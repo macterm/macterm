@@ -26,7 +26,7 @@ struct PasswordsSettings: View {
                     title: String(localized: "Password Manager", comment: "Settings pane"),
                     caption: String(
                         localized: """
-                        Macterm offers to save a password that you type at a password prompt, and fills it in the \
+                        Macterm offers to save a password that you type at a password prompt after it works, and fills it in the \
                         next time. It keeps passwords in your login keychain.
                         """
                     ),

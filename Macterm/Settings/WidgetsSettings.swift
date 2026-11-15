@@ -17,7 +17,7 @@ struct WidgetsSettings: View {
                     title: String(localized: "Widgets", comment: "Settings pane"),
                     caption: String(
                         localized: """
-                        A widget is a terminal on your desktop, in the grid of the system widgets. Its shell keeps \
+                        A widget is a terminal on your desktop, next to the system widgets. Its shell keeps \
                         running when you quit Macterm.
                         """
                     ),

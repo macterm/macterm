@@ -918,23 +918,23 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按下快捷键后，会在任何 App 上方落下的终端。退出 Macterm 后，它的 shell 仍会继续运行。"
+            "value" : "按下快捷键后，从任意 App 上方滑出的终端。退出 Macterm 后，它的 shell 仍会继续运行。"
           }
         }
       }
     },
-    "A widget is a terminal on your desktop, in the grid of the system widgets. Its shell keeps running when you quit Macterm." : {
+    "A widget is a terminal on your desktop, next to the system widgets. Its shell keeps running when you quit Macterm." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "위젯은 시스템 위젯의 격자 안에 있는 데스크탑 터미널입니다. Macterm을 종료해도 셸은 계속 실행됩니다."
+            "value" : "위젯은 시스템 위젯 옆에 있는 데스크탑 터미널입니다. Macterm을 종료해도 셸은 계속 실행됩니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "小组件是桌面上的终端，位于系统小组件的网格中。退出 Macterm 后，它的 shell 仍会继续运行。"
+            "value" : "小组件是桌面上的终端，与系统小组件并排。退出 Macterm 后，它的 shell 仍会继续运行。"
           }
         }
       }
@@ -4969,18 +4969,18 @@
         }
       }
     },
-    "Macterm offers to save a password that you type at a password prompt, and fills it in the next time. It keeps passwords in your login keychain." : {
+    "Macterm offers to save a password that you type at a password prompt after it works, and fills it in the next time. It keeps passwords in your login keychain." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "암호 프롬프트에 입력한 암호를 저장하도록 제안하고, 다음에 자동으로 입력합니다. 암호는 로그인 키체인에 보관됩니다."
+            "value" : "암호 프롬프트에 입력한 암호가 작동하면 저장을 제안하고, 다음에 자동으로 입력합니다. 암호는 로그인 키체인에 보관됩니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Macterm 会提议保存你在密码提示处输入的密码，并在下次自动填充。密码保存在你的登录钥匙串中。"
+            "value" : "在你于密码提示符处输入的密码生效后，Macterm 会提议保存它，并在下次自动填充。密码保存在你的登录钥匙串中。"
           }
         }
       }
