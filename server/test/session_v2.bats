@@ -8,27 +8,6 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# test_helper's setup is v1's (ZMX_DIR); these replace it.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  # Short: a socket path has at most 103 bytes on macOS.
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-}
-
-teardown() {
-  local sock pid
-  for sock in "$MACTERM_RUNTIME_DIR"/*; do
-    [[ -S "$sock" ]] || continue
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  rm -rf "$RT"
-}
-
 mode_of() {
   if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat -f %Lp "$1"; fi
 }

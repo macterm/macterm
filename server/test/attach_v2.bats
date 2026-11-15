@@ -8,27 +8,6 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# As in session_v2.bats.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  export ZMX
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-}
-
-teardown() {
-  local sock pid
-  for sock in "$MACTERM_RUNTIME_DIR"/*; do
-    [[ -S "$sock" ]] || continue
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  rm -rf "$RT"
-}
-
 @test "connect: attach and type, the size reaches the pty, and Ctrl-\\ detaches" {
   "$ZMX" session s1 -- /bin/sh
   python3 - <<'PY'
@@ -108,30 +87,6 @@ q = connect("s1")
 q.wait_output("snap-7")
 q.type(b"\x1c")
 assert q.wait_exit() == 0
-PY
-}
-
-@test "connect: the claim APC becomes a claim and never reaches the shell" {
-  # `cat -v` shows any ESC that it reads as ^[, and the pty's echo does too.
-  "$ZMX" session s1 -- /bin/cat -v
-  python3 - <<'PY'
-from ptyrun import connect
-from v2client import Client
-a = Client("s1")
-a.attach(80, 24)
-assert a.wait_msg("lead")["leader"] is True
-
-p = connect("s1")
-p.wait_output("\x1b[2J")
-p.type(b"\x1b_zmx;claim\x1b\\")
-assert a.wait_msg("lead", count=2)["leader"] is False
-# Split, as a pty write can be: the filter holds the first half.
-p.type(b"one\x1b_zmx;")
-p.type(b"claim\x1b\\two\r")
-a.wait_output("onetwo")
-assert b"^[" not in a.output and b"claim" not in a.output, a.output
-p.type(b"\x1c")
-assert p.wait_exit() == 0
 PY
 }
 

@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const lib_posix = @import("posix.zig");
-const ipc = @import("ipc.zig");
 const runtime = @import("runtime.zig");
 const socket = @import("socket.zig");
 const server = @import("server.zig");
@@ -16,7 +15,7 @@ pub fn connect(gpa: std.mem.Allocator, dir: []const u8) !i32 {
     runtime.ensureDir(dir) catch return error.RuntimeDir;
     const path = try socket.getSocketPath(gpa, dir, server.socket_name);
     defer gpa.free(path);
-    if (ipc.connectSession(path)) |fd| return fd else |_| {}
+    if (socket.connectSession(path)) |fd| return fd else |_| {}
     // A server that exits as idle can go between its start and the
     // connect: try again a few times.
     var tries: u32 = 0;
@@ -25,7 +24,7 @@ pub fn connect(gpa: std.mem.Allocator, dir: []const u8) !i32 {
             error.AlreadyRunning => {},
             else => return err,
         };
-        if (ipc.connectSession(path)) |fd| return fd else |err| if (tries >= 3) return err;
+        if (socket.connectSession(path)) |fd| return fd else |err| if (tries >= 3) return err;
         var ts: std.c.timespec = .{ .sec = 0, .nsec = 50 * std.time.ns_per_ms };
         _ = std.c.nanosleep(&ts, null);
     }

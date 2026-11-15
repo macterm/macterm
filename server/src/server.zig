@@ -21,7 +21,6 @@ const log = @import("log.zig");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
-const ipc = @import("ipc.zig");
 const runtime = @import("runtime.zig");
 const session = @import("session.zig");
 const relay = @import("relay.zig");
@@ -152,7 +151,7 @@ fn takeServerLock(dir: []const u8, path: []const u8) !i32 {
     while (std.c.flock(fd, std.c.LOCK.EX | std.c.LOCK.NB) != 0) : (tries += 1) {
         if (std.c._errno().* != @intFromEnum(std.c.E.AGAIN)) return error.LockFailed;
         if (tries >= 100) return error.AlreadyRunning;
-        if (ipc.connectSession(path)) |conn| {
+        if (socket.connectSession(path)) |conn| {
             lib_posix.close(conn);
             return error.AlreadyRunning;
         } else |_| {}
