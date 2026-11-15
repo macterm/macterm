@@ -664,7 +664,7 @@ final class AppState {
            let ws = workspaces[projectID]
         {
             if let chosen = key.activeTabIDs[projectID], ws.tabs.contains(where: { $0.id == chosen }) {
-                if ws.activeTabID != chosen { ws.peekTab(chosen) }
+                if ws.activeTabID != chosen { ModelWriter.tabPeek(chosen, in: ws) }
             } else if let current = ws.activeTabID {
                 key.activeTabIDs[projectID] = current
             }
@@ -1551,7 +1551,7 @@ final class AppState {
         guard Preferences.shared.autoTilingEnabled else { return }
         for ws in workspaces.values {
             for tab in ws.tabs {
-                tab.splitRoot.rebalanced()
+                ModelWriter.splitRebalance(tab)
             }
         }
         saveWorkspaces()
@@ -2475,7 +2475,8 @@ final class AppState {
         focus: Bool = true
     ) -> UUID? {
         guard let ws = workspaces[projectID] else { return nil }
-        let tab = ws.createTab(
+        let tab = ModelWriter.tabCreate(
+            in: ws,
             projectPath: projectPath, sessionSlug: sessionSlug, remoteZmxPath: remoteZmxPath,
             command: command, env: env, focus: focus
         )
@@ -2575,7 +2576,7 @@ final class AppState {
         for pane in closing {
             pane.destroySurface()
         }
-        ws.closeTab(tabID)
+        ModelWriter.tabClose(tabID, in: ws)
     }
 
     func closeTab(_ tabID: UUID, projectID: UUID) {
@@ -2622,7 +2623,7 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ws.selectTab(tabID)
+        let didAcknowledgeCompletion = ModelWriter.tabSelect(tabID, in: ws)
         if ws.activeTabID != before || didAcknowledgeCompletion {
             saveWorkspaces()
         }
@@ -2669,8 +2670,8 @@ final class AppState {
         )
         ensureWorkspace(projectID: destProjectID, path: destPath)
         guard let dest = workspaces[destProjectID] else { return }
-        source.closeTab(tabID)
-        dest.adoptTab(tab, at: toIndex)
+        ModelWriter.tabClose(tabID, in: source)
+        ModelWriter.tabInsert(tab, into: dest, at: toIndex)
         // Restamp the moved panes' routing identity to the destination project.
         // Without this they keep the SOURCE projectID, so a later
         // notification-click navigates to the old project and can't find the
@@ -2703,7 +2704,7 @@ final class AppState {
               destTab.id != tabID,
               let sourceTab = detachTabForMerge(tabID, from: sourceProjectID, to: destProjectID)
         else { return }
-        guard destTab.mergeTree(sourceTab.splitRoot, at: target) else {
+        guard ModelWriter.tabMerge(destTab, tree: sourceTab.splitRoot, at: target) else {
             // The target pane vanished mid-drag: put the detached tab back
             // (identity restored) instead of losing its live shells.
             if sourceProjectID != destProjectID {
@@ -2711,7 +2712,7 @@ final class AppState {
                     pane.rebind(projectID: sourceProjectID)
                 }
             }
-            workspaces[sourceProjectID]?.adoptTab(sourceTab)
+            if let source = workspaces[sourceProjectID] { ModelWriter.tabInsert(sourceTab, into: source) }
             saveWorkspaces()
             return
         }
@@ -2725,7 +2726,7 @@ final class AppState {
         guard let source = workspaces[sourceProjectID],
               let tab = source.tabs.first(where: { $0.id == tabID })
         else { return nil }
-        source.closeTab(tabID)
+        ModelWriter.tabClose(tabID, in: source)
         if sourceProjectID != destProjectID {
             for pane in tab.splitRoot.allPanes() {
                 pane.rebind(projectID: destProjectID)
@@ -2741,7 +2742,7 @@ final class AppState {
 
     /// Land the user on the merged tab, mirroring `moveTab`'s selection.
     private func finishMerge(intoTab destTabID: UUID, inProject destProjectID: UUID) {
-        workspaces[destProjectID]?.selectTab(destTabID)
+        if let dest = workspaces[destProjectID] { ModelWriter.tabSelect(destTabID, in: dest) }
         activeProjectID = destProjectID
         recordProjectVisit(destProjectID)
         saveWorkspaces()
@@ -2754,21 +2755,11 @@ final class AppState {
     /// No-op for a single-pane tab.
     func separateTabPanes(_ tabID: UUID, projectID: UUID) {
         guard let ws = workspaces[projectID],
-              let index = ws.tabs.firstIndex(where: { $0.id == tabID })
+              let tab = ws.tabs.first(where: { $0.id == tabID }),
+              tab.splitRoot.allPanes().count > 1
         else { return }
-        let tab = ws.tabs[index]
-        let panes = tab.splitRoot.allPanes()
-        guard panes.count > 1, let firstPane = panes.first else { return }
-        logger.debug("separateTabPanes: \(tabID, privacy: .public) panes=\(panes.count, privacy: .public)")
-        tab.splitRoot = .pane(firstPane)
-        tab.zoomedPaneID = nil
-        tab.paneFocusHistory = RecencyStack(limit: 20)
-        tab.focusedPaneID = firstPane.id
-        for (offset, pane) in panes.dropFirst().enumerated() {
-            let newTab = TerminalTab(id: UUID(), splitRoot: .pane(pane), focusedPaneID: pane.id)
-            ws.tabs.insert(newTab, at: index + 1 + offset)
-        }
-        ws.selectTab(tabID)
+        logger.debug("separateTabPanes: \(tabID, privacy: .public) panes=\(tab.splitRoot.allPanes().count, privacy: .public)")
+        ModelWriter.paneSeparateAll(tab, in: ws)
         saveWorkspaces()
     }
 
@@ -2789,26 +2780,17 @@ final class AppState {
         // the pane belonging to no tab.
         ensureWorkspace(projectID: destProjectID, path: destPath)
         guard let dest = workspaces[destProjectID],
-              let remaining = sourceTab.splitRoot.removing(paneID: paneID)
+              ModelWriter.paneDetach(sourceTab, paneID: paneID) != nil
         else { return }
         logger.debug(
             "separatePane: \(paneID, privacy: .public) to=\(destProjectID, privacy: .public) index=\(index ?? -1, privacy: .public)"
         )
-        // Detach without destroying: the same tree/zoom/focus repair as
-        // `removePane`, minus the surface teardown — the pane lives on.
-        sourceTab.splitRoot = remaining
-        if sourceTab.zoomedPaneID == paneID { sourceTab.zoomedPaneID = nil }
-        sourceTab.paneFocusHistory.remove(paneID)
-        if sourceTab.focusedPaneID == paneID {
-            sourceTab.focusedPaneID = sourceTab.nextFocusAfterClose()
-        }
-        if Preferences.shared.autoTilingEnabled { sourceTab.splitRoot.rebalanced() }
 
         if sourceProjectID != destProjectID {
             pane.rebind(projectID: destProjectID)
         }
         let newTab = TerminalTab(id: UUID(), splitRoot: .pane(pane), focusedPaneID: pane.id)
-        dest.adoptTab(newTab, at: index)
+        ModelWriter.tabInsert(newTab, into: dest, at: index)
         activeProjectID = destProjectID
         recordProjectVisit(destProjectID)
         saveWorkspaces()
@@ -2838,7 +2820,7 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.tabs.map(\.id)
-        ws.moveTab(tabID, toIndex: destination)
+        ModelWriter.tabReorder(tabID, in: ws, toIndex: destination)
         if ws.tabs.map(\.id) != before { saveWorkspaces() }
     }
 
@@ -2882,7 +2864,7 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ws.selectNextTab()
+        let didAcknowledgeCompletion = ModelWriter.tabSelectNext(in: ws)
         if ws.activeTabID != before || didAcknowledgeCompletion {
             saveWorkspaces()
         }
@@ -2895,7 +2877,7 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ws.selectPreviousTab()
+        let didAcknowledgeCompletion = ModelWriter.tabSelectPrevious(in: ws)
         if ws.activeTabID != before || didAcknowledgeCompletion {
             saveWorkspaces()
         }
@@ -2945,7 +2927,7 @@ final class AppState {
         // Without the switcher there is nothing else to look at, so the
         // original behavior stands: each press peeks the tab for real.
         guard !Preferences.shared.showTabSwitcherOverlay else { return }
-        ws.peekTab(tabCycleOrder[tabCycleIndex])
+        ModelWriter.tabPeek(tabCycleOrder[tabCycleIndex], in: ws)
     }
 
     /// Ready the cards for the workspace a cycle is about to walk: shape them
@@ -3045,7 +3027,7 @@ final class AppState {
         let selectedID = tabCycleOrder[tabCycleIndex]
         tabCycleOrder = []
         tabCycleIndex = 0
-        ws.selectTab(selectedID)
+        ModelWriter.tabSelect(selectedID, in: ws)
         saveWorkspaces()
     }
 
@@ -3091,7 +3073,7 @@ final class AppState {
 
         activeProjectID = project.id
         ensureWorkspace(projectID: project.id, path: project.path)
-        let didAcknowledgeCompletion = workspaces[project.id]?.selectTab(entry.tabID) ?? false
+        let didAcknowledgeCompletion = workspaces[project.id].map { ModelWriter.tabSelect(entry.tabID, in: $0) } ?? false
         if activeProjectID != beforeProjectID
             || workspaces[project.id]?.activeTabID != beforeTabID
             || didAcknowledgeCompletion
@@ -3119,7 +3101,7 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ws.selectTabByIndex(index)
+        let didAcknowledgeCompletion = ModelWriter.tabSelect(index: index, in: ws)
         if ws.activeTabID != before || didAcknowledgeCompletion {
             saveWorkspaces()
         }
@@ -3205,7 +3187,8 @@ final class AppState {
         guard let ws = workspaces[projectID],
               let tab = ws.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil })
         else { return nil }
-        let newID = tab.split(
+        let newID = ModelWriter.paneSplit(
+            tab,
             paneID: paneID,
             direction: direction,
             position: position,
@@ -3239,7 +3222,7 @@ final class AppState {
               let tab = ws.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil })
         else { return nil }
         guard let source = tab.splitRoot.findPane(id: paneID),
-              let newID = tab.mirror(paneID: paneID, direction: direction, position: position)
+              let newID = ModelWriter.paneMirror(tab, paneID: paneID, direction: direction, position: position)
         else { return nil }
         // The source stays leader: zmx's handleInit sets a leader only when
         // there is none, so a second client attaching leaves the pty size
@@ -3271,7 +3254,8 @@ final class AppState {
             projectDirectory: projectDirectory,
             activePaneDirectory: pane.liveLocalWorkingDirectory()
         )
-        let created = tab.makeGrid(
+        let created = ModelWriter.paneGrid(
+            tab,
             paneID: paneID,
             rows: rows,
             columns: columns,
@@ -3295,7 +3279,8 @@ final class AppState {
             projectDirectory: projectDirectory,
             activePaneDirectory: pane.liveLocalWorkingDirectory()
         )
-        tab.split(
+        ModelWriter.paneSplit(
+            tab,
             paneID: paneID,
             direction: SplitDirection.auto(for: displayedSize(of: pane)),
             newPaneWorkingDirectory: newPaneDirectory
@@ -3304,7 +3289,9 @@ final class AppState {
     }
 
     func resizePane(_ direction: PaneFocusDirection, projectID: UUID, delta: CGFloat = 0.03) {
-        workspaces[projectID]?.activeTab?.resize(direction, delta: delta)
+        if let tab = workspaces[projectID]?.activeTab {
+            ModelWriter.splitResize(tab, direction: direction, delta: delta)
+        }
         saveWorkspaces()
     }
 
@@ -3312,7 +3299,7 @@ final class AppState {
         guard let tab = workspaces[projectID]?.activeTab,
               let paneID = tab.focusedPaneID
         else { return }
-        tab.toggleZoom(paneID: paneID)
+        ModelWriter.paneZoom(tab, toggling: paneID)
     }
 
     func closePane(_ paneID: UUID, projectID: UUID) {
@@ -3340,7 +3327,7 @@ final class AppState {
             releaseSessions([closing])
         }
         reconnectPolicy.forget(paneID)
-        switch tab.removePane(paneID) {
+        switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:
             closeTab(tab.id, projectID: projectID)
         case .removed:
@@ -3632,9 +3619,8 @@ final class AppState {
         for planned in plan.tabs {
             if let id = planned.existingTabID, let tab = byID[id] {
                 // Reuse the tab object (preserves its id/history); swap the tree.
-                tab.splitRoot = planned.root
-                tab.focusedPaneID = planned.focusedPaneID
-                tab.customTitle = planned.title
+                ModelWriter.tabSetTree(tab, root: planned.root, focusedPaneID: planned.focusedPaneID)
+                ModelWriter.tabSet(tab, title: planned.title)
                 newTabs.append(tab)
             } else {
                 newTabs.append(TerminalTab(
@@ -3659,8 +3645,7 @@ final class AppState {
 
         let activeTabID = newTabs.first?.id
         if let ws = workspaces[projectID] {
-            ws.tabs = newTabs
-            ws.activeTabID = activeTabID
+            ModelWriter.tabReplaceAll(in: ws, with: newTabs, activeTabID: activeTabID)
         } else {
             workspaces[projectID] = Workspace(projectID: projectID, tabs: newTabs, activeTabID: activeTabID)
         }
@@ -3691,7 +3676,7 @@ final class AppState {
         // leave it pointing at a pane it does not have.
         guard let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil })
         else { return }
-        tab.focusPane(paneID)
+        ModelWriter.paneFocus(tab, paneID: paneID)
         // Focusing a view is how the user says "drive the size from here",
         // so tell zmx as well as ourselves — its daemon only switches leader
         // on real keystrokes, and the user has not typed anything yet.
@@ -3734,7 +3719,7 @@ final class AppState {
     func setTabTitle(containing paneID: UUID, projectID: UUID, title: String?) {
         guard let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: paneID) })
         else { return }
-        tab.customTitle = title
+        ModelWriter.tabSet(tab, title: title)
         saveWorkspaces()
     }
 
@@ -3749,8 +3734,8 @@ final class AppState {
         if let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil }) {
             let beforeTabID = workspaces[projectID]?.activeTabID
             let beforeFocusedPaneID = tab.focusedPaneID
-            let didAcknowledgeCompletion = workspaces[projectID]?.selectTab(tab.id) ?? false
-            tab.focusPane(paneID)
+            let didAcknowledgeCompletion = workspaces[projectID].map { ModelWriter.tabSelect(tab.id, in: $0) } ?? false
+            ModelWriter.paneFocus(tab, paneID: paneID)
             if workspaces[projectID]?.activeTabID != beforeTabID
                 || tab.focusedPaneID != beforeFocusedPaneID
                 || didAcknowledgeCompletion
@@ -3794,7 +3779,7 @@ final class AppState {
               let focusedID = tab.focusedPaneID
         else { return }
         if let bestID = tab.splitRoot.nearestPane(from: focusedID, direction: direction) {
-            tab.focusPane(bestID)
+            ModelWriter.paneFocus(tab, paneID: bestID)
         }
     }
 
@@ -3802,7 +3787,7 @@ final class AppState {
     /// Left/Right/Up/Down). The neighbor is the pane that Focus in the same
     /// direction would go to. Shells and focus stay with their panes.
     func moveFocusedPane(_ direction: PaneFocusDirection, projectID: UUID) {
-        guard let tab = workspaces[projectID]?.activeTab, tab.moveFocusedPane(direction) else { return }
+        guard let tab = workspaces[projectID]?.activeTab, ModelWriter.paneSwap(tab, direction: direction) else { return }
         saveWorkspaces()
     }
 
@@ -3821,7 +3806,7 @@ final class AppState {
         let current = tab.focusedPaneID.flatMap { id in panes.firstIndex(where: { $0.id == id }) } ?? 0
         let step = forward ? 1 : -1
         let next = panes[(current + step + panes.count) % panes.count]
-        tab.focusPane(next.id)
+        ModelWriter.paneFocus(tab, paneID: next.id)
     }
 
     // MARK: - Project navigation

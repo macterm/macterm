@@ -88,9 +88,7 @@ extension AppState {
                 replacements[old.id] = pane
             }
         }
-        tab.splitRoot = tab.splitRoot.replacing(replacements)
-        if let focused = tab.focusedPaneID, let new = replacements[focused] { tab.focusedPaneID = new.id }
-        if let zoomed = tab.zoomedPaneID, let new = replacements[zoomed] { tab.zoomedPaneID = new.id }
+        ModelWriter.paneReplace(tab, replacements)
         logger.info("restarting \(olds.count, privacy: .public) older session(s)")
         for old in olds {
             old.destroySurface()

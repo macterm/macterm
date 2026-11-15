@@ -49,7 +49,7 @@ extension AppState {
         // closed, then a tab was created from the CLI with `--no-focus`);
         // a nil active tab renders a blank detail view.
         if let ws = scratchWorkspace, ws.activeTabID == nil {
-            ws.activeTabID = ws.tabs.first?.id
+            ModelWriter.tabPeek(ws.tabs.first?.id, in: ws)
         }
     }
 
@@ -58,7 +58,7 @@ extension AppState {
     func selectScratchTab(_ tabID: UUID) {
         guard let ws = scratchWorkspace, ws.tabs.contains(where: { $0.id == tabID }) else { return }
         activeProjectID = ScratchTabs.projectID
-        _ = ws.selectTab(tabID)
+        ModelWriter.tabSelect(tabID, in: ws)
         warmFocusedProject()
         saveWorkspaces()
     }

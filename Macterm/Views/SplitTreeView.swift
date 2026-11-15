@@ -274,7 +274,7 @@ struct SplitDividerView<First: View, Second: View>: View {
                         resizedValue: { start, delta in
                             SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: total)
                         },
-                        onResize: { branch.ratio = $0 }
+                        onResize: { ModelWriter.splitRatio(branch, ratio: $0) }
                     )
                     .frame(
                         width: h ? SplitDividerMetrics.bandThickness : nil,

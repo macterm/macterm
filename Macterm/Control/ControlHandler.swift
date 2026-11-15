@@ -797,7 +797,7 @@ final class ControlHandler {
         let (_, workspace) = try resolveWorkspace(args)
         let (index, tab) = try resolveTab(args, in: workspace)
 
-        tab.customTitle = newTitle
+        ModelWriter.tabSet(tab, title: newTitle)
         appState.saveWorkspaces()
 
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
@@ -1043,13 +1043,13 @@ final class ControlHandler {
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
-    /// Toggle zoom on the target pane (#166) — the same `TerminalTab.toggleZoom`
+    /// Toggle zoom on the target pane (#166) — the same `ModelWriter.paneZoom`
     /// the Cmd+Shift+Enter keybind drives. Purely a layout-state change, so it
     /// needs no live surface; the pane just has to exist.
     private func paneZoom(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        target.tab.toggleZoom(paneID: target.pane.id)
+        ModelWriter.paneZoom(target.tab, toggling: target.pane.id)
         appState.saveWorkspaces()
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
@@ -1078,7 +1078,7 @@ final class ControlHandler {
         }
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard target.tab.setSplitRatio(paneID: target.pane.id, axis: axis, ratio: CGFloat(ratio)) else {
+        guard ModelWriter.splitRatio(target.tab, paneID: target.pane.id, axis: axis, ratio: CGFloat(ratio)) else {
             throw ControlError(
                 code: .notFound,
                 message: "no \(axis.rawValue) split around that pane to resize",
@@ -1293,7 +1293,7 @@ final class ControlHandler {
         } else {
             target = .rootEdge(zone)
         }
-        guard source.tab.movePane(source.pane.id, to: target) else {
+        guard ModelWriter.paneMove(source.tab, paneID: source.pane.id, to: target) else {
             throw ControlError(
                 code: .badRequest,
                 message: "move failed: the target is the pane itself, or the pane is the only pane of the tab"
