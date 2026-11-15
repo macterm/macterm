@@ -76,7 +76,7 @@ final class TerminalTab: Identifiable {
     /// Most-recent-first stack of previously focused pane IDs
     /// (excludes the currently focused pane).
     @ObservationIgnored
-    fileprivate var paneFocusHistory = RecencyStack<UUID>(limit: 20)
+    fileprivate(set) var paneFocusHistory = RecencyStack<UUID>(limit: 20)
 
     /// Record a focus change, pushing the previous pane onto history.
     fileprivate func focusPane(_ paneID: UUID) {

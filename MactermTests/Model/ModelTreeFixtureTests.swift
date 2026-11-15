@@ -142,7 +142,7 @@ struct ModelTreeFixtureTests {
             case "grid":
                 let source = try #require(ids[Self.string(fixture, "source")])
                 let tab = TerminalTab(id: UUID(), splitRoot: root, focusedPaneID: source)
-                let created = try tab.makeGrid(
+                let created = try ModelWriter.paneGrid(tab, 
                     paneID: source,
                     rows: #require(fixture["rows"] as? Int),
                     columns: #require(fixture["columns"] as? Int)
