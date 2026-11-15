@@ -66,11 +66,14 @@ final class AppState {
     /// step by `noteKeyWindow`. Views that render one specific window read
     /// that window's `WindowState` instead, or a background window would
     /// redraw itself as whatever the frontmost one is showing.
-    private(set) var windows: [WindowState] = []
+    var windows: [WindowState] { windowRegistry.windows }
 
     /// The window the user is in. Nil before the first window reports itself,
     /// and briefly while macOS has no key window (every window hidden).
-    private(set) var keyWindowID: WindowState.ID?
+    var keyWindowID: WindowState.ID? { windowRegistry.keyWindowID }
+
+    /// The table of open windows (`WindowRegistry`).
+    let windowRegistry = WindowRegistry()
 
     /// The real `AppDelegate`, handed over by the scene at launch.
     ///
@@ -265,50 +268,30 @@ final class AppState {
     /// window, so a view cannot own this identity: two instances would each
     /// bring their own `WindowState` for a single window. The `NSWindow` is
     /// the only thing that is genuinely one-per-window, so the first proposal
-    /// for a given one wins and later instances adopt it.
-    ///
-    /// Weak keys, not `ObjectIdentifier`s: an identifier is an address, and a
-    /// closed window's address can be handed to the next window allocated,
-    /// which would then find a dead window's state under its own key if the
-    /// forget path had not run. A weak-keyed table drops the entry with the
-    /// window.
-    private let windowStatesByNSWindow = NSMapTable<NSWindow, WindowState>.weakToStrongObjects()
-
+    /// for a given one wins and later instances adopt it (`WindowRegistry`).
     func canonicalWindowState(for nsWindow: NSWindow, proposed: WindowState) -> WindowState {
-        if let existing = windowStatesByNSWindow.object(forKey: nsWindow) { return existing }
-        windowStatesByNSWindow.setObject(proposed, forKey: nsWindow)
-        registerWindow(proposed)
-        return proposed
+        let (state, isNew) = windowRegistry.adopt(proposed, for: nsWindow)
+        if isNew { registerWindow(state) }
+        return state
     }
 
     func forgetWindowState(for nsWindow: NSWindow) {
-        guard let state = windowStatesByNSWindow.object(forKey: nsWindow) else { return }
-        windowStatesByNSWindow.removeObject(forKey: nsWindow)
+        guard let state = windowRegistry.forget(nsWindow) else { return }
         unregisterWindow(state)
     }
 
     /// The `NSWindow` a `WindowState` belongs to, if it has attached.
     func nsWindow(for window: WindowState) -> NSWindow? {
-        for case let candidate as NSWindow in windowStatesByNSWindow.keyEnumerator()
-            where windowStatesByNSWindow.object(forKey: candidate) === window
-        {
-            return candidate
-        }
-        return nil
+        windowRegistry.nsWindow(for: window)
     }
 
     /// The window the user is in, as a `WindowState`.
-    var keyWindow: WindowState? {
-        guard let keyWindowID else { return nil }
-        return windows.first { $0.id == keyWindowID }
-    }
+    var keyWindow: WindowState? { windowRegistry.keyWindow }
 
     /// The window an app-wide action should land in: the key one, else the
     /// first (a dialog or a toggle with no key window still has to go
     /// somewhere — see `dialogWindowID`).
-    private var keyOrFirstWindow: WindowState? {
-        keyWindow ?? windows.first
-    }
+    private var keyOrFirstWindow: WindowState? { windowRegistry.keyOrFirstWindow }
 
     /// A terminal window's view tree went away. The ONE teardown entry every
     /// per-window table hangs off — the state registry here, the delegate's
@@ -416,7 +399,7 @@ final class AppState {
         if window.activeProjectID == nil { window.activeProjectID = activeProjectID }
         // Listed before the frame moves: `setFrame` lays the window out at
         // once.
-        windows.append(window)
+        windowRegistry.append(window)
         // A restored window, or the scene's own window when `restoreWindows`
         // handed it the first saved entry before it attached.
         applyRestoredFrame(of: window)
@@ -441,7 +424,7 @@ final class AppState {
     /// here, and a screen-sized frame is not one the user chose).
     func windowFrameDidChange(_ nsWindow: NSWindow) {
         guard !nsWindow.styleMask.contains(.fullScreen),
-              let window = windowStatesByNSWindow.object(forKey: nsWindow)
+              let window = windowRegistry.state(for: nsWindow)
         else { return }
         let frame = nsWindow.frameDescriptor
         guard window.frame != frame else { return }
@@ -456,7 +439,7 @@ final class AppState {
         // back only one. During termination the list is frozen as the record
         // of what was open.
         guard !AppTerminationState.isTerminating else { return }
-        windows.removeAll { $0.id == window.id }
+        windowRegistry.remove(window)
         if keyWindowID == window.id {
             // The user is always "in" some window while one exists. AppKit
             // usually makes another window key and reports it, but not while
@@ -464,7 +447,7 @@ final class AppState {
             // and every window then read as unfocused with the app-wide
             // mirrors stranded. Promote the first; the next real key event
             // corrects it.
-            keyWindowID = windows.first?.id
+            windowRegistry.setKeyWindowID(windows.first?.id)
             alignKeyWindowTab()
         }
         SurfaceRegistry.shared.releaseSurfaces(ofWindow: window.id)
@@ -496,7 +479,7 @@ final class AppState {
     /// shells warmed. Mirroring here is what keeps all of them right without
     /// threading a window through each.
     func noteKeyWindow(_ window: WindowState) {
-        keyWindowID = window.id
+        windowRegistry.setKeyWindowID(window.id)
         // A window can become key before it has a project — it registers from
         // `onAppear`, which runs before the launch task restores the
         // selection. Adopt in that direction rather than pushing nil outward,
@@ -883,8 +866,15 @@ final class AppState {
         }
     }
 
-    var workspaces: [UUID: Workspace] = [:] {
-        didSet { attachWorkspaceHooks() }
+    /// The projects and the workspaces (`ModelState`).
+    let model = ModelState()
+
+    var workspaces: [WorkspaceID: Workspace] {
+        get { model.workspaces }
+        set {
+            model.workspaces = newValue
+            attachWorkspaceHooks()
+        }
     }
 
     /// Ordered pinned-tab records — the sidebar's pinned section. A record
@@ -1256,8 +1246,8 @@ final class AppState {
 
     /// Central project-file store (`~/.config/macterm/projects`). Injectable
     /// so tests never read or write the user's real directory.
-    @ObservationIgnored
     /// The project layout files.
+    @ObservationIgnored
     let layoutFiles: LayoutFileService
     var projectFiles: ProjectFileStore { layoutFiles.projectFiles }
 

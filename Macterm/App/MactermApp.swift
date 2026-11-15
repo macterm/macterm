@@ -54,6 +54,7 @@ struct MactermApp: App {
                 .modifier(AppColorScheme())
                 .onAppear {
                     appDelegate.appState = appState
+                    appState.model.projects = projectStore
                     // The genuine instance: NSApp.delegate is SwiftUI's own
                     // forwarding delegate, so casting it never finds ours.
                     appState.appDelegate = appDelegate

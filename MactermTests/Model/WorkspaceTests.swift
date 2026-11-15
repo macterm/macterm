@@ -9,6 +9,16 @@ struct WorkspaceTests {
     }
 
     @Test
+    func the_kind_comes_from_the_workspace_id() {
+        #expect(Workspace(id: PinnedTabs.workspaceID, tabs: [], activeTabID: nil).kind == .pinned)
+        #expect(Workspace(id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil).kind == .scratch)
+        let project = makeWorkspace()
+        #expect(project.kind == .project)
+        #expect(project.kind.isProject)
+        #expect(!WorkspaceKind.pinned.isProject)
+    }
+
+    @Test
     func init_creates_one_tab_and_selects_it() {
         let ws = makeWorkspace()
         #expect(ws.tabs.count == 1)

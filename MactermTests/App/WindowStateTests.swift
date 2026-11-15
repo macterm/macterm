@@ -400,7 +400,10 @@ struct WindowStateTests {
         let panes = try #require(state.selectedTab(for: project.id, in: b)).splitRoot.allPanes()
         #expect(panes.map(\.id) == [source.id, added])
         let newPane = try #require(tab.splitRoot.findPane(id: added))
-        #expect(SurfaceRegistry.shared.surface(for: newPane, in: .window(a.id)) !== SurfaceRegistry.shared.surface(for: newPane, in: .window(b.id)))
+        #expect(SurfaceRegistry.shared.surface(for: newPane, in: .window(a.id)) !== SurfaceRegistry.shared.surface(
+            for: newPane,
+            in: .window(b.id)
+        ))
 
         state.closePane(source.id, projectID: project.id)
         #expect(state.selectedTab(for: project.id, in: b)?.splitRoot.allPanes().map(\.id) == [added])

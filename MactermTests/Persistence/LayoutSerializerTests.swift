@@ -48,7 +48,7 @@ struct LayoutSerializerTests {
         // command with no local pid (the bug: it used to save an empty leaf).
         let root = "devbox:~/dev/api"
         let ws = Workspace(id: UUID(), projectPath: root)
-        let pane = Pane(projectPath: root, projectID: ws.projectID)
+        let pane = Pane(projectPath: root, projectID: ws.id)
         pane.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
         ws.tabs[0].splitRoot = .pane(pane)
 
@@ -68,7 +68,7 @@ struct LayoutSerializerTests {
         // nothing to record, same as a local idle pane.
         let root = "devbox:~/dev/api"
         let ws = Workspace(id: UUID(), projectPath: root)
-        let pane = Pane(projectPath: root, projectID: ws.projectID)
+        let pane = Pane(projectPath: root, projectID: ws.id)
         pane.applyRemoteForeground(RemoteForeground(comm: "-zsh", command: "-zsh"))
         ws.tabs[0].splitRoot = .pane(pane)
 
@@ -85,7 +85,7 @@ struct LayoutSerializerTests {
         // Save records what the pane is *currently* running (its live foreground
         // command), not what it was spawned with.
         let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
+        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.id))
 
         let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in "btop" })
         guard case let .pane(p) = file.tabs[0].layout else {
@@ -100,7 +100,7 @@ struct LayoutSerializerTests {
         // Pane idle at a prompt (no live command) → no run, even if it was
         // spawned with one.
         let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID, command: "btop"))
+        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.id, command: "btop"))
 
         let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in nil })
         guard case let .pane(p) = file.tabs[0].layout else {
@@ -115,7 +115,7 @@ struct LayoutSerializerTests {
         // A pane the user dropped into a non-default shell (e.g. `zsh` from `nu`)
         // saves that shell as `shell:`.
         let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
+        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.id))
 
         let file = LayoutSerializer.layout(
             for: ws,
@@ -137,7 +137,7 @@ struct LayoutSerializerTests {
         // Idle in the default login shell → no shell recorded (liveShell returns
         // nil for the default), so the layout stays portable.
         let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
+        ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.id))
 
         let file = LayoutSerializer.layout(
             for: ws,
@@ -166,8 +166,8 @@ struct LayoutSerializerTests {
         ws.tabs[0].splitRoot = .split(SplitBranch(
             direction: .vertical,
             ratio: 0.4,
-            first: .pane(Pane(projectPath: root, projectID: ws.projectID, command: "npm run dev")),
-            second: .pane(Pane(projectPath: root, projectID: ws.projectID))
+            first: .pane(Pane(projectPath: root, projectID: ws.id, command: "npm run dev")),
+            second: .pane(Pane(projectPath: root, projectID: ws.id))
         ))
 
         let layout = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: root, liveCommand: { $0.command })
