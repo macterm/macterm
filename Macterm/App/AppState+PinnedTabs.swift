@@ -64,8 +64,8 @@ extension AppState {
         ensurePinnedWorkspace()
         guard let dest = pinnedWorkspace else { return }
         let recordIndex = min(max(toRecordIndex ?? pinnedRecords.count, 0), pinnedRecords.count)
-        source.closeTab(tabID)
-        dest.adoptTab(tab, at: liveIndex(forRecordIndex: recordIndex))
+        ModelWriter.tabClose(tabID, in: source)
+        ModelWriter.tabInsert(tab, into: dest, at: liveIndex(forRecordIndex: recordIndex))
         for pane in tab.splitRoot.allPanes() {
             pane.rebind(projectID: PinnedTabs.projectID)
         }
@@ -114,7 +114,7 @@ extension AppState {
             return
         }
         ensureAdoptableWorkspace(projectID: destProjectID)
-        workspaces[destProjectID]?.adoptTab(tab, at: toIndex)
+        if let dest = workspaces[destProjectID] { ModelWriter.tabInsert(tab, into: dest, at: toIndex) }
         removePinnedRecord(forTab: record.id)
         activeProjectID = destProjectID
         saveWorkspaces()
@@ -193,7 +193,7 @@ extension AppState {
         // The pinned workspace can be restored with no selection (only
         // records persist one); a nil activeTab renders a blank detail view.
         if let ws = pinnedWorkspace, ws.activeTabID == nil {
-            ws.activeTabID = ws.tabs.first?.id
+            ModelWriter.tabPeek(ws.tabs.first?.id, in: ws)
         }
         warmFocusedProject()
         NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
@@ -216,7 +216,7 @@ extension AppState {
                 loadPinnedTab(record)
             }
         }
-        ws.selectTab(tabID)
+        ModelWriter.tabSelect(tabID, in: ws)
         warmFocusedProject()
         saveWorkspaces()
     }
@@ -305,7 +305,7 @@ extension AppState {
         for pane in unloading {
             pane.destroySurface()
         }
-        ws.closeTab(tabID)
+        ModelWriter.tabClose(tabID, in: ws)
         saveWorkspaces()
     }
 
@@ -406,9 +406,9 @@ extension AppState {
             // Restore the selection the user quit with (persisted alongside
             // the pinned section), falling back to the first row.
             if let restored = pendingPinnedActiveTabID, ws.tabs.contains(where: { $0.id == restored }) {
-                ws.activeTabID = restored
+                ModelWriter.tabPeek(restored, in: ws)
             } else {
-                ws.activeTabID = ws.tabs.first?.id
+                ModelWriter.tabPeek(ws.tabs.first?.id, in: ws)
             }
         }
         pendingPinnedActiveTabID = nil
@@ -500,7 +500,7 @@ extension AppState {
             logger.info("pinned.yaml unpinned \(record.id, privacy: .public) → \(dest.name, privacy: .public)")
             ensureAdoptableWorkspace(projectID: dest.id)
             let tab = WorkspaceSerializer.restoreTab(snapshot, projectID: dest.id)
-            workspaces[dest.id]?.adoptTab(tab)
+            if let ws = workspaces[dest.id] { ModelWriter.tabInsert(tab, into: ws) }
         }
     }
 
@@ -728,11 +728,7 @@ extension AppState {
         guard let ws = pinnedWorkspace,
               let recordIndex = pinnedRecords.firstIndex(where: { $0.id == tab.id })
         else { return }
-        if activate {
-            ws.adoptTab(tab, at: liveIndex(forRecordIndex: recordIndex))
-        } else {
-            ws.tabs.insert(tab, at: min(liveIndex(forRecordIndex: recordIndex), ws.tabs.count))
-        }
+        ModelWriter.tabInsert(tab, into: ws, at: liveIndex(forRecordIndex: recordIndex), select: activate)
     }
 
     /// Re-sort the loaded tabs to the records' order (after a sidebar
@@ -740,7 +736,8 @@ extension AppState {
     private func alignPinnedWorkspaceOrder() {
         guard let ws = pinnedWorkspace else { return }
         let order = Dictionary(uniqueKeysWithValues: pinnedRecords.enumerated().map { ($0.element.id, $0.offset) })
-        ws.tabs.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        let sorted = ws.tabs.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        ModelWriter.tabReplaceAll(in: ws, with: sorted, activeTabID: ws.activeTabID)
     }
 
     private func paneSnapshots(of node: SplitNodeSnapshot) -> [PaneSnapshot] {

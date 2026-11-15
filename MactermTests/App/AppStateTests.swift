@@ -303,11 +303,12 @@ struct AppStateTests {
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        tab.splitRoot = .split(SplitBranch(
+        let tree = SplitNode.split(SplitBranch(
             direction: .horizontal,
             first: .pane(source),
             second: .pane(mirrorPane(of: source.sessionName, projectID: p.id))
         ))
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: tab.focusedPaneID)
 
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
@@ -659,7 +660,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
-        tab.focusedPaneID = nil
+        ModelWriter.tabSetTree(tab, root: tab.splitRoot, focusedPaneID: nil)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         #expect(tab.splitRoot.allPanes().count == 1)
     }
@@ -695,11 +696,11 @@ struct AppStateTests {
         let originalTab = try #require(ws.activeTab)
         let onlyPane = try #require(originalTab.focusedPaneID)
         // Add a second tab so closing the original doesn't leave us with zero.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         let otherTab = try #require(ws.activeTabID)
 
         // Focus the original tab, then close its only pane.
-        ws.selectTab(originalTab.id)
+        ModelWriter.tabSelect(originalTab.id, in: ws)
         state.closePane(onlyPane, projectID: p.id)
 
         #expect(ws.tabs.count == 1)
@@ -728,8 +729,7 @@ struct AppStateTests {
 
         // Replace splitRoot with a known HV shape.
         let (tree, ids) = build(H(pane("l1"), V(pane("r1"), pane("r2"))))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["l1"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["l1"])
 
         try state.closePane(#require(ids["l1"]), projectID: p.id)
 
@@ -748,7 +748,7 @@ struct AppStateTests {
         let targetInOriginal = try #require(originalTab.focusedPaneID)
 
         // Switch to a new tab, then close a pane on the (now non-active) original.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         #expect(ws.activeTabID != originalTab.id)
         state.closePane(targetInOriginal, projectID: p.id)
         #expect(originalTab.splitRoot.allPanes().count == 1)
@@ -763,7 +763,7 @@ struct AppStateTests {
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         let ws1 = try #require(state.workspaces[p1.id])
         // Give p1 a second tab so moving one away doesn't empty it.
-        let moving = ws1.createTab(projectPath: "/tmp1")
+        let moving = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let staying = try #require(ws1.tabs.first?.id)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path)
@@ -797,7 +797,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let ws1 = try #require(state.workspaces[p1.id])
-        let tab = ws1.createTab(projectPath: "/tmp1")
+        let tab = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         // A project that's never been opened — no workspace yet.
         let p2 = Project(name: "p2", path: "/tmp2", sortOrder: 1)
         #expect(state.workspaces[p2.id] == nil)
@@ -837,9 +837,9 @@ struct AppStateTests {
         let ws = try #require(state.workspaces[p.id])
         let destTab = try #require(ws.activeTab)
         let destPane = try #require(destTab.splitRoot.allPanes().first?.id)
-        let sourceTab = ws.createTab(projectPath: p.path)
+        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         let sourcePane = try #require(sourceTab.splitRoot.allPanes().first?.id)
-        ws.selectTab(destTab.id)
+        ModelWriter.tabSelect(destTab.id, in: ws)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .pane(destPane, .top), inProject: p.id)
 
@@ -860,8 +860,8 @@ struct AppStateTests {
         let ws = try #require(state.workspaces[p.id])
         let destTab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
-        let sourceTab = ws.createTab(projectPath: p.path)
-        ws.selectTab(destTab.id)
+        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
+        ModelWriter.tabSelect(destTab.id, in: ws)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .rootEdge(.left), inProject: p.id)
 
@@ -930,7 +930,7 @@ struct AppStateTests {
         let original = try #require(tab.focusedPaneID)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let dragged = try #require(tab.focusedPaneID)
-        tab.zoomedPaneID = dragged
+        ModelWriter.paneZoom(tab, toggling: dragged)
 
         state.separatePane(dragged, toProject: p.id, destPath: p.path)
 
@@ -1017,11 +1017,11 @@ struct AppStateTests {
         let other = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.workspaces[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ws.createTab(projectPath: p.path).id
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         // Seed a tab in the sibling project so a leak across projects would show.
         _ = try #require(state.workspaces[other.id]?.activeTabID)
         state.activeProjectID = p.id
-        ws.selectTab(first)
+        ModelWriter.tabSelect(first, in: ws)
 
         state.selectNextTab(projectID: p.id)
         #expect(ws.activeTabID == second)
@@ -1038,9 +1038,9 @@ struct AppStateTests {
         _ = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.workspaces[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ws.createTab(projectPath: p.path).id
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         state.activeProjectID = p.id
-        ws.selectTab(first)
+        ModelWriter.tabSelect(first, in: ws)
 
         // At the first tab it wraps to the last rather than crossing over.
         state.selectPreviousTab(projectID: p.id)
@@ -1069,8 +1069,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.focusPaneInDirection(.right, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -1091,8 +1090,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"))))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
@@ -1105,8 +1103,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["b"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["a"])
     }
@@ -1117,8 +1114,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: false, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -1209,9 +1205,9 @@ struct AppStateTests {
         let ws1 = try #require(state.workspaces[p1.id])
         let ws2 = try #require(state.workspaces[p2.id])
         // Two tabs in each so closing one doesn't empty the workspace.
-        let close1 = ws1.createTab(projectPath: "/tmp1")
+        let close1 = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let keep1 = try #require(ws1.tabs.first?.id)
-        let close2 = ws2.createTab(projectPath: "/tmp2")
+        let close2 = ModelWriter.tabCreate(in: ws2, projectPath: "/tmp2")
         let keep2 = try #require(ws2.tabs.first?.id)
 
         state.closeTabs([
@@ -2199,7 +2195,7 @@ struct AppStateTests {
         #expect(names.count == 2)
 
         // Second tab so the close leaves a valid workspace.
-        _ = state.workspaces[p.id]?.createTab(projectPath: "/tmp")
+        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
         state.closeTab(tab.id, projectID: p.id)
 
         await killed.settle(expecting: names.count)
@@ -2226,8 +2222,8 @@ struct AppStateTests {
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
 
         state.closeTab(mirrorTab.id, projectID: p.id)
 
@@ -2247,11 +2243,11 @@ struct AppStateTests {
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
         // A third tab so closing both mirror-holding tabs leaves a valid
         // workspace behind.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         state.closeTab(mirrorTab.id, projectID: p.id)
         state.closeTab(tab.id, projectID: p.id)
@@ -2273,8 +2269,8 @@ struct AppStateTests {
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
 
         state.removeProject(p.id)
 
@@ -2345,7 +2341,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         // A second tab so the close leaves a valid workspace shape.
-        _ = state.workspaces[p.id]?.createTab(projectPath: "devbox:~/dev/api")
+        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         state.zmx = remoteKillRecordingZmx(remoteKilled)
@@ -2421,7 +2417,7 @@ struct AppStateTests {
         // Give p2 two tabs so there's a middle slot to drop into.
         let dest = try #require(state.workspaces[p2.id])
         let d0 = dest.tabs[0].id
-        let d1 = dest.createTab(projectPath: p2.path).id
+        let d1 = ModelWriter.tabCreate(in: dest, projectPath: p2.path).id
         let moving = try #require(state.workspaces[p1.id]?.activeTab)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path, toIndex: 1)
@@ -2442,7 +2438,7 @@ struct AppStateTests {
         let p = seedProject(state, name: "p", path: "/tmp")
         let ws = try #require(state.workspaces[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: p.path).id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
 
         state.reorderTab(t1, inProject: p.id, toIndex: 2)
         #expect(ws.tabs.map(\.id) == [t2, t1])
@@ -2459,9 +2455,9 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: p.path).id
-        let t3 = ws.createTab(projectPath: p.path).id
-        ws.activeTabID = t1
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        ModelWriter.tabPeek(t1, in: ws)
         let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(
             fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("macterm-tests-move-\(UUID().uuidString).json")
@@ -2493,8 +2489,8 @@ struct AppStateTests {
         #expect(AppCommand.movePaneRight.action(in: ctx) == nil)
 
         let first = try #require(tab.focusedPaneID)
-        let second = try #require(tab.split(paneID: first, direction: .horizontal))
-        tab.focusPane(first)
+        let second = try #require(ModelWriter.paneSplit(tab, paneID: first, direction: .horizontal))
+        ModelWriter.paneFocus(tab, paneID: first)
         #expect(AppCommand.movePaneLeft.action(in: ctx) == nil)
         #expect(AppCommand.movePaneUp.action(in: ctx) == nil)
         let moveRight = try #require(AppCommand.movePaneRight.action(in: ctx))
@@ -2511,7 +2507,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         // No live surfaces in a unit test → needsConfirmQuit is unreachable →
         // not busy → closes without staging.
@@ -2538,7 +2534,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         state.requestCloseTab(tab.id, projectID: p.id)
         #expect(state.pendingDialog?.kind == .closeTab(tabID: tab.id, projectID: p.id))

@@ -74,22 +74,6 @@ enum SplitNode: Identifiable {
     }
 }
 
-@MainActor @Observable
-final class SplitBranch: Identifiable {
-    let id = UUID()
-    var direction: SplitDirection
-    var ratio: CGFloat
-    var first: SplitNode
-    var second: SplitNode
-
-    init(direction: SplitDirection, ratio: CGFloat = 0.5, first: SplitNode, second: SplitNode) {
-        self.direction = direction
-        self.ratio = ratio
-        self.first = first
-        self.second = second
-    }
-}
-
 // MARK: - Tree operations
 
 @MainActor
@@ -128,8 +112,7 @@ extension SplitNode {
                 command: command,
                 env: env
             )
-            branch.first = newFirst
-            if id1 != nil { return (.split(branch), id1) }
+            if id1 != nil { return (.split(branch.with(first: newFirst)), id1) }
             let (newSecond, id2) = branch.second.splitting(
                 paneID: paneID,
                 direction: direction,
@@ -139,8 +122,7 @@ extension SplitNode {
                 command: command,
                 env: env
             )
-            branch.second = newSecond
-            return (.split(branch), id2)
+            return (.split(branch.with(second: newSecond)), id2)
         }
     }
 
@@ -179,13 +161,11 @@ extension SplitNode {
             let (newFirst, ok1) = branch.first.inserting(
                 node: node, at: destinationID, direction: direction, position: position
             )
-            branch.first = newFirst
-            if ok1 { return (.split(branch), true) }
+            if ok1 { return (.split(branch.with(first: newFirst)), true) }
             let (newSecond, ok2) = branch.second.inserting(
                 node: node, at: destinationID, direction: direction, position: position
             )
-            branch.second = newSecond
-            return (.split(branch), ok2)
+            return (.split(branch.with(second: newSecond)), ok2)
         }
     }
 
@@ -197,12 +177,10 @@ extension SplitNode {
             if case let .pane(p) = branch.first, p.id == paneID { return branch.second }
             if case let .pane(p) = branch.second, p.id == paneID { return branch.first }
             if branch.first.contains(paneID: paneID), let n = branch.first.removing(paneID: paneID) {
-                branch.first = n
-                return .split(branch)
+                return .split(branch.with(first: n))
             }
             if branch.second.contains(paneID: paneID), let n = branch.second.removing(paneID: paneID) {
-                branch.second = n
-                return .split(branch)
+                return .split(branch.with(second: n))
             }
             return self
         }
@@ -211,8 +189,7 @@ extension SplitNode {
     /// The same tree with the panes `a` and `b` in each other's places. The
     /// shape and every ratio stay; only the two leaves change position. The
     /// `Pane` objects are reused as they are, so surfaces and shells are
-    /// untouched. Mutates the branches in place and returns the receiver, as
-    /// `resizing` does; assign the result to publish the change.
+    /// untouched.
     func swappingPanes(_ a: UUID, _ b: UUID) -> SplitNode {
         guard a != b, let paneA = findPane(id: a), let paneB = findPane(id: b) else { return self }
         return replacingPanes { pane in
@@ -231,11 +208,12 @@ extension SplitNode {
     private func replacingPanes(_ replacement: (Pane) -> Pane) -> SplitNode {
         switch self {
         case let .pane(pane):
-            return .pane(replacement(pane))
+            .pane(replacement(pane))
         case let .split(branch):
-            branch.first = branch.first.replacingPanes(replacement)
-            branch.second = branch.second.replacingPanes(replacement)
-            return .split(branch)
+            .split(branch.with(
+                first: branch.first.replacingPanes(replacement),
+                second: branch.second.replacingPanes(replacement)
+            ))
         }
     }
 
@@ -315,21 +293,18 @@ enum PaneFocusDirection { case left, right, up, down }
 
 @MainActor
 extension SplitNode {
-    /// Rebalance all ratios so sibling panes along each direction share space
-    /// evenly. Mutates in place; returns the receiver for chaining.
-    @discardableResult
+    /// The tree with all ratios rebalanced, so sibling panes along each
+    /// direction share space evenly.
     func rebalanced() -> SplitNode {
-        if case let .split(branch) = self {
-            let leftUnits = branch.first.tileUnits(along: branch.direction)
-            let rightUnits = branch.second.tileUnits(along: branch.direction)
-            let total = leftUnits + rightUnits
-            if total > 0 {
-                branch.ratio = CGFloat(leftUnits) / CGFloat(total)
-            }
-            _ = branch.first.rebalanced()
-            _ = branch.second.rebalanced()
-        }
-        return self
+        guard case let .split(branch) = self else { return self }
+        let leftUnits = branch.first.tileUnits(along: branch.direction)
+        let rightUnits = branch.second.tileUnits(along: branch.direction)
+        let total = leftUnits + rightUnits
+        return .split(branch.with(
+            ratio: total > 0 ? CGFloat(leftUnits) / CGFloat(total) : branch.ratio,
+            first: branch.first.rebalanced(),
+            second: branch.second.rebalanced()
+        ))
     }
 
     /// Number of "cells" this subtree contributes when laid out along the given
@@ -351,47 +326,39 @@ extension SplitNode {
     func resizing(paneID: UUID, direction: PaneFocusDirection, delta: CGFloat) -> SplitNode {
         let axis: SplitDirection = (direction == .left || direction == .right) ? .horizontal : .vertical
         let sign: CGFloat = (direction == .right || direction == .down) ? 1 : -1
-        _ = applyResize(paneID: paneID, axis: axis, delta: sign * delta)
-        return self
-    }
-
-    /// Walks the tree and applies the delta to the closest matching-axis ancestor
-    /// of the given pane. Returns true if the ratio was actually adjusted.
-    @discardableResult
-    private func applyResize(paneID: UUID, axis: SplitDirection, delta: CGFloat) -> Bool {
-        guard case let .split(branch) = self else { return false }
-        let firstHas = branch.first.contains(paneID: paneID)
-        let secondHas = branch.second.contains(paneID: paneID)
-        guard firstHas || secondHas else { return false }
-        // Recurse first — deeper (closer) ancestor wins.
-        let child: SplitNode = firstHas ? branch.first : branch.second
-        if child.applyResize(paneID: paneID, axis: axis, delta: delta) { return true }
-        // No deeper match; if this branch matches the axis, apply here.
-        if branch.direction == axis {
-            branch.ratio = min(max(branch.ratio + delta, 0.15), 0.85)
-            return true
-        }
-        return false
+        return withNearestRatio(paneID: paneID, axis: axis) { $0 + sign * delta } ?? self
     }
 
     /// Set the ratio of the nearest ancestor branch of `paneID` whose direction
     /// matches `axis` to an absolute value (clamped to 0.15…0.85). The control
     /// CLI's `pane resize-split` uses this for a deterministic geometry, in
-    /// contrast to `applyResize`'s relative nudge (the keybind path). Returns
-    /// true iff a matching branch was found and set.
-    @discardableResult
-    func settingRatio(paneID: UUID, axis: SplitDirection, ratio: CGFloat) -> Bool {
-        guard case let .split(branch) = self else { return false }
+    /// contrast to `resizing`'s relative nudge (the keybind path). nil when no
+    /// matching branch holds the pane.
+    func settingRatio(paneID: UUID, axis: SplitDirection, ratio: CGFloat) -> SplitNode? {
+        withNearestRatio(paneID: paneID, axis: axis) { _ in ratio }
+    }
+
+    /// The tree with `change` applied to the ratio of the closest ancestor of
+    /// the pane whose direction is `axis`, clamped to 0.15…0.85. nil when no
+    /// such ancestor exists.
+    private func withNearestRatio(
+        paneID: UUID,
+        axis: SplitDirection,
+        _ change: (CGFloat) -> CGFloat
+    ) -> SplitNode? {
+        guard case let .split(branch) = self else { return nil }
         let firstHas = branch.first.contains(paneID: paneID)
         let secondHas = branch.second.contains(paneID: paneID)
-        guard firstHas || secondHas else { return false }
-        // Deeper (closer) ancestor wins, matching applyResize.
-        let child: SplitNode = firstHas ? branch.first : branch.second
-        if child.settingRatio(paneID: paneID, axis: axis, ratio: ratio) { return true }
-        if branch.direction == axis {
-            branch.ratio = min(max(ratio, 0.15), 0.85)
-            return true
+        guard firstHas || secondHas else { return nil }
+        // Recurse first — deeper (closer) ancestor wins.
+        if firstHas, let first = branch.first.withNearestRatio(paneID: paneID, axis: axis, change) {
+            return .split(branch.with(first: first))
         }
-        return false
+        if secondHas, let second = branch.second.withNearestRatio(paneID: paneID, axis: axis, change) {
+            return .split(branch.with(second: second))
+        }
+        // No deeper match; if this branch matches the axis, apply here.
+        guard branch.direction == axis else { return nil }
+        return .split(branch.with(ratio: min(max(change(branch.ratio), 0.15), 0.85)))
     }
 }

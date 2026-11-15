@@ -88,10 +88,11 @@ A `Pane` is the record of one terminal: its identity, its session, and the state
 
 ### State
 
-- **`AppState`** is the single `@Observable` root. It is passed with `.environment()`. It is the main way to change a workspace, tab, pane or window. It is not the only one: the control handler, the intents and the restore also change the model. You can inject `WorkspaceStore` for tests.
+- **`AppState`** is the single `@Observable` root. It is passed with `.environment()`. You can inject `WorkspaceStore` for tests.
+- **`ModelWriter`** (`Macterm/Model/Workspace.swift`) is the one writer of the tab model. `SplitBranch`, `TerminalTab` and `Workspace` are in the same file, and their setters and mutators are `fileprivate`, so the compiler refuses a change from any other file. Its verbs are the requests of design 010 §3 (`tabSet`, `paneSplit`, `splitRatio`). At the cut-over to the server's model, only their bodies change. Persistence stays the caller's: `AppState` saves after a change.
 - **`ProjectStore`** is the project list (`projects.json`). It is saved on its own.
 - **`Workspace`** is the collection of tabs of one project, `AppState.workspaces[projectID]`. The pinned tabs are a sentinel workspace (see `Macterm/App/AGENTS.md`).
-- **`TerminalTab`** is a `SplitNode` tree plus the IDs of the focused pane and the zoomed pane. **`SplitNode`** is `.pane(Pane)` or `.split(SplitBranch)`.
+- **`TerminalTab`** is a `SplitNode` tree plus the IDs of the focused pane and the zoomed pane. **`SplitNode`** is `.pane(Pane)` or `.split(SplitBranch)`. The tree operations of `SplitNode` are pure: they build new branches and keep each branch's `id`. Only a divider drag changes a branch in place (its ratio).
 - **`WindowState`** (`Macterm/App/WindowState.swift`) exists once for each window. It holds the project that the window shows and its tab for each project (`activeTabIDs`). It also holds the width and visibility of the sidebar, and the flags of the palette and sheets. Macterm saves it as `WindowSnapshot`.
 - **`Preferences`** is an observable wrapper for UserDefaults. Never touch `UserDefaults.standard` in app code. Under tests, `Preferences.defaults` resolves to a side suite that Macterm wipes.
 

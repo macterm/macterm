@@ -281,7 +281,7 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
         if isQuickTerminal {
             QuickTerminalService.shared.showPanel()
             if QuickTerminalService.shared.splitState.tab.splitRoot.findPane(id: paneID) != nil {
-                QuickTerminalService.shared.splitState.tab.focusPane(paneID)
+                QuickTerminalService.shared.splitState.focusPane(paneID)
                 FocusRestoration.restoreFocus(
                     to: paneID,
                     in: QuickTerminalService.shared.splitState.tab.splitRoot,

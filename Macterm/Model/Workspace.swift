@@ -1,34 +1,85 @@
 import Foundation
 
+// The tab model: `SplitBranch`, `TerminalTab` and `Workspace`, and
+// `ModelWriter`, the one way to change them. Their setters and mutators are
+// `fileprivate`, so the compiler refuses a change from any other file. The
+// writer's verbs are the requests of design 010 §3; at the cut-over to the
+// server's model, only their bodies change.
+
+/// One split of the tree. `first`, `second` and `direction` never change: a
+/// structural change builds new branches (`SplitNode`'s tree operations) and
+/// keeps each branch's `id`, so a view keyed by it keeps its identity. Only
+/// the ratio changes in place, for the divider drag (`ModelWriter.splitRatio`).
+@MainActor @Observable
+final class SplitBranch: Identifiable {
+    let id: UUID
+    let direction: SplitDirection
+    fileprivate(set) var ratio: CGFloat
+    let first: SplitNode
+    let second: SplitNode
+
+    init(id: UUID = UUID(), direction: SplitDirection, ratio: CGFloat = 0.5, first: SplitNode, second: SplitNode) {
+        self.id = id
+        self.direction = direction
+        self.ratio = ratio
+        self.first = first
+        self.second = second
+    }
+
+    /// This branch with the given parts replaced, under the same `id`. The
+    /// receiver itself when nothing changes, so an unchanged subtree keeps
+    /// its objects.
+    func with(ratio: CGFloat? = nil, first: SplitNode? = nil, second: SplitNode? = nil) -> SplitBranch {
+        let newRatio = ratio ?? self.ratio
+        let newFirst = first ?? self.first
+        let newSecond = second ?? self.second
+        if newRatio == self.ratio, newFirst.isSame(as: self.first), newSecond.isSame(as: self.second) {
+            return self
+        }
+        return SplitBranch(id: id, direction: direction, ratio: newRatio, first: newFirst, second: newSecond)
+    }
+}
+
+extension SplitNode {
+    /// Whether both nodes are the same object (the same pane or branch).
+    func isSame(as other: SplitNode) -> Bool {
+        switch (self, other) {
+        case let (.pane(a), .pane(b)): a === b
+        case let (.split(a), .split(b)): a === b
+        default: false
+        }
+    }
+}
+
 /// A single tab — owns a split-pane tree.
 @MainActor @Observable
 final class TerminalTab: Identifiable {
     let id: UUID
-    var customTitle: String?
-    var splitRoot: SplitNode
-    var focusedPaneID: UUID?
+    fileprivate(set) var customTitle: String?
+    fileprivate(set) var splitRoot: SplitNode
+    fileprivate(set) var focusedPaneID: UUID?
     /// When set, the split tree renders only this pane (zoom). The tree
     /// itself is untouched — clearing this restores the full layout.
     /// Transient: not persisted across launches.
-    var zoomedPaneID: UUID?
+    fileprivate(set) var zoomedPaneID: UUID?
 
     /// Bumped by every ratio change that should ANIMATE — the keyboard
     /// resize (`resize(_:delta:)`), i.e. Resize Split Left/Right/Up/Down from
     /// a keybind, the palette or a menu. `SplitLayout.animationKey` folds it
     /// in, so the frames that follow in the same transaction animate like a
-    /// split. A divider drag writes `SplitBranch.ratio` directly and the
-    /// control CLI's `pane resize-split` goes through `setSplitRatio`;
-    /// neither bumps this, so both land immediately — a drag must follow the
-    /// pointer, and a script that sets a ratio then reads pane widths must
-    /// see the geometry it asked for. In memory only, never persisted.
-    var animatedResizeGeneration = 0
+    /// split. A divider drag and the control CLI's `pane resize-split` set
+    /// the ratio through `ModelWriter.splitRatio`; neither bumps this, so
+    /// both land immediately — a drag must follow the pointer, and a script
+    /// that sets a ratio then reads pane widths must see the geometry it
+    /// asked for. In memory only, never persisted.
+    fileprivate(set) var animatedResizeGeneration = 0
     /// Most-recent-first stack of previously focused pane IDs
     /// (excludes the currently focused pane).
     @ObservationIgnored
-    var paneFocusHistory = RecencyStack<UUID>(limit: 20)
+    fileprivate(set) var paneFocusHistory = RecencyStack<UUID>(limit: 20)
 
     /// Record a focus change, pushing the previous pane onto history.
-    func focusPane(_ paneID: UUID) {
+    fileprivate func focusPane(_ paneID: UUID) {
         guard paneID != focusedPaneID else { return }
         if zoomedPaneID != nil, zoomedPaneID != paneID { zoomedPaneID = nil }
         if let current = focusedPaneID { paneFocusHistory.push(current) }
@@ -39,7 +90,7 @@ final class TerminalTab: Identifiable {
     /// Pick the next focus target after a pane is removed from the tree.
     /// Walks the history stack (skipping panes no longer in the tree), then
     /// falls back to the first pane in tree order.
-    func nextFocusAfterClose() -> UUID? {
+    fileprivate func nextFocusAfterClose() -> UUID? {
         let valid = Set(splitRoot.allPanes().map(\.id))
         paneFocusHistory.prune(keeping: valid)
         if let recent = paneFocusHistory.popValid(in: valid) { return recent }
@@ -160,7 +211,7 @@ final class TerminalTab: Identifiable {
 
     /// Toggle zoom for `paneID`. While zoomed, the tab renders only that pane;
     /// toggling off (or zooming a different pane) restores the full split view.
-    func toggleZoom(paneID: UUID) {
+    fileprivate func toggleZoom(paneID: UUID) {
         guard splitRoot.findPane(id: paneID) != nil else { return }
         if zoomedPaneID == paneID {
             zoomedPaneID = nil
@@ -179,7 +230,7 @@ final class TerminalTab: Identifiable {
     /// environment for the new pane's shell. With `focus: false`, preserve
     /// focus, history and zoom; the caller must start a hidden pane.
     @discardableResult
-    func split(
+    fileprivate func split(
         paneID: UUID,
         direction: SplitDirection,
         position: SplitPosition = .second,
@@ -222,7 +273,7 @@ final class TerminalTab: Identifiable {
             zoomedPaneID = nil
             if let newID { focusPane(newID) }
         }
-        if Preferences.shared.autoTilingEnabled { splitRoot.rebalanced() }
+        if Preferences.shared.autoTilingEnabled { splitRoot = splitRoot.rebalanced() }
         return newID
     }
 
@@ -235,7 +286,7 @@ final class TerminalTab: Identifiable {
     /// would move it away from the pane they are actually using — and, once
     /// leadership follows focus, would hand the pty size to the new view for
     /// no reason.
-    func mirror(paneID: UUID, direction: SplitDirection, position: SplitPosition) -> UUID? {
+    fileprivate func mirror(paneID: UUID, direction: SplitDirection, position: SplitPosition) -> UUID? {
         guard let source = splitRoot.findPane(id: paneID) else { return nil }
         let mirrored = Pane(mirroring: source)
         let (newRoot, inserted) = splitRoot.inserting(
@@ -248,7 +299,7 @@ final class TerminalTab: Identifiable {
         splitRoot = newRoot
         // Inserting reveals a new pane — exit zoom so it's visible.
         zoomedPaneID = nil
-        if Preferences.shared.autoTilingEnabled { splitRoot.rebalanced() }
+        if Preferences.shared.autoTilingEnabled { splitRoot = splitRoot.rebalanced() }
         return mirrored.id
     }
 
@@ -260,7 +311,7 @@ final class TerminalTab: Identifiable {
     /// cwd inheritance for every new cell, exactly as in `split`. Returns the
     /// new pane IDs.
     @discardableResult
-    func makeGrid(
+    fileprivate func makeGrid(
         paneID: UUID,
         rows: Int,
         columns: Int,
@@ -312,7 +363,7 @@ final class TerminalTab: Identifiable {
     /// splits top/bottom. Falls back to a horizontal split when the focused
     /// pane's NSView isn't attached yet and has no measurable bounds.
     @discardableResult
-    func autoSplit(
+    fileprivate func autoSplit(
         paneID: UUID,
         command: String? = nil,
         env: [String: String]? = nil,
@@ -331,7 +382,7 @@ final class TerminalTab: Identifiable {
     /// Adjust the nearest matching-axis split ratio around the focused pane.
     /// The keyboard path, and the one ratio change that animates (see
     /// `animatedResizeGeneration`).
-    func resize(_ direction: PaneFocusDirection, delta: CGFloat = 0.03) {
+    fileprivate func resize(_ direction: PaneFocusDirection, delta: CGFloat = 0.03) {
         guard let paneID = focusedPaneID else { return }
         splitRoot = splitRoot.resizing(paneID: paneID, direction: direction, delta: delta)
         animatedResizeGeneration &+= 1
@@ -342,7 +393,7 @@ final class TerminalTab: Identifiable {
     /// focus; the tree shape and the ratios stay. Returns false (tree
     /// unchanged) when there is no focused pane or no neighbor that way.
     @discardableResult
-    func moveFocusedPane(_ direction: PaneFocusDirection) -> Bool {
+    fileprivate func moveFocusedPane(_ direction: PaneFocusDirection) -> Bool {
         guard let paneID = focusedPaneID,
               let neighborID = splitRoot.nearestPane(from: paneID, direction: direction)
         else { return false }
@@ -353,16 +404,10 @@ final class TerminalTab: Identifiable {
     /// Set an absolute ratio on the nearest matching-axis split around a pane
     /// (control CLI `pane resize-split`). Returns false when the pane sits in
     /// no split of that axis.
-    @discardableResult
-    func setSplitRatio(paneID: UUID, axis: SplitDirection, ratio: CGFloat) -> Bool {
-        splitRoot.settingRatio(paneID: paneID, axis: axis, ratio: ratio)
-    }
-
-    /// Move a pane next to another pane — the legacy grab-handle drop shape,
-    /// now a thin alias for the target-based move below.
-    @discardableResult
-    func movePane(_ paneID: UUID, onto destinationID: UUID, zone: PaneDropZone) -> Bool {
-        movePane(paneID, to: .pane(destinationID, zone))
+    fileprivate func setSplitRatio(paneID: UUID, axis: SplitDirection, ratio: CGFloat) -> Bool {
+        guard let newRoot = splitRoot.settingRatio(paneID: paneID, axis: axis, ratio: ratio) else { return false }
+        splitRoot = newRoot
+        return true
     }
 
     /// Move a pane to a resolved drop target (grab-handle drag): detach it —
@@ -373,7 +418,7 @@ final class TerminalTab: Identifiable {
     /// (tree unchanged) for a target aimed at the moved pane itself, a pane
     /// the tree doesn't contain, or the only pane in the tab.
     @discardableResult
-    func movePane(_ paneID: UUID, to target: TabDropResolution.Target) -> Bool {
+    fileprivate func movePane(_ paneID: UUID, to target: TabDropResolution.Target) -> Bool {
         switch target {
         case let .pane(destinationID, _),
              let .divider(destinationID, _):
@@ -399,13 +444,13 @@ final class TerminalTab: Identifiable {
     /// meaning is positional parity — three side-by-side panes reading as
     /// thirds, a whole-edge pane taking its even share.
     @discardableResult
-    func mergeTree(_ node: SplitNode, at target: TabDropResolution.Target) -> Bool {
+    fileprivate func mergeTree(_ node: SplitNode, at target: TabDropResolution.Target) -> Bool {
         switch target {
         case let .pane(paneID, zone):
             return insertTree(node, at: paneID, zone: zone)
         case let .divider(paneID, zone):
             guard insertTree(node, at: paneID, zone: zone) else { return false }
-            splitRoot.rebalanced()
+            splitRoot = splitRoot.rebalanced()
             return true
         case let .rootEdge(zone):
             let first: SplitNode = zone.splitPosition == .first ? node : splitRoot
@@ -413,7 +458,7 @@ final class TerminalTab: Identifiable {
             splitRoot = .split(SplitBranch(direction: zone.splitDirection, first: first, second: second))
             zoomedPaneID = nil
             if let paneID = node.allPanes().first?.id { focusPane(paneID) }
-            splitRoot.rebalanced()
+            splitRoot = splitRoot.rebalanced()
             return true
         }
     }
@@ -423,7 +468,7 @@ final class TerminalTab: Identifiable {
     /// wrapped in a new split with the adopted tree on the `zone` side.
     /// Returns false (tree unchanged) when the pane isn't in this tab.
     @discardableResult
-    func insertTree(_ node: SplitNode, at destinationPaneID: UUID, zone: PaneDropZone) -> Bool {
+    fileprivate func insertTree(_ node: SplitNode, at destinationPaneID: UUID, zone: PaneDropZone) -> Bool {
         let (newRoot, inserted) = splitRoot.inserting(
             node: node, at: destinationPaneID, direction: zone.splitDirection, position: zone.splitPosition
         )
@@ -431,7 +476,7 @@ final class TerminalTab: Identifiable {
         splitRoot = newRoot
         zoomedPaneID = nil
         if let paneID = node.allPanes().first?.id { focusPane(paneID) }
-        if Preferences.shared.autoTilingEnabled { splitRoot.rebalanced() }
+        if Preferences.shared.autoTilingEnabled { splitRoot = splitRoot.rebalanced() }
         return true
     }
 
@@ -442,7 +487,7 @@ final class TerminalTab: Identifiable {
     /// (the quick terminal drops the whole tab on `.onlyPaneLeft` without its
     /// own teardown) — but NOT for `.notFound`.
     @discardableResult
-    func removePane(_ paneID: UUID) -> PaneRemovalResult {
+    fileprivate func removePane(_ paneID: UUID) -> PaneRemovalResult {
         guard let pane = splitRoot.findPane(id: paneID) else { return .notFound }
         // Decide the outcome BEFORE the irreversible surface teardown, so a
         // `.notFound`-shaped precondition can't destroy a surface first.
@@ -463,7 +508,7 @@ final class TerminalTab: Identifiable {
         if focusedPaneID == paneID {
             focusedPaneID = nextFocusAfterClose()
         }
-        if Preferences.shared.autoTilingEnabled { splitRoot.rebalanced() }
+        if Preferences.shared.autoTilingEnabled { splitRoot = splitRoot.rebalanced() }
         return .removed
     }
 }
@@ -478,8 +523,8 @@ enum PaneRemovalResult {
 @MainActor @Observable
 final class Workspace: Identifiable {
     let projectID: UUID
-    var tabs: [TerminalTab] = []
-    var activeTabID: UUID? {
+    fileprivate(set) var tabs: [TerminalTab] = []
+    fileprivate(set) var activeTabID: UUID? {
         didSet {
             guard activeTabID != oldValue else { return }
             // Every selection path (select/peek/adopt/close) lands here — the
@@ -531,7 +576,7 @@ final class Workspace: Identifiable {
     /// would publish a transient selection and pollute the recent-tab history.
     /// With no active tab, adopt the new one; there is no selection to preserve.
     @discardableResult
-    func createTab(
+    fileprivate func createTab(
         projectPath: String,
         sessionSlug: String? = nil,
         remoteZmxPath: String? = nil,
@@ -568,7 +613,7 @@ final class Workspace: Identifiable {
     /// is reused as-is; the caller is responsible for having removed it from its
     /// previous workspace first. `index` positions the tab in the list (a
     /// sidebar drop lands at a specific slot); nil / out-of-range appends.
-    func adoptTab(_ tab: TerminalTab, at index: Int? = nil) {
+    fileprivate func adoptTab(_ tab: TerminalTab, at index: Int? = nil) {
         if let index, index >= 0, index <= tabs.count {
             tabs.insert(tab, at: index)
         } else {
@@ -578,7 +623,7 @@ final class Workspace: Identifiable {
         activeTabID = tab.id
     }
 
-    func closeTab(_ tabID: UUID) {
+    fileprivate func closeTab(_ tabID: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         tabs.remove(at: index)
         tabHistory.remove(tabID)
@@ -592,7 +637,7 @@ final class Workspace: Identifiable {
     }
 
     @discardableResult
-    func selectTab(_ tabID: UUID) -> Bool {
+    fileprivate func selectTab(_ tabID: UUID) -> Bool {
         guard let tab = tabs.first(where: { $0.id == tabID }) else { return false }
         if let current = activeTabID, current != tabID { tabHistory.push(current) }
         activeTabID = tabID
@@ -603,7 +648,7 @@ final class Workspace: Identifiable {
     }
 
     @discardableResult
-    func selectNextTab() -> Bool {
+    fileprivate func selectNextTab() -> Bool {
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
         else { return false }
@@ -611,7 +656,7 @@ final class Workspace: Identifiable {
     }
 
     @discardableResult
-    func selectPreviousTab() -> Bool {
+    fileprivate func selectPreviousTab() -> Bool {
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
         else { return false }
@@ -638,18 +683,18 @@ final class Workspace: Identifiable {
     }
 
     /// Switch to a tab without recording history (used during Ctrl+Tab cycling).
-    func peekTab(_ tabID: UUID) {
+    fileprivate func peekTab(_ tabID: UUID) {
         guard tabs.contains(where: { $0.id == tabID }) else { return }
         activeTabID = tabID
     }
 
     @discardableResult
-    func selectTabByIndex(_ index: Int) -> Bool {
+    fileprivate func selectTabByIndex(_ index: Int) -> Bool {
         guard index >= 0, index < tabs.count else { return false }
         return selectTab(tabs[index].id)
     }
 
-    func reorderTabs(fromOffsets source: IndexSet, toOffset destination: Int) {
+    fileprivate func reorderTabs(fromOffsets source: IndexSet, toOffset destination: Int) {
         tabs.move(fromOffsets: source, toOffset: destination)
     }
 
@@ -659,7 +704,7 @@ final class Workspace: Identifiable {
     /// coordinate space — the offset SwiftUI's `dropDestination` reports — so it
     /// is adjusted down by one when the tab is dragged toward the end. A no-op
     /// destination (same slot) leaves the array and selection untouched.
-    func moveTab(_ tabID: UUID, toIndex destination: Int) {
+    fileprivate func moveTab(_ tabID: UUID, toIndex destination: Int) {
         guard let from = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         let to = Self.resolvedMoveIndex(from: from, toDropOffset: destination, count: tabs.count)
         guard to != from else { return }
@@ -677,5 +722,282 @@ final class Workspace: Identifiable {
         let clamped = max(0, min(destination, count))
         let to = clamped > from ? clamped - 1 : clamped
         return max(0, min(to, count - 1))
+    }
+}
+
+// MARK: - The writer
+
+/// The one way to change the tab model. Every other file reads it.
+///
+/// Each verb is named after its request in design 010 §3 (`tab.set` is
+/// `tabSet`, `split.ratio` is `splitRatio`). A verb with no request there is
+/// GUI logic that the cut-over turns into one or more of them (`splitResize`
+/// becomes `split.ratio`, `paneSwap` two `pane.move`s). Persistence is the
+/// caller's: `AppState` saves after a change, and the quick terminal reports
+/// through `QuickTerminalSplitState.onStructureChange`.
+@MainActor
+enum ModelWriter {
+    // MARK: tab.*
+
+    /// `tab.create`: a new tab with one pane.
+    @discardableResult
+    static func tabCreate(
+        in workspace: Workspace,
+        projectPath: String,
+        sessionSlug: String? = nil,
+        remoteZmxPath: String? = nil,
+        command: String? = nil,
+        env: [String: String]? = nil,
+        focus: Bool = true
+    ) -> TerminalTab {
+        workspace.createTab(
+            projectPath: projectPath,
+            sessionSlug: sessionSlug,
+            remoteZmxPath: remoteZmxPath,
+            command: command,
+            env: env,
+            focus: focus
+        )
+    }
+
+    /// The destination half of `tab.move`: put a tab that left another
+    /// workspace into this one, at `index` (nil appends). With `select`, it
+    /// becomes the active tab.
+    static func tabInsert(_ tab: TerminalTab, into workspace: Workspace, at index: Int? = nil, select: Bool = true) {
+        if select {
+            workspace.adoptTab(tab, at: index)
+        } else {
+            workspace.tabs.insert(tab, at: min(index ?? workspace.tabs.count, workspace.tabs.count))
+        }
+    }
+
+    /// `tab.close`, and the source half of `tab.move`.
+    static func tabClose(_ tabID: UUID, in workspace: Workspace) {
+        workspace.closeTab(tabID)
+    }
+
+    /// `tab.set`: rename. nil goes back to the automatic title.
+    static func tabSet(_ tab: TerminalTab, title: String?) {
+        tab.customTitle = title
+    }
+
+    /// Give a tab a new tree (Apply Layout keeps the tab and swaps its tree).
+    static func tabSetTree(_ tab: TerminalTab, root: SplitNode, focusedPaneID: UUID?) {
+        tab.splitRoot = root
+        tab.focusedPaneID = focusedPaneID
+    }
+
+    /// `tab.select`. Returns whether looking at the tab acknowledged a
+    /// finished run (the caller saves then).
+    @discardableResult
+    static func tabSelect(_ tabID: UUID, in workspace: Workspace) -> Bool {
+        workspace.selectTab(tabID)
+    }
+
+    @discardableResult
+    static func tabSelectNext(in workspace: Workspace) -> Bool {
+        workspace.selectNextTab()
+    }
+
+    @discardableResult
+    static func tabSelectPrevious(in workspace: Workspace) -> Bool {
+        workspace.selectPreviousTab()
+    }
+
+    @discardableResult
+    static func tabSelect(index: Int, in workspace: Workspace) -> Bool {
+        workspace.selectTabByIndex(index)
+    }
+
+    /// Make `tabID` the active tab with no history and no acknowledgement:
+    /// the Ctrl+Tab cycle, and a workspace restored with no selection. nil
+    /// clears the selection.
+    static func tabPeek(_ tabID: UUID?, in workspace: Workspace) {
+        if let tabID {
+            workspace.peekTab(tabID)
+        } else {
+            workspace.activeTabID = nil
+        }
+    }
+
+    /// `tab.reorder` with a drop offset (see `Workspace.moveTab`).
+    static func tabReorder(_ tabID: UUID, in workspace: Workspace, toIndex destination: Int) {
+        workspace.moveTab(tabID, toIndex: destination)
+    }
+
+    /// `tab.reorder` in the shape of `List.onMove`.
+    static func tabReorder(in workspace: Workspace, fromOffsets source: IndexSet, toOffset destination: Int) {
+        workspace.reorderTabs(fromOffsets: source, toOffset: destination)
+    }
+
+    /// Replace every tab of the workspace (Apply Layout).
+    static func tabReplaceAll(in workspace: Workspace, with tabs: [TerminalTab], activeTabID: UUID?) {
+        workspace.tabs = tabs
+        workspace.activeTabID = activeTabID
+    }
+
+    /// `tab.merge`: put another tab's tree into this tab at `target`.
+    @discardableResult
+    static func tabMerge(_ tab: TerminalTab, tree node: SplitNode, at target: TabDropResolution.Target) -> Bool {
+        tab.mergeTree(node, at: target)
+    }
+
+    // MARK: pane.*
+
+    /// `pane.split`. Returns the new pane's id. See `TerminalTab.split`.
+    @discardableResult
+    static func paneSplit(
+        _ tab: TerminalTab,
+        paneID: UUID,
+        direction: SplitDirection,
+        position: SplitPosition = .second,
+        command: String? = nil,
+        env: [String: String]? = nil,
+        newPaneWorkingDirectory: String? = nil,
+        focus: Bool = true
+    ) -> UUID? {
+        tab.split(
+            paneID: paneID,
+            direction: direction,
+            position: position,
+            command: command,
+            env: env,
+            newPaneWorkingDirectory: newPaneWorkingDirectory,
+            focus: focus
+        )
+    }
+
+    /// `pane.split` with `dir: auto`: along the pane's longer axis on screen.
+    @discardableResult
+    static func paneAutoSplit(
+        _ tab: TerminalTab,
+        paneID: UUID,
+        command: String? = nil,
+        env: [String: String]? = nil,
+        newPaneWorkingDirectory: String? = nil
+    ) -> UUID? {
+        tab.autoSplit(paneID: paneID, command: command, env: env, newPaneWorkingDirectory: newPaneWorkingDirectory)
+    }
+
+    /// A second pane on the session of `paneID` (`pane mirror`).
+    static func paneMirror(_ tab: TerminalTab, paneID: UUID, direction: SplitDirection, position: SplitPosition) -> UUID? {
+        tab.mirror(paneID: paneID, direction: direction, position: position)
+    }
+
+    /// `grid RxC`: split a pane into equal cells. Returns the new pane ids.
+    @discardableResult
+    static func paneGrid(
+        _ tab: TerminalTab,
+        paneID: UUID,
+        rows: Int,
+        columns: Int,
+        command: String? = nil,
+        newPaneWorkingDirectory: String? = nil
+    ) -> [UUID] {
+        tab.makeGrid(
+            paneID: paneID,
+            rows: rows,
+            columns: columns,
+            command: command,
+            newPaneWorkingDirectory: newPaneWorkingDirectory
+        )
+    }
+
+    /// `pane.close`. Destroys the pane's surface (see `TerminalTab.removePane`).
+    @discardableResult
+    static func paneClose(_ tab: TerminalTab, paneID: UUID) -> PaneRemovalResult {
+        tab.removePane(paneID)
+    }
+
+    /// `pane.move` within a tab.
+    @discardableResult
+    static func paneMove(_ tab: TerminalTab, paneID: UUID, to target: TabDropResolution.Target) -> Bool {
+        tab.movePane(paneID, to: target)
+    }
+
+    /// Move Pane: swap the focused pane with its neighbor in `direction`.
+    @discardableResult
+    static func paneSwap(_ tab: TerminalTab, direction: PaneFocusDirection) -> Bool {
+        tab.moveFocusedPane(direction)
+    }
+
+    /// `pane.separate` for every pane of the tab but the first: each goes to
+    /// a new tab right after it, and the tab stays selected.
+    static func paneSeparateAll(_ tab: TerminalTab, in workspace: Workspace) {
+        guard let index = workspace.tabs.firstIndex(where: { $0 === tab }) else { return }
+        let panes = tab.splitRoot.allPanes()
+        guard panes.count > 1, let firstPane = panes.first else { return }
+        tab.splitRoot = .pane(firstPane)
+        tab.zoomedPaneID = nil
+        tab.paneFocusHistory = RecencyStack(limit: 20)
+        tab.focusedPaneID = firstPane.id
+        for (offset, pane) in panes.dropFirst().enumerated() {
+            let newTab = TerminalTab(id: UUID(), splitRoot: .pane(pane), focusedPaneID: pane.id)
+            workspace.tabs.insert(newTab, at: index + 1 + offset)
+        }
+        workspace.selectTab(tab.id)
+    }
+
+    /// The source half of `pane.separate`, and of a pane's move to another
+    /// tab: take the pane out of the tree without ending it. The tree, zoom
+    /// and focus are repaired as in `paneClose`, but the surface lives on.
+    /// nil when the pane is not in the tab or is its only pane.
+    @discardableResult
+    static func paneDetach(_ tab: TerminalTab, paneID: UUID) -> Pane? {
+        guard tab.splitRoot.allPanes().count > 1,
+              let pane = tab.splitRoot.findPane(id: paneID),
+              let remaining = tab.splitRoot.removing(paneID: paneID)
+        else { return nil }
+        tab.splitRoot = remaining
+        if tab.zoomedPaneID == paneID { tab.zoomedPaneID = nil }
+        tab.paneFocusHistory.remove(paneID)
+        if tab.focusedPaneID == paneID {
+            tab.focusedPaneID = tab.nextFocusAfterClose()
+        }
+        if Preferences.shared.autoTilingEnabled { tab.splitRoot = tab.splitRoot.rebalanced() }
+        return pane
+    }
+
+    /// `pane.focus`.
+    static func paneFocus(_ tab: TerminalTab, paneID: UUID) {
+        tab.focusPane(paneID)
+    }
+
+    /// `pane.zoom` as a toggle: zoom `paneID`, or unzoom when it is zoomed.
+    static func paneZoom(_ tab: TerminalTab, toggling paneID: UUID) {
+        tab.toggleZoom(paneID: paneID)
+    }
+
+    /// Put each pane of `replacements` (by id) in the place of the old pane,
+    /// and move focus and zoom with it (Restart Session).
+    static func paneReplace(_ tab: TerminalTab, _ replacements: [UUID: Pane]) {
+        tab.splitRoot = tab.splitRoot.replacing(replacements)
+        if let focused = tab.focusedPaneID, let new = replacements[focused] { tab.focusedPaneID = new.id }
+        if let zoomed = tab.zoomedPaneID, let new = replacements[zoomed] { tab.zoomedPaneID = new.id }
+    }
+
+    // MARK: split.*
+
+    /// `split.ratio` for one branch: the divider drag. Not animated.
+    static func splitRatio(_ branch: SplitBranch, ratio: CGFloat) {
+        branch.ratio = ratio
+    }
+
+    /// `split.ratio` for the nearest branch of `axis` around a pane (control
+    /// CLI `pane resize-split`). Not animated. False when no such branch.
+    @discardableResult
+    static func splitRatio(_ tab: TerminalTab, paneID: UUID, axis: SplitDirection, ratio: CGFloat) -> Bool {
+        tab.setSplitRatio(paneID: paneID, axis: axis, ratio: ratio)
+    }
+
+    /// Resize Split Left/Right/Up/Down: a relative, animated `split.ratio`
+    /// around the focused pane.
+    static func splitResize(_ tab: TerminalTab, direction: PaneFocusDirection, delta: CGFloat = 0.03) {
+        tab.resize(direction, delta: delta)
+    }
+
+    /// Equal shares for every pane of the tab (the `rebalance` of a request).
+    static func splitRebalance(_ tab: TerminalTab) {
+        tab.splitRoot = tab.splitRoot.rebalanced()
     }
 }

@@ -401,7 +401,7 @@ struct AnimatedSplitView: View {
             resizedValue: { start, delta in
                 SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: divider.total)
             },
-            onResize: { divider.branch.ratio = $0 }
+            onResize: { ModelWriter.splitRatio(divider.branch, ratio: $0) }
         )
         .frame(width: bandRect.width, height: bandRect.height)
         .position(x: bandRect.midX, y: bandRect.midY)

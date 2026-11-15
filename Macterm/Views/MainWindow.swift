@@ -1095,7 +1095,7 @@ struct WorkspaceView: View {
             onAdaptiveBackgroundChange: { paneID, color in
                 appState.setAdaptiveBackgroundColor(color, paneID: paneID, projectID: project.id, windowID: windowState.id)
             },
-            onToggleZoom: { paneID in tab.toggleZoom(paneID: paneID) },
+            onToggleZoom: { paneID in ModelWriter.paneZoom(tab, toggling: paneID) },
             paneDrop: dropContext(for: tab, renderedNode: renderedNode)
         )
         .environment(\.paneHostID, windowState.id)
@@ -1142,7 +1142,7 @@ struct WorkspaceView: View {
             draggedPaneID: draggedPaneID,
             renderedTabID: tab.id,
             onMovePane: { paneID, target in
-                if tab.movePane(paneID, to: target) {
+                if ModelWriter.paneMove(tab, paneID: paneID, to: target) {
                     appState.saveWorkspaces()
                 }
             },

@@ -94,15 +94,15 @@ struct CommandSourceTests {
         let firstTabID = try #require(ws.activeTabID)
 
         // Create a second tab and make it active.
-        let secondTab = ws.createTab(projectPath: "/tmp")
-        ws.selectTab(secondTab.id)
+        let secondTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSelect(secondTab.id, in: ws)
         #expect(ws.activeTabID == secondTab.id)
 
         // Build the palette item — it captures the active tab at item-build time.
         let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
 
         // Switch back to the first tab before executing.
-        ws.selectTab(firstTabID)
+        ModelWriter.tabSelect(firstTabID, in: ws)
         item.action()
         state.postPaletteAction?()
         await flushMainQueue()
