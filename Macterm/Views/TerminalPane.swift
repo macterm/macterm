@@ -101,7 +101,7 @@ struct TerminalPane: View {
                         ModePill(
                             title: String(localized: "Outdated"),
                             systemImage: "arrow.triangle.2.circlepath",
-                            help: String(localized: "Some panes in this tab are from an outdated Macterm version")
+                            help: String(localized: "This pane is from an outdated Macterm version. Click to refresh")
                         ) { [weak appState, weak pane] in
                             guard let appState, let pane else { return }
                             appState.requestRestartSession(of: pane)

@@ -9600,22 +9600,6 @@
         }
       }
     },
-    "Some panes in this tab are from an outdated Macterm version" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 탭의 일부 패널은 이전 Macterm 버전에서 실행 중입니다"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此标签页中的部分窗格来自旧版 Macterm"
-          }
-        }
-      }
-    },
     "Split Automatically" : {
       "localizations" : {
         "ko" : {
@@ -10831,6 +10815,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此面板的文件已不存在"
+          }
+        }
+      }
+    },
+    "This pane is from an outdated Macterm version. Click to refresh" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 패널은 이전 Macterm 버전에서 실행 중입니다. 클릭하여 새로 고침"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此窗格来自旧版 Macterm。点按以刷新"
           }
         }
       }
