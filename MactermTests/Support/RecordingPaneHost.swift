@@ -60,6 +60,7 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         state.leads.append(leader)
         lock.unlock()
     }
+
     func paneForeground(_ foreground: MactermProtocol.Foreground) {
         lock.lock()
         state.foreground = foreground
