@@ -303,7 +303,7 @@ extension AppState {
         let unloading = tab.splitRoot.allPanes()
         releaseSessions(unloading)
         for pane in unloading {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
         ws.closeTab(tabID)
         saveWorkspaces()

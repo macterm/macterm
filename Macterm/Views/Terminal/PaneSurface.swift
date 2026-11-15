@@ -11,17 +11,20 @@ import Foundation
 /// tab show the same pane ids and each has its own view and its own client on
 /// the session.
 ///
-/// A surface starts with no window (`windowID == nil`): the incubator, the CLI
-/// and the quick terminal get it so. The first window that draws the pane
-/// takes it (`Pane.surface(for:)`).
+/// `SurfaceRegistry` owns the surfaces, keyed by their host and the pane id.
+/// The pane holds no view. A surface starts in the incubator; the first host
+/// that draws the pane takes it (`SurfaceRegistry.surface(for:in:)`).
 @MainActor @Observable
 final class PaneSurface: Identifiable {
     let id = UUID()
     @ObservationIgnored
     unowned let pane: Pane
-    /// The window that draws this surface; nil until one does.
+    /// What draws this surface. `.incubator` until a host takes it.
     @ObservationIgnored
-    fileprivate(set) var windowID: UUID?
+    fileprivate(set) var host: SurfaceHost
+
+    /// The window that draws this surface; nil for every other host.
+    var windowID: UUID? { host.windowID }
 
     let searchState = TerminalSearchState()
     /// What the copy-mode pill says (`Copy Mode`, `Select Mode`), nil while the
@@ -51,20 +54,15 @@ final class PaneSurface: Identifiable {
         reattachTick &+= 1
     }
 
-    init(pane: Pane, windowID: UUID?) {
+    fileprivate init(pane: Pane, host: SurfaceHost) {
         self.pane = pane
-        self.windowID = windowID
-    }
-
-    /// The window takes a surface that no window had yet.
-    fileprivate func claim(for windowID: UUID) {
-        self.windowID = windowID
+        self.host = host
     }
 
     /// Whether this surface's runtime callbacks feed the pane: the first
     /// surface of the pane. Every surface parses the same output, so only one
     /// may count titles, runs, bells and notifications.
-    var isFeed: Bool { pane.surfaces.first === self }
+    var isFeed: Bool { SurfaceRegistry.shared.isFeed(self) }
 
     /// The live terminal NSView. Created lazily the first time it's requested,
     /// destroyed explicitly with the pane or when its window goes. Owning the
@@ -78,7 +76,7 @@ final class PaneSurface: Identifiable {
 
     func ensureNSView() -> GhosttyTerminalNSView {
         if let existing = _nsView { return existing }
-        let view = pane.makeView()
+        let view = SurfaceRegistry.shared.makeView(for: pane)
         view.owningPane = pane
         view.owningSurface = self
         _nsView = view
@@ -248,52 +246,165 @@ final class PaneSurface: Identifiable {
     }
 }
 
-extension Pane {
-    /// The surface of `windowID`, if the pane has one. Makes nothing.
-    func existingSurface(for windowID: UUID?) -> PaneSurface? {
-        guard let windowID else { return surfaces[0] }
-        return surfaces.first { $0.windowID == windowID }
+
+/// What draws a surface. A pane has at most one surface for each host.
+enum SurfaceHost: Hashable {
+    /// A main window, by its `WindowState.id`.
+    case window(UUID)
+    /// No host yet: the hidden incubator window, the CLI and the other callers
+    /// with no view of their own. The first host that draws the pane takes
+    /// this surface.
+    case incubator
+    /// The quick terminal's panel.
+    case quickTerminal
+    /// A desktop widget's panel, by the widget's id.
+    case widget(UUID)
+
+    var windowID: UUID? {
+        if case let .window(id) = self { return id }
+        return nil
+    }
+}
+
+/// The surfaces of every pane, keyed by host and pane id (design 010 §5).
+///
+/// The pane is the model record and holds no view. Everything that makes,
+/// finds or destroys a libghostty view goes through here, so the record can
+/// become a value after the model cut-over.
+///
+/// Each pane's list is in the order that its surfaces came, and is never
+/// empty once asked for. The first one is the feed: its callbacks count
+/// titles, runs, bells and notifications for the pane, and its exit ends the
+/// pane.
+@MainActor
+final class SurfaceRegistry {
+    static let shared = SurfaceRegistry()
+
+    private struct Entry {
+        weak var pane: Pane?
+        var surfaces: [PaneSurface] = []
+        /// The pane has built a view. `command` is a FIRST-spawn input (it
+        /// becomes libghostty's `initial_input`, typed into the fresh shell):
+        /// a later build — a reconnect, a second window — attaches an EXISTING
+        /// session, so typing the command again would run it a second time.
+        /// Snapshot restore has the same contract (`PaneSnapshot` does not
+        /// persist `command`).
+        var hasBuiltView = false
     }
 
-    /// The surface that `window` draws this pane with. The first window to ask
-    /// takes the surface that no window has (the incubator's, the CLI's);
-    /// every other window gets a surface of its own, which is a second client
-    /// of the same session. `nil` is the host of the quick terminal, the
-    /// desktop widgets and the incubator: it gets the first surface.
+    private var entries: [UUID: Entry] = [:]
+
+    /// The surfaces of `pane`, the feed first. Makes the incubator surface
+    /// when the pane has none, so the list is never empty. Makes no view.
+    func surfaces(of pane: Pane) -> [PaneSurface] {
+        if let existing = entries[pane.id]?.surfaces, !existing.isEmpty { return existing }
+        // A new entry is the moment to drop the entries of panes that are gone.
+        entries = entries.filter { $0.value.pane != nil }
+        let first = PaneSurface(pane: pane, host: .incubator)
+        entries[pane.id] = Entry(pane: pane, surfaces: [first])
+        return [first]
+    }
+
+    /// The surface that `host` draws `pane` with. The incubator gets the feed
+    /// surface. Any other host first takes the surface that no host has (the
+    /// incubator's, the CLI's), else gets a surface of its own, which is a
+    /// second client of the same session.
     ///
     /// Makes only the model object. No view and no client exist until the
     /// surface's `ensureNSView`, so a body may call it.
-    func surface(for windowID: UUID?) -> PaneSurface {
-        guard let windowID else { return surfaces[0] }
-        if let existing = surfaces.first(where: { $0.windowID == windowID }) { return existing }
-        if let free = surfaces.first(where: { $0.windowID == nil }) {
-            free.claim(for: windowID)
+    func surface(for pane: Pane, in host: SurfaceHost) -> PaneSurface {
+        let all = surfaces(of: pane)
+        if host == .incubator { return all[0] }
+        if let existing = all.first(where: { $0.host == host }) { return existing }
+        if let free = all.first(where: { $0.host == .incubator }) {
+            free.host = host
             return free
         }
-        let surface = PaneSurface(pane: self, windowID: windowID)
-        surfaces.append(surface)
+        let surface = PaneSurface(pane: pane, host: host)
+        entries[pane.id]?.surfaces.append(surface)
         return surface
     }
 
-    /// The surface the pane's CLI verbs, session queries and previews use: the
-    /// one in the key window, else one in a visible window, else the first
-    /// that has a view, else the first.
-    var preferredSurface: PaneSurface {
-        let live = surfaces.filter { $0.nsView != nil }
+    /// The surface of `host`, if the pane has one. Makes nothing.
+    func existingSurface(for pane: Pane, in host: SurfaceHost) -> PaneSurface? {
+        guard let all = entries[pane.id]?.surfaces else { return nil }
+        if host == .incubator { return all.first }
+        return all.first { $0.host == host }
+    }
+
+    /// The surface for the callers with no host in hand (the CLI, intents,
+    /// persistence and previews): the one in the key window, else one in a
+    /// visible window, else the first that has a view, else the first.
+    func preferredSurface(of pane: Pane) -> PaneSurface {
+        let all = surfaces(of: pane)
+        let live = all.filter { $0.nsView != nil }
         return live.first { $0.nsView?.window?.isKeyWindow == true }
             ?? live.first { $0.nsView?.window?.isVisible == true }
             ?? live.first
-            ?? surfaces[0]
+            ?? all[0]
     }
 
-    /// Give up the surfaces of `windowID`. A pane keeps its last surface, which
-    /// has no window afterwards, so a warm view survives a closed window.
-    func releaseSurfaces(of windowID: UUID) {
-        for surface in surfaces where surface.windowID == windowID {
-            if surfaces.count == 1 {
-                surface.windowID = nil
-            } else {
-                retire(surface)
+    /// The preferred surface's view, if it has one. Makes nothing.
+    func view(of pane: Pane) -> GhosttyTerminalNSView? {
+        guard entries[pane.id] != nil else { return nil }
+        return preferredSurface(of: pane).nsView
+    }
+
+    /// The preferred surface's view, made if it has none.
+    func ensureView(of pane: Pane) -> GhosttyTerminalNSView {
+        preferredSurface(of: pane).ensureNSView()
+    }
+
+    /// The preferred surface's scroll view, made if it has none.
+    func ensureScrollView(of pane: Pane) -> SurfaceScrollView {
+        preferredSurface(of: pane).ensureScrollView()
+    }
+
+    /// Whether `surface` is its pane's feed.
+    func isFeed(_ surface: PaneSurface) -> Bool {
+        entries[surface.pane.id]?.surfaces.first === surface
+    }
+
+    /// A new libghostty view for one of the pane's surfaces.
+    func makeView(for pane: Pane) -> GhosttyTerminalNSView {
+        _ = surfaces(of: pane)
+        let hasBuilt = entries[pane.id]?.hasBuiltView ?? false
+        // Every pane's shell learns its own restart-stable address so
+        // `macterm` invoked inside it can self-target (`MACTERM_SESSION`).
+        // Injected at spawn, which means a reattached shell keeps the
+        // value from its original spawn — correct, because the session name
+        // is persisted verbatim and survives restarts (pane UUIDs don't).
+        // Our value wins over a layout-declared duplicate: this is identity,
+        // not configuration.
+        var mergedEnv = pane.env ?? [:]
+        mergedEnv[ControlProtocol.sessionEnvVar] = pane.sessionName
+        // A palette action's command is first-spawn input like `command`.
+        if hasBuilt { mergedEnv[CustomPaletteScript.commandVariable] = nil }
+        let view = GhosttyTerminalNSView(
+            paneID: pane.id,
+            workingDirectory: pane.projectPath,
+            sessionName: pane.sessionName,
+            command: hasBuilt ? nil : pane.command,
+            shell: pane.shell,
+            env: mergedEnv,
+            remoteSpec: pane.remoteSpec,
+            remoteZmxPath: pane.remoteZmxPath
+        )
+        entries[pane.id]?.hasBuiltView = true
+        return view
+    }
+
+    /// Give up every surface of window `windowID`. A pane keeps its last
+    /// surface, which goes back to the incubator, so a warm view survives a
+    /// closed window.
+    func releaseSurfaces(ofWindow windowID: UUID) {
+        for entry in entries.values where entry.pane != nil {
+            for surface in entry.surfaces where surface.host == .window(windowID) {
+                if entries[surface.pane.id]?.surfaces.count == 1 {
+                    surface.host = .incubator
+                } else {
+                    retire(surface)
+                }
             }
         }
     }
@@ -303,16 +414,61 @@ extension Pane {
     /// surface's. When the first surface goes, the next one becomes the feed
     /// and takes over the runtime callbacks.
     func retire(_ surface: PaneSurface) {
-        guard surfaces.count > 1, let index = surfaces.firstIndex(where: { $0 === surface }) else { return }
+        let pane = surface.pane
+        guard var all = entries[pane.id]?.surfaces, all.count > 1,
+              let index = all.firstIndex(where: { $0 === surface })
+        else { return }
         surface.captureClosingSnapshot()
-        surfaces.remove(at: index)
+        all.remove(at: index)
+        entries[pane.id]?.surfaces = all
         if index == 0 {
             // The old feed may have gone between the two snapshot marks.
-            receiveRemoteSnapshot(started: false)
-            if let view = surfaces[0].nsView { connectViewCallbacks(view, isFeed: true) }
+            pane.receiveRemoteSnapshot(started: false)
+            if let view = all[0].nsView { pane.connectViewCallbacks(view, isFeed: true) }
         }
         // Deferred: a retire can come from inside a SwiftUI update while the
         // view is still in a hierarchy.
         DispatchQueue.main.async { surface.destroy() }
+    }
+
+    /// Tear down every surface's view of `pane` and null out its callbacks.
+    /// Call when the pane leaves the tree for good, or for a remote reconnect.
+    /// Safe to call more than once. The surfaces stay, with no view.
+    func destroySurfaces(of pane: Pane) {
+        let all = entries[pane.id]?.surfaces ?? []
+        pane.surfacesWillTearDown(hadView: all.contains { $0.nsView != nil })
+        for surface in all {
+            surface.destroy()
+        }
+    }
+}
+
+extension Pane {
+    /// Whether closing this pane must be confirmed first because a foreground
+    /// program is running. This is the single signal every busy-close guard
+    /// reads (pane/tab close, project removal, the CLI's `busy` error,
+    /// the quit dialog rows).
+    ///
+    /// The verdict itself is `ForegroundPolicy.needsConfirmClose` — a pure
+    /// function over the pane's sample, so the local/remote asymmetry lives
+    /// in exactly one tested place. This wrapper just feeds it the live
+    /// surface signal.
+    var needsConfirmClose: Bool {
+        let view = SurfaceRegistry.shared.view(of: self)
+        return ForegroundPolicy.needsConfirmClose(
+            sample: foregroundSample,
+            executionState: executionState,
+            isRemote: isRemote,
+            hasSurface: view != nil,
+            surfaceBusy: view?.needsConfirmQuit() == true
+        )
+    }
+
+    /// Returns a local pane's cwd. Remote cwd values omit the host, so remote
+    /// panes return nil.
+    func liveLocalWorkingDirectory() -> String? {
+        guard !isRemote else { return nil }
+        return SurfaceRegistry.shared.view(of: self)?.currentPwd
+            ?? ProcessInspector.foregroundWorkingDirectory(forPane: self)
     }
 }

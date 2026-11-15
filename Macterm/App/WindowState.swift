@@ -57,7 +57,7 @@ final class WindowState: Identifiable {
     /// this map, the same shape as `AppState.activeProjectID` — so every "the
     /// tab the user is working in" call site keeps working unchanged. Two
     /// windows that select one tab draw the same panes, each with a surface of
-    /// its own (`Pane.surface(for:)`).
+    /// its own (`SurfaceRegistry.surface(for:in:)`).
     var activeTabIDs: [UUID: UUID] = [:]
 
     /// This window's sidebar width.

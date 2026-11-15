@@ -77,7 +77,7 @@ enum FocusRestoration {
         // A pane has one view in each window that draws it: the one that is in
         // the target window is the one to focus.
         restoreFocus(
-            viewIn: { window in finder()?.surfaces.compactMap(\.nsView).first { $0.window === window } },
+            viewIn: { window in finder().map { SurfaceRegistry.shared.surfaces(of: $0) }?.compactMap(\.nsView).first { $0.window === window } },
             window: resolve,
             attempt: attempt
         )

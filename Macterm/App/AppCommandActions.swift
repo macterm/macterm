@@ -203,14 +203,14 @@ extension AppCommand {
             // The mode lives on the pane's view: it reads the keys there and
             // drives the surface's selection. No surface, no mode.
             guard let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView
+                  let view = SurfaceRegistry.shared.view(of: pane)
             else { return nil }
             return { view.copyMode.toggle() }
         case .readOnlyMode:
             // The state lives in libghostty, which enforces it: the command
             // is the same `toggle_readonly` that a ghostty keybind sends.
             guard let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView, view.surface != nil
+                  let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.sendBindingAction("toggle_readonly") }
         case .restartSession:
@@ -225,7 +225,7 @@ extension AppCommand {
             // focused pane. Only where Apple's on-device model can run.
             guard OnDeviceModel.availability == .available,
                   let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView, view.surface != nil
+                  let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.explainOutput() }
         case .openProject:
@@ -254,7 +254,7 @@ extension AppCommand {
             // project's identity into a local-looking path.
             guard let current, !current.isRemote,
                   let pane = ctx.appState.focusedPane(for: current.id),
-                  let pwd = pane.nsView?.currentPwd, !pwd.isEmpty,
+                  let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd, !pwd.isEmpty,
                   current.path != pwd
             else { return nil }
             return { ctx.appState.replaceProjectPathWithCurrentDir(projectStore: ctx.projectStore) }

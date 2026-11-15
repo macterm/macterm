@@ -193,7 +193,7 @@ struct MactermPaneEntity: AppEntity {
         id = pane.sessionName
         title = pane.displayTitle
         project = IntentTargets.projectName(projectID, in: ctx)
-        workingDirectory = pane.nsView?.currentPwd ?? pane.projectPath
+        workingDirectory = SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath
         foregroundProcess = pane.foregroundProcessName
     }
 }

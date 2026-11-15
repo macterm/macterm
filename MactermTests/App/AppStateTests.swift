@@ -45,7 +45,7 @@ struct AppStateTests {
         let localProject = seedProject(state, path: "/project")
         let localWorkspace = try #require(state.workspaces[localProject.id])
         let activePane = try #require(localWorkspace.activeTab?.focusedPane)
-        activePane.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
         state.createTab(projectID: localProject.id, projects: [localProject])
 
@@ -53,7 +53,7 @@ struct AppStateTests {
         #expect(localWorkspace.activeTab?.focusedPane?.sessionSlug == "project")
 
         let inheritedPane = try #require(localWorkspace.activeTab?.focusedPane)
-        inheritedPane.ensureNSView().currentPwd = "/project/src/deep"
+        SurfaceRegistry.shared.ensureView(of: inheritedPane).currentPwd = "/project/src/deep"
         state.newTabInheritsWorkingDirectory = { false }
 
         state.createTab(projectID: localProject.id, projects: [localProject])
@@ -421,7 +421,7 @@ struct AppStateTests {
         #expect(sent.isEmpty)
         #expect(state.isLeader(source))
 
-        state.noteUserInput(in: mirrored.preferredSurface)
+        state.noteUserInput(in: SurfaceRegistry.shared.preferredSurface(of: mirrored))
         #expect(state.isLeader(mirrored))
     }
 
@@ -594,14 +594,14 @@ struct AppStateTests {
         let project = seedProject(state, path: "/project")
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let activePane = try #require(tab.focusedPane)
-        activePane.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
 
         #expect(tab.focusedPane?.projectPath == "/project/src")
 
         let inheritedPane = try #require(tab.focusedPane)
-        inheritedPane.ensureNSView().currentPwd = "/project/src/deep"
+        SurfaceRegistry.shared.ensureView(of: inheritedPane).currentPwd = "/project/src/deep"
         state.newSplitInheritsWorkingDirectory = { false }
 
         state.splitPane(direction: .vertical, projectID: project.id, projects: [project])
@@ -638,7 +638,7 @@ struct AppStateTests {
         let project = seedProject(state, path: "/project")
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        source.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/src"
 
         let created = state.makeGrid(
             source.id,
@@ -672,17 +672,17 @@ struct AppStateTests {
         let color = CGColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
 
         state.setAdaptiveBackgroundColor(color, paneID: pane.id, projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         let otherProject = seedProject(state, name: "other", path: "/tmp/other")
         state.setAdaptiveBackgroundColor(nil, paneID: pane.id, projectID: otherProject.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         state.setAdaptiveBackgroundColor(nil, paneID: UUID(), projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         state.setAdaptiveBackgroundColor(nil, paneID: pane.id, projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == nil)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == nil)
     }
 
     // MARK: - Close pane
@@ -2608,8 +2608,8 @@ struct AppStateTests {
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)
-        let firstView = first.ensureNSView()
-        let secondView = second.ensureNSView()
+        let firstView = SurfaceRegistry.shared.ensureView(of: first)
+        let secondView = SurfaceRegistry.shared.ensureView(of: second)
 
         state.cycleRecentTab(projectID: project.id)
 
@@ -2640,8 +2640,8 @@ struct AppStateTests {
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)
-        let firstView = first.ensureNSView()
-        let secondView = second.ensureNSView()
+        let firstView = SurfaceRegistry.shared.ensureView(of: first)
+        let secondView = SurfaceRegistry.shared.ensureView(of: second)
 
         state.cycleRecentTab(projectID: project.id)
 
@@ -2731,7 +2731,7 @@ struct AppStateTests {
 
         let shown = QuickTerminalSplitState()
         let livePane = try #require(shown.tab.focusedPane)
-        _ = livePane.ensureNSView()
+        _ = SurfaceRegistry.shared.ensureView(of: livePane)
         let state = AppState(
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: makeProjectFileStore(),

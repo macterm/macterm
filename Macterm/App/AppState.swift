@@ -467,9 +467,7 @@ final class AppState {
             keyWindowID = windows.first?.id
             alignKeyWindowTab()
         }
-        for pane in allLivePanes() {
-            pane.releaseSurfaces(of: window.id)
-        }
+        SurfaceRegistry.shared.releaseSurfaces(ofWindow: window.id)
         settleWindowSelections()
         logger.debug("unregisterWindow: \(window.id, privacy: .public) count=\(self.windows.count)")
         persistWindows()
@@ -531,7 +529,7 @@ final class AppState {
     /// The tab `window` has selected in `projectID`: its own record when that
     /// tab still exists, else the workspace's active tab. Two windows may
     /// select the same tab: each draws the same panes with a surface of its
-    /// own (`Pane.surface(for:)`).
+    /// own (`SurfaceRegistry.surface(for:in:)`).
     ///
     /// The pinned workspace has no per-window selection: every window on it
     /// shows its active tab. Nothing maintains a map entry for it — the
@@ -592,10 +590,11 @@ final class AppState {
                 shown[window.id, default: []].insert(pane.id)
             }
         }
-        for pane in allLivePanes() where pane.surfaces.count > 1 {
-            for surface in pane.surfaces where pane.surfaces.count > 1 {
+        let registry = SurfaceRegistry.shared
+        for pane in allLivePanes() where registry.surfaces(of: pane).count > 1 {
+            for surface in registry.surfaces(of: pane) where registry.surfaces(of: pane).count > 1 {
                 guard let windowID = surface.windowID else { continue }
-                if shown[windowID]?.contains(pane.id) != true { pane.retire(surface) }
+                if shown[windowID]?.contains(pane.id) != true { registry.retire(surface) }
             }
         }
         pruneSessionLeaders()
@@ -627,7 +626,7 @@ final class AppState {
     /// The size `pane` is drawn at in the window the user is working in: the
     /// view in the key window, else a visible one, else any.
     func displayedSize(of pane: Pane) -> CGSize {
-        pane.preferredSurface.nsView?.bounds.size ?? .zero
+        SurfaceRegistry.shared.preferredSurface(of: pane).nsView?.bounds.size ?? .zero
     }
 
     /// Select a tab in a specific window.
@@ -696,6 +695,7 @@ final class AppState {
     /// otherwise the tab's focused pane on that session claims, else the
     /// first.
     private func claimLeadership(forPanesIn tab: TerminalTab, in windowID: UUID?) {
+        let host = Self.host(windowID)
         let panes = tab.splitRoot.allPanes()
         var handled: Set<String> = []
         for pane in panes where !handled.contains(pane.sessionName) {
@@ -707,12 +707,12 @@ final class AppState {
             // surface that came up elsewhere has just falsified — zmx hands a
             // fresh client leadership whenever the previous leader detached.
             if let recorded = sessionLeaders[pane.sessionName],
-               siblings.contains(where: { $0.surface(for: windowID).id == recorded })
+               siblings.contains(where: { SurfaceRegistry.shared.surface(for: $0, in: host).id == recorded })
             {
                 continue
             }
             let claimant = siblings.first { $0.id == tab.focusedPaneID } ?? pane
-            claimSessionLeadership(claimant.surface(for: windowID))
+            claimSessionLeadership(SurfaceRegistry.shared.surface(for: claimant, in: host))
         }
     }
 
@@ -1462,7 +1462,7 @@ final class AppState {
         let missingWrapped = workspaces.values
             .flatMap(\.tabs)
             .flatMap { $0.splitRoot.allPanes() }
-            .contains { $0.nsView?.isZmxWrapped == true && !map.contains($0.sessionName) }
+            .contains { SurfaceRegistry.shared.view(of: $0)?.isZmxWrapped == true && !map.contains($0.sessionName) }
         if missingWrapped, zmxRetryBudget > 0 {
             zmxRetryBudget -= 1
             zmxRefreshGate.noteSessionLifecycle()
@@ -1737,7 +1737,7 @@ final class AppState {
     /// project at exit time: a tab may have moved since it was warmed.
     private func warmPane(_ pane: Pane) {
         incubatePane(pane)
-        pane.surfaces[0].nsView?.onProcessExit = { [weak self, weak pane] in
+        SurfaceRegistry.shared.surfaces(of: pane)[0].nsView?.onProcessExit = { [weak self, weak pane] in
             guard let self, let pane else { return }
             self.handleProcessExit(pane.id, projectID: pane.projectID)
         }
@@ -1945,7 +1945,8 @@ final class AppState {
     /// outside the model is exactly what `surfaceDidGetSize` claims against.
     private func allClients() -> [PaneSurface] {
         let panes = allLivePanes()
-        return panes.map { $0.surfaces[0] } + panes.flatMap { $0.surfaces.dropFirst() }
+        let all = panes.map { SurfaceRegistry.shared.surfaces(of: $0) }
+        return all.map { $0[0] } + all.flatMap { $0.dropFirst() }
     }
 
     /// Give up these panes' claims on their zmx sessions, killing a session
@@ -1989,7 +1990,7 @@ final class AppState {
             where retained.contains(pane.sessionName) && !handled.contains(pane.sessionName)
         {
             handled.insert(pane.sessionName)
-            guard pane.surfaces.contains(where: { isLeader($0) }) else { continue }
+            guard SurfaceRegistry.shared.surfaces(of: pane).contains(where: { isLeader($0) }) else { continue }
             let survivors = clients(of: pane.sessionName).filter { !releasedIDs.contains($0.pane.id) }
             let focused = survivors.first { workspaces[$0.pane.projectID]?.activeTab?.focusedPaneID == $0.pane.id }
             guard let heir = focused ?? survivors.first else { continue }
@@ -2032,9 +2033,11 @@ final class AppState {
     /// answer however the key window changes.
     private func referenceSurface(of pane: Pane) -> PaneSurface {
         for window in windows {
-            if let surface = pane.existingSurface(for: window.id) { return surface }
+            if let surface = SurfaceRegistry.shared.existingSurface(for: pane, in: .window(window.id)) {
+                return surface
+            }
         }
-        return pane.surfaces[0]
+        return SurfaceRegistry.shared.surfaces(of: pane)[0]
     }
 
     /// Whether `pane` drives its session's pty size, as its reference surface
@@ -2098,7 +2101,7 @@ final class AppState {
     /// `noteSessionLeader` for the callers with no window in hand (the CLI,
     /// intents): the pane's preferred surface.
     func noteSessionLeader(_ pane: Pane) {
-        noteSessionLeader(pane.preferredSurface)
+        noteSessionLeader(SurfaceRegistry.shared.preferredSurface(of: pane))
     }
 
     /// The user typed into `surface`. zmx hands leadership to whichever client
@@ -2158,7 +2161,7 @@ final class AppState {
 
     /// `claimSessionLeadership` for the callers with no window in hand.
     func claimSessionLeadership(_ pane: Pane) {
-        claimSessionLeadership(pane.preferredSurface)
+        claimSessionLeadership(SurfaceRegistry.shared.preferredSurface(of: pane))
     }
 
     /// Claim for `surface` without a look at the model: not gated on
@@ -2185,6 +2188,12 @@ final class AppState {
     @ObservationIgnored
     var sendClaim: (PaneSurface) -> Bool = { $0.nsView?.sendLeadershipClaim() ?? false }
 
+    /// The host of a window id, for the callers that pass nil for the
+    /// surface that no window draws.
+    static func host(_ windowID: UUID?) -> SurfaceHost {
+        windowID.map(SurfaceHost.window) ?? .incubator
+    }
+
     /// The panes of `tab` whose surface in window `windowID` is not driving
     /// its session's size — the ones the UI dims in that window. Without a
     /// window it reads each pane's first surface.
@@ -2192,7 +2201,7 @@ final class AppState {
         let attachments = sessionAttachments()
         var ids: Set<UUID> = []
         for pane in tab.splitRoot.allPanes() {
-            let surface = pane.surface(for: windowID)
+            let surface = SurfaceRegistry.shared.surface(for: pane, in: Self.host(windowID))
             if !isLeader(surface, among: attachments[pane.sessionName] ?? []) {
                 ids.insert(pane.id)
             }
@@ -2332,7 +2341,7 @@ final class AppState {
     }
 
     /// Update the active project's path to wherever the focused pane currently
-    /// sits (via OSC 7 — `pane.nsView.currentPwd`). Useful when a project
+    /// sits (via OSC 7 — `SurfaceRegistry.shared.view(of: pane).currentPwd`). Useful when a project
     /// started in one directory but the user has settled into a subdirectory
     /// and wants new tabs / persisted state to start there.
     ///
@@ -2346,7 +2355,7 @@ final class AppState {
               // directory — adopting it would corrupt the project's identity.
               !project.isRemote,
               let pane = focusedPane(for: projectID),
-              let pwd = pane.nsView?.currentPwd,
+              let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd,
               !pwd.isEmpty
         else { return }
         projectStore.setPath(id: projectID, to: pwd)
@@ -2381,7 +2390,7 @@ final class AppState {
             let removing = ws.tabs.flatMap { $0.splitRoot.allPanes() }
             releaseSessions(removing)
             for pane in removing {
-                pane.destroySurface()
+                SurfaceRegistry.shared.destroySurfaces(of: pane)
             }
         }
         workspaces.removeValue(forKey: projectID)
@@ -2573,7 +2582,7 @@ final class AppState {
         let closing = tab.splitRoot.allPanes()
         releaseSessions(closing)
         for pane in closing {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
         ws.closeTab(tabID)
     }
@@ -2981,7 +2990,7 @@ final class AppState {
         let cycleTabs = tabCycleOrder.compactMap { id in ws.tabs.first { $0.id == id } }
         livePreviewPanes = cycleTabs.flatMap { $0.splitRoot.allPanes() }
         for pane in livePreviewPanes {
-            pane.nsView?.rendersForPreview = true
+            SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = true
         }
         captureLivePreviews()
         let timer = Timer(timeInterval: Self.livePreviewInterval, repeats: true) { [weak self] _ in
@@ -3007,7 +3016,7 @@ final class AppState {
         livePreviewTimer?.invalidate()
         livePreviewTimer = nil
         for pane in livePreviewPanes {
-            pane.nsView?.rendersForPreview = false
+            SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = false
         }
         livePreviewPanes = []
     }
@@ -3654,7 +3663,7 @@ final class AppState {
         // session the surviving one was just matched to.
         releaseSessions(plan.panesToDestroy)
         for pane in plan.panesToDestroy {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
 
         let activeTabID = newTabs.first?.id
@@ -3696,7 +3705,10 @@ final class AppState {
         // so tell zmx as well as ourselves — its daemon only switches leader
         // on real keystrokes, and the user has not typed anything yet.
         if let pane = tab.splitRoot.findPane(id: paneID) {
-            claimSessionLeadership(windowID.map { pane.surface(for: $0) } ?? pane.preferredSurface)
+            claimSessionLeadership(
+                windowID.map { SurfaceRegistry.shared.surface(for: pane, in: .window($0)) }
+                    ?? SurfaceRegistry.shared.preferredSurface(of: pane)
+            )
         }
     }
 
@@ -3709,7 +3721,7 @@ final class AppState {
             .compactMap({ $0.splitRoot.findPane(id: paneID) })
             .first
         else { return }
-        let surface = pane.surface(for: windowID)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: Self.host(windowID))
         guard surface.adaptiveBackgroundColor != color else { return }
         surface.adaptiveBackgroundColor = color
     }

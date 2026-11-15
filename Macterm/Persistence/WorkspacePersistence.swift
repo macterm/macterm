@@ -514,7 +514,7 @@ enum WorkspaceSerializer {
             // `AppState.replaceProjectPathWithCurrentDir` gates the same way).
             let liveCwd = p.isRemote
                 ? nil
-                : (p.nsView?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: p))
+                : (SurfaceRegistry.shared.view(of: p)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: p))
             let needsAttention = p.executionState == .done
             let completionFailed = needsAttention && p.completionFailed
             return .pane(PaneSnapshot(
@@ -526,7 +526,7 @@ enum WorkspaceSerializer {
                 sessionName: p.sessionName,
                 workingDirectory: liveCwd,
                 hostSessionDirectory: p.isRemote ? p.hostSessionDirectory.map { known in
-                    p.nsView?.currentPwd.flatMap { RemoteSpawn.isSafeHostFolder($0) ? $0 : nil } ?? known
+                    SurfaceRegistry.shared.view(of: p)?.currentPwd.flatMap { RemoteSpawn.isSafeHostFolder($0) ? $0 : nil } ?? known
                 } : nil
             ))
         case let .split(b):

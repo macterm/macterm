@@ -548,10 +548,10 @@ struct PaneTests {
     @Test
     func destroySurface_is_safe_when_nsView_is_nil() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        #expect(p.nsView == nil)
-        p.destroySurface() // must not crash
-        p.destroySurface() // idempotent
-        #expect(p.nsView == nil)
+        #expect(SurfaceRegistry.shared.view(of: p) == nil)
+        SurfaceRegistry.shared.destroySurfaces(of: p) // must not crash
+        SurfaceRegistry.shared.destroySurfaces(of: p) // idempotent
+        #expect(SurfaceRegistry.shared.view(of: p) == nil)
     }
 
     // MARK: - zmx session naming

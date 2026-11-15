@@ -29,7 +29,7 @@ struct SplitNodeTests {
         let child = try #require(tree.findPane(id: childID))
         #expect(child.remoteZmxPath == source.remoteZmxPath)
         #expect(child.isRemote)
-        #expect(child.nsView == nil)
+        #expect(SurfaceRegistry.shared.view(of: child) == nil)
     }
 
     @Test

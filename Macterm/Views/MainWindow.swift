@@ -1023,7 +1023,7 @@ struct WorkspaceView: View {
     private var appState
     /// This window's own selection (#345). Never `ws.activeTab`: that is the
     /// KEY window's. Every window that selects a tab draws the same panes,
-    /// each with a surface of its own (`Pane.surface(for:)`).
+    /// each with a surface of its own (`SurfaceRegistry.surface(for:in:)`).
     @Environment(WindowState.self)
     private var windowState
     /// The pane currently dragged by its grab handle, bubbled up via
@@ -1098,7 +1098,7 @@ struct WorkspaceView: View {
             onToggleZoom: { paneID in tab.toggleZoom(paneID: paneID) },
             paneDrop: dropContext(for: tab, renderedNode: renderedNode)
         )
-        .environment(\.paneHostID, windowState.id)
+        .environment(\.paneHost, .window(windowState.id))
         // Pane grab-handle drags and sidebar tab drags are both captured
         // per leaf (see LeafDropDelegate for why there is no whole-area
         // target), sharing one resolution rendered here (#227). Uses

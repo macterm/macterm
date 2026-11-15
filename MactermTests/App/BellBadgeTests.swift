@@ -85,7 +85,7 @@ struct BellBadgeTests {
     func tearing_down_a_pane_takes_its_bell_out_of_the_count() {
         let ringing = tab(ringing: 1)
         for pane in ringing.splitRoot.allPanes() {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
         #expect(!ringing.hasUnacknowledgedBell)
     }

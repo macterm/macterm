@@ -51,8 +51,8 @@ enum ProcessInspector {
         // (falls back to the shell name, saves no run) until the cache catches
         // up. The client-pid fallback is only correct for UNWRAPPED panes
         // (zmx unbundled / over the socket-path budget).
-        if pane.nsView?.isZmxWrapped == true { return nil }
-        return pane.nsView?.foregroundPID
+        if SurfaceRegistry.shared.view(of: pane)?.isZmxWrapped == true { return nil }
+        return SurfaceRegistry.shared.view(of: pane)?.foregroundPID
     }
 
     /// The command running in the pane's foreground, or nil if the pane is idle
@@ -126,7 +126,7 @@ enum ProcessInspector {
     /// would judge it. Nil when the surface has no readable foreground.
     @MainActor
     static func surfaceExecutable(forPane pane: Pane) -> (path: String, isProtected: Bool)? {
-        guard let pid = pane.nsView?.foregroundPID, let path = executablePath(pid: pid) else { return nil }
+        guard let pid = SurfaceRegistry.shared.view(of: pane)?.foregroundPID, let path = executablePath(pid: pid) else { return nil }
         return (path, isProtectedExecutable(atPath: path))
     }
 
@@ -362,7 +362,7 @@ enum ProcessInspector {
         // keystrokes), which would misread every wrapped pane as a raw-mode
         // TUI and break the status indicator's canonical-command detection.
         let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, pane.nsView?.isZmxWrapped == true {
+        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.isZmxWrapped == true {
             // A wrapped pane whose session tty isn't cached yet must NOT fall
             // back to the client-side tty: the zmx connect client keeps that
             // pty permanently raw, so the answer would flap raw/canonical
@@ -370,7 +370,7 @@ enum ProcessInspector {
             // and re-renders, which is one edge of the frozen-render loop.
             return false
         }
-        return terminalInputIsRaw(ttyPath: daemonTTY ?? pane.nsView?.ttyName)
+        return terminalInputIsRaw(ttyPath: daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName)
     }
 
     static func terminalInputIsRaw(ttyPath: String?) -> Bool {
@@ -440,8 +440,8 @@ enum ProcessInspector {
     @MainActor
     private static func lineDisciplineTTYPath(forPane pane: Pane) -> String? {
         let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, pane.nsView?.isZmxWrapped == true { return nil }
-        return daemonTTY ?? pane.nsView?.ttyName
+        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.isZmxWrapped == true { return nil }
+        return daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName
     }
 
     /// The current working directory of the pane's foreground process, read

@@ -656,10 +656,10 @@ struct ControlHandlerTests {
         appState.newTabInheritsWorkingDirectory = { true }
         let project = seedProject(appState, projectStore, name: "target", path: "/target-project")
         let targetPane = try #require(appState.workspaces[project.id]?.activeTab?.focusedPane)
-        targetPane.ensureNSView().currentPwd = "/target-project/src"
+        SurfaceRegistry.shared.ensureView(of: targetPane).currentPwd = "/target-project/src"
         let activeProject = seedProject(appState, projectStore, name: "active", path: "/active-project")
         let activePane = try #require(appState.workspaces[activeProject.id]?.activeTab?.focusedPane)
-        activePane.ensureNSView().currentPwd = "/active-project/elsewhere"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/active-project/elsewhere"
 
         let response = await handler.handle(request(
             "tab.new",
@@ -792,7 +792,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         let activeProject = appState.activeProjectID
-        appState.incubatePane = { _ = $0.ensureNSView() }
+        appState.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
         if pinned { appState.ensurePinnedWorkspace() }
         let projectID = pinned ? PinnedTabs.projectID : project.id
         // A split needs a source; create it in the background too.
@@ -814,7 +814,7 @@ struct ControlHandlerTests {
             let childID = try #require(split.data?.panes?.first?.id)
             child = try #require(tab.splitRoot.allPanes().first { $0.id.uuidString == childID })
         }
-        let exit = try #require(child.nsView?.onProcessExit)
+        let exit = try #require(SurfaceRegistry.shared.view(of: child)?.onProcessExit)
 
         exit()
         // The asynchronous libghostty callback may be delivered twice.
@@ -1113,10 +1113,10 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore, path: "/project")
         let tab = try #require(appState.workspaces[project.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        source.ensureNSView().currentPwd = "/project/source"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/source"
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         let focusedPane = try #require(tab.focusedPane)
-        focusedPane.ensureNSView().currentPwd = "/project/focused"
+        SurfaceRegistry.shared.ensureView(of: focusedPane).currentPwd = "/project/focused"
 
         let response = await handler.handle(request(
             "pane.split", args: ControlArgs(session: source.sessionName, direction: "down")
@@ -1180,7 +1180,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore, path: "devbox:~/repo")
         let tab = try #require(appState.workspaces[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        source.ensureNSView().currentPwd = "/repo/src"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/repo/src"
 
         let response = await handler.handle(request("pane.split", args: ControlArgs(direction: "right")))
 

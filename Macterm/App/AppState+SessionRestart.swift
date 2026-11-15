@@ -93,7 +93,7 @@ extension AppState {
         if let zoomed = tab.zoomedPaneID, let new = replacements[zoomed] { tab.zoomedPaneID = new.id }
         logger.info("restarting \(olds.count, privacy: .public) older session(s)")
         for old in olds {
-            old.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: old)
             outdatedSessions.remove(old.sessionName)
         }
         for name in Set(olds.map(\.sessionName)) {

@@ -424,7 +424,7 @@ final class ControlHandler {
     /// same `no_surface` contract `pane.run` uses.
     private func paneInspect(_ args: ControlArgs) throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
-        guard let view = pane.nsView, let size = view.surfaceSize else {
+        guard let view = SurfaceRegistry.shared.view(of: pane), let size = view.surfaceSize else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -460,7 +460,7 @@ final class ControlHandler {
             // remote pane the surface's own verdict is meaningless (the local
             // ssh client reads as a perpetually running program).
             needsConfirmQuit: pane.needsConfirmClose,
-            readOnly: pane.isReadOnly
+            readOnly: SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly
         )
         return ControlData(inspect: inspect)
     }
@@ -470,7 +470,7 @@ final class ControlHandler {
     private func paneDump(_ args: ControlArgs) throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
         let scrollback = args.scrollback == true
-        guard let view = pane.nsView, let text = view.readText(scrollback: scrollback) else {
+        guard let view = SurfaceRegistry.shared.view(of: pane), let text = view.readText(scrollback: scrollback) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -971,14 +971,14 @@ final class ControlHandler {
     /// `no_surface` miss.
     private func paneSendText(_ args: ControlArgs, text: String) throws -> ControlData {
         if let target = widgetTarget(args) {
-            if target.pane.isReadOnly { throw Self.paneReadOnly }
-            guard let view = target.pane.nsView, view.sendText(text) else { throw Self.widgetNotLive }
+            if SurfaceRegistry.shared.preferredSurface(of: target.pane).isReadOnly { throw Self.paneReadOnly }
+            guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else { throw Self.widgetNotLive }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
         }
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        if target.pane.isReadOnly { throw Self.paneReadOnly }
-        guard let view = target.pane.nsView, view.sendText(text) else {
+        if SurfaceRegistry.shared.preferredSurface(of: target.pane).isReadOnly { throw Self.paneReadOnly }
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -1014,14 +1014,14 @@ final class ControlHandler {
         /// still work on a read-only surface: refuse only a key that would go
         /// to the program.
         func refuseIfReadOnly(_ pane: Pane) throws {
-            guard pane.isReadOnly, let view = pane.nsView,
+            guard SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly, let view = SurfaceRegistry.shared.view(of: pane),
                   view.keyReachesProgram(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
             else { return }
             throw Self.paneReadOnly
         }
         if let target = widgetTarget(args) {
             try refuseIfReadOnly(target.pane)
-            guard let view = target.pane.nsView, view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers) else {
+            guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers) else {
                 throw Self.widgetNotLive
             }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
@@ -1029,7 +1029,7 @@ final class ControlHandler {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
         try refuseIfReadOnly(target.pane)
-        guard let view = target.pane.nsView,
+        guard let view = SurfaceRegistry.shared.view(of: target.pane),
               view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
         else {
             throw ControlError(
@@ -1101,7 +1101,7 @@ final class ControlHandler {
         }
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.debugResizeSurface(cols: cols, rows: rows) else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.debugResizeSurface(cols: cols, rows: rows) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet (or its cell size is unknown)",
@@ -1123,11 +1123,11 @@ final class ControlHandler {
             guard let reply = PasswordPromptMonitor.Reply(rawValue: answer) else {
                 throw ControlError(code: .badRequest, message: "answer must be accept, dismiss or autofill")
             }
-            guard let view = target.pane.nsView, monitor.answer(reply, in: view) else {
+            guard let view = SurfaceRegistry.shared.view(of: target.pane), monitor.answer(reply, in: view) else {
                 throw ControlError(code: .badRequest, message: "no password bubble is up in that pane")
             }
         }
-        return ControlData(password: monitor.state(for: target.pane.nsView))
+        return ControlData(password: monitor.state(for: SurfaceRegistry.shared.view(of: target.pane)))
     }
 
     /// DEBUG-ONLY: a project's memory as a verb, so the e2e suite can turn
@@ -1197,7 +1197,7 @@ final class ControlHandler {
     private func paneCopyMode(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane) else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         switch args.copyMode {
@@ -1227,7 +1227,7 @@ final class ControlHandler {
     private func paneReadOnly(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.surface != nil else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         view.sendBindingAction("toggle_readonly")
@@ -1240,7 +1240,7 @@ final class ControlHandler {
     private func paneExplain(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.surface != nil else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         switch args.explain {
@@ -1720,7 +1720,7 @@ final class ControlHandler {
             tabID: tab.id.uuidString,
             title: pane.displayTitle,
             process: pane.foregroundProcessName,
-            cwd: pane.nsView?.currentPwd ?? pane.projectPath,
+            cwd: SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath,
             focused: tab.id == workspace.activeTabID && pane.id == tab.focusedPaneID,
             state: controlState(for: pane.executionState),
             mirror: appState.isMirrored(pane),

@@ -381,7 +381,7 @@ final class QuickTerminalSplitState {
     /// Whether any pane has built its surface — i.e. the panel has been shown
     /// this run, so the tab's sessions are live and must not be swapped out.
     var hasLiveSurfaces: Bool {
-        tab.splitRoot.allPanes().contains { $0.nsView != nil }
+        tab.splitRoot.allPanes().contains { SurfaceRegistry.shared.view(of: $0) != nil }
     }
 
     /// Adopt the persisted tab from the last run so its panes reattach their
@@ -404,10 +404,10 @@ final class QuickTerminalSplitState {
     }
 
     func setAdaptiveBackgroundColor(_ color: CGColor?, paneID: UUID) {
-        guard let pane = tab.splitRoot.findPane(id: paneID),
-              pane.adaptiveBackgroundColor != color
-        else { return }
-        pane.adaptiveBackgroundColor = color
+        guard let pane = tab.splitRoot.findPane(id: paneID) else { return }
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .quickTerminal)
+        guard surface.adaptiveBackgroundColor != color else { return }
+        surface.adaptiveBackgroundColor = color
     }
 
     func requestClosePane(_ paneID: UUID) {
@@ -466,7 +466,9 @@ final class QuickTerminalSplitState {
     /// the text-file editor's path (`AppState.openTextFile`).
     @discardableResult
     func autoSplit(paneID: UUID, command: String? = nil, env: [String: String]? = nil) -> UUID? {
-        let newID = tab.autoSplit(paneID: paneID, command: command, env: env)
+        let size = tab.splitRoot.findPane(id: paneID)
+            .flatMap { SurfaceRegistry.shared.existingSurface(for: $0, in: .quickTerminal)?.nsView }?.bounds.size
+        let newID = tab.autoSplit(paneID: paneID, drawnSize: size ?? .zero, command: command, env: env)
         onStructureChange()
         return newID
     }
@@ -664,6 +666,7 @@ private struct QuickTerminalView: View {
                 }
             )
         )
+        .environment(\.paneHost, .quickTerminal)
         // Grab-handle drags share the workspace drop grammar (whole-edge,
         // divider, local). The context carries no tab handler: the quick
         // terminal is one tab outside every workspace and adopts no others.

@@ -86,7 +86,7 @@ extension AppState {
 
     private func endSessions(of widget: DesktopWidget) {
         for pane in widget.tab.splitRoot.allPanes() {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
             pane.killPersistentSession(using: zmx)
         }
     }
@@ -302,7 +302,7 @@ extension AppState {
         var respawned = false
         if let alive {
             for widget in desktopWidgets where ids.contains(widget.id) {
-                guard let pane = widget.pane, !alive.contains(pane.sessionName), pane.nsView == nil else { continue }
+                guard let pane = widget.pane, !alive.contains(pane.sessionName), SurfaceRegistry.shared.view(of: pane) == nil else { continue }
                 logger.info("desktop widget \(widget.id.uuidString, privacy: .public): session gone; respawning")
                 widget.startOver()
                 respawned = true
@@ -350,7 +350,7 @@ extension AppState {
     func refreshDesktopWidgetRecipes(
         liveCommand: (Pane) -> String? = { ProcessInspector.runningCommand(forPane: $0) }
     ) {
-        for widget in desktopWidgets where widget.pane?.nsView != nil {
+        for widget in desktopWidgets where widget.pane.flatMap({ SurfaceRegistry.shared.view(of: $0) }) != nil {
             let declaration = LayoutSerializer.pinnedDeclaration(
                 for: widget.tab,
                 liveCommand: { pane in pane.isShellAtPrompt ? nil : liveCommand(pane) }

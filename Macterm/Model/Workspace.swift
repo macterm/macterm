@@ -310,18 +310,20 @@ final class TerminalTab: Identifiable {
     /// Split the focused pane along its longer on-screen axis (Ghostty's
     /// `new_split` / BSP behavior): a wide pane splits left/right, a tall pane
     /// splits top/bottom. Falls back to a horizontal split when the focused
-    /// pane's NSView isn't attached yet and has no measurable bounds.
+    /// pane's NSView isn't attached yet and has no measurable bounds. The
+    /// caller passes the size the pane is drawn at, because the model holds
+    /// no view.
     @discardableResult
     func autoSplit(
         paneID: UUID,
+        drawnSize: CGSize = .zero,
         command: String? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> UUID? {
-        let bounds = splitRoot.findPane(id: paneID)?.nsView?.bounds.size ?? .zero
-        return split(
+        split(
             paneID: paneID,
-            direction: SplitDirection.auto(for: bounds),
+            direction: SplitDirection.auto(for: drawnSize),
             command: command,
             env: env,
             newPaneWorkingDirectory: newPaneWorkingDirectory
@@ -452,11 +454,11 @@ final class TerminalTab: Identifiable {
         // `.notFound` with a dead surface).
         let panes = splitRoot.allPanes()
         if panes.count <= 1 {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
             return .onlyPaneLeft
         }
         guard let newRoot = splitRoot.removing(paneID: paneID) else { return .notFound }
-        pane.destroySurface()
+        SurfaceRegistry.shared.destroySurfaces(of: pane)
         splitRoot = newRoot
         if zoomedPaneID == paneID { zoomedPaneID = nil }
         paneFocusHistory.remove(paneID)

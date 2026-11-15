@@ -110,7 +110,7 @@ final class GhosttyTerminalNSView: NSView {
     private let workingDirectory: String
     /// Command to type into the shell once the surface is created (the pane's
     /// declared `run`). nil → no injected input.
-    private let command: String?
+    let command: String?
     /// Shell binary to launch as the surface's program. nil → libghostty's
     /// default (resolved from the ghostty config / login shell).
     private let shell: String?

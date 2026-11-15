@@ -273,7 +273,7 @@ private struct PaneDragSource: NSViewRepresentable {
         /// A scaled live snapshot of the pane's surface; falls back to a plain
         /// theme-colored card if the view can't render one.
         private func dragPreviewImage(for pane: Pane) -> NSImage {
-            if let view = pane.nsView, !view.bounds.isEmpty,
+            if let view = SurfaceRegistry.shared.view(of: pane), !view.bounds.isEmpty,
                let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             {
                 view.cacheDisplay(in: view.bounds, to: rep)

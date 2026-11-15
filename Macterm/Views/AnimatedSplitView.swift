@@ -181,8 +181,8 @@ struct AnimatedSplitView: View {
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
-    @Environment(\.paneHostID)
-    private var hostID
+    @Environment(\.paneHost)
+    private var host
 
     @State
     private var ghosts: [ClosingGhost] = []
@@ -315,7 +315,7 @@ struct AnimatedSplitView: View {
                         .transition(.identity)
                         .onAppear { settle(leaf.id) }
                         .onChange(of: leaf.hidden, initial: true) { _, hidden in
-                            leaf.pane.existingSurface(for: hostID)?.nsView?.hiddenInLayout = hidden
+                            SurfaceRegistry.shared.existingSurface(for: leaf.pane, in: host)?.nsView?.hiddenInLayout = hidden
                         }
                 }
 
@@ -477,7 +477,7 @@ struct AnimatedSplitView: View {
         let remaining = Set(new.leaves.map(\.id))
         let closing = old.leaves.filter { !remaining.contains($0.id) && !$0.hidden }
             .compactMap { leaf in
-                leaf.pane.existingSurface(for: hostID)?.closingSnapshot.map { snapshot in
+                SurfaceRegistry.shared.existingSurface(for: leaf.pane, in: host)?.closingSnapshot.map { snapshot in
                     ClosingGhost(
                         id: leaf.id,
                         rect: leaf.rect,

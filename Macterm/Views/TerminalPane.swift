@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 extension EnvironmentValues {
-    @Entry var paneHostID: UUID?
+    /// What draws the panes below: a window, the quick terminal or a widget.
+    @Entry var paneHost: SurfaceHost = .incubator
 }
 
 struct TerminalPane: View {
@@ -20,13 +21,13 @@ struct TerminalPane: View {
     let onZoomRequest: () -> Void
     @Environment(AppState.self)
     private var appState: AppState?
-    @Environment(\.paneHostID)
-    private var hostID
+    @Environment(\.paneHost)
+    private var host
 
     var body: some View {
         // This window's view of the pane: its own search, copy mode and
         // read-only state, its own view, its own client of the session.
-        let surface = pane.surface(for: hostID)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: host)
         // The search bar sits above the terminal surface in a VStack, so showing
         // it pushes the terminal content down rather than overlaying it.
         VStack(spacing: 0) {
@@ -322,7 +323,7 @@ private struct TerminalSurface: NSViewRepresentable {
     static func dismantleNSView(_ host: SurfaceHost, coordinator _: Coordinator) {
         // Intentionally empty. Only the disposable container dies here; the
         // scroll view and its surface are owned by `Pane`, and when the pane
-        // is removed from the tree AppState calls pane.destroySurface()
+        // is removed from the tree AppState calls SurfaceRegistry.shared.destroySurfaces(of: pane)
         // explicitly.
         _ = host
     }

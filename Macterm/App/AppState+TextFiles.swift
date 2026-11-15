@@ -117,7 +117,7 @@ extension AppState {
         let command = TextFileEditor.typedCommand
         // The pane the user clicked, which for a mirror is not the real one:
         // its own size is what they are looking at.
-        let direction = SplitDirection.auto(for: clicked.nsView?.bounds.size ?? .zero)
+        let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: clicked)?.bounds.size ?? .zero)
         switch anchor {
         case let .workspace(projectID, pane):
             logger.info("link: \(path, privacy: .public) beside pane \(pane.id, privacy: .public)")

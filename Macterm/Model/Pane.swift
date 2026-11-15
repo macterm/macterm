@@ -146,24 +146,6 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private var agentIconPID: pid_t?
 
-    /// One surface for each window that draws the pane, in the order that they
-    /// came. The first one is the feed: its callbacks count titles, runs,
-    /// bells and notifications for the pane, and its exit ends the pane. Never
-    /// empty. Not observed: a body may ask for a surface (`surface(for:)`).
-    @ObservationIgnored
-    var surfaces: [PaneSurface] = []
-
-    // The state that belongs to one window's view lives on `PaneSurface`. The
-    // forwards here read the preferred surface, for the callers with no window
-    // in hand: the CLI, intents, persistence and the quit sweep.
-    var searchState: TerminalSearchState { preferredSurface.searchState }
-    var copyModeLabel: String? { preferredSurface.copyModeLabel }
-    var isReadOnly: Bool { preferredSurface.isReadOnly }
-    var adaptiveBackgroundColor: CGColor? {
-        get { preferredSurface.adaptiveBackgroundColor }
-        set { preferredSurface.adaptiveBackgroundColor = newValue }
-    }
-
     /// The pane rang BEL and nobody has looked at it since. Set by `ringBell`
     /// (the `GHOSTTY_ACTION_RING_BELL` route), cleared by `acknowledgeBell` —
     /// which the same events that acknowledge a finished command drive: the
@@ -188,12 +170,6 @@ final class Pane: Identifiable {
         guard hasUnacknowledgedBell else { return false }
         hasUnacknowledgedBell = false
         return true
-    }
-
-    /// Returns a local pane's cwd. Remote cwd values omit the host, so remote panes return nil.
-    func liveLocalWorkingDirectory() -> String? {
-        guard !isRemote else { return nil }
-        return nsView?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: self)
     }
 
     var executionState: TerminalExecutionState = .idle {
@@ -787,50 +763,6 @@ final class Pane: Identifiable {
         programTitlePID = programPID
     }
 
-    /// True once this pane has built a surface view. `command` is a
-    /// FIRST-spawn input (it becomes libghostty's `initial_input`, typed into
-    /// the fresh shell): a later build — a reconnect, a second window —
-    /// reattaches an EXISTING session, so retyping the command would run it a
-    /// second time inside a session already running it. Snapshot restore has
-    /// the same contract for the same reason (`PaneSnapshot` deliberately
-    /// doesn't persist `command`).
-    @ObservationIgnored
-    private var hasBuiltSurface = false
-
-    /// A new libghostty view for one of the pane's surfaces.
-    func makeView() -> GhosttyTerminalNSView {
-        // Every pane's shell learns its own restart-stable address so
-        // `macterm` invoked inside it can self-target (`MACTERM_SESSION`).
-        // Injected at spawn, which means a reattached shell keeps the
-        // value from its original spawn — correct, because the session name
-        // is persisted verbatim and survives restarts (pane UUIDs don't).
-        // Our value wins over a layout-declared duplicate: this is identity,
-        // not configuration.
-        var mergedEnv = env ?? [:]
-        mergedEnv[ControlProtocol.sessionEnvVar] = sessionName
-        // A palette action's command is first-spawn input like `command`.
-        if hasBuiltSurface { mergedEnv[CustomPaletteScript.commandVariable] = nil }
-        let view = GhosttyTerminalNSView(
-            paneID: id,
-            workingDirectory: projectPath,
-            sessionName: sessionName,
-            command: hasBuiltSurface ? nil : command,
-            shell: shell,
-            env: mergedEnv,
-            remoteSpec: remoteSpec,
-            remoteZmxPath: remoteZmxPath
-        )
-        hasBuiltSurface = true
-        return view
-    }
-
-    /// The preferred surface's view, for the callers with no window in hand.
-    func ensureNSView() -> GhosttyTerminalNSView {
-        preferredSurface.ensureNSView()
-    }
-
-    var nsView: GhosttyTerminalNSView? { preferredSurface.nsView }
-
     /// Whether this remote pane's connection stopped (#281, 0057): its client
     /// (`macterm remote-pane`) waits on the pane's tty while the session
     /// lives on the host. Read at trigger time by the reconnect sweep. Local
@@ -846,25 +778,6 @@ final class Pane: Identifiable {
         return RemoteSpawn.destination(user: user, host: host)
     }
 
-    /// Whether closing this pane must be confirmed first because a foreground
-    /// program is running. This is the single signal every busy-close guard
-    /// reads (pane/tab close, project removal, the CLI's `busy` error,
-    /// the quit dialog rows).
-    ///
-    /// The verdict itself is `ForegroundPolicy.needsConfirmClose` — a pure
-    /// function over the pane's sample, so the local/remote asymmetry lives
-    /// in exactly one tested place. This wrapper just feeds it the live
-    /// surface signal.
-    var needsConfirmClose: Bool {
-        ForegroundPolicy.needsConfirmClose(
-            sample: foregroundSample,
-            executionState: executionState,
-            isRemote: isRemote,
-            hasSurface: nsView != nil,
-            surfaceBusy: nsView?.needsConfirmQuit() == true
-        )
-    }
-
     /// The remote-side busy verdict alone (see
     /// `ForegroundPolicy.remoteNeedsConfirmClose`), nil when no report has
     /// ever arrived. Kept as a pane property so tests exercise the
@@ -876,15 +789,10 @@ final class Pane: Identifiable {
         )
     }
 
-    func ensureScrollView() -> SurfaceScrollView {
-        preferredSurface.ensureScrollView()
-    }
-
-    var scrollView: SurfaceScrollView? { preferredSurface.scrollView }
-
-    /// Tear down every surface's ghostty view and null out callbacks. Call
-    /// when the pane is removed from the tree. Safe to call multiple times.
-    func destroySurface() {
+    /// The model's half of a surface teardown, before
+    /// `SurfaceRegistry.destroySurfaces` destroys the views. Safe to call
+    /// more than once.
+    func surfacesWillTearDown(hadView: Bool) {
         // A pane with no surface has nothing left to acknowledge — an unloaded
         // pinned tab's panes stay in the tree, and their bells must not keep the
         // Dock badged for shells that no longer exist (ghostty's window-close
@@ -892,7 +800,7 @@ final class Pane: Identifiable {
         // torn down before its view ever existed still settles.
         acknowledgeBell()
         cancelHeldTitle()
-        guard surfaces.contains(where: { $0.nsView != nil }) else { return }
+        guard hadView else { return }
         isReceivingRemoteSnapshot = false
         // A remote pane's report described the connection that goes now.
         // The next connection's session reports again; until then nothing
@@ -907,9 +815,6 @@ final class Pane: Identifiable {
         // drop any still sitting in Notification Center. Ghostty does the same
         // when a surface is removed.
         NotificationHandler.shared.clearDelivered(paneID: id)
-        for surface in surfaces {
-            surface.destroy()
-        }
     }
 
     var processTitle: String {
@@ -999,7 +904,6 @@ final class Pane: Identifiable {
         executionTracker = TerminalExecutionTracker(
             hasUserInteraction: command != nil || env?[CustomPaletteScript.commandVariable] != nil
         )
-        surfaces = [PaneSurface(pane: self, windowID: nil)]
     }
 
     /// A second pane attached to `source`'s session — the same running shell
@@ -1012,7 +916,7 @@ final class Pane: Identifiable {
     /// forgets them:
     ///
     /// - `command` MUST be nil. It is injected as `initial_input` on the first
-    ///   surface build, and `hasBuiltSurface` is per-`Pane`, not per-session —
+    ///   surface build (`SurfaceRegistry`), and that record is per pane, not per session —
     ///   so a mirror carrying its source's `command` would re-type a declared
     ///   layout `run:` into a session that is already running it.
     /// - `shell` MUST be nil for the same reason: the session's shell was

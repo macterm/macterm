@@ -320,14 +320,14 @@ struct WindowStateTests {
         #expect(state.selectedTab(for: project.id, in: a) === tab)
         #expect(state.selectedTab(for: project.id, in: b) === tab)
         for pane in tab.splitRoot.allPanes() {
-            let forA = pane.surface(for: a.id)
-            let forB = pane.surface(for: b.id)
+            let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+            let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
             #expect(forA !== forB)
             #expect(forA.pane === pane)
             #expect(forB.pane === pane)
-            #expect(pane.surface(for: a.id) === forA, "the same surface for the same window")
-            #expect(pane.surface(for: b.id) === forB)
-            #expect(pane.surfaces.count == 2)
+            #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA, "the same surface for the same window")
+            #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
+            #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
             #expect(forA.isFeed, "the first window to draw the pane has its feed")
             #expect(!forB.isFeed)
         }
@@ -347,15 +347,15 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
 
         state.noteKeyWindow(b)
         state.noteKeyWindow(a)
 
-        #expect(pane.surface(for: a.id) === forA)
-        #expect(pane.surface(for: b.id) === forB)
-        #expect(pane.surfaces.count == 2)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
     }
 
     @Test
@@ -400,7 +400,7 @@ struct WindowStateTests {
         let panes = try #require(state.selectedTab(for: project.id, in: b)).splitRoot.allPanes()
         #expect(panes.map(\.id) == [source.id, added])
         let newPane = try #require(tab.splitRoot.findPane(id: added))
-        #expect(newPane.surface(for: a.id) !== newPane.surface(for: b.id))
+        #expect(SurfaceRegistry.shared.surface(for: newPane, in: .window(a.id)) !== SurfaceRegistry.shared.surface(for: newPane, in: .window(b.id)))
 
         state.closePane(source.id, projectID: project.id)
         #expect(state.selectedTab(for: project.id, in: b)?.splitRoot.allPanes().map(\.id) == [added])
@@ -422,8 +422,8 @@ struct WindowStateTests {
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         for pane in panes {
-            _ = pane.surface(for: a.id)
-            _ = pane.surface(for: b.id)
+            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         }
         #expect(Set(panes.map(\.sessionName)) == [source.sessionName])
         #expect(state.clients(of: source.sessionName).count == 4)
@@ -442,14 +442,14 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
         let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        let forA = pane.surface(for: a.id)
-        _ = pane.surface(for: b.id)
-        #expect(pane.surfaces.count == 2)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
 
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
 
-        #expect(pane.surfaces.count == 1, "b's client goes with its view of the tab")
-        #expect(pane.surfaces.first === forA)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1, "b's client goes with its view of the tab")
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).first === forA)
     }
 
     @Test
@@ -464,13 +464,13 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
         let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        _ = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         #expect(!forB.isFeed)
 
         state.selectTab(ws.tabs[1].id, projectID: project.id)
 
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
         #expect(forB.isFeed, "the pane keeps a feed while any window draws it")
     }
 
@@ -484,13 +484,13 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        _ = pane.surface(for: a.id)
-        _ = pane.surface(for: b.id)
-        #expect(pane.surfaces.count == 2)
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
 
         state.unregisterWindow(b)
 
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
         #expect(!state.isMirrored(pane), "one client per session again")
     }
 
@@ -517,7 +517,7 @@ struct WindowStateTests {
         }
 
         for pane in tab.splitRoot.allPanes() {
-            #expect(pane.surfaces.count == 1)
+            #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
             #expect(!state.isMirrored(pane), "one client per session")
         }
     }
@@ -536,8 +536,8 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         #expect(state.isMirrored(pane))
         #expect(state.isLeader(forA), "a's view leads until b's is focused")
 
@@ -782,13 +782,13 @@ struct WindowStateTests {
 
         let before = try #require(state.selectedTab(for: project.id, in: first))
         let pane = try #require(before.splitRoot.allPanes().first)
-        let surface = pane.surface(for: first.id)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .window(first.id))
 
         state.registerWindow(first)
         let after = try #require(state.selectedTab(for: project.id, in: first))
         #expect(after === before, "registration keeps the panes the window already draws")
-        #expect(pane.surface(for: first.id) === surface)
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(first.id)) === surface)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
     }
 
     @Test
@@ -933,13 +933,13 @@ struct WindowStateTests {
         claimed = []
 
         state.noteKeyWindow(b)
-        #expect(Set(claimed) == Set(panes.map { $0.surface(for: b.id).id }))
+        #expect(Set(claimed) == Set(panes.map { SurfaceRegistry.shared.surface(for: $0, in: .window(b.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id) == Set(panes.map(\.id)))
         #expect(state.nonLeaderPaneIDs(in: tab, window: b.id).isEmpty)
 
         claimed = []
         state.noteKeyWindow(a)
-        #expect(Set(claimed) == Set(panes.map { $0.surface(for: a.id).id }))
+        #expect(Set(claimed) == Set(panes.map { SurfaceRegistry.shared.surface(for: $0, in: .window(a.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id).isEmpty)
     }
 
@@ -1022,15 +1022,15 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
         state.noteKeyWindow(b)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         state.focusPane(pane.id, projectID: project.id, windowID: b.id)
         #expect(state.isLeader(forB))
         #expect(!state.isLeader(forA))
 
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
 
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
         #expect(state.isLeader(forA))
         #expect(!state.isMirrored(pane))
     }
@@ -1052,8 +1052,8 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         #expect(state.isLeader(forA))
         claimed = []
 
@@ -1082,7 +1082,7 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(b)
-        let forB = pane.surface(for: b.id)
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         #expect(claimed.isEmpty, "nothing recorded while undeliverable")
 
         deliverable = true
@@ -1108,7 +1108,7 @@ struct WindowStateTests {
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.noteKeyWindow(a)
-        let surface = pane.surface(for: a.id)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
         #expect(!state.isMirrored(pane))
         #expect(claimed.isEmpty, "becoming key claims nothing for a sole client")
 
@@ -1136,7 +1136,7 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
         let background = try #require(ws.tabs[1].splitRoot.allPanes().first)
-        let surface = background.surface(for: b.id)
+        let surface = SurfaceRegistry.shared.surface(for: background, in: .window(b.id))
         claimed = []
 
         state.surfaceDidGetSize(surfaceID: surface.id)
@@ -1161,7 +1161,7 @@ struct WindowStateTests {
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.noteKeyWindow(a)
-        let surface = pane.surface(for: a.id)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
 
         state.surfaceDidGetSize(surfaceID: surface.id)
 

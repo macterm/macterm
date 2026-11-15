@@ -831,7 +831,7 @@ extension AppStateDesktopWidgetsTests {
         state.restoreSelection(projects: [])
         let widget = state.createDesktopWidget(command: "htop")
         let pane = try #require(widget.pane)
-        _ = pane.ensureNSView()
+        _ = SurfaceRegistry.shared.ensureView(of: pane)
 
         pane.notePromptReturned()
         state.refreshDesktopWidgetRecipes(liveCommand: { _ in "/opt/homebrew/bin/starship prompt --status=0" })
