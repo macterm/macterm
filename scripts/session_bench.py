@@ -370,6 +370,27 @@ def summarize(samples):
     }
 
 
+# The interval between two presses of Return while the bench waits for a
+# ready marker.
+POKE_INTERVAL = 0.25
+
+
+def poke_until(send, wait, timeout):
+    """Press Return with `send` until `wait` sees the ready marker. The
+    session's program prints the marker only after it reads a line (see
+    Bench.ready_cat), so the marker always arrives at an attached client.
+    A Return that a remote client gets before zmx runs can be lost, so
+    the bench presses it again. Returns the time that the marker arrived."""
+    deadline = time.monotonic() + timeout
+    while True:
+        send()
+        try:
+            return wait(min(POKE_INTERVAL, max(0.01, deadline - time.monotonic())))
+        except BenchError:
+            if time.monotonic() >= deadline:
+                raise
+
+
 def wait_ready(program, takes_terminal=True, marker=None, timeout=30):
     """Wait until the program has the terminal and its far end echoes. A
     program that does not take the terminal (bare cat) echoes through the
@@ -379,7 +400,8 @@ def wait_ready(program, takes_terminal=True, marker=None, timeout=30):
     if takes_terminal:
         program.wait_raw(timeout)
     if marker:
-        program.read_until(marker.encode(), timeout, since=0)
+        poke_until(lambda: program.write(b"\r"),
+                   lambda t: program.read_until(marker.encode(), t, since=0), timeout)
     offset = len(program.output)
     program.write(b"@")
     first_echo = program.read_until(b"@", timeout, since=offset)
@@ -455,11 +477,14 @@ class Bench:
         return name
 
     def ready_cat(self):
-        """The session's program: print a ready marker, then cat. Returns
-        the command and the marker. The marker is two words in the script, so
-        the echo of the command line never matches it."""
+        """The session's program: read a line, print a ready marker, then cat.
+        Returns the command and the marker. The bench presses Return to start
+        it (poke_until): v1 sends a new session's first client no output from
+        before the client attached. The marker is two words in the script,
+        so the echo of the command line never matches it."""
         marker = f"ready-{self.nonce}"
-        return ["/bin/sh", "-c", f"printf '%s-%s\\n' ready {self.nonce}; exec /bin/cat"], marker
+        script = f"read -r _; printf '%s-%s\\n' ready {self.nonce}; exec /bin/cat"
+        return ["/bin/sh", "-c", script], marker
 
     def v1_attach(self, name, command=None):
         """The client of a local v1 pane. With a command, it makes the
@@ -560,7 +585,9 @@ class Bench:
         stream.call("session.create", id=name, command=[word.encode() for word in command],
                     cols=COLUMNS, rows=ROWS)
         channel = stream.open(name)
-        stream.wait(lambda: marker.encode() in stream.tail.get(channel, b""), 30, repr(marker))
+        poke_until(lambda: stream.type(channel, "\r"),
+                   lambda t: stream.wait(lambda: marker.encode() in stream.tail.get(channel, b""),
+                                         t, repr(marker)), 30)
         stream.type(channel, "@")
         first_echo = stream.wait_output(channel, b"@", 30)
         stream.type(channel, "\n")
@@ -697,13 +724,15 @@ class Bench:
         return results
 
     def fill_script(self):
-        """A program that prints --reattach-lines lines, then a marker, then
-        answers each line that it reads with `got-<line>`. Returns the
+        """A program that reads a line, prints --reattach-lines lines, then a
+        marker, then answers each line that it reads with `got-<line>`. The
+        bench presses Return to start it, as for ready_cat. Returns the
         command and the marker."""
         marker = f"fill-done-{self.nonce}"
         # 6 characters of line number and 193 dots: 199 columns, so that no
         # line wraps on the 200-column terminal.
         script = (
+            "read -r _; "
             f'i=0; while [ $i -lt {self.args.reattach_lines} ]; do printf "%05d %s\\n" $i "{"." * 193}"; '
             f"i=$((i+1)); done; printf '%s\\n' {marker}; stty -echo; "
             "exec awk '{print \"got-\" $0; fflush()}'"
@@ -720,12 +749,14 @@ class Bench:
             stream.call("session.create", id=name, command=[word.encode() for word in command],
                         cols=COLUMNS, rows=ROWS)
             channel = stream.open(name)
+            stream.type(channel, "\r")
             stream.wait(lambda: marker.encode() in stream.tail.get(channel, b""), 120, repr(marker))
             stream.close_channel(channel)
             return name
         fill = PtyProgram(self.v1_attach(name, command), self.env)
         try:
             fill.wait_raw(30)
+            fill.write(b"\r")
             fill.read_until(marker.encode(), timeout=120, since=0)
             fill.write(DETACH_KEY)
             if not fill.wait_exit(10):
