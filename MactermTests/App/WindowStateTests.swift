@@ -524,8 +524,9 @@ struct WindowStateTests {
 
     @Test
     func surfaces_of_two_windows_take_part_in_leadership() throws {
-        // A second window's surface is a real client of the session: focusing
-        // a pane there claims the pty and dims the other window's view.
+        // A second window's surface is a real client of the session: the
+        // window that a click makes key claims the pty and dims the other
+        // window's view.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
@@ -540,8 +541,9 @@ struct WindowStateTests {
         let forB = pane.surface(for: b.id)
         session.attach([forA, forB])
         #expect(state.isMirrored(pane))
-        #expect(forA.isLeader, "a's view leads until b's is focused")
+        #expect(forA.isLeader, "a's view leads until b's is used")
 
+        state.noteKeyWindow(b)
         state.focusPane(pane.id, projectID: project.id, windowID: b.id)
 
         #expect(forB.isLeader)

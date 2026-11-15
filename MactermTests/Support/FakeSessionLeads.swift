@@ -16,10 +16,13 @@ final class FakeSessionLeads {
     var answers = true
 
     init(_ state: AppState) {
-        state.sendClaim = { [weak self, weak state] surface in
-            guard let self, let state, deliverable else { return false }
-            claimed.append(surface.id)
-            guard answers else { return true }
+        // Strong on self: a test may not use the fake after its setup, and
+        // Swift may release a local after its last use. The fake holds no
+        // reference to the state, so there is no cycle.
+        state.sendClaim = { [weak state] surface in
+            guard let state, self.deliverable else { return false }
+            self.claimed.append(surface.id)
+            guard self.answers else { return true }
             for client in state.clients(of: surface.pane.sessionName) {
                 client.receiveLead(client === surface)
             }
