@@ -66,7 +66,7 @@ enum RoamingLink {
             }.value
             logger.info("link: host=\(destination, privacy: .public) port=\(port, privacy: .public)")
             return Opened(
-                link: RemoteServers.Link(connection: connection, process: nil, installed: false, commands: 0),
+                link: RemoteServers.Link(connection: connection, process: nil, installed: false, commands: 0, isRoaming: true),
                 transport: made
             )
         } catch {

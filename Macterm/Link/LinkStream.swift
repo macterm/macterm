@@ -110,6 +110,12 @@ struct LinkStream {
         return nil
     }
 
+    /// Asks for an ACK at the next `next`: the transport sends one after a new
+    /// socket, so that the host learns the new address at once.
+    mutating func nudge() {
+        ackDue = true
+    }
+
     /// When `next` could have something to send, in ms.
     func deadline(now: Int64) -> Int64 {
         var at = lastTx + Self.keepalive

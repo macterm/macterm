@@ -142,6 +142,8 @@ final class RemoteHosts {
     /// stay on it until it ends.
     @ObservationIgnored private var transports: [String: LinkTransport] = [:]
     @ObservationIgnored private var standby: [String: RemoteServers.Link] = [:]
+    /// Tells a late `onDead` of an older link from the current one.
+    @ObservationIgnored private var roamingGeneration: [String: Int] = [:]
     /// The sessions that wait for their host to be ready.
     @ObservationIgnored private var waiting: [String: Set<String>] = [:]
     /// Sessions whose connection stopped: they wait for a trigger or a key.
@@ -197,7 +199,7 @@ final class RemoteHosts {
             // The next connect checks the connection again. A roaming link
             // stays: the host may still hold it, and the next attach asks it
             // (`decide` drops it when it does not answer).
-            if case let .ready(link) = hosts[target.destination], link.isRoaming {} else {
+            if !isRoamingLink(target.destination) {
                 drop(target.destination)
             }
             return .wait(message: nil)
@@ -340,6 +342,14 @@ final class RemoteHosts {
         let destination = target.destination
         guard configuration.key != nil else { return .close }
         guard let sessions = await Self.list(over: link) else {
+            // A roaming link whose transport still runs is waiting for the
+            // network: the next trigger asks again. Only a dead transport
+            // drops it (`roamingEnded`).
+            if link.isRoaming, link.connection.isOpen, case let .ready(current) = hosts[destination], current === link {
+                lost.insert(session)
+                mark(panes, lost: true)
+                return .wait(message: nil)
+            }
             // The link broke. Only a failure on the host's current link
             // counts, and drops it: another request may have made a new one
             // meanwhile. Two failures in a row are the host's answer.
@@ -510,6 +520,8 @@ final class RemoteHosts {
     private func adoptRoaming(_ destination: String, over ssh: RemoteServers.Link) {
         let connections = connections
         let enabled = configuration.roamingEnabled()
+        let generation = roamingGeneration[destination, default: 0] + 1
+        roamingGeneration[destination] = generation
         Task { [weak self] in
             let opened = await RoamingLink.open(
                 destination: destination,
@@ -517,7 +529,7 @@ final class RemoteHosts {
                 connections: connections,
                 enabled: enabled,
                 onDead: { [weak self] in
-                    Task { @MainActor in self?.roamingEnded(destination) }
+                    Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
                 }
             )
             guard let self, let opened else { return }
@@ -527,8 +539,14 @@ final class RemoteHosts {
                 opened.transport.stop()
                 return
             }
+            guard roamingGeneration[destination] == generation else {
+                opened.link.close()
+                opened.transport.stop()
+                return
+            }
             standby[destination]?.close()
             standby[destination] = ssh
+            transports[destination]?.stop()
             transports[destination] = opened.transport
             hosts[destination] = .ready(opened.link)
         }
@@ -536,13 +554,21 @@ final class RemoteHosts {
 
     /// The link ended by itself: no packet for a long time. The panes on it
     /// are lost, and the next connect uses ssh.
-    private func roamingEnded(_ destination: String) {
-        guard case let .ready(link) = hosts[destination], link.isRoaming else { return }
+    private func roamingEnded(_ destination: String, generation: Int) {
+        guard roamingGeneration[destination] == generation,
+              case let .ready(link) = hosts[destination], link.isRoaming
+        else { return }
         logger.info("link: host=\(destination, privacy: .public) ended")
         drop(destination)
     }
 
+    private func isRoamingLink(_ destination: String) -> Bool {
+        if case let .ready(link) = hosts[destination] { return link.isRoaming }
+        return false
+    }
+
     private func endRoaming(_ destination: String) {
+        roamingGeneration[destination, default: 0] += 1
         transports.removeValue(forKey: destination)?.stop()
         standby.removeValue(forKey: destination)?.close()
     }

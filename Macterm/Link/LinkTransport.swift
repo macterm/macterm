@@ -28,11 +28,13 @@ final class LinkTransport: @unchecked Sendable {
     private let pump: Int32
     private let host: String
     private let port: UInt16
-    private var codec: LinkPacketCodec
+    private let codec: LinkPacketCodec
     private var stream = LinkStream()
     private let lock = NSLock()
     private var wake: (read: Int32, write: Int32) = (-1, -1)
     private var stopped = false
+    /// The wake pipe is closed: `poke` writes nothing more. Under `lock`.
+    private var closed = false
     private var rebindRequested = false
     private var started = false
     private var onDead: (@Sendable () -> Void)?
@@ -40,6 +42,7 @@ final class LinkTransport: @unchecked Sendable {
     private var udp: Int32 = -1
     private var remote = sockaddr_storage()
     private var remoteLength: socklen_t = 0
+    private var remoteFamily: Int32 = AF_INET
     private var lastRx: Int64 = 0
     /// Stream bytes for the socket pair that did not fit yet.
     private var toPump = Data()
@@ -82,7 +85,12 @@ final class LinkTransport: @unchecked Sendable {
     /// Starts the thread. `onDead` runs once, on the thread, when the link
     /// ends by itself.
     func start(onDead: @escaping @Sendable () -> Void) throws {
-        try resolveAndOpen()
+        lock.lock()
+        let wasStopped = stopped
+        lock.unlock()
+        guard !wasStopped else { throw Failure.system("stopped") }
+        try resolve()
+        try openSocket()
         lock.lock()
         self.onDead = onDead
         started = true
@@ -118,6 +126,9 @@ final class LinkTransport: @unchecked Sendable {
     }
 
     private func poke() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
         var byte: UInt8 = 1
         _ = Darwin.write(wake.write, &byte, 1)
     }
@@ -135,7 +146,7 @@ final class LinkTransport: @unchecked Sendable {
             rebindRequested = false
             lock.unlock()
             if quit { break }
-            if rebind { try? resolveAndOpen() }
+            if rebind, (try? openSocket()) != nil { stream.nudge() }
 
             let now = Self.now()
             transmit(now: now)
@@ -232,8 +243,9 @@ final class LinkTransport: @unchecked Sendable {
 
     // MARK: - Sockets
 
-    /// Resolves the host and opens a new UDP socket, closing the old one.
-    private func resolveAndOpen() throws {
+    /// Resolves the host once, at the start: a rebind must not wait for DNS
+    /// before the network is up.
+    private func resolve() throws {
         var hints = addrinfo()
         hints.ai_socktype = SOCK_DGRAM
         hints.ai_family = AF_UNSPEC
@@ -242,20 +254,27 @@ final class LinkTransport: @unchecked Sendable {
             throw Failure.unresolved
         }
         defer { freeaddrinfo(result) }
-        let fd = socket(first.pointee.ai_family, SOCK_DGRAM, 0)
+        var address = sockaddr_storage()
+        memcpy(&address, first.pointee.ai_addr, Int(first.pointee.ai_addrlen))
+        remote = address
+        remoteLength = first.pointee.ai_addrlen
+        remoteFamily = first.pointee.ai_family
+    }
+
+    /// Opens a new UDP socket, closing the old one.
+    private func openSocket() throws {
+        let fd = socket(remoteFamily, SOCK_DGRAM, 0)
         guard fd >= 0 else { throw Failure.system("socket") }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        var address = sockaddr_storage()
-        memcpy(&address, first.pointee.ai_addr, Int(first.pointee.ai_addrlen))
-        let length = first.pointee.ai_addrlen
         if udp >= 0 { Darwin.close(udp) }
         udp = fd
-        remote = address
-        remoteLength = length
     }
 
     private func teardown() {
+        lock.lock()
+        closed = true
+        lock.unlock()
         if udp >= 0 { Darwin.close(udp) }
         udp = -1
         Darwin.close(pump)

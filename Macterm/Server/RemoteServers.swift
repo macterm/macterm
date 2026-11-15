@@ -125,7 +125,8 @@ final class RemoteServers {
         /// The ssh commands that this connect ran over the master.
         let commands: Int
 
-        init(connection: ServerConnection, process: Process?, installed: Bool, commands: Int) {
+        init(connection: ServerConnection, process: Process?, installed: Bool, commands: Int, isRoaming: Bool = false) {
+            self.isRoaming = isRoaming
             self.connection = connection
             self.process = process
             self.installed = installed
@@ -133,9 +134,7 @@ final class RemoteServers {
         }
 
         /// A roaming link (design/009), not the ssh connection.
-        var isRoaming: Bool {
-            process == nil
-        }
+        let isRoaming: Bool
 
         func close() {
             connection.close()
