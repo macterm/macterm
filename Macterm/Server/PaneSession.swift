@@ -226,7 +226,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 if !reconnects { return }
             } catch is CancellationError {
                 return
-            } catch let ProtocolControlError.errorResponse(info) where info.code == "not_found" && !firstAttach {
+            } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
                 host.paneExited(code: nil, signal: nil)
                 return
             } catch {
@@ -296,7 +296,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         )
         do {
             _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
-        } catch let ProtocolControlError.errorResponse(info) where info.code == "exited" {
+        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .exited {
             _ = try await connection.call(MactermProtocol.SessionKill.self, .init(id: name))
             _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
         }

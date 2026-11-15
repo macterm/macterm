@@ -96,17 +96,17 @@ struct RemoteServersTests {
 
     @Test
     func an_older_server_makes_way_and_a_newer_one_stays() {
-        func hello(level: UInt32, build: String) -> MactermProtocol.Hello {
-            .init(level: level, minLevel: 1, build: build, role: .server, epoch: 1, caps: [])
+        func hello(level: UInt32, key: String?) -> MactermProtocol.Hello {
+            .init(level: level, minLevel: 1, build: "1.0.1", role: .server, epoch: 1, caps: [], buildKey: key)
         }
         let ours = MactermProtocol.level
-        let other = hello(level: ours, build: "1.0.1+thdxg.def")
-        #expect(!RemoteServers.shouldReplace(hello(level: ours, build: "1.0.1+thdxg.abc"), key: "abc", installed: true))
+        let other = hello(level: ours, key: "def")
+        #expect(!RemoteServers.shouldReplace(hello(level: ours, key: "abc"), key: "abc", installed: true))
         // Another build of the same level: only after this connect installed.
         #expect(RemoteServers.shouldReplace(other, key: "abc", installed: true))
         #expect(!RemoteServers.shouldReplace(other, key: "abc", installed: false))
-        #expect(RemoteServers.shouldReplace(hello(level: ours, build: "unknown"), key: "abc", installed: true))
-        #expect(!RemoteServers.shouldReplace(hello(level: ours + 1, build: "1.0.1+thdxg.def"), key: "abc", installed: true))
+        #expect(RemoteServers.shouldReplace(hello(level: ours, key: nil), key: "abc", installed: true))
+        #expect(!RemoteServers.shouldReplace(hello(level: ours + 1, key: "def"), key: "abc", installed: true))
     }
 
     @Test

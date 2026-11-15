@@ -144,6 +144,7 @@ extension MactermProtocol {
         var role: MactermProtocol.Role
         var epoch: UInt64
         var caps: [String]
+        var buildKey: String?
     }
 }
 
@@ -155,6 +156,7 @@ extension MactermProtocol.Hello: ProtocolValue {
         var role: MactermProtocol.Role?
         var epoch: UInt64?
         var caps: [String]?
+        var buildKey: String?
         try reader.readMap { key, reader in
             switch key {
             case "level": level = try UInt32(from: &reader)
@@ -163,6 +165,7 @@ extension MactermProtocol.Hello: ProtocolValue {
             case "role": role = try MactermProtocol.Role(from: &reader)
             case "epoch": epoch = try UInt64(from: &reader)
             case "caps": caps = try [String](from: &reader)
+            case "build_key": buildKey = try reader.readOptional(String.self)
             default: return false
             }
             return true
@@ -173,10 +176,13 @@ extension MactermProtocol.Hello: ProtocolValue {
         self.role = try MessagePackReader.required(role, "role")
         self.epoch = try MessagePackReader.required(epoch, "epoch")
         self.caps = try MessagePackReader.required(caps, "caps")
+        self.buildKey = buildKey
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        writer.writeMapHeader(6)
+        var keyCount = 6
+        if buildKey != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
         writer.writeString("level")
         level.encode(to: &writer)
         writer.writeString("min_level")
@@ -189,6 +195,10 @@ extension MactermProtocol.Hello: ProtocolValue {
         epoch.encode(to: &writer)
         writer.writeString("caps")
         caps.encode(to: &writer)
+        if let buildKey {
+            writer.writeString("build_key")
+            buildKey.encode(to: &writer)
+        }
     }
 }
 
@@ -840,6 +850,7 @@ extension MactermProtocol {
         var state: MactermProtocol.SessionState
         var build: String
         var level: UInt32
+        var buildKey: String?
         var pid: Int64?
         var shellPid: Int64?
         var pty: ProtocolBin?
@@ -860,6 +871,7 @@ extension MactermProtocol.Session: ProtocolValue {
         var state: MactermProtocol.SessionState?
         var build: String?
         var level: UInt32?
+        var buildKey: String?
         var pid: Int64?
         var shellPid: Int64?
         var pty: ProtocolBin?
@@ -877,6 +889,7 @@ extension MactermProtocol.Session: ProtocolValue {
             case "state": state = try MactermProtocol.SessionState(from: &reader)
             case "build": build = try String(from: &reader)
             case "level": level = try UInt32(from: &reader)
+            case "build_key": buildKey = try reader.readOptional(String.self)
             case "pid": pid = try reader.readOptional(Int64.self)
             case "shell_pid": shellPid = try reader.readOptional(Int64.self)
             case "pty": pty = try reader.readOptional(ProtocolBin.self)
@@ -896,6 +909,7 @@ extension MactermProtocol.Session: ProtocolValue {
         self.state = try MessagePackReader.required(state, "state")
         self.build = try MessagePackReader.required(build, "build")
         self.level = try MessagePackReader.required(level, "level")
+        self.buildKey = buildKey
         self.pid = pid
         self.shellPid = shellPid
         self.pty = pty
@@ -911,6 +925,7 @@ extension MactermProtocol.Session: ProtocolValue {
 
     func encode(to writer: inout MessagePackWriter) {
         var keyCount = 7
+        if buildKey != nil { keyCount += 1 }
         if pid != nil { keyCount += 1 }
         if shellPid != nil { keyCount += 1 }
         if pty != nil { keyCount += 1 }
@@ -928,6 +943,10 @@ extension MactermProtocol.Session: ProtocolValue {
         build.encode(to: &writer)
         writer.writeString("level")
         level.encode(to: &writer)
+        if let buildKey {
+            writer.writeString("build_key")
+            buildKey.encode(to: &writer)
+        }
         if let pid {
             writer.writeString("pid")
             pid.encode(to: &writer)
@@ -2501,4 +2520,127 @@ extension MactermProtocol.Resumed: ProtocolMessage {
     static let name = "resumed"
     static let since: UInt32 = 2
     static let senders: [MactermProtocol.Trust] = [.session]
+}
+
+extension MactermProtocol {
+    /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
+    enum ErrorCode: Equatable {
+        case busy
+        case exited
+        case forbidden
+        case invalidArgs
+        case notFound
+        case refused
+        case startFailed
+        case starting
+        case timeout
+        case unavailable
+        case unknownMethod
+        case unknown(String)
+
+        init(_ code: String) {
+            switch code {
+            case "busy": self = .busy
+            case "exited": self = .exited
+            case "forbidden": self = .forbidden
+            case "invalid_args": self = .invalidArgs
+            case "not_found": self = .notFound
+            case "refused": self = .refused
+            case "start_failed": self = .startFailed
+            case "starting": self = .starting
+            case "timeout": self = .timeout
+            case "unavailable": self = .unavailable
+            case "unknown_method": self = .unknownMethod
+            default: self = .unknown(code)
+            }
+        }
+    }
+}
+
+extension MactermProtocol.ErrorInfo {
+    var errorCode: MactermProtocol.ErrorCode {
+        .init(code)
+    }
+}
+
+extension MactermProtocol {
+    /// One `PaneMessage` as its type. `unknown` holds the name of a message that a later build added.
+    enum PaneMessageKind: Equatable {
+        case state(State)
+        case attach(Attach)
+        case resize(Resize)
+        case claim(Claim)
+        case lead(Lead)
+        case snapshotStart(SnapshotStart)
+        case snapshotEnd(SnapshotEnd)
+        case exit(Exit)
+        case take(Take)
+        case end(End)
+        case refresh(Refresh)
+        case title(Title)
+        case cwd(Cwd)
+        case foreground(Foreground)
+        case mark(Mark)
+        case progress(Progress)
+        case bell(Bell)
+        case activity(Activity)
+        case status(Status)
+        case programStatus(ProgramStatus)
+        case attention(Attention)
+        case seen(Seen)
+        case resumed(Resumed)
+        case unknown(String)
+    }
+}
+
+extension MactermProtocol.PaneMessage {
+    /// The message as its type. Throws when a message that this build knows does not read.
+    func decoded() throws -> MactermProtocol.PaneMessageKind {
+        switch t {
+        case MactermProtocol.State.name: try .state(message(of: MactermProtocol.State.self))
+        case MactermProtocol.Attach.name: try .attach(message(of: MactermProtocol.Attach.self))
+        case MactermProtocol.Resize.name: try .resize(message(of: MactermProtocol.Resize.self))
+        case MactermProtocol.Claim.name: try .claim(message(of: MactermProtocol.Claim.self))
+        case MactermProtocol.Lead.name: try .lead(message(of: MactermProtocol.Lead.self))
+        case MactermProtocol.SnapshotStart.name: try .snapshotStart(message(of: MactermProtocol.SnapshotStart.self))
+        case MactermProtocol.SnapshotEnd.name: try .snapshotEnd(message(of: MactermProtocol.SnapshotEnd.self))
+        case MactermProtocol.Exit.name: try .exit(message(of: MactermProtocol.Exit.self))
+        case MactermProtocol.Take.name: try .take(message(of: MactermProtocol.Take.self))
+        case MactermProtocol.End.name: try .end(message(of: MactermProtocol.End.self))
+        case MactermProtocol.Refresh.name: try .refresh(message(of: MactermProtocol.Refresh.self))
+        case MactermProtocol.Title.name: try .title(message(of: MactermProtocol.Title.self))
+        case MactermProtocol.Cwd.name: try .cwd(message(of: MactermProtocol.Cwd.self))
+        case MactermProtocol.Foreground.name: try .foreground(message(of: MactermProtocol.Foreground.self))
+        case MactermProtocol.Mark.name: try .mark(message(of: MactermProtocol.Mark.self))
+        case MactermProtocol.Progress.name: try .progress(message(of: MactermProtocol.Progress.self))
+        case MactermProtocol.Bell.name: try .bell(message(of: MactermProtocol.Bell.self))
+        case MactermProtocol.Activity.name: try .activity(message(of: MactermProtocol.Activity.self))
+        case MactermProtocol.Status.name: try .status(message(of: MactermProtocol.Status.self))
+        case MactermProtocol.ProgramStatus.name: try .programStatus(message(of: MactermProtocol.ProgramStatus.self))
+        case MactermProtocol.Attention.name: try .attention(message(of: MactermProtocol.Attention.self))
+        case MactermProtocol.Seen.name: try .seen(message(of: MactermProtocol.Seen.self))
+        case MactermProtocol.Resumed.name: try .resumed(message(of: MactermProtocol.Resumed.self))
+        default: .unknown(t)
+        }
+    }
+}
+
+extension MactermProtocol {
+    /// One `Event` as its type. `unknown` holds the name of a message that a later build added.
+    enum EventKind: Equatable {
+        case sessionExit(SessionExit)
+        case paneAttention(PaneAttention)
+        case unknown(String)
+    }
+}
+
+extension MactermProtocol.Event {
+    /// The message as its type. Throws when a message that this build knows does not read.
+    func decoded() throws -> MactermProtocol.EventKind {
+        switch e {
+        case MactermProtocol.SessionExit.name: try .sessionExit(event(of: MactermProtocol.SessionExit.self))
+        case MactermProtocol.PaneAttention.name: try .paneAttention(event(of: MactermProtocol.PaneAttention.self))
+        default: .unknown(e)
+        }
+    }
 }

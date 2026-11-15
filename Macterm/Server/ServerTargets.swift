@@ -32,33 +32,26 @@ enum ZmxHostTarget: String, CaseIterable, Equatable {
     }
 }
 
-/// What `zmx version` on a host says: the upstream version, and the fork's
-/// release tag when the binary is one of ours.
-struct ZmxVersion: Equatable {
-    /// `1.0.1`, as upstream prints it.
-    var upstream: String
-    /// `build-2026-11-06-abcdef1` from `1.0.1+thdxg.build-2026-11-06-abcdef1`,
-    /// nil for an upstream binary or a fork build older than the marker.
-    var forkTag: String?
+/// When this app replaces the server that answers (design/002): the one
+/// rule for the local server and for a host's server. `ProtocolFixtureTests`
+/// pins it with the hello pairs of `server/schema/frames.json`.
+///
+/// - A lower level is older: replace it.
+/// - A higher level is newer: never downgrade it.
+/// - At the same level, builds have no order. Replace another build only
+///   when the app owns the server's file (`ownsServer`), and never when the
+///   app has no build key.
+struct ServerReplacement: Equatable {
+    /// The app's build key (`ServerBuilds.bundledKey`).
+    var key: String?
+    /// Locally: the server runs from the app's own file, or from a file that
+    /// an update removed. On a host: this connect installed the app's build.
+    var ownsServer: Bool
+    var level: UInt32 = MactermProtocol.level
 
-    static let forkMarker = "+thdxg."
-
-    /// The version from the first line of `zmx version`, which is
-    /// `zmx<TAB><TAB><version>`, or from a bare version string. nil for
-    /// anything that does not look like a version.
-    static func parse(_ output: String) -> ZmxVersion? {
-        guard let firstLine = output.split(whereSeparator: \.isNewline).first else { return nil }
-        var text = firstLine.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("zmx") {
-            text = text.dropFirst(3).trimmingCharacters(in: .whitespaces)
-        }
-        guard let first = text.first, first.isNumber else { return nil }
-        guard !text.contains(where: \.isWhitespace) else { return nil }
-        if let marker = text.range(of: forkMarker) {
-            let tag = String(text[marker.upperBound...])
-            guard !tag.isEmpty else { return nil }
-            return ZmxVersion(upstream: String(text[..<marker.lowerBound]), forkTag: tag)
-        }
-        return ZmxVersion(upstream: text, forkTag: nil)
+    func replaces(_ hello: MactermProtocol.Hello) -> Bool {
+        if hello.level != level { return hello.level < level }
+        guard let key, ownsServer else { return false }
+        return hello.buildKey != key
     }
 }

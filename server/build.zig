@@ -9,9 +9,13 @@ pub fn build(b: *std.Build) void {
     const version = b.option([]const u8, "version", "Version string for release") orelse
         @as([]const u8, build_zig_zon.version);
     const strip = b.option(bool, "strip", "Leave out debug info");
+    // The build key (`scripts/build-server.sh`). A build with no key (a
+    // development build) says so in `hello` with no `build_key`.
+    const key = b.option([]const u8, "key", "Build key");
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
+    options.addOption(?[]const u8, "key", key);
     const ghostty_ver = build_zig_zon.dependencies.ghostty.hash;
     options.addOption([]const u8, "ghostty_version", ghostty_ver);
 

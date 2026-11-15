@@ -241,8 +241,7 @@ final class RemoteServers {
     /// level, or, right after this connect `installed` this build, another
     /// build of the same level (the type's comment, step 4).
     nonisolated static func shouldReplace(_ hello: MactermProtocol.Hello, key: String, installed: Bool) -> Bool {
-        if hello.level != MactermProtocol.level { return hello.level < MactermProtocol.level }
-        return installed && ZmxVersion.parse(hello.build)?.forkTag != key
+        ServerReplacement(key: key, ownsServer: installed).replaces(hello)
     }
 
     /// The kept answer for a host: its host id and host keys.

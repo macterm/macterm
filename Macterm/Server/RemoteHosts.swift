@@ -602,7 +602,7 @@ final class RemoteHosts {
             _ = try await LocalSessions.bounded {
                 try await connection.call(MactermProtocol.SessionKill.self, .init(id: session))
             }
-        } catch let ProtocolControlError.errorResponse(info) where info.code == "not_found" {
+        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
             return
         } catch {
             logger.warning("remote session kill \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")

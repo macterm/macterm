@@ -131,3 +131,10 @@ extension MactermProtocol.PaneMessage {
         try MessagePackReader.decode(M.self, from: a?.bytes ?? Data([0x80]))
     }
 }
+
+extension MactermProtocol.Event {
+    /// The fields as the event's type. Read `e` first to choose it.
+    func event<M: ProtocolMessage>(of _: M.Type) throws -> M {
+        try MessagePackReader.decode(M.self, from: a?.bytes ?? Data([0x80]))
+    }
+}
