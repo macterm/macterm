@@ -250,8 +250,7 @@ struct CLIContractTests {
         }
         #expect(
             text == existing,
-            "The CLI no longer matches golden/\(name). If the change is on purpose, "
-                + "run this suite with MACTERM_UPDATE_GOLDEN=1 and review the diff.",
+            "The CLI no longer matches golden/\(name). For a change on purpose, run with MACTERM_UPDATE_GOLDEN=1 and review the diff.",
             sourceLocation: sourceLocation
         )
     }
