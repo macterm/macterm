@@ -161,10 +161,8 @@ run = """
 [tasks.test]
 description = "Run the test suite"
 usage = 'flag "-v --verbose" help="Stream raw output instead of the spinner"'
-# No `sources`: the tests read files of every kind (the server and its
-# schema, the golden files, assets, extensions, the website checkout), so a
-# list of inputs would miss one, and the task would report a pass and run
-# nothing. xcodebuild skips what did not change itself.
+# No `sources`: the tests read files of many kinds, and a list that misses
+# one makes the task pass without a run. Every run runs every test.
 run = """
   source scripts/_lib.sh
   if [[ "$usage_verbose" == "true" ]]; then
