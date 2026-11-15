@@ -1263,7 +1263,7 @@ final class ControlHandler {
         ))
     }
 
-    /// DEBUG-ONLY (#227): drive `TerminalTab.movePane(to:)` — the grab-handle
+    /// DEBUG-ONLY (#227): drive `ModelWriter.paneMove` — the grab-handle
     /// drag-and-drop reshape — headlessly, so reorders can be reproduced and
     /// regression-tested without a mouse. `dest` targets a pane in the same
     /// tab (a local `.pane` drop); omitting it moves to the workspace edge on

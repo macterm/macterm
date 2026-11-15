@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 //
 // - The workspace, where every other pane is a drop target split into four
 //   triangular edge zones highlighting the half the pane will land in. Handled
-//   by `TerminalTab.movePane`, reshaping the tab's tree.
+//   by `ModelWriter.paneMove`, reshaping the tab's tree.
 // - The sidebar, where a drop separates the pane into its own tab at the slot
 //   it lands on. Handled by `AppState.separatePane` (see `SidebarDropItem` /
 //   `TabSlotDropItem`), moving it between tabs — and projects — instead.

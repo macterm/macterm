@@ -3208,7 +3208,7 @@ final class AppState {
     /// (#345). Both render the same live shell; zmx broadcasts its output to
     /// every attached client.
     ///
-    /// The mirror does not take focus (see `TerminalTab.mirror`), and it
+    /// The mirror does not take focus (see `ModelWriter.paneMirror`), and it
     /// carries no `command`/`shell` (see `Pane.init(mirroring:)`), so it
     /// attaches to the running session instead of respawning or re-running it.
     @discardableResult
@@ -3233,7 +3233,7 @@ final class AppState {
     }
 
     /// Split a pane into an equal `rows`×`columns` grid (see
-    /// `TerminalTab.makeGrid`), spawning `command` in each new pane. Every
+    /// `ModelWriter.paneGrid`), spawning `command` in each new pane. Every
     /// cell honors the new split directory preference, so a grid and a
     /// `Cmd+D` split off the same pane can't disagree about it. Returns the
     /// new pane IDs.
