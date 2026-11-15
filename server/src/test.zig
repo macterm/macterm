@@ -22,5 +22,7 @@ comptime {
     _ = @import("ring.zig");
     _ = @import("proxy.zig");
     _ = @import("link/packet.zig");
+    _ = @import("link/stream.zig");
+    _ = @import("link/host.zig");
     _ = @import("model/tests.zig");
 }

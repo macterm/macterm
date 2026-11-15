@@ -446,3 +446,60 @@ assert n.request("pane.seen", id="nope")["err"]["code"] == "not_found"
 n.call("session.kill", id="att")
 PY
 }
+
+@test "server: link.open opens a UDP port for the link, link.close and the end of the connection free it" {
+  MACTERM_LINK_PORTS=62501-62599 "$ZMX" server
+  python3 - <<'PY'
+import socket, time
+from v2client import ServerClient
+
+def bound(port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        return False
+    except OSError:
+        return True
+    finally:
+        s.close()
+
+def free(port):
+    for _ in range(50):
+        if not bound(port):
+            return True
+        time.sleep(0.1)
+    return False
+
+c = ServerClient(level=3)
+key = bytes(range(32))
+r = c.call("link.open", secret=key, key_id=11)
+port = r["port"]
+assert 62501 <= port <= 62599, r
+assert bound(port)
+
+# The same key id is refused, and a key of the wrong length too.
+assert c.request("link.open", secret=key, key_id=11)["err"]["code"] == "invalid_args"
+assert c.request("link.open", secret=b"short", key_id=12)["err"]["code"] == "invalid_args"
+
+c.call("link.close", key_id=11)
+assert free(port)
+assert c.request("link.close", key_id=11)["err"]["code"] == "not_found"
+
+# The end of the connection ends its links.
+c2 = ServerClient(level=3)
+port = c2.call("link.open", secret=key, key_id=13)["port"]
+assert bound(port)
+c2.close()
+assert free(port)
+PY
+}
+
+@test "server: link.open fails when the host turns the link off" {
+  MACTERM_LINK=off "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+res = c.request("link.open", secret=bytes(32), key_id=1)
+assert res["err"]["code"] == "unavailable", res
+PY
+}

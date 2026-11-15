@@ -25,6 +25,7 @@ const ipc = @import("ipc.zig");
 const runtime = @import("runtime.zig");
 const session = @import("session.zig");
 const relay = @import("relay.zig");
+const link_host = @import("link/host.zig");
 const protocol = @import("protocol/protocol.zig");
 const frame = protocol.frame;
 const msgpack = protocol.msgpack;
@@ -420,11 +421,17 @@ const Server = struct {
     /// A session ended or the server started: look for server files that
     /// no session runs, once every session settled (`pruneBuilds`).
     prune_due: bool = true,
+    /// The roaming links (`link.open`, design/009).
+    links: link_host.Host,
+    /// Socket pair ends of new links. Each becomes a client at the end of the
+    /// loop pass, because a request cannot add to `peers` while the loop
+    /// walks it.
+    pending_peers: std.ArrayList(i32) = .empty,
 
     fn init(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, fds: Bound) !Server {
         var epoch: u64 = undefined;
         io.random(std.mem.asBytes(&epoch));
-        var s: Server = .{ .gpa = gpa, .io = io, .dir = dir, .listen_fd = fds.listen, .lock_fd = fds.lock, .epoch = epoch };
+        var s: Server = .{ .gpa = gpa, .io = io, .dir = dir, .listen_fd = fds.listen, .lock_fd = fds.lock, .epoch = epoch, .links = link_host.Host.init(gpa) };
         _ = try selfExe(&s.exe_buf);
         return s;
     }
@@ -440,7 +447,7 @@ const Server = struct {
             .build = build_options.version,
             .role = .server,
             .epoch = s.epoch,
-            .caps = &.{},
+            .caps = &.{"udp-link"},
         };
     }
 
@@ -476,6 +483,8 @@ const Server = struct {
             };
             const nruns = s.runs.items.len;
             for (s.runs.items) |r| try fds.append(s.gpa, .{ .fd = r.out_fd, .events = lib_posix.POLL.IN, .revents = 0 });
+            const link_start = fds.items.len;
+            try s.links.pollFds(&fds, s.gpa);
 
             _ = try lib_posix.poll(fds.items, s.pollTimeout());
 
@@ -516,6 +525,9 @@ const Server = struct {
             for (s.runs.items[0..nruns], fds.items[2 + npeers + nentries + chans.items.len ..][0..nruns]) |r, pfd| {
                 if (r.out_fd >= 0 and pfd.revents != 0) s.readRun(r);
             }
+            s.links.handle(fds.items[link_start..], s.now());
+            for (s.pending_peers.items) |fd| s.addPeer(fd);
+            s.pending_peers.clearRetainingCapacity();
             s.timers();
             s.sweep();
             if (s.prune_due and s.allSettled()) {
@@ -577,8 +589,10 @@ const Server = struct {
         for (s.peers.items) |p| for (p.channels.items) |ch| if (ch.fd >= 0 and !ch.closed) {
             if (ch.flow.deadline(ch.q.stale())) |d| next = @min(next orelse d, d);
         };
-        const d = next orelse return -1;
-        return @intCast(std.math.clamp(d - t, 0, std.math.maxInt(i32)));
+        const d = next orelse return s.links.timeout(t);
+        const own: i32 = @intCast(std.math.clamp(d - t, 0, std.math.maxInt(i32)));
+        const link = s.links.timeout(t);
+        return if (link >= 0) @min(own, link) else own;
     }
 
     // ── Exit ────────────────────────────────────────────────────────────────
@@ -626,6 +640,7 @@ const Server = struct {
 
     /// Closes everything. Sessions see a client leave and keep running.
     fn shutdown(s: *Server) void {
+        s.links.deinit();
         s.closeListen();
         for (s.peers.items) |p| {
             lib_posix.close(p.fd);
@@ -1206,6 +1221,12 @@ const Server = struct {
             },
             m.Ping => s.reply(p.id, re, m.Ping, .{}),
             m.CommandRun => s.runCommand(p, re, args),
+            m.LinkOpen => s.linkOpen(p, re, args),
+            m.LinkClose => {
+                if (!s.links.closeKey(p.id, args.key_id))
+                    return s.replyError(p.id, re, "not_found", "This connection has no link with this key id.");
+                s.reply(p.id, re, m.LinkClose, .{});
+            },
             else => s.replyError(p.id, re, "unknown_method", "The server has no such method."),
         }
     }
@@ -1239,6 +1260,46 @@ const Server = struct {
     }
 
     // ── Running a command ───────────────────────────────────────────────────
+
+    /// The first and last UDP port of a link, from `MACTERM_LINK_PORTS`
+    /// (`first-last`), or null when `MACTERM_LINK=off`. A host that turns the
+    /// link off sets it in the environment of its server.
+    fn linkPorts() ?[2]u16 {
+        if (std.c.getenv("MACTERM_LINK")) |v| if (std.mem.eql(u8, std.mem.span(v), "off")) return null;
+        const range = std.c.getenv("MACTERM_LINK_PORTS") orelse
+            return .{ link_host.default_first_port, link_host.default_last_port };
+        const text = std.mem.span(range);
+        const dash = std.mem.findScalar(u8, text, '-') orelse
+            return .{ link_host.default_first_port, link_host.default_last_port };
+        const first = std.fmt.parseInt(u16, text[0..dash], 10) catch
+            return .{ link_host.default_first_port, link_host.default_last_port };
+        const last = std.fmt.parseInt(u16, text[dash + 1 ..], 10) catch
+            return .{ link_host.default_first_port, link_host.default_last_port };
+        return .{ first, last };
+    }
+
+    fn linkOpen(s: *Server, p: *Peer, re: u64, args: m.LinkOpen.Args) void {
+        const ports = linkPorts() orelse
+            return s.replyError(p.id, re, "unavailable", "The link is off on this host.");
+        if (args.secret.bytes.len != 32)
+            return s.replyError(p.id, re, "invalid_args", "The key is not 32 bytes.");
+        var seed: u32 = undefined;
+        s.io.random(std.mem.asBytes(&seed));
+        const opened = s.links.open(p.id, args.secret.bytes[0..32].*, args.key_id, s.now(), ports, seed) catch |err| {
+            std.log.warn("server: link.open failed: {s}", .{@errorName(err)});
+            return switch (err) {
+                error.KeyInUse => s.replyError(p.id, re, "invalid_args", "Another link has this key id."),
+                error.TooMany => s.replyError(p.id, re, "unavailable", "The server has too many links."),
+                else => s.replyError(p.id, re, "unavailable", "The server cannot open a link."),
+            };
+        };
+        s.pending_peers.append(s.gpa, opened.peer_fd) catch {
+            lib_posix.close(opened.peer_fd);
+            s.links.closeOwner(p.id);
+            return s.replyError(p.id, re, "unavailable", "The server cannot open a link.");
+        };
+        s.reply(p.id, re, m.LinkOpen, .{ .port = opened.port });
+    }
 
     fn runCommand(s: *Server, p: *Peer, re: u64, args: m.CommandRun.Args) void {
         if (args.argv.len == 0 or args.argv[0].bytes.len == 0 or args.argv[0].bytes[0] != '/')
@@ -1771,6 +1832,7 @@ const Server = struct {
                     if (r.out_fd >= 0) lib_posix.close(r.out_fd);
                     r.out_fd = -1;
                 };
+                s.links.closeOwner(p.id);
                 lib_posix.close(p.fd);
                 p.in.deinit(s.gpa);
                 p.out.deinit(s.gpa);
