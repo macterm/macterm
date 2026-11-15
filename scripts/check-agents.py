@@ -10,15 +10,15 @@ For each inline code span in each AGENTS.md:
 - A span with a `/` is a path. It must exist (from the repository root or from
   the folder of the AGENTS.md), or another tracked file must name it.
 - A span that is a dotted chain of identifiers (`Pane.destroySurface`, `foo()`)
-  must have each identifier as a word in a tracked file that is not an
-  AGENTS.md.
+  must have all its identifiers as words in one tracked file that is not a map.
 - A file name (`Hotkeys.swift`, `AppState+PinnedTabs`) must exist as a tracked
   file, or another tracked file must name it.
 
 Every other span (a command with spaces, a config line, a chord, a value) is
-not checked. The root AGENTS.md has at most 300 lines. A span in scripts/check-agents-external.txt names code outside
-this tree and is not checked; a line there that no AGENTS.md uses fails. Exit
-status 1 means that a span was not found.
+not checked. The root AGENTS.md has at most 300 lines. A span in
+scripts/check-agents-external.txt names code outside this tree and is not
+checked; a line there that no AGENTS.md uses fails. Exit status 1 means that a
+span was not found.
 """
 
 import os
@@ -31,6 +31,7 @@ ROOT = subprocess.run(
 ).stdout.strip()
 # Names of code outside this tree (the ghostty fork, Apple, other tools).
 EXTERNAL = "scripts/check-agents-external.txt"
+SELF = "scripts/check-agents.py"
 # Every session loads the root AGENTS.md, so it stays short.
 ROOT_LINE_LIMIT = 300
 
@@ -53,14 +54,16 @@ def tracked_files():
 
 
 def load_corpus(files):
-    words, text, names = set(), [], set()
+    """The words of each file, all text, and the file names, of every tracked
+    file that is not a map (an AGENTS.md, its CLAUDE.md links, this check)."""
+    words, text, names = [], [], set()
     for path in files:
         base = os.path.basename(path)
         names.add(base)
         names.add(os.path.splitext(base)[0])
-        if base == "AGENTS.md" or path == EXTERNAL:
-            continue
         full = os.path.join(ROOT, path)
+        if base in ("AGENTS.md", "CLAUDE.md") or os.path.islink(full) or path in (EXTERNAL, SELF):
+            continue
         if os.path.getsize(full) > 4_000_000:
             continue
         try:
@@ -68,7 +71,7 @@ def load_corpus(files):
                 content = handle.read()
         except (UnicodeDecodeError, OSError):
             continue
-        words.update(IDENT.findall(content))
+        words.append(set(IDENT.findall(content)))
         text.append(content)
     return words, "\n".join(text), names
 
@@ -87,11 +90,11 @@ def code_spans(markdown):
 
 
 def problem(span, folder, words, text, names):
+    span = re.sub(r"\(.*\)$", "", span)
     if not span or any(c in SKIP_CHARACTERS for c in span) or "://" in span:
         return None
     if span.startswith("-") or span[0].isdigit():
         return None
-    span = re.sub(r"\(.*\)$", "", span)
     if "/" in span:
         path = span.removeprefix("./")
         if path.startswith("/") or ".." in path.split("/")[:1]:
@@ -114,9 +117,12 @@ def problem(span, folder, words, text, names):
     if CHAIN.match(span):
         if span in names:
             return None
-        missing = [part for part in span.split(".") if part not in words]
-        if missing:
-            return "no symbol " + ", ".join(missing)
+        parts = set(span.split("."))
+        if not any(parts <= file_words for file_words in words):
+            missing = [part for part in span.split(".") if not any(part in w for w in words)]
+            if missing:
+                return "no symbol " + ", ".join(missing)
+            return "no file names all of " + ", ".join(sorted(parts))
     return None
 
 

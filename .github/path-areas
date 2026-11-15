@@ -4,7 +4,8 @@
 # matches `/`: `server/*` is every file under server/.
 #
 # Readers: test.yml (app, extensions), checks.yml (style), server.yml
-# (server), session-bench.yml (bench), docs.yml (docs).
+# (server), session-bench.yml (bench), docs.yml (docs). An AGENTS.md or
+# CLAUDE.md file is in no area.
 
 # The app, its tests and everything that they build or read: the bundle, the
 # build recipes and the Xcode pin, the schemas, the golden files, and the

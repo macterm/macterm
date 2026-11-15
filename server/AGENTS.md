@@ -3,8 +3,8 @@
 This file loads when you work in `server/`. The root `AGENTS.md` has the build, the architecture and the conventions.
 
 - **The server has no pin.** `scripts/build-server.sh` builds it for macOS universal and Linux x86_64 and aarch64 (static musl, stripped). That script holds the Zig version and the flags.
-  - The build key is the git tree hash of `server/` and that script, from the working tree. `zmx version` reports `1.0.1+thdxg.<key>`.
-  - Setup installs the build for the key and records the key in `.server-key`. It takes, in order: `build/server` (CI puts its own build there); a Zig build when those folders have changes that are not committed; the prebuilt `macterm-<key>-<target>.tar.gz` from the `server-prebuilt` release; a Zig build. Every tarball is checked against its `.sha256`.
+  - The build key is the git tree hash of `server/` (without `server/AGENTS.md` and `server/CLAUDE.md`) and that script, from the working tree. An edit to this file makes no new key. `zmx version` reports `1.0.1+thdxg.<key>`.
+  - Setup installs the build for the key and records the key in `.server-key`. It takes, in order: `build/server` (CI puts its own build there); a Zig build when `server/` has changes that are not committed; the prebuilt `macterm-<key>-<target>.tar.gz` from the `server-prebuilt` release; a Zig build. Every tarball is checked against its `.sha256`.
   - `.github/workflows/server-build.yml` builds on `macos-15`, because zig cannot link with Xcode 26.4 or later (zig#31658). It takes the prebuilt when it exists. It uploads a new build on `main` and on pull requests from this repository, and never replaces an asset. It removes assets older than 90 days, except the build of main's key.
   - The release workflows build from the commit, never from a prebuilt.
   - `build.sh` refuses a bundle whose server is not the build of the tree.

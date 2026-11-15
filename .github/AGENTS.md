@@ -40,7 +40,7 @@ Secrets:
 - The org secret `MACTERM_APP_PRIVATE_KEY` and the org variable `MACTERM_APP_CLIENT_ID` of the `macterm-ci` GitHub App. The jobs that write to another repository (the cask bump to `macterm/homebrew-tap`, the GhosttyKit bump PR, the website dispatch). The push of `publish-appcast.sh` to `macterm/appcast` uses it too, so the app is the commit author. These jobs take a short-lived token of it from `actions/create-github-app-token`, for the repositories that they write (`macterm` and `appcast` for a publish). No workflow uses a personal access token.
 - `MACTERM_SIGNING_CERT_P12` and `MACTERM_SIGNING_CERT_PASSWORD`. This is a stable self-signed certificate. It keeps TCC grants across updates. **Back up the private key and the certificate**. If you lose either one, users are stranded.
 
-The release notes come from the generator of GitHub (`.github/release.yml`). A person chooses the version number. The `/release` skill walks through the ceremony. The recipe for the certificate is in the history of this file.
+The release notes come from the generator of GitHub (`.github/release.yml`). A person chooses the version number. The `/release` skill walks through the ceremony. The recipe for the certificate is in the git history of the root `AGENTS.md`.
 
 - **The website's `/changelog` shows the notes of every stable release** (`releases.mjs` of macterm/website, rendered by its `build-docs.mjs`). The GitHub release is the only copy of the notes. An edit there reaches the page at the next site build. `website-dispatch.yml` starts that build for each release that a person publishes, edits or deletes. The page links `#123` and `@user` itself and drops HTML comments, so write the notes in the same Markdown as before.
 

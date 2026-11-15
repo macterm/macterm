@@ -10,6 +10,7 @@ CursorGlide.Comet
 CursorGlide.trail
 GHOSTTY_NULLABLE
 Geometry.terminal_height
+RenderState.Geometry
 Mods.ctrlOrSuper
 RenderState.RegionShifts
 RenderState.Shift.rowsAboveAt
@@ -20,6 +21,7 @@ Screen.viewport_pixel_offset
 Selection.expandToLines
 Surface.posToViewport
 Surface.rowScrollOffset
+Terminal.flags.selection_cursor
 Uniforms.cursor_comet
 adjust_selection
 animationWake
@@ -53,5 +55,11 @@ ictool
 linkd
 modelmanagerd
 
-# The demo recordings: a file name in a traceback.
+# Other tools: Helix's theme key, a file name in a demo's traceback, the
+# STE skill (git ignores .claude/).
+.claude/skills/asd-ste100/
 os.py
+ui.cursor
+
+# A placeholder, not a name.
+noun.verb

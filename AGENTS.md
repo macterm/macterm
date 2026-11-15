@@ -90,10 +90,11 @@ A `Pane` is the record of one terminal: its identity, its session, and the state
 
 - **`AppState`** is the single `@Observable` root. It is passed with `.environment()`. It is the main way to change a workspace, tab, pane or window. It is not the only one: the control handler, the intents and the restore also change the model. You can inject `WorkspaceStore` for tests.
 - **`ProjectStore`** is the project list (`projects.json`). It is saved on its own.
-- **`Workspace`** is the collection of tabs of one project, `AppState.workspaces[projectID]`. The pinned tabs are a sentinel workspace (see Pinned Tabs).
+- **`Workspace`** is the collection of tabs of one project, `AppState.workspaces[projectID]`. The pinned tabs are a sentinel workspace (see `Macterm/App/AGENTS.md`).
 - **`TerminalTab`** is a `SplitNode` tree plus the IDs of the focused pane and the zoomed pane. **`SplitNode`** is `.pane(Pane)` or `.split(SplitBranch)`.
 - **`WindowState`** (`Macterm/App/WindowState.swift`) exists once for each window. It holds the project that the window shows and its tab for each project (`activeTabIDs`). It also holds the width and visibility of the sidebar, and the flags of the palette and sheets. Macterm saves it as `WindowSnapshot`.
 - **`Preferences`** is an observable wrapper for UserDefaults. Never touch `UserDefaults.standard` in app code. Under tests, `Preferences.defaults` resolves to a side suite that Macterm wipes.
+
 ## Layout
 
 - `Macterm/App/`: `AppState` (with `AppState+…` extensions for pinned tabs, the first run, the quick terminal, desktop widgets, text files and the bell badge), `WindowState`, `Preferences`, `Hotkeys`, `KeyRouter`, `Responders`, `KeybindPassthrough`, `GlobalHotkeys`, `AppCommand` with `AppCommandActions` and `AppCommandMenu` (the one source of the actions that a user can invoke: the palette, the menus and Settings render from `AppCommand.allCases`), `FocusRestoration`, `Updater` (Sparkle), `FirstRunSeed`, `Tutorial`, `FinderServices`, `OpenFolder`, `TextFileDefaults`, `DockMenu`, `BellBadge`, `AdaptiveIcon…`, `PasswordPromptMonitor`, `BenchmarkControl`, `PollCadence`, `RecencyStack`.
@@ -180,15 +181,16 @@ The GUI text is in three String Catalogs: `Macterm/Localizable.xcstrings` (the a
 - With stacked `.dropDestination`s, only the first one that you apply wins.
 - The closure of `.contextMenu(forSelectionType:)` in the sidebar runs one time for each open of the menu. It never runs on a redraw of a row. A cheap read such as `GitWorktrees.list` therefore belongs there. Inside it, `.disabled` on a `Menu` is dropped. The item then renders enabled over an empty submenu. A disabled submenu must therefore be a disabled `Button` (`SidebarContent.worktreesMenu`).
 - **Anything that takes mouse input over a pane needs an AppKit view**. `GhosttyTerminalNSView` wins the hit test. SwiftUI gestures over a pane therefore never see the press. `PaneDragSource` and `ResizeDragBand` are `NSViewRepresentable`s. They forward what they do not own to `viewBeneath`. `NSHostingView` swallows hit tests even with `allowsHitTesting(false)`. Override `hitTest`.
+
 ### Adding a new feature
 
 **A feature request starts with the question "does ghostty already do this?" The answer goes to the user before you write any code**. The config surface of libghostty is large. An implementation in Macterm of something that a ghostty key already expresses is a second answer. It disagrees with the first, and the user must find it. #393 deleted the scroll-speed slider and the whole wheel path of Macterm after someone tried `mouse-scroll-multiplier`. It also deleted two Settings controls that `tab-inherit-working-directory` and `macos-shortcuts` had answered all along. Read the config reference of ghostty and `ghostty.h` first. Then choose one of these:
 
-- **A ghostty key covers it**. Read the key live from the loaded config (see the config pipeline) and add **no Settings UI**. Where the default of Macterm must be different from the default of ghostty, that departure is a line in `MactermConfig.defaultsBody`. It is never a fallback in `Preferences`. Naming the key can be the whole answer. Say so, and do not build.
+- **A ghostty key covers it**. Read the key live from the loaded config (see `Macterm/Config/AGENTS.md`) and add **no Settings UI**. Where the default of Macterm must be different from the default of ghostty, that departure is a line in `MactermConfig.defaultsBody`. It is never a fallback in `Preferences`. Naming the key can be the whole answer. Say so, and do not build.
 - **Ghostty can express it as a custom shader or a fork patch**. Prefer that to a reimplementation in Swift. Land it in Settings → Animations first, off by default.
 - **It is a concept of Macterm itself** (projects, tabs for each project, the sidebar, layouts, windows, the CLI, sessions). Build it here and follow *Adding a new setting*.
 
-A feature that changes what a user reads in the docs also gets a docs PR in `macterm/website`, filed with the feature PR (see "The website").
+A feature that changes what a user reads in the docs also gets a docs PR in `macterm/website`, filed with the feature PR (see `.github/AGENTS.md`).
 ### Adding a new action
 
 1. Add an `AppCommand` case (a title in Title Case, a category, and a linked `HotkeyAction` if you can rebind it). The palette, the menus and Settings use it.
@@ -205,7 +207,7 @@ Macterm-side settings go through `Preferences`. Settings that have the shape of 
 3. Add UI to the matching pane in `Macterm/Settings/`. A new pane also needs a `SettingsPane` case and a line in `SettingsView.detail`.
 ## Known Limitations
 
-- **Local sessions do not keep running after a restart of the Mac. Remote sessions do**. Every pane (workspace, pinned, quick terminal) persists through zmx. It connects again after a quit.
+- **Local sessions do not keep running after a restart of the Mac. Remote sessions do**. Every pane (workspace, pinned, quick terminal) persists as a session of the local server. It connects again after a quit.
 - **Remote sessions need Macterm's server on the host**. Macterm installs it at the first connection, after one consent, for Linux x86_64 and aarch64 and for macOS. Any other host, and a host where the user declined, gets plain ssh shells that end with the connection. **Windows hosts are not supported.** When the attach command ends with no line of the script and not with 255, the app runs one probe (`HostCheck.windowsProbe`, `echo %OS% $env:OS`: `Windows_NT` in cmd.exe and PowerShell). If it answers, the connect fails with `Failure.windowsHost` and the pane says so. That failure gets no plain shells, because the plain-shell command is POSIX. The probe never reads the host's error text, which is in the host's language.
 - **A remote session whose pane closed while no connection was up stays on the host.** Nothing reaps remote sessions.
 - **A second window on the same tab draws the same panes**. Its surface is dimmed where the pty has the size of the other view. You cannot declare `pane mirror` panes in layouts, so Save Layout and Apply Layout split one into two sessions.
@@ -213,5 +215,5 @@ Macterm-side settings go through `Preferences`. Settings that have the shape of 
 - **Developer ID does not sign Macterm**. On first launch, you need `xattr -cr /Applications/Macterm.app`, or Homebrew. The stable self-signed certificate keeps TCC grants across updates.
 - **`macos-hidden = always` costs the menu bar**. Settings, Quit, About and Check for Updates have no route while it is on. Set the own preferences of Macterm before you switch it on.
 - **Pane IDs are not stable across restarts.**
-- **Desktop widgets are not in the widget gallery of the system**. See Desktop widgets. They also do not take the monochrome look of the system while an app is in front.
+- **Desktop widgets are not in the widget gallery of the system**. See `Macterm/App/AGENTS.md`. They also do not take the monochrome look of the system while an app is in front.
 - **Macterm detects password prompts only where it can read the tty that prompts**. This means local panes. It does not see `sudo` on a remote host, or anything behind an `ssh` that you typed by hand. It does not see prompts in raw mode that draw their own `*` mask either.

@@ -8,8 +8,9 @@
 #                                        changes that are not committed
 #   scripts/build-server.sh build <dir>  build into <dir>
 #
-# The key is the git tree hash of server/ (without its AGENTS.md and CLAUDE.md)
-# and protocol/ and the blob hash of this script, from the working tree (committed or not), hashed together. This
+# The key is the git tree hash of server/ (without its AGENTS.md and
+# CLAUDE.md) and protocol/ (gone; it hashes as "none") and the blob hash of
+# this script, from the working tree (committed or not), hashed together. This
 # script holds the Zig version and every build flag, so a change to either is
 # a new key. A prebuilt named for a key is therefore the build of exactly that
 # source (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
