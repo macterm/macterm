@@ -122,7 +122,7 @@ def test_session_target_resolves_to_the_leader(app, fresh_tab, live_pane):
 
 
 def test_closing_a_mirror_leaves_the_session_running(app, fresh_tab, live_pane):
-    """The refcount, against a real daemon rather than a stubbed ZmxClient.
+    """The refcount, against a real daemon rather than a stubbed SessionClient.
 
     Closing one view of a session must not kill the shell the other view is
     still showing — proven by the surviving pane continuing to execute after

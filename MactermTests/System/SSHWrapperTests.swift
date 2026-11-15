@@ -135,7 +135,7 @@ struct SSHWrapperTests {
     func install_script_survives_non_posix_login_shells() {
         // sshd hands the remote command to the LOGIN shell, so the script
         // must ship as `sh -c '<single-quote-free single-line script>'` —
-        // the RemoteSpawn wire rule. Sent bare, a nushell login shell rejects
+        // the HostCommands wire rule. Sent bare, a nushell login shell rejects
         // `2>&1` and the install always fails; measured against a real sshd.
         for verbose in [true, false] {
             let command = SSHWrapper.installScript(verbose: verbose)

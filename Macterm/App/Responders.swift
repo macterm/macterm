@@ -135,7 +135,7 @@ final class QuickTerminalResponder: KeyResponder {
         }
         if HotkeyRegistry.matches(event, action: .zoomPane) {
             guard let paneID = state.focusedPaneID else { return .passThrough }
-            state.tab.toggleZoom(paneID: paneID)
+            ModelWriter.paneZoom(state.tab, toggling: paneID)
             return .handled
         }
         // The pane modes act on the panel's focused pane, as in
@@ -143,11 +143,11 @@ final class QuickTerminalResponder: KeyResponder {
         // main-app responder, which toggles the mode of the main window's
         // pane, so these swallow it also when the panel's pane has no view.
         if HotkeyRegistry.matches(event, action: .copyMode) {
-            state.tab.focusedPane?.nsView?.copyMode.toggle()
+            state.tab.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.copyMode.toggle()
             return .handled
         }
         if HotkeyRegistry.matches(event, action: .readOnlyMode) {
-            if let view = state.tab.focusedPane?.nsView, view.surface != nil {
+            if let view = state.tab.focusedPane.flatMap({ SurfaceRegistry.shared.view(of: $0) }), view.surface != nil {
                 view.sendBindingAction("toggle_readonly")
             }
             return .handled

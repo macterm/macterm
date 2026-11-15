@@ -44,7 +44,7 @@ final class SSHDHost {
 
     private func makeServers(_ builds: ServerBuilds) -> RemoteServers {
         RemoteServers(connections: connections, configuration: .init(
-            scripts: HostScripts.bundled,
+            scripts: HostCommands.Scripts.bundled,
             builds: builds,
             askConsent: { [unowned self] host in
                 asked.append(host)

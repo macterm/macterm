@@ -4,7 +4,7 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "RemoteTerminfo")
 
 /// Installs Macterm's own `xterm-ghostty` terminfo entry on a remote host, so
-/// a remote pane's `RemoteSpawn.remoteTermPreamble` can settle on the full
+/// a remote pane's `HostCommands.remoteTermPreamble` can settle on the full
 /// entry instead of `xterm-256color`.
 ///
 /// This is `ghostty +ssh`'s terminfo install reimplemented natively — no
@@ -88,7 +88,7 @@ enum RemoteTerminfo {
     /// out of the system database. Its stderr goes into the output, which
     /// the installer logs on a failure.
     static func installArgv(source: String) -> [String] {
-        let script = RemoteSpawn.remoteEnvPreamble
+        let script = HostCommands.remoteEnvPreamble
             + "printf \"%s\" \"$1\" | { \(SSHWrapper.installCommand(verbose: true)); } 2>&1"
         return ["/bin/sh", "-c", script, "sh", source]
     }

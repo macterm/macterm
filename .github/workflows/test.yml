@@ -20,46 +20,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The path areas of .github/path-areas that this commit changes.
   changes:
     name: Detect changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
-      swift: ${{ steps.filter.outputs.swift }}
-      extensions: ${{ steps.filter.outputs.extensions }}
+      app: ${{ steps.changes.outputs.app }}
+      extensions: ${{ steps.changes.outputs.extensions }}
     steps:
       - uses: useblacksmith/checkout@v1
-      - uses: dorny/paths-filter@v4
-        id: filter
         with:
-          filters: |
-            swift:
-              - "**/*.swift"
-              - "project.yml"
-              - "Configs/**"
-              - "mise.toml"
-              - "scripts/**"
-              - ".github/workflows/test.yml"
-              # The Xcode pin lives here; a bump must rebuild what it governs.
-              - ".github/actions/select-xcode/**"
-              - ".github/actions/build-release/**"
-              - ".github/actions/import-signing-cert/**"
-              # The app bundles the server built from these.
-              - "server/**"
-              - "protocol/**"
-              - ".github/workflows/server-build.yml"
-              # The adaptive icon's helper and its private interfaces, and the
-              # icon that AdaptiveIconTests reads.
-              - "IconRenderer/**"
-              - "Macterm/AppIcon.icon/**"
-              - "Macterm/Info.plist"
-              - "Macterm/Macterm.entitlements"
-              - "Macterm/*.xcstrings"
-              # The frames that ProtocolFixtureTests decodes.
-              - "server/schema/**"
-            # The extensions anyone can install: the unit tests read each
-            # through the validator; nothing else needs to run for them.
-            extensions:
-              - "extensions/**"
+          fetch-depth: 2
+      - name: Find Changes
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: scripts/changed-areas.sh
 
   # The session server that the app bundles, built from server/ at this
   # commit or taken from its prebuilt (server-build.yml). Every job that
@@ -67,7 +43,7 @@ jobs:
   server:
     name: Server
     needs: changes
-    if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.extensions == 'true'
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.extensions == 'true'
     permissions:
       contents: write
     uses: ./.github/workflows/server-build.yml
@@ -80,7 +56,7 @@ jobs:
     # passes a required check.
     if: >-
       !cancelled()
-      && (needs.changes.outputs.swift == 'true' || needs.changes.outputs.extensions == 'true')
+      && (needs.changes.outputs.app == 'true' || needs.changes.outputs.extensions == 'true')
     runs-on: xcode-27
     env:
       # Xcode passes only TEST_RUNNER_ variables to the test host. The tests
@@ -115,59 +91,9 @@ jobs:
           ref: ${{ steps.website-ref.outputs.ref }}
           path: website
 
-      - uses: jdx/mise-action@v5.2.7
-
-      # Pin the toolchain: the macOS 27 runner defaults to whatever Xcode the image
-      # currently ships, which is how macterm#340's type-check failure stayed
-      # invisible here. See the action for the full rationale.
-      - name: Select Xcode
-        id: xcode
-        uses: ./.github/actions/select-xcode
-
-      # ISO week (YYYY-Www) — makes the GhosttyKit cache self-refresh weekly.
-      - name: Cache epoch
-        id: epoch
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-      # GhosttyKit + bundled resources: the source-independent download
-      # (setup.sh). setup.sh is a presence check, so a restored cache makes it a
-      # no-op. Keyed on setup.sh's hash + the ISO week so a new upstream ghostty
-      # release (setup.sh pulls `latest`) is actually picked up within a week.
-      #
-      # NO `restore-keys` fallback ON PURPOSE: pairing a time-rolling key with a
-      # prefix restore-key re-baptizes last week's content under the fresh key
-      # forever (the week rolls → exact key misses → prefix restores the stale
-      # cache → the presence-check setup no-ops → actions/cache saves the SAME
-      # stale bytes under the new key). Without the fallback, a new week starts
-      # empty, setup re-downloads once, and the fresh content is cached — the
-      # intended "picked up within a week" behavior. Shared verbatim with the
-      # release workflows.
-      - name: Cache GhosttyKit
-        uses: actions/cache@v6
-        with:
-          path: |
-            GhosttyKit.xcframework
-            Macterm/Resources/ghostty
-            Macterm/Resources/terminfo
-            .ghosttykit-tag
-          # The tag stamp is cached WITH the artifacts it describes. setup.sh
-          # reads a missing stamp as "provenance unknown" and warns, which a
-          # restored tree is not — this key hashes setup.sh, so the pin these
-          # artifacts came from is exactly the one it names. Without the stamp
-          # in here that warning would fire on every cache hit.
-          key: ghosttykit-${{ hashFiles('scripts/setup.sh') }}-${{ steps.epoch.outputs.week }}
-
-      - name: Download the Server
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
-
-      # Runs BEFORE the DerivedData cache, which keys on what this installs.
-      - name: Setup GhosttyKit
-        run: mise run setup --verbose
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: App Setup
+        id: setup
+        uses: ./.github/actions/app-setup
 
       # Debug build products, keyed on the GhosttyKit ACTUALLY INSTALLED above,
       # so they can never be paired with a framework they weren't compiled
@@ -220,10 +146,10 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: build/DerivedData
-          key: derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-${{ github.run_id }}
+          key: derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-${{ github.run_id }}
           restore-keys: |
-            derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-
-            derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-
+            derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-
+            derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-
 
       - name: Test
         run: mise run test --verbose
@@ -256,49 +182,16 @@ jobs:
     name: End-to-end
     needs: [changes, server]
     # !cancelled(): see the unit job.
-    if: ${{ !cancelled() && needs.changes.outputs.swift == 'true' }}
+    if: ${{ !cancelled() && needs.changes.outputs.app == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - uses: jdx/mise-action@v5.2.7
-
-      # Pin the toolchain: the macOS 27 runner defaults to whatever Xcode the image
-      # currently ships, which is how macterm#340's type-check failure stayed
-      # invisible here. See the action for the full rationale.
-      - name: Select Xcode
-        id: xcode
-        uses: ./.github/actions/select-xcode
-
-      # ISO week (YYYY-Www) — makes the GhosttyKit cache self-refresh weekly.
-      - name: Cache epoch
-        id: epoch
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-      # Same key as the unit job (see its comment for the no-restore-keys
-      # rationale), so all consumers feed one GhosttyKit cache entry.
-      - name: Cache GhosttyKit
-        uses: actions/cache@v6
-        with:
-          path: |
-            GhosttyKit.xcframework
-            Macterm/Resources/ghostty
-            Macterm/Resources/terminfo
-            .ghosttykit-tag
-          key: ghosttykit-${{ hashFiles('scripts/setup.sh') }}-${{ steps.epoch.outputs.week }}
-      - name: Download the Server
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
-
-      # Runs BEFORE the DerivedData cache, which keys on what this installs.
-      - name: Setup GhosttyKit
-        run: mise run setup --verbose
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: App Setup
+        id: setup
+        uses: ./.github/actions/app-setup
 
       # Shares the unit job's Debug DerivedData namespace — same configuration,
       # same on-disk path, so the same framework-hash key (see the unit job for
@@ -311,10 +204,10 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: build/DerivedData
-          key: derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-${{ github.run_id }}
+          key: derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-${{ github.run_id }}
           restore-keys: |
-            derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-
-            derived-debug-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-
+            derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-${{ hashFiles('**/*.swift', 'project.yml') }}-
+            derived-debug-xcode${{ steps.setup.outputs.xcode-version }}-${{ hashFiles('GhosttyKit.xcframework/*/Headers/ghostty.h') }}-
 
       - name: End-to-end tests
         run: mise run e2e --verbose
@@ -344,7 +237,7 @@ jobs:
     name: Release Build
     needs: [changes, server]
     # !cancelled(): see the unit job.
-    if: ${{ !cancelled() && needs.changes.outputs.swift == 'true' }}
+    if: ${{ !cancelled() && needs.changes.outputs.app == 'true' }}
     runs-on: xcode-27
     steps:
       - name: Checkout
@@ -359,12 +252,6 @@ jobs:
         run: |
           source scripts/_lib.sh
           echo "version=$(macterm_tip_version)" >> "$GITHUB_OUTPUT"
-
-      - name: Download the Server
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
 
       - name: Build
         uses: ./.github/actions/build-release

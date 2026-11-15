@@ -43,7 +43,7 @@ struct AppStateTextFilesTests {
         let project = seedProject(state, path: root)
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let clicked = try #require(tab.focusedPane)
-        clicked.ensureNSView().currentPwd = root
+        SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
         #expect(state.openClickedLink("src/main.rs:12:4", in: clicked, projects: [project]))
 
@@ -66,7 +66,7 @@ struct AppStateTextFilesTests {
         let project = seedProject(state, path: root)
         let workspace = try #require(state.workspaces[project.id])
         let clicked = try #require(workspace.activeTab?.focusedPane)
-        clicked.ensureNSView().currentPwd = root
+        SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
         #expect(state.openClickedLink(root + "/src/main.rs", in: clicked, projects: [project]))
 
@@ -85,7 +85,7 @@ struct AppStateTextFilesTests {
         let project = seedProject(state, path: root)
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let clicked = try #require(tab.focusedPane)
-        clicked.ensureNSView().currentPwd = root
+        SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
         #expect(!state.openClickedLink("https://example.com:8080", in: clicked, projects: [project]))
         #expect(!state.openClickedLink("src/missing.rs:3", in: clicked, projects: [project]))

@@ -1,33 +1,35 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: appBundleID, category: "ZmxClient")
+private let logger = Logger(subsystem: appBundleID, category: "SessionClient")
 
 /// The session paths of Macterm's panes. A local pane is a v2 session of the
-/// local server: its surface runs `zmx connect <id> -- <shell>` (injected as
-/// ghostty's `command-wrapper`, `ZmxAttach`), which attaches to the session
-/// or asks the server to make it, so the shell survives app quit and the
-/// same id attaches again at the next launch. Listing and ending local
-/// sessions go through the server (`LocalSessions`).
+/// local server: its surface runs from a channel (`PaneSession`), which
+/// attaches to the session or asks the server to make it, so the shell
+/// survives app quit and the same name attaches again at the next launch.
+/// Listing and ending local sessions go through the server
+/// (`LocalSessions`).
 ///
 /// A remote pane is a session of its host's server (0057); its teardown
 /// goes through `RemoteHosts`.
-struct ZmxClient {
-    /// Bundled zmx executable URL when the socket-path budget probe passed,
-    /// otherwise nil. Use for the wrap-vs-bypass decision on NEW surfaces.
-    var executableURL: @Sendable () -> URL?
-    /// True whenever the zmx binary is bundled, independent of the probe.
-    /// Kill paths use this (not `executableURL`) so we can still tear down
+///
+/// The closures are the seam: tests give `AppState` a client of their own.
+struct SessionClient {
+    /// True when new local panes run as sessions of the bundled server:
+    /// the server is in the bundle and nothing forces a plain shell
+    /// (`liveBypass`, which also refuses a missing runtime directory). Decides the surface mode of a NEW local pane.
+    var runsSessions: @Sendable () -> Bool
+    /// True whenever the server is bundled, independent of the bypass.
+    /// Kill paths use this (not `runsSessions`) so we can still tear down
     /// sessions from an earlier under-budget launch even when this launch is
-    /// over budget — probe bypass means "don't wrap", not "don't kill".
+    /// over budget — a bypass means "make no session", not "end none".
     var isBundled: @Sendable () -> Bool
-    /// Tear down a session. No-op on a missing session. Bounded by the
-    /// subprocess timeout so a stuck daemon can't hold the close path forever.
+    /// Tear down a session. No-op on a missing session.
     var killSession: @Sendable (_ sessionID: String) async -> Void
     /// Tear down a session on a REMOTE host (#104), through the host's
     /// server (`RemoteHosts.endSession`). Best-effort: with no connection up
     /// it asks for no login, and the session stays.
-    var killRemoteSession: @Sendable (_ remote: ProjectPath, _ sessionID: String, _ zmxPath: String?) async -> Void
+    var killRemoteSession: @Sendable (_ remote: ProjectPath, _ sessionID: String) async -> Void
     /// Every local v2 session from the server (`LocalSessions`), or nil when
     /// the server cannot be reached. nil means UNKNOWN: a caller never ends
     /// or restarts anything on it.
@@ -35,74 +37,59 @@ struct ZmxClient {
     /// Ends v1's local zmx sessions of these names and their programs
     /// (`V1Sessions`), at the first v2 launch (design/008 §4). True only
     /// when none of them runs after it. False on the unit-test host, which
-    /// tries nothing.
+    /// tries nothing. Migration code: see `V1Sessions`.
     var endV1Sessions: @Sendable (_ names: [String]) async -> Bool
 }
 
-extension ZmxClient {
-    /// 5-second cap on any `zmx` subprocess so a stuck daemon never blocks the
-    /// app's close / quit paths. Every call we issue completes in <100ms in
-    /// practice; if it doesn't, log + continue beats hanging.
-    static let subprocessTimeout: Duration = .seconds(5)
-
-    static let live: ZmxClient = {
-        // The bundled binary at Contents/Resources/zmx/zmx (embed-zmx.sh).
-        let cachedBundledURL: URL? = Bundle.main.url(
-            forResource: "zmx",
-            withExtension: nil,
-            subdirectory: "zmx"
-        )
+extension SessionClient {
+    static let live: SessionClient = {
+        // The binary only: a kill must not depend on the runtime directory.
+        let bundled = Bundle.main.url(forResource: "zmx", withExtension: nil, subdirectory: "zmx") != nil
 
         @Sendable
-        func resolveExecutable() -> URL? {
-            guard let url = cachedBundledURL else { return nil }
-            return liveBypass == nil ? url : nil
+        func runsSessions() -> Bool {
+            bundled && liveBypass == nil
         }
 
-        @Sendable
-        func bundledExecutable() -> URL? {
-            cachedBundledURL
-        }
-
-        return ZmxClient(
-            executableURL: resolveExecutable,
-            isBundled: { bundledExecutable() != nil },
+        return SessionClient(
+            runsSessions: runsSessions,
+            isBundled: { bundled },
             killSession: { sessionID in
                 // As `listSessions`: no server for the unit-test host.
-                guard resolveExecutable() != nil else { return }
+                guard runsSessions() else { return }
                 await LocalSessions.shared.kill(sessionID)
             },
-            killRemoteSession: { remote, sessionID, _ in
+            killRemoteSession: { remote, sessionID in
                 guard case let .remote(user, host, _) = remote else { return }
-                let destination = RemoteSpawn.destination(user: user, host: host)
+                let destination = HostCommands.destination(user: user, host: host)
                 await RemoteHosts.shared.endSession(sessionID, destination: destination)
             },
             listSessions: {
                 // The unit-test host starts no server (`ZmxBypass.unitTestHost`).
-                guard resolveExecutable() != nil else { return nil }
+                guard runsSessions() else { return nil }
                 return await LocalSessions.shared.list()
             },
             endV1Sessions: { names in
                 // The unit-test host ends nothing: its names are not v1's.
-                guard resolveExecutable() != nil else { return false }
+                guard runsSessions() else { return false }
                 return await V1Sessions.end(names: Set(names), socketDir: ZmxSocketBudget.v1SocketDir())
             }
         )
     }()
 
-    /// No-op client for tests / when zmx is unavailable.
-    static let noop = ZmxClient(
-        executableURL: { nil },
+    /// No-op client for tests.
+    static let noop = SessionClient(
+        runsSessions: { false },
         isBundled: { false },
         killSession: { _ in },
-        killRemoteSession: { _, _, _ in },
+        killRemoteSession: { _, _ in },
         listSessions: { [] },
         endV1Sessions: { _ in true }
     )
 
-    /// Why this process starts new panes without zmx, or nil when it wraps
-    /// them. Decided once per process, so `live.executableURL` and the
-    /// Settings notice always agree.
+    /// Why this process starts new panes as plain shells, or nil when they
+    /// run in sessions. Decided once per process, so `live.runsSessions` and
+    /// the Settings notice always agree.
     static var liveBypass: ZmxBypass? {
         liveBypassCache.withLock { cached in
             if let cached { return cached }
@@ -205,8 +192,8 @@ enum ZmxReaper {
     }
 }
 
-/// Why new panes start as plain shells, without `zmx connect`
-/// (`ZmxClient.liveBypass`).
+/// Why new panes start as plain shells, with no session
+/// (`SessionClient.liveBypass`).
 enum ZmxBypass: Equatable {
     /// The unit-test host is the full app: it boots, spawns the active
     /// project's panes, and then dies without the quit sweep, so wrapping
@@ -237,7 +224,8 @@ enum ZmxSocketBudget {
 
     /// v1's zmx socket dir: `ZMX_DIR`, then `XDG_RUNTIME_DIR`/zmx, then
     /// `TMPDIR`/zmx-<uid>, then `/tmp/zmx-<uid>`, as v1's zmx resolves it.
-    /// Only the first v2 launch uses it, to end v1's sessions.
+    /// Only the first v2 launch uses it, to end v1's sessions. Migration
+    /// code: it goes with `V1Sessions`.
     static func v1SocketDir(env: [String: String] = ProcessInfo.processInfo.environment) -> String {
         if let custom = env["ZMX_DIR"], !custom.isEmpty { return custom }
         let uid = getuid()

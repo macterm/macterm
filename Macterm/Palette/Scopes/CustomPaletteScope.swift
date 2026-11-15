@@ -470,14 +470,14 @@ enum CustomPaletteActions {
             // A pinned tab belongs to no project. A tab born in the pinned
             // workspace would be pinned itself, so the command always splits
             // beside the focused pane there, as a clicked text file does.
-            if projectID == PinnedTabs.projectID {
+            if projectID == PinnedTabs.workspaceID {
                 guard let pane = appState.focusedPane(for: projectID) else {
                     appState.presentToast(String(localized: "No pane to run beside"))
                     return
                 }
                 var env = CustomPaletteEnvironment.make(projectName: nil, projectDirectory: nil, exports: exports)
                 if let command { env[CustomPaletteScript.commandVariable] = CustomPaletteScript.script(command) }
-                let direction = SplitDirection.auto(for: pane.nsView?.bounds.size ?? .zero)
+                let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero)
                 if cwd != nil {
                     guard let directory = directory(operand, base: PinnedTabs.fallbackRoot, appState: appState) else { return }
                     appState.splitPane(pane.id, direction: direction, projectID: projectID, env: env, newPaneWorkingDirectory: directory)
@@ -518,7 +518,7 @@ enum CustomPaletteActions {
                 if place == .split, let pane = appState.focusedPane(for: projectID) {
                     appState.splitPane(
                         pane.id,
-                        direction: .auto(for: pane.nsView?.bounds.size ?? .zero),
+                        direction: .auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero),
                         projectID: projectID,
                         env: env,
                         newPaneWorkingDirectory: directory
@@ -535,7 +535,7 @@ enum CustomPaletteActions {
                 if let pane = appState.focusedPane(for: projectID) {
                     appState.splitPane(
                         pane.id,
-                        direction: .auto(for: pane.nsView?.bounds.size ?? .zero),
+                        direction: .auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero),
                         projectID: projectID,
                         projectDirectory: project.path,
                         command: typed,

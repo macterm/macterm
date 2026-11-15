@@ -45,23 +45,23 @@ struct RemoteServersTests {
 
     @Test
     func a_host_command_is_sh_c_with_plain_word_arguments() {
-        #expect(HostScripts.command("echo $1", ["abc123"]) == "sh -c 'echo $1' macterm abc123")
+        #expect(HostCommands.command("echo $1", ["abc123"]) == "sh -c 'echo $1' macterm abc123")
         // Fail closed: nothing that a shell could split or quote.
-        #expect(HostScripts.command("echo 'x'", ["abc"]) == nil)
-        #expect(HostScripts.command("echo", ["a b"]) == nil)
-        #expect(HostScripts.command("echo", ["a;rm"]) == nil)
-        #expect(HostScripts.command("echo", [""]) == nil)
-        #expect(HostScripts.command("echo", [String(repeating: "a", count: 65)]) == nil)
+        #expect(HostCommands.command("echo 'x'", ["abc"]) == nil)
+        #expect(HostCommands.command("echo", ["a b"]) == nil)
+        #expect(HostCommands.command("echo", ["a;rm"]) == nil)
+        #expect(HostCommands.command("echo", [""]) == nil)
+        #expect(HostCommands.command("echo", [String(repeating: "a", count: 65)]) == nil)
         // csh refuses a newline in single quotes, and reads `!x` as history.
-        #expect(HostScripts.command("a\nb", ["abc"]) == nil)
-        #expect(HostScripts.command("echo !x", ["abc"]) == nil)
-        #expect(HostScripts.command("[ ! -e f ] && [ a != b ]", ["abc"]) != nil)
+        #expect(HostCommands.command("a\nb", ["abc"]) == nil)
+        #expect(HostCommands.command("echo !x", ["abc"]) == nil)
+        #expect(HostCommands.command("[ ! -e f ] && [ a != b ]", ["abc"]) != nil)
     }
 
     @Test
     func a_script_becomes_one_line_with_no_comments() {
         let script = "# note\nv=$1;\n\nif [ -n \"$v\" ]; then\n  echo x;  \nfi;\n"
-        #expect(HostScripts.oneLine(script) == "v=$1; if [ -n \"$v\" ]; then echo x; fi;")
+        #expect(HostCommands.oneLine(script) == "v=$1; if [ -n \"$v\" ]; then echo x; fi;")
     }
 
     @Test
@@ -69,8 +69,8 @@ struct RemoteServersTests {
         let tree = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("server/host", isDirectory: true)
-        let scripts = try #require(HostScripts.load(from: tree))
-        #expect(HostScripts.bundled == scripts, "Contents/Resources/host is not server/host: build again")
+        let scripts = try #require(HostCommands.Scripts.load(from: tree))
+        #expect(HostCommands.Scripts.bundled == scripts, "Contents/Resources/host is not server/host: build again")
         let attach = try #require(scripts.attachCommand(key: "abc123"))
         let install = try #require(scripts.installCommand(key: "abc123", sha256: String(repeating: "f", count: 64), hostID: "id-1"))
         // Each line is valid sh, and the command parses with csh as the

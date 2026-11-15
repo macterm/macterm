@@ -15,9 +15,9 @@ import Foundation
 /// as for a project tab.
 enum ScratchTabs {
     /// Fixed across launches and machines. Spelled as raw bytes for the
-    /// linter, like `PinnedTabs.projectID`; this is
+    /// linter, like `PinnedTabs.workspaceID`; this is
     /// `F1E0D0D0-0000-4000-8000-4D6163536372`.
-    static let projectID = UUID(uuid: (
+    static let workspaceID = UUID(uuid: (
         0xF1, 0xE0, 0xD0, 0xD0, 0x00, 0x00, 0x40, 0x00,
         0x80, 0x00, 0x4D, 0x61, 0x63, 0x53, 0x63, 0x72
     ))
@@ -57,6 +57,6 @@ enum ScratchTabs {
     /// Synthetic `Project` value for the call sites that render or route by a
     /// `Project`. Never inserted into `ProjectStore`.
     static var project: Project {
-        Project(id: projectID, name: displayName, path: fallbackRoot)
+        Project(id: workspaceID, name: displayName, path: fallbackRoot)
     }
 }

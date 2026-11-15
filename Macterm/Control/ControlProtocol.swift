@@ -637,7 +637,7 @@ struct ControlPaneInspect: Codable, Equatable {
     /// libghostty liveness flags.
     var processExited: Bool
     var needsConfirmQuit: Bool
-    /// The pane is read-only (`Pane.isReadOnly`): `pane.run` and `pane.key`
+    /// The pane is read-only (`PaneSurface.isReadOnly`): `pane.run` and `pane.key`
     /// refuse it with `read_only`. Optional so that a newer client still
     /// decodes the reply of an app from before the field.
     var readOnly: Bool?

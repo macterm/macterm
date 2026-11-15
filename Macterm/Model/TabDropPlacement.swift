@@ -8,7 +8,7 @@ struct TabDropResolution: Equatable {
     /// the headless debug verbs (`pane move`, `tab merge`). Drags resolve
     /// only to `.pane` — `TabDropPlacer` mirrors Ghostty's pane-local
     /// algorithm — while `.rootEdge` and `.divider` stay expressible for the
-    /// CLI and `TerminalTab.mergeTree`.
+    /// CLI and `ModelWriter.tabMerge`.
     enum Target: Equatable {
         /// Split the whole workspace on this side: the dropped tree becomes a
         /// new top-level sibling, equalized along that axis.

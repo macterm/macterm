@@ -81,7 +81,7 @@ enum LayoutSerializer {
             // is disabled for remote panes by design. Their `run:` IS captured:
             // `liveCommand` answers from the remote foreground probe's cached
             // command line (`ProcessInspector.runningCommand`'s remote branch).
-            let livePath = p.isRemote ? p.projectPath : (p.nsView?.currentPwd ?? p.projectPath)
+            let livePath = p.isRemote ? p.projectPath : (SurfaceRegistry.shared.view(of: p)?.currentPwd ?? p.projectPath)
             let cwd: String? = switch cwdStyle {
             case let .projectRelative(root):
                 relativePath(livePath, to: root)
