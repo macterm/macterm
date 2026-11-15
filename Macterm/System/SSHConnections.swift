@@ -254,6 +254,17 @@ final class SSHConnections {
         return SSHControlPath.resolvedDestination(fromConfig: outcome.stdout)
     }
 
+    /// The host name that a UDP packet can go to directly: `hostname` of
+    /// `ssh -G`, unless the config sends the connection through a jump host
+    /// or a proxy command (UDP would not take that way). nil when `ssh -G`
+    /// fails.
+    func directHostname(_ destination: String) async -> String? {
+        guard Self.isValidDestination(destination) else { return nil }
+        let outcome = await runSSH(["-G", "--", destination], timeout: .seconds(5))
+        guard let outcome, outcome.status == 0 else { return nil }
+        return SSHControlPath.directHostname(fromConfig: outcome.stdout)
+    }
+
     /// End Macterm's master for `destination`, or its login. A user's master
     /// stays.
     func disconnect(_ destination: String) async {
@@ -657,6 +668,24 @@ enum SSHControlPath {
               !user.isEmpty, !hostname.isEmpty, !port.isEmpty
         else { return nil }
         return "\(user)@\(hostname):\(port)"
+    }
+
+    /// `hostname` from the output of `ssh -G`, or nil when the config names a
+    /// jump host or a proxy command, or has no host name.
+    static func directHostname(fromConfig output: String) -> String? {
+        var values: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            let key = parts[0].lowercased()
+            if ["hostname", "proxyjump", "proxycommand"].contains(key), values[key] == nil {
+                values[key] = parts.count == 2 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+            }
+        }
+        for key in ["proxyjump", "proxycommand"] {
+            if let value = values[key], !value.isEmpty, value.lowercased() != "none" { return nil }
+        }
+        guard let host = values["hostname"], !host.isEmpty else { return nil }
+        return host
     }
 
     static func lastLine(of text: String) -> String {

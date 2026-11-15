@@ -85,12 +85,16 @@ final class RemoteHosts {
         /// A host's link to its server is up: its background work starts
         /// (the terminfo install).
         var linkReady: @MainActor (String) -> Void = { _ in }
+        /// Whether to open a roaming link (design/009) after a connect. Off
+        /// by default, so that a test never opens a UDP port.
+        var roamingEnabled: @MainActor () -> Bool = { false }
 
         static var live: Configuration {
             Configuration(
                 key: ServerBuilds.bundledKey,
                 declines: .preferences,
-                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0) }
+                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0) },
+                roamingEnabled: { Preferences.shared.remoteRoamingLink }
             )
         }
     }
@@ -133,6 +137,11 @@ final class RemoteHosts {
     @ObservationIgnored var panes: (@MainActor (String) -> [Pane])?
 
     @ObservationIgnored private var hosts: [String: Host] = [:]
+    /// The roaming link of a host (design/009), and the ssh link that it
+    /// replaced as the host's link. Panes that attached over the ssh link
+    /// stay on it until it ends.
+    @ObservationIgnored private var transports: [String: LinkTransport] = [:]
+    @ObservationIgnored private var standby: [String: RemoteServers.Link] = [:]
     /// The sessions that wait for their host to be ready.
     @ObservationIgnored private var waiting: [String: Set<String>] = [:]
     /// Sessions whose connection stopped: they wait for a trigger or a key.
@@ -185,8 +194,12 @@ final class RemoteHosts {
                 pane.remoteLinkDidStop()
             }
             mark(panes, lost: true)
-            // The next connect checks the connection again.
-            drop(target.destination)
+            // The next connect checks the connection again. A roaming link
+            // stays: the host may still hold it, and the next attach asks it
+            // (`decide` drops it when it does not answer).
+            if case let .ready(link) = hosts[target.destination], link.isRoaming {} else {
+                drop(target.destination)
+            }
             return .wait(message: nil)
         case .retry:
             lost.remove(session)
@@ -271,6 +284,7 @@ final class RemoteHosts {
             if case let .ready(old) = hosts[destination] { old.close() }
             hosts[destination] = .ready(link)
             configuration.linkReady(destination)
+            adoptRoaming(destination, over: link)
         } catch RemoteServers.Failure.declined {
             decline(destination)
             throw RemoteServers.Failure.declined
@@ -471,7 +485,10 @@ final class RemoteHosts {
             // One login serves every pane of the host. The sweep owns when a
             // lost pane connects again, so this never loops.
             configuration.hostDidConnect(destination)
-            if case .ready = host { configuration.linkReady(destination) }
+            if case let .ready(link) = host {
+                configuration.linkReady(destination)
+                adoptRoaming(destination, over: link)
+            }
         case let .failure(failure):
             hosts[destination] = nil
             for session in sessions {
@@ -484,12 +501,67 @@ final class RemoteHosts {
         }
     }
 
+    // MARK: - The roaming link
+
+    /// Opens a roaming link over the host's ssh link, in the background. If
+    /// it works, it becomes the host's link: new attaches use it, and it
+    /// survives sleep and a new network. The ssh link stays for the panes that
+    /// attached over it. A host that cannot do it keeps the ssh link.
+    private func adoptRoaming(_ destination: String, over ssh: RemoteServers.Link) {
+        let connections = connections
+        let enabled = configuration.roamingEnabled()
+        Task { [weak self] in
+            let opened = await RoamingLink.open(
+                destination: destination,
+                over: ssh,
+                connections: connections,
+                enabled: enabled,
+                onDead: { [weak self] in
+                    Task { @MainActor in self?.roamingEnded(destination) }
+                }
+            )
+            guard let self, let opened else { return }
+            // The host may have changed while the link opened.
+            guard case let .ready(current) = hosts[destination], current === ssh else {
+                opened.link.close()
+                opened.transport.stop()
+                return
+            }
+            standby[destination]?.close()
+            standby[destination] = ssh
+            transports[destination] = opened.transport
+            hosts[destination] = .ready(opened.link)
+        }
+    }
+
+    /// The link ended by itself: no packet for a long time. The panes on it
+    /// are lost, and the next connect uses ssh.
+    private func roamingEnded(_ destination: String) {
+        guard case let .ready(link) = hosts[destination], link.isRoaming else { return }
+        logger.info("link: host=\(destination, privacy: .public) ended")
+        drop(destination)
+    }
+
+    private func endRoaming(_ destination: String) {
+        transports.removeValue(forKey: destination)?.stop()
+        standby.removeValue(forKey: destination)?.close()
+    }
+
+    /// The network changed or the Mac woke: each roaming link uses a new
+    /// socket, so that its packets leave on the new path.
+    func networkDidChange() {
+        for transport in transports.values {
+            transport.pathChanged()
+        }
+    }
+
     /// Forget a host's link: the next pane checks the connection again.
     private func drop(_ destination: String) {
         switch hosts[destination] {
         case let .ready(link):
             link.close()
             hosts[destination] = nil
+            if link.isRoaming { endRoaming(destination) }
         case .plain:
             hosts[destination] = nil
         case .preparing,
