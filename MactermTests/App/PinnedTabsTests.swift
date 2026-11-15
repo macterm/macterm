@@ -39,7 +39,7 @@ struct PinnedTabsTests {
         return p
     }
 
-    private var pinnedID: UUID { PinnedTabs.projectID }
+    private var pinnedID: UUID { PinnedTabs.workspaceID }
 
     // MARK: - Reserved name
 
@@ -50,7 +50,7 @@ struct PinnedTabsTests {
         for name in ["Pinned", "pinned", "PINNED", "pInNeD", " Pinned ", "\tpinned\n"] {
             #expect(PinnedTabs.reservesName(name), "\(name)")
         }
-        for name in ["", "Pinned 2", "Pinned Tabs", "unpinned", "pinned.yaml", "Pin ned", PinnedTabs.projectID.uuidString] {
+        for name in ["", "Pinned 2", "Pinned Tabs", "unpinned", "pinned.yaml", "Pin ned", PinnedTabs.workspaceID.uuidString] {
             #expect(!PinnedTabs.reservesName(name), "\(name)")
         }
     }
@@ -799,13 +799,13 @@ struct PinnedTabsTests {
             originProjectID: nil
         ))
 
-        fx.state.selectNextTab(projectID: PinnedTabs.projectID)
+        fx.state.selectNextTab(projectID: PinnedTabs.workspaceID)
 
         // Landed on the unloaded record and restored it.
         #expect(fx.state.pinnedWorkspace?.activeTabID == unloadedID)
         #expect(fx.state.isPinnedTabLoaded(unloadedID))
 
-        fx.state.selectPreviousTab(projectID: PinnedTabs.projectID)
+        fx.state.selectPreviousTab(projectID: PinnedTabs.workspaceID)
         #expect(fx.state.pinnedWorkspace?.activeTabID == tab.id)
     }
 

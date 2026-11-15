@@ -966,8 +966,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         for ws in appState?.workspaces.values ?? [:].values {
-            let project = projectsByID[ws.projectID]
-            let projectName = Project.synthetic(for: ws.projectID)?.name
+            let project = projectsByID[ws.id]
+            let projectName = Project.synthetic(for: ws.id)?.name
                 ?? project?.name
                 ?? String(localized: "Project")
             for tab in ws.tabs {

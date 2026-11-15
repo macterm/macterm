@@ -7,7 +7,7 @@ struct LayoutReconcilerTests {
     /// Build a single-tab workspace from a split tree.
     private func workspace(projectID: UUID, root: SplitNode, title: String? = nil) -> Workspace {
         let tab = TerminalTab(id: UUID(), splitRoot: root, focusedPaneID: root.allPanes().first?.id, customTitle: title)
-        return Workspace(projectID: projectID, tabs: [tab], activeTabID: tab.id)
+        return Workspace(id: projectID, tabs: [tab], activeTabID: tab.id)
     }
 
     /// Parse a layout from a `tabs:` fixture. Throws (rather than `try!`) so a
@@ -293,7 +293,7 @@ struct LayoutReconcilerTests {
         let goneShell = Pane(projectPath: "/proj", projectID: pid)
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(keep), focusedPaneID: keep.id, customTitle: "Dev")
         let tabB = TerminalTab(id: UUID(), splitRoot: .pane(goneShell), focusedPaneID: goneShell.id, customTitle: "Scratch")
-        let ws = Workspace(projectID: pid, tabs: [tabA, tabB], activeTabID: tabA.id)
+        let ws = Workspace(id: pid, tabs: [tabA, tabB], activeTabID: tabA.id)
 
         // Only the "Dev" tab is declared.
         let file = try layout("""

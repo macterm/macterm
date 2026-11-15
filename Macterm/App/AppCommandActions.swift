@@ -83,14 +83,14 @@ extension AppCommand {
         case .pinTab:
             // Pin the active tab. Only from a real project — the
             // pinned workspace's own tabs are already pinned.
-            guard let projectID, projectID != PinnedTabs.projectID,
+            guard let projectID, projectID != PinnedTabs.workspaceID,
                   let tab = ctx.appState.workspaces[projectID]?.activeTab
             else { return nil }
             return { ctx.appState.pinTab(tab.id, fromProject: projectID) }
         case .unpinTab:
             // Unpin the active pinned tab — back to its origin project.
-            guard projectID == PinnedTabs.projectID,
-                  let tab = ctx.appState.workspaces[PinnedTabs.projectID]?.activeTab
+            guard projectID == PinnedTabs.workspaceID,
+                  let tab = ctx.appState.workspaces[PinnedTabs.workspaceID]?.activeTab
             else { return nil }
             return { ctx.appState.unpinTab(tab.id, projects: ctx.projectStore.projects) }
         case .separateAllPanes:

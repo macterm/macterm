@@ -124,7 +124,7 @@ extension AppState {
             // A pinned tab's editor always splits: a tab born pinned is
             // pinned for good, and quitting the editor would leave it behind
             // as a dimmed, unloaded row.
-            if placement == .tab, projectID != PinnedTabs.projectID {
+            if placement == .tab, projectID != PinnedTabs.workspaceID {
                 return createTab(projectID: projectID, projects: projects, command: command, env: env) != nil
             }
             let projectDirectory = configuredProjectDirectory(projectID: projectID, projects: projects)

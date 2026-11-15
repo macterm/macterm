@@ -206,7 +206,7 @@ struct BackgroundCreationTests {
         // Move it into a normal project: the pane's routing identity is
         // rebound, but its session and warmed surface stay put.
         let dest = seedProject(state, name: "dest", path: "/dest")
-        state.moveTab(tab.id, from: PinnedTabs.projectID, to: dest.id, destPath: dest.path)
+        state.moveTab(tab.id, from: PinnedTabs.workspaceID, to: dest.id, destPath: dest.path)
         #expect(pane.projectID == dest.id)
 
         let wsDest = try #require(state.workspaces[dest.id])

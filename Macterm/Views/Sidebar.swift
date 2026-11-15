@@ -380,12 +380,12 @@ struct SidebarContent: View {
             case let .project(projectID):
                 guard let project = projectStore.projects.first(where: { $0.id == projectID }) else { return }
                 appState.selectProject(project, in: windowState)
-            case let .tab(PinnedTabs.projectID, tabID):
+            case let .tab(PinnedTabs.workspaceID, tabID):
                 // Loaded → select; unloaded → restore from declaration.
                 appState.selectPinnedTab(tabID)
-            case let .tab(ScratchTabs.projectID, tabID):
+            case let .tab(ScratchTabs.workspaceID, tabID):
                 appState.selectScratchTabs(in: windowState)
-                appState.selectTab(tabID, projectID: ScratchTabs.projectID, in: windowState)
+                appState.selectTab(tabID, projectID: ScratchTabs.workspaceID, in: windowState)
             case let .tab(projectID, tabID):
                 if let project = projectStore.projects.first(where: { $0.id == projectID }) {
                     appState.selectProject(project, in: windowState)
@@ -439,7 +439,7 @@ struct SidebarContent: View {
                     tab: tab,
                     index: index + 1,
                     iconSymbolOverride: "pin",
-                    selectionItem: .tab(projectID: PinnedTabs.projectID, tabID: record.id),
+                    selectionItem: .tab(projectID: PinnedTabs.workspaceID, tabID: record.id),
                     presentation: presentation,
                     isInteractive: isInteractive,
                     onRename: { newName in
@@ -467,21 +467,21 @@ struct SidebarContent: View {
         .padding(.trailing, rowTrailingInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .tag(SidebarItem.tab(projectID: PinnedTabs.projectID, tabID: record.id))
-        .id(SidebarItem.tab(projectID: PinnedTabs.projectID, tabID: record.id))
+        .tag(SidebarItem.tab(projectID: PinnedTabs.workspaceID, tabID: record.id))
+        .id(SidebarItem.tab(projectID: PinnedTabs.workspaceID, tabID: record.id))
         // Dragging a pinned row into a project unpins it (AppState.moveTab
         // routes the record bookkeeping). Deliberately NO drop destination on
         // the row — same rule as `tabRow`: any row-level target claims the
         // drag before the ForEach's insertion mechanism sees it and kills the
         // native insertion line.
-        .draggable(MovableTab(tabID: record.id, sourceProjectID: PinnedTabs.projectID))
+        .draggable(MovableTab(tabID: record.id, sourceProjectID: PinnedTabs.workspaceID))
     }
 
     /// A tab dropped at a pinned insertion offset (the ForEach's native
     /// insertion line): from a project → pin there; from within the pinned
     /// rows → reorder (`reorderPinnedTab` speaks the same pre-removal offset).
     private func receivePinnedTabDrop(_ item: MovableTab, at offset: Int) {
-        if item.sourceProjectID == PinnedTabs.projectID {
+        if item.sourceProjectID == PinnedTabs.workspaceID {
             appState.reorderPinnedTab(item.tabID, toIndex: offset)
         } else {
             appState.pinTab(item.tabID, fromProject: item.sourceProjectID, toRecordIndex: offset)
@@ -539,7 +539,7 @@ struct SidebarContent: View {
             index: tabIndex + 1,
             // A scratch row has no project section around it, so its icon
             // says which rows these are, as the pin does for pinned rows.
-            iconSymbolOverride: project.id == ScratchTabs.projectID ? ScratchTabs.iconSymbol : nil,
+            iconSymbolOverride: project.id == ScratchTabs.workspaceID ? ScratchTabs.iconSymbol : nil,
             selectionItem: .tab(projectID: project.id, tabID: tab.id),
             presentation: presentation,
             isInteractive: isInteractive,
@@ -619,7 +619,7 @@ struct SidebarContent: View {
     /// its own copy of this order for the clicks it still handles itself.
     private var orderedItems: [SidebarItem] {
         var items: [SidebarItem] = appState.pinnedRecords.map {
-            .tab(projectID: PinnedTabs.projectID, tabID: $0.id)
+            .tab(projectID: PinnedTabs.workspaceID, tabID: $0.id)
         }
         for project in projectStore.projects {
             items.append(.project(project.id))
@@ -628,7 +628,7 @@ struct SidebarContent: View {
                 .tab(projectID: project.id, tabID: $0.id)
             })
         }
-        items.append(contentsOf: scratchTabs.map { .tab(projectID: ScratchTabs.projectID, tabID: $0.id) })
+        items.append(contentsOf: scratchTabs.map { .tab(projectID: ScratchTabs.workspaceID, tabID: $0.id) })
         return items
     }
 
@@ -637,7 +637,7 @@ struct SidebarContent: View {
 
     /// Whether the scratch rows are drawn: see `body`.
     private var showsScratchRows: Bool {
-        !scratchTabs.isEmpty || windowState.activeProjectID == ScratchTabs.projectID
+        !scratchTabs.isEmpty || windowState.activeProjectID == ScratchTabs.workspaceID
     }
 
     private var activeTabID: UUID? {
@@ -735,7 +735,7 @@ struct SidebarContent: View {
                 if let project = projectStore.projects.first(where: { $0.id == id }) {
                     projectMenu(project)
                 }
-            case let .tab(PinnedTabs.projectID, tabID):
+            case let .tab(PinnedTabs.workspaceID, tabID):
                 if let record = appState.pinnedRecord(tabID) {
                     pinnedTabMenu(record: record)
                 }
@@ -847,7 +847,7 @@ struct SidebarContent: View {
                tab.splitRoot.allPanes().count > 1
             {
                 Button("Separate Panes") {
-                    appState.separateTabPanes(record.id, projectID: PinnedTabs.projectID)
+                    appState.separateTabPanes(record.id, projectID: PinnedTabs.workspaceID)
                 }
             }
             Divider()
@@ -867,7 +867,7 @@ struct SidebarContent: View {
                     Button(destination.name) {
                         appState.moveTab(
                             record.id,
-                            from: PinnedTabs.projectID,
+                            from: PinnedTabs.workspaceID,
                             to: destination.id,
                             destPath: destination.path
                         )
@@ -889,7 +889,7 @@ struct SidebarContent: View {
             // point as the normal tab menu's Close Tab and the closeTab
             // command — `requestCloseTab` routes pinned tabs to the unload.
             Button("Close Tab", role: .destructive) {
-                appState.requestCloseTab(record.id, projectID: PinnedTabs.projectID)
+                appState.requestCloseTab(record.id, projectID: PinnedTabs.workspaceID)
             }
         }
     }
@@ -926,7 +926,7 @@ struct SidebarContent: View {
                 }
             }
         }
-        if project.id != ScratchTabs.projectID {
+        if project.id != ScratchTabs.workspaceID {
             // Out of the project, shells intact (#665). The tab keeps its own
             // working directory; only its row moves below the projects.
             Button("Move to Scratch Tabs") {
@@ -971,8 +971,8 @@ struct SidebarContent: View {
         var tabRefs: [(tabID: UUID, projectID: UUID)] = []
         for item in items {
             switch item {
-            case .project(PinnedTabs.projectID),
-                 .project(ScratchTabs.projectID):
+            case .project(PinnedTabs.workspaceID),
+                 .project(ScratchTabs.workspaceID):
                 // The pinned and the scratch sections can't be removed.
                 break
             case let .project(id):

@@ -470,7 +470,7 @@ enum CustomPaletteActions {
             // A pinned tab belongs to no project. A tab born in the pinned
             // workspace would be pinned itself, so the command always splits
             // beside the focused pane there, as a clicked text file does.
-            if projectID == PinnedTabs.projectID {
+            if projectID == PinnedTabs.workspaceID {
                 guard let pane = appState.focusedPane(for: projectID) else {
                     appState.presentToast(String(localized: "No pane to run beside"))
                     return

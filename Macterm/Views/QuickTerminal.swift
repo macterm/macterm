@@ -26,7 +26,7 @@ private func orderPanelFront(_ panel: NSPanel) -> Bool {
 final class QuickTerminalService: NSObject {
     static let shared = QuickTerminalService()
     /// The routing id of the quick terminal's panes — the counterpart of
-    /// `PinnedTabs.projectID` for a workspace that is not a project. Fresh
+    /// `PinnedTabs.workspaceID` for a workspace that is not a project. Fresh
     /// per launch on purpose: unlike the pinned sentinel it is never written
     /// to disk (the tab is restored by the caller that knows it is the quick
     /// terminal's), so nothing can key on a stale value.

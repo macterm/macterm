@@ -476,10 +476,46 @@ enum PaneRemovalResult {
     case notFound
 }
 
-/// All tabs for one project.
+/// The id of a workspace. A project's workspace has the project's id; the
+/// other kinds have their own ids (`PinnedTabs.workspaceID`,
+/// `ScratchTabs.workspaceID`). It is a UUID, as in design 010 §1, so the
+/// model's ids can replace it one for one.
+typealias WorkspaceID = UUID
+
+/// What a workspace holds tabs for (design 010 §1).
+enum WorkspaceKind: String, Hashable {
+    /// The tabs of one project. The only kind in the project list.
+    case project
+    /// The pinned tabs (`PinnedTabs`).
+    case pinned
+    /// The tabs of no project (`ScratchTabs`).
+    case scratch
+    /// The quick terminal's tab.
+    case quick
+    /// One desktop widget's tab.
+    case widget
+
+    /// The kind of a workspace with id `id`: a sentinel's kind, else a
+    /// project. The quick terminal's and the widgets' tabs are not in
+    /// `AppState.workspaces` yet, so no id names them.
+    init(id: WorkspaceID) {
+        switch id {
+        case PinnedTabs.workspaceID: self = .pinned
+        case ScratchTabs.workspaceID: self = .scratch
+        default: self = .project
+        }
+    }
+
+    /// Whether a workspace of this kind belongs to a row of the project
+    /// list.
+    var isProject: Bool { self == .project }
+}
+
+/// All tabs of one workspace: a project, the pinned tabs or the scratch tabs.
 @MainActor @Observable
 final class Workspace: Identifiable {
-    let projectID: UUID
+    let id: WorkspaceID
+    let kind: WorkspaceKind
     var tabs: [TerminalTab] = []
     var activeTabID: UUID? {
         didSet {
@@ -508,15 +544,17 @@ final class Workspace: Identifiable {
         return tabs.first { $0.id == activeTabID }
     }
 
-    init(projectID: UUID, projectPath: String) {
-        self.projectID = projectID
-        let tab = TerminalTab(projectPath: projectPath, projectID: projectID)
+    init(id: WorkspaceID, projectPath: String) {
+        self.id = id
+        kind = WorkspaceKind(id: id)
+        let tab = TerminalTab(projectPath: projectPath, projectID: id)
         tabs.append(tab)
         activeTabID = tab.id
     }
 
-    init(projectID: UUID, tabs: [TerminalTab], activeTabID: UUID?) {
-        self.projectID = projectID
+    init(id: WorkspaceID, tabs: [TerminalTab], activeTabID: UUID?) {
+        self.id = id
+        kind = WorkspaceKind(id: id)
         self.tabs = tabs
         // Validate the supplied activeTabID against the tabs list. A stale id
         // (e.g. from a corrupt persistence snapshot) falls back to the first
@@ -543,7 +581,7 @@ final class Workspace: Identifiable {
     ) -> TerminalTab {
         let tab = TerminalTab(
             projectPath: projectPath,
-            projectID: projectID,
+            projectID: id,
             sessionSlug: sessionSlug,
             command: command,
             env: env

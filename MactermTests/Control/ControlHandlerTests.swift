@@ -470,7 +470,7 @@ struct ControlHandlerTests {
         #expect(appState.activeProjectID == project.id)
         // …while `pinned` still means the pinned workspace, first.
         let pinned = await handler.handle(request("project.select", args: ControlArgs(project: "Pinned")))
-        #expect(pinned.data?.projects?.first?.id == PinnedTabs.projectID.uuidString)
+        #expect(pinned.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
     }
 
     @Test
@@ -540,7 +540,7 @@ struct ControlHandlerTests {
 
         let response = await handler.handle(request("project.select", args: ControlArgs(project: "pinned")))
         #expect(response.ok)
-        #expect(response.data?.projects?.first?.id == PinnedTabs.projectID.uuidString)
+        #expect(response.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
         #expect(response.data?.projects?.first?.index == nil)
     }
 
@@ -689,7 +689,7 @@ struct ControlHandlerTests {
         let remote = Project(name: "remote", path: "host:~/repo", zmxPath: "/opt/custom/bin/zmx")
         projectStore.add(remote)
         // Restored but never opened: no selectProject stamp on any pane.
-        let workspace = Workspace(projectID: remote.id, projectPath: remote.path)
+        let workspace = Workspace(id: remote.id, projectPath: remote.path)
         appState.workspaces[remote.id] = workspace
         var warmed: [UUID] = []
         appState.incubatePane = { pane in
@@ -794,7 +794,7 @@ struct ControlHandlerTests {
         let activeProject = appState.activeProjectID
         appState.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
         if pinned { appState.ensurePinnedWorkspace() }
-        let projectID = pinned ? PinnedTabs.projectID : project.id
+        let projectID = pinned ? PinnedTabs.workspaceID : project.id
         // A split needs a source; create it in the background too.
         let created = await handler.handle(request("tab.new", args: ControlArgs(
             project: projectID.uuidString, focus: false
@@ -841,7 +841,7 @@ struct ControlHandlerTests {
         appState.zmx = .noop
         let remote = Project(name: "remote", path: "host:~/repo", zmxPath: "/opt/custom/bin/zmx")
         projectStore.add(remote)
-        let workspace = Workspace(projectID: remote.id, projectPath: remote.path)
+        let workspace = Workspace(id: remote.id, projectPath: remote.path)
         appState.workspaces[remote.id] = workspace
         let tab = try #require(workspace.activeTab)
         let sourceID = try #require(tab.focusedPaneID)

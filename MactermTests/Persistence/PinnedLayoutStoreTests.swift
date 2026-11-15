@@ -207,7 +207,7 @@ struct PinnedLayoutStoreTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = WorkspaceStore(fileURL: tmp)
 
-        let ws = Workspace(projectID: PinnedTabs.projectID, projectPath: "/tmp")
+        let ws = Workspace(id: PinnedTabs.workspaceID, projectPath: "/tmp")
         let liveTab = ws.tabs[0]
         let records = [
             PinnedTabRecord(

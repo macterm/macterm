@@ -442,9 +442,9 @@ enum WorkspaceSerializer {
         // Sort by projectID so the serialized file is byte-stable across saves
         // (Dictionary.values iteration order is unspecified). restore() is
         // order-independent, so this only tames diff churn on the file.
-        workspaces.values.sorted { $0.projectID.uuidString < $1.projectID.uuidString }.map { ws in
+        workspaces.values.sorted { $0.id.uuidString < $1.id.uuidString }.map { ws in
             WorkspaceSnapshot(
-                projectID: ws.projectID,
+                projectID: ws.id,
                 activeTabID: ws.activeTabID,
                 tabs: ws.tabs.map { snapshotTab($0) }
             )
@@ -457,7 +457,7 @@ enum WorkspaceSerializer {
             // An empty workspace restores empty: the user closed every tab.
             // Dropping it would make the next selection create a default tab.
             let tabs = snap.tabs.map { restoreTab($0, projectID: snap.projectID) }
-            return Workspace(projectID: snap.projectID, tabs: tabs, activeTabID: snap.activeTabID)
+            return Workspace(id: snap.projectID, tabs: tabs, activeTabID: snap.activeTabID)
         }
     }
 

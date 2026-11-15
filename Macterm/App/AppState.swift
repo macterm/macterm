@@ -377,7 +377,7 @@ final class AppState {
     /// via `pinnedActiveTabID`), and a per-window entry for it is read by
     /// nothing and maintained by nothing — see `selectedTab(for:in:)`.
     private func recordRestoredTab(_ tabID: UUID?, in window: WindowState) {
-        guard let project = window.activeProjectID, project != PinnedTabs.projectID, let tabID else { return }
+        guard let project = window.activeProjectID, project != PinnedTabs.workspaceID, let tabID else { return }
         window.activeTabIDs[project] = tabID
     }
 
@@ -542,7 +542,7 @@ final class AppState {
     /// old one.
     func selectedTab(for projectID: UUID, in window: WindowState) -> TerminalTab? {
         guard let ws = workspaces[projectID] else { return nil }
-        if projectID != PinnedTabs.projectID,
+        if ws.kind != .pinned,
            let id = window.activeTabIDs[projectID],
            let tab = ws.tabs.first(where: { $0.id == id })
         {
@@ -580,7 +580,7 @@ final class AppState {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
             guard let projectID = window.activeProjectID, let ws = workspaces[projectID] else { continue }
-            if projectID != PinnedTabs.projectID {
+            if ws.kind != .pinned {
                 let valid = window.activeTabIDs[projectID].map { id in ws.tabs.contains { $0.id == id } } ?? false
                 if !valid, let current = ws.activeTabID {
                     window.activeTabIDs[projectID] = current
@@ -637,7 +637,7 @@ final class AppState {
     /// shows is fine — this window draws the same panes with surfaces of its
     /// own.
     func selectTab(_ tabID: UUID, projectID: UUID, in window: WindowState) {
-        if keyWindowID == window.id || projectID == PinnedTabs.projectID {
+        if keyWindowID == window.id || projectID == PinnedTabs.workspaceID {
             selectTab(tabID, projectID: projectID)
             return
         }
@@ -659,8 +659,7 @@ final class AppState {
     /// align.
     private func alignKeyWindowTab() {
         if let key = keyWindow, let projectID = key.activeProjectID,
-           projectID != PinnedTabs.projectID,
-           let ws = workspaces[projectID]
+           let ws = workspaces[projectID], ws.kind != .pinned
         {
             if let chosen = key.activeTabIDs[projectID], ws.tabs.contains(where: { $0.id == chosen }) {
                 if ws.activeTabID != chosen { ws.peekTab(chosen) }
@@ -755,13 +754,13 @@ final class AppState {
     /// project; otherwise the first window that is, so a `tab select
     /// --project` for a background project still moves the window showing it.
     private func workspaceActiveTabDidChange(_ ws: Workspace) {
-        guard ws.projectID != PinnedTabs.projectID else { return }
-        let onProject = windows.filter { $0.activeProjectID == ws.projectID }
+        guard ws.kind != .pinned else { return }
+        let onProject = windows.filter { $0.activeProjectID == ws.id }
         guard let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first else { return }
         if let tab = ws.activeTabID {
-            target.activeTabIDs[ws.projectID] = tab
+            target.activeTabIDs[ws.id] = tab
         } else {
-            target.activeTabIDs.removeValue(forKey: ws.projectID)
+            target.activeTabIDs.removeValue(forKey: ws.id)
         }
         settleWindowSelections()
         if target.id == keyWindowID { claimLeadershipForKeyWindow() }
@@ -890,7 +889,7 @@ final class AppState {
 
     /// Ordered pinned-tab records — the sidebar's pinned section. A record
     /// whose id matches a live tab in the pinned workspace
-    /// (`workspaces[PinnedTabs.projectID]`) is loaded; the rest are unloaded
+    /// (`workspaces[PinnedTabs.workspaceID]`) is loaded; the rest are unloaded
     /// (their sessions died) and rebuild from their declaration on selection.
     /// All mutation goes through `AppState+PinnedTabs.swift`.
     var pinnedRecords: [PinnedTabRecord] = []
@@ -969,14 +968,11 @@ final class AppState {
     private var projectRecency = RecencyStack<UUID>(limit: 50)
     private let recencyKey = "macterm.projectRecency"
 
-    /// Bumped whenever the app itself writes a project file, so an open
-    /// Projects settings pane can re-read the directory. There's no file
-    /// watcher by design (hand-edits surface on next use); this covers only
-    /// the changes Macterm makes, which the user does expect to see land.
-    private(set) var layoutFilesVersion = 0
+    /// See `LayoutFileService.version`.
+    var layoutFilesVersion: Int { layoutFiles.version }
 
     func noteLayoutFilesChanged() {
-        layoutFilesVersion &+= 1
+        layoutFiles.noteChanged()
     }
 
     /// The transient confirmation showing in `ToastOverlay`, if any. Only for
@@ -1020,50 +1016,19 @@ final class AppState {
         activeToast = nil
     }
 
-    // Tab cycling state (Ctrl+Tab)
-    private var tabCycleOrder: [UUID] = []
-    private var tabCycleIndex: Int = 0
-    var isTabCycling: Bool { !tabCycleOrder.isEmpty }
+    /// The Recent Tab cycle and the switcher's previews (#344).
+    let tabCycler = TabCycler()
+
+    var isTabCycling: Bool { tabCycler.isCycling }
 
     /// The tab IDs the current cycle walks, most-recent-first, and where in
     /// that list the gesture currently sits — what the tab switcher overlay
     /// (#344) renders. Empty when no cycle is in flight.
-    var tabCycleTabIDs: [UUID] { tabCycleOrder }
-    var tabCycleSelection: Int { tabCycleIndex }
-
-    /// Last sampled preview per pane, keyed by pane ID — what the tab
-    /// switcher renders.
-    ///
-    /// Filled only while a cycle is showing the switcher: `beginLivePreviews`
-    /// wakes the renderer of every offered pane (an off-screen renderer is
-    /// parked and holds no frame, see `PanePreview`) and re-samples them all
-    /// on a timer until the cycle commits, so a card pictures its tab as it
-    /// is now. The entries outlive the gesture on purpose — the next one opens
-    /// on each tab's last frame for the tick or two the woken renderers need,
-    /// instead of on a bare fill — and `store` never lets a frameless sample
-    /// erase a frame, so a card can only ever go from nothing to a picture.
-    private(set) var panePreviews: [UUID: PanePreview] = [:]
-
-    /// Aspect ratio of the region a workspace's panes fill on screen, so the
-    /// switcher's cards can be shaped like the thing they picture rather than
-    /// cropping it. Measured from whichever tab is visible; every tab in the
-    /// workspace fills the same container, so one value shapes the strip.
-    private(set) var paneContainerAspect: CGFloat?
-
-    /// The panes whose renderers a cycle in flight is keeping awake
-    /// (`GhosttyTerminalNSView.rendersForPreview`), and the timer re-sampling
-    /// them. Remembered as panes, not looked up from the cycle order: a tab
-    /// that closes mid-gesture must still get its override cleared. Both are
-    /// empty whenever no cycle is showing the switcher.
-    @ObservationIgnored
-    private var livePreviewPanes: [Pane] = []
-    @ObservationIgnored
-    private var livePreviewTimer: Timer?
-    /// Sampling cadence while the switcher is up. Fast enough to read as the
-    /// terminal moving; the copy per pane is a downsample of one frame.
-    static let livePreviewInterval: TimeInterval = 0.2
-    /// Whether a cycle is currently re-sampling its cards.
-    var isLivePreviewing: Bool { livePreviewTimer != nil }
+    var tabCycleTabIDs: [UUID] { tabCycler.order }
+    var tabCycleSelection: Int { tabCycler.index }
+    var panePreviews: [UUID: PanePreview] { tabCycler.panePreviews }
+    var paneContainerAspect: CGFloat? { tabCycler.paneContainerAspect }
+    var isLivePreviewing: Bool { tabCycler.isLivePreviewing }
 
     private let workspaceStore: WorkspaceStore
 
@@ -1292,7 +1257,9 @@ final class AppState {
     /// Central project-file store (`~/.config/macterm/projects`). Injectable
     /// so tests never read or write the user's real directory.
     @ObservationIgnored
-    let projectFiles: ProjectFileStore
+    /// The project layout files.
+    let layoutFiles: LayoutFileService
+    var projectFiles: ProjectFileStore { layoutFiles.projectFiles }
 
     init(
         workspaceStore: WorkspaceStore = WorkspaceStore(),
@@ -1301,7 +1268,7 @@ final class AppState {
         quickTerminal: QuickTerminalSplitState? = nil
     ) {
         self.workspaceStore = workspaceStore
-        self.projectFiles = projectFiles
+        layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         customPalettes = CustomPaletteStore(configDirectoryURL: projectFiles.configDirectoryURL, hotkeys: paletteHotkeys)
@@ -1566,7 +1533,7 @@ final class AppState {
         // The scratch workspace restores like a project's (#665): its only
         // record is the snapshot, and its sessions must be claims before the
         // orphan sweep below.
-        let valid = Set(projects.map(\.id)).union([ScratchTabs.projectID])
+        let valid = Set(projects.map(\.id)).union([ScratchTabs.workspaceID])
         // Restore every project's snapshot — including layout-file projects.
         // The snapshot carries each pane's persisted zmx session identity, so
         // panes REATTACH their still-running shells; applying the project
@@ -1574,7 +1541,7 @@ final class AppState {
         // launch. A declared layout is only ever applied by an explicit Apply
         // Layout; a project with no snapshot gets the default workspace.
         for ws in WorkspaceSerializer.restore(from: loaded.workspaces, validIDs: valid) {
-            workspaces[ws.projectID] = ws
+            workspaces[ws.id] = ws
         }
         // Pinned tabs: records first, then the launch reconcile against
         // `pinned.yaml` (the file is authoritative for membership — see
@@ -1592,12 +1559,12 @@ final class AppState {
         reconcileWidgetLayoutAtLaunch()
         Task { await materializeRestoredDesktopWidgets(restoredWidgets) }
         if let id = Preferences.shared.activeProjectID {
-            if id == PinnedTabs.projectID {
+            if id == PinnedTabs.workspaceID {
                 if !pinnedRecords.isEmpty {
                     ensurePinnedWorkspace()
                     activeProjectID = id
                 }
-            } else if id == ScratchTabs.projectID {
+            } else if id == ScratchTabs.workspaceID {
                 // Only with tabs: an empty scratch workspace has no row in the
                 // sidebar, so a launch on it would show an empty detail view
                 // with nothing selected.
@@ -1635,18 +1602,18 @@ final class AppState {
         // (CLI `tab new`, a pane separated into it, a merge) — make sure it
         // has a record before the snapshot serializes.
         syncPinnedRecordsWithWorkspace()
-        let ordinary = workspaces.filter { $0.key != PinnedTabs.projectID }
+        let ordinary = workspaces.filter { $0.value.kind != .pinned }
         workspaceStore.save(
             WorkspaceSerializer.snapshot(ordinary),
             pinned: WorkspaceSerializer.snapshotPinned(
                 records: pinnedRecords,
-                workspace: workspaces[PinnedTabs.projectID]
+                workspace: workspaces[PinnedTabs.workspaceID]
             ),
             // The pinned workspace is excluded from `ordinary`, so it loses
             // the WorkspaceSnapshot.activeTabID every other workspace keeps —
             // carry the selection separately or a relaunch always lands on
             // the first pinned row.
-            pinnedActiveTabID: workspaces[PinnedTabs.projectID]?.activeTabID,
+            pinnedActiveTabID: workspaces[PinnedTabs.workspaceID]?.activeTabID,
             // Every open window, so a relaunch brings them all back (#345).
             // Empty is never written as an empty list: windows register as
             // their views appear, so a save during launch would otherwise
@@ -2569,7 +2536,7 @@ final class AppState {
         // Closing a PINNED tab is an unload, not a removal: sessions end, the
         // record (and its pinned.yaml entry) stays as a dimmed row, and the
         // next launch eager-starts it again. Unpin is the removal path.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             unloadPinnedTab(tabID)
             return
         }
@@ -2625,7 +2592,7 @@ final class AppState {
         // The single selection seam: a pinned row may be UNLOADED (no live
         // tab), so pinned selection routes through the record-aware path —
         // every caller (sidebar, toolbar switcher, CLI) gets it for free.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             selectPinnedTab(tabID)
             return
         }
@@ -2655,7 +2622,7 @@ final class AppState {
         // A move INTO the pinned workspace is a pin — route through `pinTab`
         // so the declaration is captured and the record inserted. This keeps
         // every drag/menu path a plain `moveTab` call.
-        if destProjectID == PinnedTabs.projectID {
+        if destProjectID == PinnedTabs.workspaceID {
             pinTab(tabID, fromProject: sourceProjectID, toRecordIndex: toIndex)
             return
         }
@@ -2663,7 +2630,7 @@ final class AppState {
         // find; dragging its dimmed row into a project is still an unpin —
         // the drop names where it should spawn. Checked BEFORE the live-tab
         // guard, which would otherwise bail first.
-        if sourceProjectID == PinnedTabs.projectID,
+        if sourceProjectID == PinnedTabs.workspaceID,
            workspaces[sourceProjectID]?.tabs.contains(where: { $0.id == tabID }) != true,
            let record = pinnedRecord(tabID)
         {
@@ -2690,7 +2657,7 @@ final class AppState {
         }
         // A move OUT of the pinned workspace is the unpin: the record (and
         // its `pinned.yaml` entry) goes with it.
-        if sourceProjectID == PinnedTabs.projectID {
+        if sourceProjectID == PinnedTabs.workspaceID {
             removePinnedRecord(forTab: tabID)
         }
         activeProjectID = destProjectID
@@ -2741,7 +2708,7 @@ final class AppState {
             }
             // Merging a pinned tab's tree into another project's tab unpins
             // it — the tab object dissolves into the destination.
-            if sourceProjectID == PinnedTabs.projectID {
+            if sourceProjectID == PinnedTabs.workspaceID {
                 removePinnedRecord(forTab: tabID)
             }
         }
@@ -2841,7 +2808,7 @@ final class AppState {
         // A pinned reorder must move the RECORD (the sidebar rows and
         // pinned.yaml follow records, not the live-tab array) — the offset
         // arrives in live-tab space here, so translate it.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             reorderPinnedLiveTab(tabID, toLiveIndex: destination)
             return
         }
@@ -2858,7 +2825,7 @@ final class AppState {
     /// tab past exactly one row.
     func activeTabMoveOffset(step: Int, projectID: UUID) -> Int? {
         guard let ws = workspaces[projectID], let tabID = ws.activeTabID else { return nil }
-        let ids = projectID == PinnedTabs.projectID ? pinnedRecords.map(\.id) : ws.tabs.map(\.id)
+        let ids = ws.kind == .pinned ? pinnedRecords.map(\.id) : ws.tabs.map(\.id)
         guard let from = ids.firstIndex(of: tabID) else { return nil }
         let to = from + step
         guard ids.indices.contains(to) else { return nil }
@@ -2874,7 +2841,7 @@ final class AppState {
         guard let offset = activeTabMoveOffset(step: step, projectID: projectID),
               let tabID = workspaces[projectID]?.activeTabID
         else { return }
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             reorderPinnedTab(tabID, toIndex: offset)
         } else {
             reorderTab(tabID, inProject: projectID, toIndex: offset)
@@ -2885,7 +2852,7 @@ final class AppState {
         // The pinned workspace cycles in RECORD order — unloaded rows
         // included, restored on landing — so the keyboard walks exactly what
         // the sidebar shows, not just the loaded subset.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             cyclePinnedTab(step: 1)
             return
         }
@@ -2898,7 +2865,7 @@ final class AppState {
     }
 
     func selectPreviousTab(projectID: UUID) {
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             cyclePinnedTab(step: -1)
             return
         }
@@ -2924,21 +2891,10 @@ final class AppState {
 
     func cycleRecentTab(projectID: UUID) {
         guard let ws = workspaces[projectID] else { return }
-        if tabCycleOrder.isEmpty {
-            // The limit bounds the cycle whether or not the switcher shows it:
-            // the cards and the keyboard walk one list, so a limit that only
-            // applied with the overlay on would make a tab's reachability
-            // depend on a display preference.
-            let recency = ws.recencyOrder()
-            let candidateLimit = Preferences.shared.recentTabCandidates
-            tabCycleOrder = candidateLimit == Preferences.unlimitedRecentTabCandidates
-                ? recency
-                : Array(recency.prefix(candidateLimit))
-            tabCycleIndex = 0
-            prepareTabCyclePreviews(in: ws)
+        tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) {
+            Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
         }
-        guard tabCycleOrder.count > 1 else { return }
-        tabCycleIndex = (tabCycleIndex + 1) % tabCycleOrder.count
+        guard tabCycler.advance() else { return }
         // A binding with no modifier has no release to commit on, so there is
         // no hold gesture to preview: switch now and end the cycle.
         if recentTabHoldModifiers.isEmpty {
@@ -2953,88 +2909,14 @@ final class AppState {
         //
         // Without the switcher there is nothing else to look at, so the
         // original behavior stands: each press peeks the tab for real.
-        guard !Preferences.shared.showTabSwitcherOverlay else { return }
-        ws.peekTab(tabCycleOrder[tabCycleIndex])
-    }
-
-    /// Ready the cards for the workspace a cycle is about to walk: shape them
-    /// from the visible tab (the only one with a measurable on-screen region),
-    /// forget panes that have closed, and start sampling. Skipped entirely
-    /// when the overlay is off, so the default cycling path costs nothing.
-    private func prepareTabCyclePreviews(in ws: Workspace) {
-        guard Preferences.shared.showTabSwitcherOverlay else { return }
-        if let tab = ws.activeTab, let aspect = PanePreviewCapture.containerAspect(of: tab) {
-            paneContainerAspect = aspect
-        }
-        // Drop previews of panes that have closed. Checked across every
-        // workspace, not just this one — a cached preview belongs to a pane,
-        // and a pane in another project is still alive.
-        let live = Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
-        panePreviews = panePreviews.filter { live.contains($0.key) }
-        beginLivePreviews(in: ws)
-    }
-
-    /// Keep the cards current for as long as the gesture lasts: wake the
-    /// renderer of every pane the cycle offers and sample them all, now and
-    /// then on a timer. An off-screen pane's renderer is parked
-    /// (`syncOcclusion`) and holds no frame, so without the wake-up there
-    /// would be nothing to sample; waking it makes libghostty rebuild and draw
-    /// at once, and the pty has kept the screen current all along. Every pane
-    /// is woken, the visible tab's included — it is on screen anyway, and one
-    /// rule beats tracking which tab that is. The immediate sample is for the
-    /// visible tab, whose frame exists right now; the woken renderers draw
-    /// asynchronously and are picked up by the first tick, under the overlay's
-    /// fade-in. Undone by `endLivePreviews`.
-    private func beginLivePreviews(in ws: Workspace) {
-        endLivePreviews()
-        let cycleTabs = tabCycleOrder.compactMap { id in ws.tabs.first { $0.id == id } }
-        livePreviewPanes = cycleTabs.flatMap { $0.splitRoot.allPanes() }
-        for pane in livePreviewPanes {
-            SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = true
-        }
-        captureLivePreviews()
-        let timer = Timer(timeInterval: Self.livePreviewInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.captureLivePreviews() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        livePreviewTimer = timer
-    }
-
-    /// One sampling tick. Each pane's last preview is handed back in so a
-    /// pane whose renderer drew nothing since is returned as is — the copy
-    /// is the cost here, and only the panes that are actually moving pay it.
-    private func captureLivePreviews() {
-        for pane in livePreviewPanes {
-            store(PanePreviewCapture.capture(pane, reusing: panePreviews[pane.id]), for: pane.id)
-        }
-    }
-
-    /// Park the renderers `beginLivePreviews` woke and stop sampling. Runs on
-    /// every way a cycle ends, so a renderer can never be left awake behind a
-    /// tab nobody is looking at.
-    private func endLivePreviews() {
-        livePreviewTimer?.invalidate()
-        livePreviewTimer = nil
-        for pane in livePreviewPanes {
-            SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = false
-        }
-        livePreviewPanes = []
-    }
-
-    /// Keep the best preview we have: a sample that came back frameless must
-    /// not erase a frame already collected, so a pane whose woken renderer has
-    /// not drawn yet keeps showing its last picture rather than blanking.
-    private func store(_ preview: PanePreview, for paneID: UUID) {
-        if preview.image == nil, panePreviews[paneID]?.image != nil { return }
-        panePreviews[paneID] = preview
+        guard !Preferences.shared.showTabSwitcherOverlay, let selected = tabCycler.selectedTabID else { return }
+        ws.peekTab(selected)
     }
 
     /// Point the in-flight cycle at `index` without committing — what hovering
-    /// a card in the switcher does. Out-of-range indices are ignored, since a
-    /// tab can close under the pointer mid-gesture.
+    /// a card in the switcher does.
     func focusTabCycle(at index: Int) {
-        guard tabCycleOrder.indices.contains(index) else { return }
-        tabCycleIndex = index
+        tabCycler.focus(at: index)
     }
 
     /// Commit the cycle straight to `index` — what clicking a card does. The
@@ -3046,14 +2928,7 @@ final class AppState {
     }
 
     func commitTabCycle(projectID: UUID) {
-        endLivePreviews()
-        guard !tabCycleOrder.isEmpty, let ws = workspaces[projectID] else {
-            tabCycleOrder = []
-            return
-        }
-        let selectedID = tabCycleOrder[tabCycleIndex]
-        tabCycleOrder = []
-        tabCycleIndex = 0
+        guard let selectedID = tabCycler.finish(), let ws = workspaces[projectID] else { return }
         ws.selectTab(selectedID)
         saveWorkspaces()
     }
@@ -3064,14 +2939,14 @@ final class AppState {
         // Pinned rows cycle first (they sit at the top of the sidebar), in
         // RECORD order — unloaded records included, so keyboard cycling can
         // land on (and restore) a dead pinned tab exactly like clicking it.
-        let pinnedEntries: [(projectID: UUID, tabID: UUID)] = pinnedRecords.map { (PinnedTabs.projectID, $0.id) }
+        let pinnedEntries: [(projectID: UUID, tabID: UUID)] = pinnedRecords.map { (PinnedTabs.workspaceID, $0.id) }
         let projectEntries: [(projectID: UUID, tabID: UUID)] = projects.flatMap { p in
             (workspaces[p.id]?.tabs ?? []).map { (p.id, $0.id) }
         }
         // Scratch tabs cycle last: the sidebar draws their section below the
         // projects.
         let scratchEntries: [(projectID: UUID, tabID: UUID)] = (scratchWorkspace?.tabs ?? []).map {
-            (ScratchTabs.projectID, $0.id)
+            (ScratchTabs.workspaceID, $0.id)
         }
         let allTabs = pinnedEntries + projectEntries + scratchEntries
         guard !allTabs.isEmpty else { return }
@@ -3085,12 +2960,12 @@ final class AppState {
             case .previous: (currentIndex - 1 + allTabs.count) % allTabs.count
             }
         let entry = allTabs[newIndex]
-        if entry.projectID == PinnedTabs.projectID {
+        if entry.projectID == PinnedTabs.workspaceID {
             // Loads an unloaded record and persists on its own.
             selectPinnedTab(entry.tabID)
             return
         }
-        if entry.projectID == ScratchTabs.projectID {
+        if entry.projectID == ScratchTabs.workspaceID {
             selectScratchTab(entry.tabID)
             return
         }
@@ -3114,14 +2989,14 @@ final class AppState {
     /// same two sources `selectTabByIndex` selects from. It is what bounds
     /// digit accumulation, so the two must keep counting the same things.
     func selectableTabCount(projectID: UUID) -> Int {
-        if projectID == PinnedTabs.projectID { return pinnedRecords.count }
+        if projectID == PinnedTabs.workspaceID { return pinnedRecords.count }
         return workspaces[projectID]?.tabs.count ?? 0
     }
 
     func selectTabByIndex(_ index: Int, projectID: UUID) {
         // Cmd+digit in the pinned workspace counts SIDEBAR rows (records,
         // unloaded included), matching what the user sees.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             guard pinnedRecords.indices.contains(index) else { return }
             selectPinnedTab(pinnedRecords[index].id)
             return
@@ -3335,7 +3210,7 @@ final class AppState {
         // the unload path tears the pane down itself — falling through to
         // removePane would destroy the surface first and leave unloadPinnedTab
         // double-tearing it (harmless but pointless).
-        if projectID == PinnedTabs.projectID, tab.splitRoot.allPanes().count <= 1 {
+        if projectID == PinnedTabs.workspaceID, tab.splitRoot.allPanes().count <= 1 {
             closeTab(tab.id, projectID: projectID)
             return
         }
@@ -3371,7 +3246,7 @@ final class AppState {
         let pane = workspaces[projectID]?.tabs
             .compactMap { $0.splitRoot.findPane(id: paneID) }
             .first
-        guard let pane, pane.isRemote, projectID != PinnedTabs.projectID else {
+        guard let pane, pane.isRemote, projectID != PinnedTabs.workspaceID else {
             paneProcessExited(paneID, projectID: projectID)
             return
         }
@@ -3410,17 +3285,7 @@ final class AppState {
         logger.info("applyLayout: project=\(project.name, privacy: .public)")
         let layout: LayoutFile
         do {
-            guard let file = try projectFiles.loadFull(
-                forProjectPath: project.path,
-                preferredSlug: ProjectSlug.slug(from: project.name)
-            )
-            else {
-                return LayoutFileError.noProjectFile(projectPath: project.path)
-            }
-            guard let bridged = file.layoutFile else {
-                return LayoutFileError.noTabs
-            }
-            layout = bridged
+            layout = try layoutFiles.layout(for: project)
         } catch {
             logger.error("applyLayout failed to load: \(error, privacy: .public)")
             return error
@@ -3485,51 +3350,23 @@ final class AppState {
     func saveLayout(project: Project, siblingProjects: [Project] = [], host: DialogHost = .mainWindow) -> Error? {
         logger.info("saveLayout: project=\(project.name, privacy: .public)")
         guard let ws = workspaces[project.id] else { return nil }
-        // Reserve the *other* same-directory projects' files so the save leaves
-        // them alone. Drop our own slug: a same-*name* sibling shares our slug
-        // and thus our file (last save wins — flagged below), so it must not
-        // reserve that file away from us.
-        let ownSlug = ProjectSlug.slug(from: project.name)
-        let reservedSlugs = sameDirectorySiblingSlugs(of: project, in: siblingProjects).subtracting([ownSlug])
         do {
             let layout = LayoutSerializer.layout(for: ws, projectName: project.name, projectRoot: project.path)
-            let target = try projectFiles.write(
-                ProjectFile(name: project.name, path: project.path, zmxPath: project.zmxPath, tabs: layout.tabs),
-                projectName: project.name,
-                reservedSlugs: reservedSlugs
-            )
+            let saved = try layoutFiles.save(layout, for: project, siblingProjects: siblingProjects)
             logger.info("saveLayout succeeded: tabs=\(ws.tabs.count, privacy: .public)")
-            // This is the app writing a project file — an open Projects
-            // settings pane must re-read the directory or it shows the
-            // pre-save state.
-            noteLayoutFilesChanged()
-            // A stray-*file* conflict (an unrelated file declares this path)
-            // takes priority over the shared-*project* notice — both raise
-            // a layout notice, so only surface the latter when the former
-            // stayed quiet.
-            if !presentSaveConflictIfNeeded(
-                project: project,
-                savedTo: target,
-                siblingProjects: siblingProjects,
-                host: host
-            ) {
-                presentSharedPathConflictIfNeeded(
-                    project: project,
-                    savedTo: target,
-                    siblingProjects: siblingProjects,
-                    host: host
-                )
+            if let conflict = saved.conflict {
+                presentLayoutSaveConflict(conflict, savedTo: saved.target, host: host)
             }
-            // Confirm the clean save only. Either conflict check above raises a
-            // dialog that says the file landed *and* what's wrong with it — a
-            // cheerful "Layout saved" stacked on top would undercut it.
+            // Confirm the clean save only. A conflict raises a dialog that
+            // says the file landed *and* what's wrong with it — a cheerful
+            // "Layout saved" stacked on top would undercut it.
             //
             // The subtitle is the full path, home-contracted: the projects
             // directory isn't somewhere the user necessarily has in mind, so a
             // bare filename doesn't tell them where to go look. `~` keeps it
             // readable (and keeps the username out of a screenshot).
             if pendingDialog == nil {
-                presentToast(String(localized: "Layout saved"), subtitle: ProjectPath.homeContracted(target.path))
+                presentToast(String(localized: "Layout saved"), subtitle: ProjectPath.homeContracted(saved.target.path))
             }
             return nil
         } catch {
@@ -3538,84 +3375,35 @@ final class AppState {
         }
     }
 
-    /// Slugs of the *other* projects that back `project`'s directory — the
-    /// layout files that are theirs, not this project's. Lets a save leave a
-    /// sibling's file alone, and tells a sibling's legitimate file apart from a
-    /// stray duplicate.
-    private func sameDirectorySiblingSlugs(of project: Project, in siblingProjects: [Project]) -> Set<String> {
-        Set(
-            siblingProjects
-                .filter { $0.id != project.id && ProjectPath.matches($0.path, project.path) }
-                .map { ProjectSlug.slug(from: $0.name) }
-        )
-    }
-
-    /// A save that lands next to *stray* files declaring the same path — ones
-    /// that are neither this project's own file nor a sibling project's — gets
-    /// a visible notice. The slug-preferring lookup ignores such strays (a
-    /// hand-authored copy, or an old file whose realign-delete failed), so warn
-    /// they exist rather than let them rot silently.
-    @discardableResult
-    private func presentSaveConflictIfNeeded(
-        project: Project,
+    private func presentLayoutSaveConflict(
+        _ conflict: LayoutFileService.SaveConflict,
         savedTo target: URL,
-        siblingProjects: [Project],
-        host: DialogHost
-    ) -> Bool {
-        let siblingSlugs = sameDirectorySiblingSlugs(of: project, in: siblingProjects)
-        let strays = projectFiles.matches(forProjectPath: project.path).filter { file in
-            let name = file.url.lastPathComponent
-            // The file we just wrote is not in conflict with itself, and a
-            // sibling project's own file is expected, not a stray.
-            guard name != target.lastPathComponent else { return false }
-            return !siblingSlugs.contains { ProjectSlug.owns(filename: name, slug: $0) }
-        }
-        guard !strays.isEmpty else { return false }
-        let names = strays.map { "“\($0.url.lastPathComponent)”" }.joined(separator: ", ")
-        presentLayoutError(
-            verb: .save,
-            message: String(localized: """
-            Macterm saved the layout to “\(target.lastPathComponent)”. These other files also \
-            declare the path of this project, and Macterm ignores them: \(names). \
-            Remove them or merge them in the projects folder.
-            """),
-            title: String(localized: "Layout saved with a conflict"),
-            host: host
-        )
-        return true
-    }
-
-    /// A directory can back several projects, and a project's layout file is
-    /// keyed by path **and** name-slug — so a same-path project whose name
-    /// yields the *same* slug writes to the very file this save just wrote, and
-    /// the last save silently wins. Flag exactly that pair: same canonical path
-    /// AND same slug. Same path but distinct names is fine — those resolve to
-    /// distinct slug files (`api.yaml` / `api-staging.yaml`) that load
-    /// independently and never overwrite each other.
-    private func presentSharedPathConflictIfNeeded(
-        project: Project,
-        savedTo target: URL,
-        siblingProjects: [Project],
         host: DialogHost
     ) {
-        let slug = ProjectSlug.slug(from: project.name)
-        let colliding = siblingProjects.filter {
-            $0.id != project.id
-                && ProjectPath.matches($0.path, project.path)
-                && ProjectSlug.slug(from: $0.name) == slug
+        switch conflict {
+        case let .strayFiles(names):
+            presentLayoutError(
+                verb: .save,
+                message: String(localized: """
+                Macterm saved the layout to “\(target.lastPathComponent)”. These other files also \
+                declare the path of this project, and Macterm ignores them: \(names). \
+                Remove them or merge them in the projects folder.
+                """),
+                title: String(localized: "Layout saved with a conflict"),
+                host: host
+            )
+        case let .sharedFile(names):
+            presentLayoutError(
+                verb: .save,
+                message: String(localized: """
+                \(names) share this folder and the layout file “\(target.lastPathComponent)” with this project. \
+                Your save replaced their layout. Each save replaces the one before. \
+                Give the projects different names to keep separate layout files.
+                """),
+                title: String(localized: "Layout file shared with another project"),
+                host: host
+            )
         }
-        guard !colliding.isEmpty else { return }
-        let names = colliding.map { "“\($0.name)”" }.joined(separator: ", ")
-        presentLayoutError(
-            verb: .save,
-            message: String(localized: """
-            \(names) share this folder and the layout file “\(target.lastPathComponent)” with this project. \
-            Your save replaced their layout. Each save replaces the one before. \
-            Give the projects different names to keep separate layout files.
-            """),
-            title: String(localized: "Layout file shared with another project"),
-            host: host
-        )
     }
 
     /// `saveLayout` + error presentation, mirroring `applyLayoutPresentingError`.
@@ -3671,7 +3459,7 @@ final class AppState {
             ws.tabs = newTabs
             ws.activeTabID = activeTabID
         } else {
-            workspaces[projectID] = Workspace(projectID: projectID, tabs: newTabs, activeTabID: activeTabID)
+            workspaces[projectID] = Workspace(id: projectID, tabs: newTabs, activeTabID: activeTabID)
         }
         activeProjectID = projectID
         saveWorkspaces()
@@ -3853,18 +3641,18 @@ final class AppState {
     private func stepProject(_ step: Int, projects: [Project]) {
         var slots = projects.map(\.id)
         if !pinnedRecords.isEmpty {
-            slots.insert(PinnedTabs.projectID, at: 0)
+            slots.insert(PinnedTabs.workspaceID, at: 0)
         }
         if hasScratchTabs {
-            slots.append(ScratchTabs.projectID)
+            slots.append(ScratchTabs.workspaceID)
         }
         guard slots.count > 1, let current = activeProjectID,
               let i = slots.firstIndex(of: current)
         else { return }
         let target = slots[(i + step + slots.count) % slots.count]
-        if target == PinnedTabs.projectID {
+        if target == PinnedTabs.workspaceID {
             selectPinnedProject()
-        } else if target == ScratchTabs.projectID {
+        } else if target == ScratchTabs.workspaceID {
             selectScratchTabs()
         } else if let project = projects.first(where: { $0.id == target }) {
             selectProject(project)
@@ -3943,16 +3731,16 @@ final class AppState {
         // The pinned workspace starts EMPTY — the path-taking init spawns an
         // initial tab, which nobody pinned. The scratch workspace too: a tab
         // there is one the user asked for.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             ensurePinnedWorkspace()
             return
         }
-        if projectID == ScratchTabs.projectID {
+        if projectID == ScratchTabs.workspaceID {
             ensureScratchWorkspace()
             return
         }
         if workspaces[projectID] == nil {
-            workspaces[projectID] = Workspace(projectID: projectID, projectPath: path)
+            workspaces[projectID] = Workspace(id: projectID, projectPath: path)
         }
     }
 }

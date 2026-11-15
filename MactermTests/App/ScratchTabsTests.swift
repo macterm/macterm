@@ -30,15 +30,15 @@ struct ScratchTabsTests {
         return p
     }
 
-    private var scratchID: UUID { ScratchTabs.projectID }
+    private var scratchID: UUID { ScratchTabs.workspaceID }
 
     // MARK: - Identity
 
     @Test
     func sentinel_is_not_the_pinned_one_and_both_are_synthetic() {
-        #expect(ScratchTabs.projectID != PinnedTabs.projectID)
+        #expect(ScratchTabs.workspaceID != PinnedTabs.workspaceID)
         #expect(Project.synthetic(for: scratchID)?.name == ScratchTabs.displayName)
-        #expect(Project.synthetic(for: PinnedTabs.projectID)?.name == PinnedTabs.displayName)
+        #expect(Project.synthetic(for: PinnedTabs.workspaceID)?.name == PinnedTabs.displayName)
         #expect(Project.synthetic(for: UUID()) == nil)
         #expect(Project.isSynthetic(scratchID))
         #expect(!Project.isSynthetic(UUID()))
@@ -50,7 +50,7 @@ struct ScratchTabsTests {
             #expect(ScratchTabs.reservesName(name), "\(name)")
             #expect(Project.reservesName(name), "\(name)")
         }
-        for name in ["", "Scratch Tabs 2", "Scratchy", "tabs", "Pinned Tabs", ScratchTabs.projectID.uuidString] {
+        for name in ["", "Scratch Tabs 2", "Scratchy", "tabs", "Pinned Tabs", ScratchTabs.workspaceID.uuidString] {
             #expect(!ScratchTabs.reservesName(name), "\(name)")
         }
         // The pinned name still goes through the shared test.

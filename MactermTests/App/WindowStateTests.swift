@@ -860,7 +860,7 @@ struct WindowStateTests {
         window.activeProjectID = q.id
         #expect(window.expandedProjects == [q.id], "only a change of project opens a section")
 
-        window.activeProjectID = PinnedTabs.projectID
+        window.activeProjectID = PinnedTabs.workspaceID
         #expect(window.expandedProjects == [q.id], "the pinned workspace has no section")
 
         state.removeProject(q.id)
@@ -1217,17 +1217,17 @@ struct WindowStateTests {
         state.ensurePinnedWorkspace()
         // Through AppState so the tabs get pinned records (selection is
         // record-aware), as Cmd+T's `createTab` does.
-        let first = try #require(state.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        let window = WindowState(activeProjectID: PinnedTabs.projectID)
+        let first = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        let window = WindowState(activeProjectID: PinnedTabs.workspaceID)
         state.registerWindow(window)
         state.noteKeyWindow(window)
-        window.activeTabIDs[PinnedTabs.projectID] = first
+        window.activeTabIDs[PinnedTabs.workspaceID] = first
 
-        let created = try #require(state.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
+        let created = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
 
-        #expect(state.selectedTab(for: PinnedTabs.projectID, in: window)?.id == created)
-        state.selectTab(first, projectID: PinnedTabs.projectID, in: window)
-        #expect(state.selectedTab(for: PinnedTabs.projectID, in: window)?.id == first)
+        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == created)
+        state.selectTab(first, projectID: PinnedTabs.workspaceID, in: window)
+        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == first)
     }
 
     @Test
@@ -1248,10 +1248,10 @@ struct WindowStateTests {
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         writer.ensurePinnedWorkspace()
-        let firstPinned = try #require(writer.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        _ = try #require(writer.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        writer.selectTab(firstPinned, projectID: PinnedTabs.projectID)
-        let w = WindowState(activeProjectID: PinnedTabs.projectID)
+        let firstPinned = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        _ = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        writer.selectTab(firstPinned, projectID: PinnedTabs.workspaceID)
+        let w = WindowState(activeProjectID: PinnedTabs.workspaceID)
         writer.registerWindow(w)
         writer.noteKeyWindow(w)
         writer.saveWorkspaces()
@@ -1266,14 +1266,14 @@ struct WindowStateTests {
         reader.noteKeyWindow(restored)
         reader.restoreWindows(adopting: restored)
 
-        #expect(restored.activeProjectID == PinnedTabs.projectID)
-        #expect(restored.activeTabIDs[PinnedTabs.projectID] == nil)
+        #expect(restored.activeProjectID == PinnedTabs.workspaceID)
+        #expect(restored.activeTabIDs[PinnedTabs.workspaceID] == nil)
         let pinned = try #require(reader.pinnedWorkspace)
         #expect(pinned.tabs.count == 2)
-        #expect(reader.selectedTab(for: PinnedTabs.projectID, in: restored)?.id == pinned.activeTabID)
+        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == pinned.activeTabID)
 
         let created = pinned.createTab(projectPath: "/tmp")
-        #expect(reader.selectedTab(for: PinnedTabs.projectID, in: restored)?.id == created.id)
+        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == created.id)
     }
 }
 

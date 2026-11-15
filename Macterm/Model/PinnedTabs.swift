@@ -12,7 +12,7 @@ enum PinnedTabs {
     /// panes' routing identity both key on it. Spelled as raw bytes (not a
     /// force-unwrapped `UUID(uuidString:)`) purely for the linter; this is
     /// `F1E0D0D0-0000-4000-8000-4D6163506E64`.
-    static let projectID = UUID(uuid: (
+    static let workspaceID = UUID(uuid: (
         0xF1, 0xE0, 0xD0, 0xD0, 0x00, 0x00, 0x40, 0x00,
         0x80, 0x00, 0x4D, 0x61, 0x63, 0x50, 0x6E, 0x64
     ))
@@ -63,7 +63,7 @@ enum PinnedTabs {
     /// `Project` (MainWindow's workspace view, global tab cycling, the CLI's
     /// project resolution). Never inserted into `ProjectStore`.
     static var project: Project {
-        Project(id: projectID, name: displayName, path: fallbackRoot)
+        Project(id: workspaceID, name: displayName, path: fallbackRoot)
     }
 }
 

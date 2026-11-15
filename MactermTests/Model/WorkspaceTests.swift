@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct WorkspaceTests {
     private func makeWorkspace() -> Workspace {
-        Workspace(projectID: UUID(), projectPath: "/tmp")
+        Workspace(id: UUID(), projectPath: "/tmp")
     }
 
     @Test
@@ -72,7 +72,7 @@ struct WorkspaceTests {
 
     @Test(arguments: [false, true])
     func createTab_stamps_remote_configuration_before_publishing_selection(focus: Bool) {
-        let ws = Workspace(projectID: UUID(), tabs: [], activeTabID: nil)
+        let ws = Workspace(id: UUID(), tabs: [], activeTabID: nil)
         let zmxPath = "/opt/custom/bin/zmx"
         var reportedPaths: [String?] = []
         ws.onActiveTabChanged = { reportedPaths.append(ws.activeTab?.focusedPane?.remoteZmxPath) }

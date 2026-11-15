@@ -413,8 +413,8 @@ struct CustomPaletteScopeTests {
         let (context, _, _) = try makeContext(files: [:])
         let state = context.appState
         state.selectPinnedProject()
-        _ = try #require(state.createTab(projectID: PinnedTabs.projectID, projectPath: PinnedTabs.fallbackRoot))
-        let before = state.workspaces[PinnedTabs.projectID]?.tabs.count
+        _ = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: PinnedTabs.fallbackRoot))
+        let before = state.workspaces[PinnedTabs.workspaceID]?.tabs.count
         CustomPaletteActions.perform(
             .run(command: "htop", in: .tab),
             operand: nil,
@@ -422,10 +422,10 @@ struct CustomPaletteScopeTests {
             appState: state,
             projects: context.projectStore.projects
         )
-        #expect(state.workspaces[PinnedTabs.projectID]?.tabs.count == before, "no new pinned tab")
-        let panes = try #require(state.workspaces[PinnedTabs.projectID]?.activeTab?.splitRoot.allPanes())
+        #expect(state.workspaces[PinnedTabs.workspaceID]?.tabs.count == before, "no new pinned tab")
+        let panes = try #require(state.workspaces[PinnedTabs.workspaceID]?.activeTab?.splitRoot.allPanes())
         #expect(panes.count == 2)
-        let pane = try #require(state.focusedPane(for: PinnedTabs.projectID))
+        let pane = try #require(state.focusedPane(for: PinnedTabs.workspaceID))
         #expect(pane.command == nil)
         #expect(pane.env?[CustomPaletteScript.commandVariable] == "htop")
         #expect(pane.env?["HOST"] == "a")

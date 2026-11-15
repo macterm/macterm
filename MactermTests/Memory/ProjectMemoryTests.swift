@@ -463,8 +463,8 @@ struct ProjectMemoryTests {
     @Test
     func memory_covers_projects_only() {
         #expect(ProjectMemory.covers(UUID()))
-        #expect(!ProjectMemory.covers(PinnedTabs.projectID))
-        #expect(!ProjectMemory.covers(ScratchTabs.projectID))
+        #expect(!ProjectMemory.covers(PinnedTabs.workspaceID))
+        #expect(!ProjectMemory.covers(ScratchTabs.workspaceID))
         #expect(!ProjectMemory.covers(QuickTerminalService.projectID))
         #expect(!ProjectMemory.covers(DesktopWidget.projectID))
     }

@@ -153,7 +153,7 @@ final class WindowState: Identifiable {
 
     /// The pinned workspace has no section to open.
     private func expandActiveProject() {
-        guard let activeProjectID, activeProjectID != PinnedTabs.projectID else { return }
+        guard let activeProjectID, activeProjectID != PinnedTabs.workspaceID else { return }
         expandedProjects.insert(activeProjectID)
     }
 }

@@ -6,7 +6,7 @@ import Testing
 struct LayoutSerializerTests {
     @Test
     func emits_tab_topology_with_direction_and_ratio() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/proj")
+        let ws = Workspace(id: UUID(), projectPath: "/proj")
         let (tree, _) = build(H(pane("a", projectPath: "/proj"), pane("b", projectPath: "/proj/sub"), ratio: 0.7))
         ws.tabs[0].splitRoot = tree
 
@@ -47,7 +47,7 @@ struct LayoutSerializerTests {
         // probe-cached remote foreground, so Save Layout captures a running
         // command with no local pid (the bug: it used to save an empty leaf).
         let root = "devbox:~/dev/api"
-        let ws = Workspace(projectID: UUID(), projectPath: root)
+        let ws = Workspace(id: UUID(), projectPath: root)
         let pane = Pane(projectPath: root, projectID: ws.projectID)
         pane.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
         ws.tabs[0].splitRoot = .pane(pane)
@@ -67,7 +67,7 @@ struct LayoutSerializerTests {
         // The probe reporting the session's shell means an idle prompt —
         // nothing to record, same as a local idle pane.
         let root = "devbox:~/dev/api"
-        let ws = Workspace(projectID: UUID(), projectPath: root)
+        let ws = Workspace(id: UUID(), projectPath: root)
         let pane = Pane(projectPath: root, projectID: ws.projectID)
         pane.applyRemoteForeground(RemoteForeground(comm: "-zsh", command: "-zsh"))
         ws.tabs[0].splitRoot = .pane(pane)
@@ -84,7 +84,7 @@ struct LayoutSerializerTests {
     func records_live_running_command_per_pane() {
         // Save records what the pane is *currently* running (its live foreground
         // command), not what it was spawned with.
-        let ws = Workspace(projectID: UUID(), projectPath: "/proj")
+        let ws = Workspace(id: UUID(), projectPath: "/proj")
         ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
 
         let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in "btop" })
@@ -99,7 +99,7 @@ struct LayoutSerializerTests {
     func omits_run_for_idle_pane() {
         // Pane idle at a prompt (no live command) → no run, even if it was
         // spawned with one.
-        let ws = Workspace(projectID: UUID(), projectPath: "/proj")
+        let ws = Workspace(id: UUID(), projectPath: "/proj")
         ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID, command: "btop"))
 
         let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in nil })
@@ -114,7 +114,7 @@ struct LayoutSerializerTests {
     func records_live_shell_when_pane_sits_in_one() {
         // A pane the user dropped into a non-default shell (e.g. `zsh` from `nu`)
         // saves that shell as `shell:`.
-        let ws = Workspace(projectID: UUID(), projectPath: "/proj")
+        let ws = Workspace(id: UUID(), projectPath: "/proj")
         ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
 
         let file = LayoutSerializer.layout(
@@ -136,7 +136,7 @@ struct LayoutSerializerTests {
     func omits_shell_when_pane_is_in_default_shell() {
         // Idle in the default login shell → no shell recorded (liveShell returns
         // nil for the default), so the layout stays portable.
-        let ws = Workspace(projectID: UUID(), projectPath: "/proj")
+        let ws = Workspace(id: UUID(), projectPath: "/proj")
         ws.tabs[0].splitRoot = .pane(Pane(projectPath: "/proj", projectID: ws.projectID))
 
         let file = LayoutSerializer.layout(
@@ -162,7 +162,7 @@ struct LayoutSerializerTests {
         let root = dir.path
         let store = ProjectFileStore(directoryURL: dir.appendingPathComponent("projects"))
 
-        let ws = Workspace(projectID: UUID(), projectPath: root)
+        let ws = Workspace(id: UUID(), projectPath: root)
         ws.tabs[0].splitRoot = .split(SplitBranch(
             direction: .vertical,
             ratio: 0.4,

@@ -1909,7 +1909,7 @@ struct AppStateTests {
         // Pre-seed a saved snapshot for the project: a single-pane workspace.
         let storeURL = dir.appendingPathComponent("workspaces.json")
         let store = WorkspaceStore(fileURL: storeURL)
-        let snapshotWS = Workspace(projectID: project.id, projectPath: dir.path)
+        let snapshotWS = Workspace(id: project.id, projectPath: dir.path)
         store.save(WorkspaceSerializer.snapshot([project.id: snapshotWS]))
 
         // And a central file declaring a different (two-pane) split.
@@ -2090,7 +2090,7 @@ struct AppStateTests {
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(a), focusedPaneID: a.id)
         let tabB = TerminalTab(id: UUID(), splitRoot: bTree, focusedPaneID: nil)
         let tabC = TerminalTab(id: UUID(), splitRoot: .pane(c), focusedPaneID: c.id)
-        let ws = Workspace(projectID: pid, tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
+        let ws = Workspace(id: pid, tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
 
         let warm = Set(AppState.panesToWarm(in: ws).map(\.id))
         // Active tab A's pane is NOT warmed (SwiftUI starts it); B's two + C are.
@@ -2104,7 +2104,7 @@ struct AppStateTests {
         let pid = UUID()
         let only = Pane(projectPath: "/p", projectID: pid)
         let tab = TerminalTab(id: UUID(), splitRoot: .pane(only), focusedPaneID: only.id)
-        let ws = Workspace(projectID: pid, tabs: [tab], activeTabID: tab.id)
+        let ws = Workspace(id: pid, tabs: [tab], activeTabID: tab.id)
         #expect(AppState.panesToWarm(in: ws).isEmpty)
     }
 

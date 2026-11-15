@@ -246,7 +246,6 @@ final class PaneSurface: Identifiable {
     }
 }
 
-
 /// What draws a surface. A pane has at most one surface for each host.
 enum SurfaceHost: Hashable {
     /// A main window, by its `WindowState.id`.

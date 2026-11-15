@@ -57,7 +57,7 @@ extension AppState {
                 focusedPaneID: planned.focusedPaneID,
                 customTitle: planned.title
             )
-            workspaces[project.id] = Workspace(projectID: project.id, tabs: [tab], activeTabID: tab.id)
+            workspaces[project.id] = Workspace(id: project.id, tabs: [tab], activeTabID: tab.id)
         }
 
         // The pinned half is added as a record with no live tab — exactly the

@@ -302,7 +302,9 @@ extension AppState {
         var respawned = false
         if let alive {
             for widget in desktopWidgets where ids.contains(widget.id) {
-                guard let pane = widget.pane, !alive.contains(pane.sessionName), SurfaceRegistry.shared.view(of: pane) == nil else { continue }
+                guard let pane = widget.pane, !alive.contains(pane.sessionName),
+                      SurfaceRegistry.shared.view(of: pane) == nil
+                else { continue }
                 logger.info("desktop widget \(widget.id.uuidString, privacy: .public): session gone; respawning")
                 widget.startOver()
                 respawned = true

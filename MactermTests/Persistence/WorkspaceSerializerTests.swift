@@ -13,7 +13,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_single_tab_single_pane_preserves_paths() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp/a")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp/a")
         let roundTripped = roundTrip([ws.projectID: ws])
         #expect(roundTripped.count == 1)
         #expect(roundTripped[0].tabs.count == 1)
@@ -30,7 +30,7 @@ struct WorkspaceSerializerTests {
         // directory. Snapshotted before its shell reports a cwd — the save
         // `createTab` makes — it must still come back in the worktree, under
         // the session name it was created with.
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp/app")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp/app")
         let tab = ws.createTab(projectPath: "/tmp/app-feature", sessionSlug: "app")
         let pane = try #require(tab.focusedPane)
 
@@ -44,7 +44,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_preserves_tab_and_workspace_ids() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let tabID = ws.tabs[0].id
         let roundTripped = roundTrip([ws.projectID: ws])
         #expect(roundTripped[0].projectID == ws.projectID)
@@ -53,7 +53,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_preserves_nested_topology() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"), ratio: 0.3), ratio: 0.4))
         ws.tabs[0].splitRoot = tree
 
@@ -80,7 +80,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_preserves_custom_title() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         ws.tabs[0].customTitle = "My Custom Title"
         let roundTripped = roundTrip([ws.projectID: ws])
         #expect(roundTripped[0].tabs[0].customTitle == "My Custom Title")
@@ -88,7 +88,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_preserves_active_tab_when_valid() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let second = ws.createTab(projectPath: "/tmp")
         ws.selectTab(second.id)
         let roundTripped = roundTrip([ws.projectID: ws])
@@ -98,7 +98,7 @@ struct WorkspaceSerializerTests {
     @Test
     func round_trip_falls_back_to_first_tab_when_active_missing() {
         // Simulate a corrupt snapshot where activeTabID doesn't match any tab.
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let snaps = WorkspaceSerializer.snapshot([ws.projectID: ws])
         var snap = snaps[0]
         snap = WorkspaceSnapshot(projectID: snap.projectID, activeTabID: UUID(), tabs: snap.tabs)
@@ -110,8 +110,8 @@ struct WorkspaceSerializerTests {
 
     @Test
     func restore_skips_workspaces_for_removed_projects() {
-        let kept = Workspace(projectID: UUID(), projectPath: "/tmp/a")
-        let dropped = Workspace(projectID: UUID(), projectPath: "/tmp/b")
+        let kept = Workspace(id: UUID(), projectPath: "/tmp/a")
+        let dropped = Workspace(id: UUID(), projectPath: "/tmp/b")
         let snaps = WorkspaceSerializer.snapshot([kept.projectID: kept, dropped.projectID: dropped])
         let restored = WorkspaceSerializer.restore(from: snaps, validIDs: [kept.projectID])
         #expect(restored.count == 1)
@@ -132,7 +132,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func snapshot_preserves_focused_pane_id() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let tab = ws.tabs[0]
         let (tree, ids) = build(H(pane("a"), pane("b")))
         tab.splitRoot = tree
@@ -143,7 +143,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_preserves_done_attention_state() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
             p.recordUserInteraction()
             p.markCommandRunning()
@@ -163,7 +163,7 @@ struct WorkspaceSerializerTests {
 
     /// A workspace whose one pane ended its progress run on an ERROR.
     private func failedWorkspace() -> Workspace {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
             p.recordUserInteraction()
             p.markCommandRunning()
@@ -193,7 +193,7 @@ struct WorkspaceSerializerTests {
             guard case let .pane(p) = root else { return nil }
             return p
         }
-        let passed = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let passed = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = passed.tabs[0].splitRoot {
             p.recordUserInteraction()
             p.markCommandRunning()
@@ -272,7 +272,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func round_trip_does_not_persist_idle_or_running() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
             // Idle stays idle.
             #expect(p.executionState == .idle)
@@ -285,7 +285,7 @@ struct WorkspaceSerializerTests {
 
     @Test
     func restore_done_is_cleared_by_acknowledge() {
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
             p.recordUserInteraction()
             p.markCommandRunning()
@@ -309,7 +309,7 @@ struct WorkspaceSerializerTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = WorkspaceStore(fileURL: tmp)
 
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let (tree, _) = build(H(pane("a"), pane("b")))
         ws.tabs[0].splitRoot = tree
 
@@ -439,7 +439,7 @@ struct WorkspaceSerializerTests {
         // cwd is a remote-filesystem path with no host prefix that would parse
         // as a bogus LOCAL dir and orphan the remote session.
         let spec = "devbox:~/dev/api"
-        let ws = Workspace(projectID: UUID(), projectPath: spec)
+        let ws = Workspace(id: UUID(), projectPath: spec)
         #expect(ws.tabs[0].splitRoot.allPanes().first?.isRemote == true)
 
         let snaps = WorkspaceSerializer.snapshot([ws.projectID: ws])
@@ -456,7 +456,7 @@ struct WorkspaceSerializerTests {
         // End-to-end: a restored remote pane must still be remote (drives the
         // ssh/zmx spawn path), not silently downgraded to a local shell.
         let spec = "user@host:/srv/app"
-        let ws = Workspace(projectID: UUID(), projectPath: spec)
+        let ws = Workspace(id: UUID(), projectPath: spec)
         let restored = roundTrip([ws.projectID: ws])
         let pane = restored.first?.tabs.first?.splitRoot.allPanes().first
         #expect(pane?.isRemote == true)
@@ -479,7 +479,7 @@ struct WorkspaceSerializerTests {
         #expect(store.load().workspaces.isEmpty) // present-but-undecodable → empty + latch
 
         // The next mutation's autosave must be refused, leaving the file intact.
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         store.save(WorkspaceSerializer.snapshot([ws.projectID: ws]))
 
         #expect(try Data(contentsOf: tmp) == garbage)
@@ -495,7 +495,7 @@ struct WorkspaceSerializerTests {
         let store = WorkspaceStore(fileURL: tmp) // absent file → clean load
         _ = store.load()
 
-        let ws = Workspace(projectID: UUID(), projectPath: "/tmp")
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         store.save(WorkspaceSerializer.snapshot([ws.projectID: ws]))
 
         #expect(FileManager.default.fileExists(atPath: tmp.path))
@@ -510,7 +510,7 @@ struct WorkspaceSerializerSessionIdentityTests {
         let projectID = UUID()
         let pane = Pane(projectPath: "/tmp/proj", projectID: projectID)
         let tab = TerminalTab(id: UUID(), splitRoot: .pane(pane), focusedPaneID: pane.id)
-        let ws = Workspace(projectID: projectID, tabs: [tab], activeTabID: tab.id)
+        let ws = Workspace(id: projectID, tabs: [tab], activeTabID: tab.id)
 
         let snapshots = WorkspaceSerializer.snapshot([projectID: ws])
         let restored = try #require(

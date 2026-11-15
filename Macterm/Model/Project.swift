@@ -73,8 +73,8 @@ extension Project {
     /// project's id.
     static func synthetic(for id: UUID) -> Project? {
         switch id {
-        case PinnedTabs.projectID: PinnedTabs.project
-        case ScratchTabs.projectID: ScratchTabs.project
+        case PinnedTabs.workspaceID: PinnedTabs.project
+        case ScratchTabs.workspaceID: ScratchTabs.project
         default: nil
         }
     }
