@@ -336,3 +336,50 @@ from v2client import Client
 Client("s1").wait_msg("state")
 PY
 }
+
+# Sends DA1 and appends to $2 if a reply came in $1 seconds.
+da1_probe() {
+  echo "printf '\033[c'; if IFS= read -r -s -t $1 -d c r; then echo ANSWERED >> $2; else echo TIMEOUT >> $2; fi"
+}
+
+# Waits until the file $1 has $2 lines, and prints them.
+wait_lines() {
+  local i=0
+  until [[ -f "$1" && $(wc -l < "$1") -ge $2 ]]; do
+    (( i++ < 100 )) || { echo "timed out waiting for $2 lines in $1"; return 1; }
+    sleep 0.1
+  done
+}
+
+@test "session: answers DA1 while no client is attached, also after a client left" {
+  "$ZMX" session da -- /bin/sh -c "$(da1_probe 5 "$RT/da"); read -r _; $(da1_probe 5 "$RT/da"); exec sleep 30"
+  wait_lines "$RT/da" 1
+  python3 - <<'PY'
+from v2client import Client
+c = Client("da")
+c.attach()
+c.wait_msg("state")
+c.close()
+c = Client("da")
+c.wait(lambda: c.control(), what="the hello")
+c.type("go\n")
+PY
+  wait_lines "$RT/da" 2
+  [ "$(tr '\n' ' ' < "$RT/da")" = "ANSWERED ANSWERED " ]
+}
+
+@test "session: leaves DA1 to the client while one is attached" {
+  "$ZMX" session da2 -- /bin/sh -c "read -r _; $(da1_probe 1 "$RT/da2"); exec sleep 30"
+  python3 - <<'PY' &
+from v2client import Client
+import time
+c = Client("da2")
+c.attach()
+c.wait_msg("state")
+c.type("go\n")
+time.sleep(5)
+PY
+  wait_lines "$RT/da2" 1
+  [ "$(cat "$RT/da2")" = TIMEOUT ]
+  kill %1 2>/dev/null || true
+}
