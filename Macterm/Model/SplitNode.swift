@@ -208,9 +208,9 @@ extension SplitNode {
     private func replacingPanes(_ replacement: (Pane) -> Pane) -> SplitNode {
         switch self {
         case let .pane(pane):
-            return .pane(replacement(pane))
+            .pane(replacement(pane))
         case let .split(branch):
-            return .split(branch.with(
+            .split(branch.with(
                 first: branch.first.replacingPanes(replacement),
                 second: branch.second.replacingPanes(replacement)
             ))
