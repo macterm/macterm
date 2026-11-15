@@ -70,9 +70,9 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    // Test
+    // Test. The schema's generator adds its tests below.
+    const test_step = b.step("test", "Run unit tests");
     {
-        const test_step = b.step("test", "Run unit tests");
         const test_module = b.addModule("test", .{
             .root_source_file = b.path("src/test.zig"),
             .target = target,
@@ -150,7 +150,7 @@ pub fn build(b: *std.Build) void {
 
         const schema_tests = b.addTest(.{ .root_module = schema_mod });
         // `zig build test` runs them with the server's tests.
-        b.top_level_steps.get("test").?.step.dependOn(&b.addRunArtifact(schema_tests).step);
+        test_step.dependOn(&b.addRunArtifact(schema_tests).step);
     }
 
     // Check for LSP integration

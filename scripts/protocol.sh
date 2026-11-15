@@ -53,14 +53,14 @@ trap 'rm -rf "$tmp"' EXIT
 
 if [[ "$release" == "true" ]]; then
   # The newest release tag whose tree has the metadata. The rolling `tip`
-  # tag is not a release.
+  # tag is not a release. The suffix rule sorts v1.2.0 above v1.2.0-beta.1.
   tag=""
   while read -r t; do
     if git cat-file -e "$t:$METADATA" 2>/dev/null; then
       tag="$t"
       break
     fi
-  done < <(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$')
+  done < <(git -c versionsort.suffix=-beta tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$')
   if [[ -z "$tag" ]]; then
     echo "protocol.sh: no release tag has $METADATA. The check against a release does not run."
     exit 0
