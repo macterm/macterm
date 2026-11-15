@@ -320,7 +320,7 @@ c.attach(tty=True)
 # The shell's own line editor is not line mode with echo off.
 first = c.wait_msg("tty_mode")
 assert not (first["canonical"] and not first["echo"]), first
-c.type("stty -echo icanon; printf 'noecho-%s\\n' 1\r")
+c.type("stty -echo icanon; sleep 2; printf 'noecho-%s\\n' 1\r")
 c.wait_output("noecho-1")
 c.wait(lambda: {"canonical": True, "echo": False} in [v["a"] for v in c.messages("tty_mode")], 10, "password mode")
 # A client that did not ask gets none.
