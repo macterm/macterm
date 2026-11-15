@@ -151,6 +151,10 @@ struct SplitLeafView: View {
     /// frozen program must not look live. A lost pane that shows a line of
     /// Macterm's only dims, so that the line stays legible.
     private var isObscured: Bool {
+        Self.obscures(pane, isNonLeaderMirror: isNonLeaderMirror)
+    }
+
+    static func obscures(_ pane: Pane, isNonLeaderMirror: Bool) -> Bool {
         isNonLeaderMirror || (pane.isRemoteLinkLost && !pane.showsRemoteLinkMessage)
     }
 

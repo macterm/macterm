@@ -28,7 +28,7 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     let name: String
-    private let surface: SurfaceChannelHost
+    private let surface: any PaneSessionHost
     private let hosts: RemoteHosts
     private var state = State.idle
     /// Tells a late answer from a current one.
@@ -41,7 +41,7 @@ final class RemotePaneDriver: PaneInputRoute {
     /// Input that a lost link refused, in order. It goes before `earlyInput`.
     private var undelivered = Data()
 
-    init(name: String, surface: SurfaceChannelHost, hosts: RemoteHosts = .shared) {
+    init(name: String, surface: any PaneSessionHost, hosts: RemoteHosts = .shared) {
         self.name = name
         self.surface = surface
         self.hosts = hosts
@@ -162,6 +162,7 @@ final class RemotePaneDriver: PaneInputRoute {
     /// The connection stopped: the pane dims and waits for a trigger.
     fileprivate func linkStopped() {
         if case .closed = state { return }
+        logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
         teardown()
         state = .waiting
         step(.lost)
@@ -258,9 +259,9 @@ final class RemotePaneDriver: PaneInputRoute {
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
         private let generation: Int
-        private let surface: SurfaceChannelHost
+        private let surface: any PaneSessionHost
 
-        init(driver: RemotePaneDriver, generation: Int, surface: SurfaceChannelHost) {
+        init(driver: RemotePaneDriver, generation: Int, surface: any PaneSessionHost) {
             self.driver = driver
             self.generation = generation
             self.surface = surface

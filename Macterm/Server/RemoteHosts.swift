@@ -514,7 +514,10 @@ final class RemoteHosts {
     /// comes back or stops again (an attach ran in between) unsets it.
     private func mark(_ panes: [Pane], lost: Bool, message: Bool = false) {
         for pane in panes {
-            if pane.isRemoteLinkLost != lost { pane.isRemoteLinkLost = lost }
+            if pane.isRemoteLinkLost != lost {
+                logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
+                pane.isRemoteLinkLost = lost
+            }
             let shows = lost && (message || pane.showsRemoteLinkMessage)
             if pane.showsRemoteLinkMessage != shows { pane.showsRemoteLinkMessage = shows }
         }

@@ -145,11 +145,19 @@ final class RemoteServers {
             watcher = Task { [weak self] in
                 await LinkHeartbeat.run(
                     ping: {
-                        _ = try await connection.call(MactermProtocol.Ping.self, .init())
-                        return true
+                        logger.info("link heartbeat: ping")
+                        do {
+                            _ = try await connection.call(MactermProtocol.Ping.self, .init())
+                            logger.info("link heartbeat: answered")
+                            return true
+                        } catch {
+                            logger.info("link heartbeat: failed: \(String(describing: error), privacy: .public)")
+                            throw error
+                        }
                     },
                     isOpen: { connection.isOpen }
                 )
+                logger.info("link heartbeat: link is dead, closing it")
                 self?.close()
             }
         }
