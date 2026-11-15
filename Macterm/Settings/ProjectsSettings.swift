@@ -27,6 +27,20 @@ struct ProjectsSettings: View {
     var body: some View {
         Form {
             Section {
+                SettingsInfoPanel(
+                    symbol: "folder",
+                    title: String(localized: "Projects"),
+                    caption: String(
+                        localized: """
+                        A project is a folder, on this Mac or on a remote machine. A layout is a file that says \
+                        which tabs, splits and commands a project has.
+                        """
+                    ),
+                    docs: .layouts
+                )
+            }
+
+            Section {
                 if projectStore.projects.isEmpty {
                     Text("No projects.")
                         .foregroundStyle(.secondary)
@@ -93,7 +107,7 @@ struct ProjectsSettings: View {
                 Text("Removing a layout deletes its file. The project stays.")
                     .settingsSecondaryText()
             } header: {
-                DocsSectionHeader("Layouts", docs: .layouts)
+                Text("Layouts")
             }
         }
         .formStyle(.grouped)

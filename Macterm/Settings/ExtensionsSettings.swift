@@ -38,6 +38,17 @@ struct ExtensionsSettings: View {
         )
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                SettingsInfoPanel(
+                    symbol: "puzzlepiece.extension",
+                    title: String(localized: "Extensions", comment: "Settings pane"),
+                    caption: String(
+                        localized: """
+                        An extension adds screens to the command palette, for example Git branches or Docker \
+                        containers. Install one from the list, or write your own.
+                        """
+                    ),
+                    docs: .extensionsSettings
+                )
                 HStack(spacing: 10) {
                     SettingsSearchField(text: $query, prompt: "Search extensions")
                     Picker(Self.filterLabel, selection: $filter) {
@@ -85,13 +96,6 @@ struct ExtensionsSettings: View {
                         Preferences.shared.autoUpdateExtensions = on
                         if on { Task { await appState.extensionAutoUpdater.runOnce() } }
                     }
-
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Extensions add screens to the command palette.")
-                        .settingsSecondaryText()
-                    Spacer()
-                    DocsLink(.extensionsSettings)
-                }
             }
             .padding(20)
         }

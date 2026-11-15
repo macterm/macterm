@@ -1669,17 +1669,25 @@ private struct QuickTerminalSettings: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent {
+                SettingsInfoPanel(
+                    symbol: "rectangle.bottomthird.inset.filled",
+                    title: String(localized: "Quick Terminal", comment: "Settings pane"),
+                    caption: String(
+                        localized: """
+                        A terminal that drops down over any app when you press its shortcut. Its shells keep \
+                        running when you quit Macterm.
+                        """
+                    ),
+                    docs: .quickTerminal
+                )
+            }
+
+            Section {
+                LabeledContent("Shortcut") {
                     Text(HotkeyRegistry.displayString(
                         for: HotkeyRegistry.selectedShortcutString(for: .toggleQuickTerminal)
                     ))
-                } label: {
-                    Text("Shortcut")
-                    Text("Works when Macterm is not the active app.")
-                        .settingsDescription()
                 }
-            } header: {
-                DocsSectionHeader("Quick Terminal", docs: .quickTerminal)
             }
 
             Section {

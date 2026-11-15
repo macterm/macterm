@@ -843,6 +843,22 @@
         }
       }
     },
+    "A project is a folder, on this Mac or on a remote machine. A layout is a file that says which tabs, splits and commands a project has." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트는 이 Mac 또는 원격 컴퓨터에 있는 폴더입니다. 레이아웃은 프로젝트에 어떤 탭, 분할 화면, 명령이 있는지 정하는 파일입니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目是这台 Mac 或远程机器上的一个文件夹。布局是一个文件，用来指定项目有哪些标签页、分屏和命令。"
+          }
+        }
+      }
+    },
     "A remote project cannot open a directory on this Mac" : {
       "localizations" : {
         "ko" : {
@@ -891,18 +907,34 @@
         }
       }
     },
-    "A widget is a terminal on your desktop." : {
+    "A terminal that drops down over any app when you press its shortcut. Its shells keep running when you quit Macterm." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "위젯은 데스크탑에 있는 터미널입니다."
+            "value" : "단축키를 누르면 모든 앱 위로 내려오는 터미널입니다. Macterm을 종료해도 셸은 계속 실행됩니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "小组件是桌面上的终端。"
+            "value" : "按下快捷键后，会在任何 App 上方落下的终端。退出 Macterm 后，它的 shell 仍会继续运行。"
+          }
+        }
+      }
+    },
+    "A widget is a terminal on your desktop, in the grid of the system widgets. Its shell keeps running when you quit Macterm." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위젯은 시스템 위젯의 격자 안에 있는 데스크탑 터미널입니다. Macterm을 종료해도 셸은 계속 실행됩니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小组件是桌面上的终端，位于系统小组件的网格中。退出 Macterm 后，它的 shell 仍会继续运行。"
           }
         }
       }
@@ -1262,6 +1294,22 @@
         }
       }
     },
+    "An extension adds screens to the command palette, for example Git branches or Docker containers. Install one from the list, or write your own." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램은 명령 팔레트에 화면을 추가합니다. 예를 들어 Git 브랜치나 Docker 컨테이너가 있습니다. 목록에서 설치하거나 직접 만들 수 있습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扩展会向命令面板添加屏幕，例如 Git 分支或 Docker 容器。你可以从列表中安装，也可以自己编写。"
+          }
+        }
+      }
+    },
     "An update is available. Click to install." : {
       "localizations" : {
         "ko" : {
@@ -1489,18 +1537,18 @@
         }
       }
     },
-    "Asks for Touch ID, or your login password, before it fills in or shows a saved password. Macterm stores passwords in your login keychain." : {
+    "Asks for Touch ID, or your login password, before it fills in or shows a saved password." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "저장된 암호를 입력하거나 표시하기 전에 Touch ID 또는 로그인 암호를 요청합니다. Macterm은 암호를 로그인 키체인에 저장합니다."
+            "value" : "저장된 암호를 입력하거나 표시하기 전에 Touch ID 또는 로그인 암호를 요청합니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在填充或显示已存储的密码之前，要求 Touch ID 或你的登录密码。Macterm 将密码存储在你的登录钥匙串中。"
+            "value" : "在填充或显示已存储的密码之前，要求 Touch ID 或你的登录密码。"
           }
         }
       }
@@ -3225,22 +3273,6 @@
         }
       }
     },
-    "Extensions add screens to the command palette." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "확장 프로그램은 명령 팔레트에 화면을 추가합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "扩展会向命令面板添加屏幕。"
-          }
-        }
-      }
-    },
     "Extensions updated" : {
       "localizations" : {
         "ko" : {
@@ -4937,6 +4969,22 @@
         }
       }
     },
+    "Macterm offers to save a password that you type at a password prompt, and fills it in the next time. It keeps passwords in your login keychain." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호 프롬프트에 입력한 암호를 저장하도록 제안하고, 다음에 자동으로 입력합니다. 암호는 로그인 키체인에 보관됩니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 会提议保存你在密码提示处输入的密码，并在下次自动填充。密码保存在你的登录钥匙串中。"
+          }
+        }
+      }
+    },
     "Macterm removes the password for “%@” from your keychain." : {
       "localizations" : {
         "ko" : {
@@ -6304,22 +6352,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭时只读取屏幕上的文本。"
-          }
-        }
-      }
-    },
-    "Offers to save a password that you type at a password prompt after it works, and fills it in the next time that the prompt appears." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "암호 프롬프트에 입력한 암호가 작동하면 저장을 제안하고, 다음에 그 프롬프트가 나타나면 자동으로 입력합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你在密码提示符处输入的密码生效后，提供存储它的选项，并在下次出现该提示符时填充它。"
           }
         }
       }
@@ -11679,22 +11711,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工作目录"
-          }
-        }
-      }
-    },
-    "Works when Macterm is not the active app." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Macterm이 활성 앱이 아닐 때도 작동합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Macterm 不是活跃 App 时也可使用。"
           }
         }
       }
