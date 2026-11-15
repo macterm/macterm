@@ -10,16 +10,23 @@
 //! never sees half of a change (out of memory is the one exception). Inputs are copied into the
 //! model's arena, so a caller keeps its own memory.
 //!
-//! The model never grows smaller while it runs: a changed list or a removed
-//! tab leaves its old memory in the arena. An edit costs some bytes. The
-//! server loads the file again when it starts, and that gives a clean arena.
+//! A changed list or a removed tab leaves its old memory in the arena, so
+//! each edit costs some bytes. `compact` copies the model into a new arena
+//! and frees the old one; `file.save` calls it, so the memory follows the
+//! size of the model and not the count of edits.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tree = @import("tree.zig");
+const ids = @import("ids.zig");
 
 pub const Node = tree.Node;
 pub const Pane = tree.Pane;
+pub const ProjectId = ids.ProjectId;
+pub const WorkspaceId = ids.WorkspaceId;
+pub const TabId = ids.TabId;
+pub const PaneId = ids.PaneId;
+pub const SplitId = ids.SplitId;
 
 /// The version of the file that this build writes (design/010 §2).
 pub const version: u32 = 1;
@@ -27,7 +34,7 @@ pub const version: u32 = 1;
 pub const Kind = enum { project, pinned, scratch, quick, widget };
 
 pub const Project = struct {
-    id: []const u8,
+    id: ProjectId,
     name: []const u8,
     /// A local path, or `user@host:dir`.
     path: []const u8,
@@ -38,24 +45,24 @@ pub const Project = struct {
 };
 
 pub const Tab = struct {
-    id: []const u8,
+    id: TabId,
     custom_title: ?[]const u8 = null,
     root: Node,
-    focused: ?[]const u8 = null,
+    focused: ?PaneId = null,
 };
 
 pub const Workspace = struct {
     /// For a `project` workspace, the project's id. Any other kind has an
     /// id of its own (the fixed ids of the pinned and the scratch workspace,
     /// a widget's id).
-    id: []const u8,
+    id: WorkspaceId,
     kind: Kind,
     tabs: []Tab = &.{},
-    active_tab: ?[]const u8 = null,
+    active_tab: ?TabId = null,
 };
 
 pub const Selection = struct {
-    active_project: ?[]const u8 = null,
+    active_project: ?ProjectId = null,
 };
 
 /// What `model.json` holds.
@@ -80,33 +87,45 @@ pub const Error = error{
 };
 
 /// The most recent ids first, with no duplicates.
-const Recency = struct {
-    items: std.ArrayList([]const u8) = .empty,
-    limit: usize,
+fn Recency(comptime Id: type) type {
+    return struct {
+        items: std.ArrayList(Id) = .empty,
+        limit: usize,
 
-    fn push(r: *Recency, a: Allocator, id: []const u8) Error!void {
-        r.remove(id);
-        try r.items.insert(a, 0, id);
-        if (r.items.items.len > r.limit) r.items.shrinkRetainingCapacity(r.limit);
-    }
+        const Self = @This();
 
-    fn remove(r: *Recency, id: []const u8) void {
-        var i: usize = 0;
-        while (i < r.items.items.len) {
-            if (std.mem.eql(u8, r.items.items[i], id)) _ = r.items.orderedRemove(i) else i += 1;
+        fn push(r: *Self, a: Allocator, id: Id) Error!void {
+            r.remove(id);
+            try r.items.insert(a, 0, id);
+            if (r.items.items.len > r.limit) r.items.shrinkRetainingCapacity(r.limit);
         }
-    }
 
-    /// Takes the newest id for which `valid` holds, and drops the ids that it
-    /// passed.
-    fn popValid(r: *Recency, ctx: anytype, valid: anytype) ?[]const u8 {
-        while (r.items.items.len > 0) {
-            const top = r.items.orderedRemove(0);
-            if (valid(ctx, top)) return top;
+        fn remove(r: *Self, id: Id) void {
+            var i: usize = 0;
+            while (i < r.items.items.len) {
+                if (r.items.items[i].eql(id)) _ = r.items.orderedRemove(i) else i += 1;
+            }
         }
-        return null;
-    }
-};
+
+        /// Takes the newest id for which `valid` holds, and drops the ids
+        /// that it passed.
+        fn popValid(r: *Self, ctx: anytype, valid: anytype) ?Id {
+            while (r.items.items.len > 0) {
+                const top = r.items.orderedRemove(0);
+                if (valid(ctx, top)) return top;
+            }
+            return null;
+        }
+
+        /// A copy in `a`, with every id copied.
+        fn clone(r: Self, a: Allocator) Allocator.Error!Self {
+            var out: Self = .{ .limit = r.limit };
+            try out.items.ensureTotalCapacityPrecise(a, r.items.items.len);
+            for (r.items.items) |id| out.items.appendAssumeCapacity(try id.dupe(a));
+            return out;
+        }
+    };
+}
 
 pub const pane_history_limit = 20;
 pub const tab_history_limit = 50;
@@ -117,11 +136,11 @@ pub const Model = struct {
     arena: std.heap.ArenaAllocator,
     data: Data = .{},
     /// Tab id to its zoomed pane id.
-    zoomed: std.StringHashMapUnmanaged([]const u8) = .empty,
+    zoomed: ids.Map(TabId, PaneId) = .empty,
     /// Tab id to its earlier focus, newest first (design/010 §1).
-    pane_history: std.StringHashMapUnmanaged(Recency) = .empty,
+    pane_history: ids.Map(TabId, Recency(PaneId)) = .empty,
     /// Workspace id to its earlier active tabs, newest first.
-    tab_history: std.StringHashMapUnmanaged(Recency) = .empty,
+    tab_history: ids.Map(WorkspaceId, Recency(TabId)) = .empty,
 
     pub fn init(gpa: Allocator) Model {
         return .{ .arena = .init(gpa) };
@@ -136,69 +155,85 @@ pub const Model = struct {
         return m.arena.allocator();
     }
 
+    /// Copies the model, the zoom and the histories included, into a new
+    /// arena, and frees the old one. Every pointer and slice into the model
+    /// is invalid after it, the panes that `closeTab` and the other
+    /// operations return included. Out of memory leaves the model as it was.
+    pub fn compact(m: *Model) Allocator.Error!void {
+        var fresh: std.heap.ArenaAllocator = .init(m.arena.child_allocator);
+        errdefer fresh.deinit();
+        const a = fresh.allocator();
+        const data = try cloneData(a, m.data);
+        var zoomed: ids.Map(TabId, PaneId) = .empty;
+        var it = m.zoomed.iterator();
+        while (it.next()) |e| try zoomed.put(a, try e.key_ptr.dupe(a), try e.value_ptr.dupe(a));
+        const pane_history = try cloneHistory(TabId, PaneId, a, m.pane_history);
+        const tab_history = try cloneHistory(WorkspaceId, TabId, a, m.tab_history);
+        m.arena.deinit();
+        m.* = .{
+            .arena = fresh,
+            .data = data,
+            .zoomed = zoomed,
+            .pane_history = pane_history,
+            .tab_history = tab_history,
+        };
+    }
+
     // ── Lookup ──────────────────────────────────────────────────────────────
 
     const TabLoc = struct { ws: *Workspace, index: usize };
 
-    pub fn findProject(m: *const Model, id: []const u8) ?*Project {
-        for (m.data.projects) |*p| if (std.mem.eql(u8, p.id, id)) return p;
+    pub fn findProject(m: *const Model, id: ProjectId) ?*Project {
+        for (m.data.projects) |*p| if (p.id.eql(id)) return p;
         return null;
     }
 
-    pub fn findWorkspace(m: *const Model, id: []const u8) ?*Workspace {
-        for (m.data.workspaces) |*w| if (std.mem.eql(u8, w.id, id)) return w;
+    pub fn findWorkspace(m: *const Model, id: WorkspaceId) ?*Workspace {
+        for (m.data.workspaces) |*w| if (w.id.eql(id)) return w;
         return null;
     }
 
-    fn locateTab(m: *const Model, tab_id: []const u8) ?TabLoc {
+    fn locateTab(m: *const Model, tab_id: TabId) ?TabLoc {
         for (m.data.workspaces) |*w| {
-            for (w.tabs, 0..) |t, i| if (std.mem.eql(u8, t.id, tab_id)) return .{ .ws = w, .index = i };
+            for (w.tabs, 0..) |t, i| if (t.id.eql(tab_id)) return .{ .ws = w, .index = i };
         }
         return null;
     }
 
-    pub fn findTab(m: *const Model, tab_id: []const u8) ?*Tab {
+    pub fn findTab(m: *const Model, tab_id: TabId) ?*Tab {
         const loc = m.locateTab(tab_id) orelse return null;
         return &loc.ws.tabs[loc.index];
     }
 
     /// The tab that holds pane `pane_id`.
-    pub fn findPaneTab(m: *const Model, pane_id: []const u8) ?*Tab {
+    pub fn findPaneTab(m: *const Model, pane_id: PaneId) ?*Tab {
         for (m.data.workspaces) |*w| {
             for (w.tabs) |*t| if (tree.contains(&t.root, pane_id)) return t;
         }
         return null;
     }
 
-    pub fn findPane(m: *const Model, pane_id: []const u8) ?*const Pane {
+    pub fn findPane(m: *const Model, pane_id: PaneId) ?*const Pane {
         const t = m.findPaneTab(pane_id) orelse return null;
         return tree.findPane(&t.root, pane_id);
     }
 
     /// The workspace that holds tab `tab_id`.
-    pub fn workspaceOfTab(m: *const Model, tab_id: []const u8) ?*Workspace {
+    pub fn workspaceOfTab(m: *const Model, tab_id: TabId) ?*Workspace {
         return (m.locateTab(tab_id) orelse return null).ws;
     }
 
-    pub fn zoomedPane(m: *const Model, tab_id: []const u8) ?[]const u8 {
+    pub fn zoomedPane(m: *const Model, tab_id: TabId) ?PaneId {
         return m.zoomed.get(tab_id);
     }
 
     /// True when a pane or a split has this id. Panes and splits share one
     /// namespace, as `validate` checks it.
-    fn nodeIdInUse(m: *const Model, id: []const u8) bool {
-        return m.paneInUse(id) or m.splitInUse(id);
-    }
-
-    fn splitInUse(m: *const Model, id: []const u8) bool {
+    fn nodeIdInUse(m: *const Model, text: []const u8) bool {
         for (m.data.workspaces) |*w| {
-            for (w.tabs) |*t| if (tree.findSplit(&t.root, id) != null) return true;
+            for (w.tabs) |*t| if (tree.hasNodeId(&t.root, text)) return true;
         }
         return false;
-    }
-
-    fn paneInUse(m: *const Model, id: []const u8) bool {
-        return m.findPaneTab(id) != null;
     }
 
     /// Fails with `DuplicateId` when a pane or a split of `node` has an id
@@ -219,15 +254,15 @@ pub const Model = struct {
         ignoring: ?*const Node,
     ) Error!void {
         const id = switch (node.*) {
-            .pane => |p| p.id,
-            .split => |s| s.id,
+            .pane => |p| p.id.text,
+            .split => |s| s.id.text,
         };
         if (id.len == 0) return error.BadRequest;
         const gop = try seen.getOrPut(a, id);
         if (gop.found_existing) return error.DuplicateId;
         // An id that the model has is fresh only inside `ignoring` (the tree
         // that this one replaces).
-        if (m.nodeIdInUse(id) and (ignoring == null or !(tree.contains(ignoring.?, id) or tree.findSplit(ignoring.?, id) != null))) {
+        if (m.nodeIdInUse(id) and (ignoring == null or !tree.hasNodeId(ignoring.?, id))) {
             return error.DuplicateId;
         }
         switch (node.*) {
@@ -245,10 +280,10 @@ pub const Model = struct {
     /// Adds a project and its workspace (kind `project`, the same id).
     pub fn addProject(m: *Model, p: Project) Error!void {
         const a = m.alloc();
-        if (p.id.len == 0) return error.BadRequest;
-        if (m.findProject(p.id) != null or m.findWorkspace(p.id) != null) return error.DuplicateId;
+        if (p.id.isEmpty()) return error.BadRequest;
+        if (m.findProject(p.id) != null or m.findWorkspace(.ofProject(p.id)) != null) return error.DuplicateId;
         const copy: Project = .{
-            .id = try a.dupe(u8, p.id),
+            .id = try p.id.dupe(a),
             .name = try a.dupe(u8, p.name),
             .path = try a.dupe(u8, p.path),
             .color = if (p.color) |c| try a.dupe(u8, c) else null,
@@ -256,43 +291,44 @@ pub const Model = struct {
             .created_at = p.created_at,
         };
         const projects = try appendOne(Project, a, m.data.projects, copy);
-        const workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = copy.id, .kind = .project });
+        const workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = .ofProject(copy.id), .kind = .project });
         m.data.projects = projects;
         m.data.workspaces = workspaces;
     }
 
     /// Adds a workspace that is not a project's: pinned, scratch, quick or
     /// widget.
-    pub fn addWorkspace(m: *Model, id: []const u8, kind: Kind) Error!void {
+    pub fn addWorkspace(m: *Model, id: WorkspaceId, kind: Kind) Error!void {
         const a = m.alloc();
-        if (kind == .project or id.len == 0) return error.BadRequest;
-        if (m.findWorkspace(id) != null or m.findProject(id) != null) return error.DuplicateId;
-        m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = try a.dupe(u8, id), .kind = kind });
+        if (kind == .project or id.isEmpty()) return error.BadRequest;
+        if (m.findWorkspace(id) != null or m.findProject(.of(id.text)) != null) return error.DuplicateId;
+        m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = try id.dupe(a), .kind = kind });
     }
 
     /// Removes a project and its workspace. Returns the panes that left the
     /// model (the caller ends their sessions).
-    pub fn removeProject(m: *Model, id: []const u8) Error![]const Pane {
+    pub fn removeProject(m: *Model, id: ProjectId) Error![]const Pane {
         const a = m.alloc();
+        const ws_id: WorkspaceId = .ofProject(id);
         const pi = indexOf(Project, m.data.projects, id) orelse return error.NotFound;
-        const wi = indexOf(Workspace, m.data.workspaces, id) orelse return error.NotFound;
+        const wi = indexOf(Workspace, m.data.workspaces, ws_id) orelse return error.NotFound;
         var gone: std.ArrayList(Pane) = .empty;
         for (m.data.workspaces[wi].tabs) |*t| try appendPanes(a, &t.root, &gone);
         for (m.data.workspaces[wi].tabs) |t| m.forgetTab(t.id);
-        _ = m.tab_history.remove(id);
+        _ = m.tab_history.remove(ws_id);
         m.data.projects = try removeAt(Project, a, m.data.projects, pi);
         m.data.workspaces = try removeAt(Workspace, a, m.data.workspaces, wi);
         if (m.data.selection.active_project) |sel| {
-            if (std.mem.eql(u8, sel, id)) m.data.selection.active_project = null;
+            if (sel.eql(id)) m.data.selection.active_project = null;
         }
         return gone.items;
     }
 
-    pub fn selectProject(m: *Model, id: ?[]const u8) Error!void {
+    pub fn selectProject(m: *Model, id: ?ProjectId) Error!void {
         const a = m.alloc();
         if (id) |wanted| {
             if (m.findProject(wanted) == null) return error.NotFound;
-            m.data.selection.active_project = try a.dupe(u8, wanted);
+            m.data.selection.active_project = try wanted.dupe(a);
         } else {
             m.data.selection.active_project = null;
         }
@@ -306,8 +342,8 @@ pub const Model = struct {
     /// active tab.
     pub fn createTab(
         m: *Model,
-        ws_id: []const u8,
-        tab_id: []const u8,
+        ws_id: WorkspaceId,
+        tab_id: TabId,
         index: ?usize,
         root: Node,
         title: ?[]const u8,
@@ -315,12 +351,12 @@ pub const Model = struct {
     ) Error!void {
         const a = m.alloc();
         const ws = m.findWorkspace(ws_id) orelse return error.NotFound;
-        if (tab_id.len == 0) return error.BadRequest;
-        if (m.locateTab(tab_id) != null or m.findWorkspace(tab_id) != null) return error.DuplicateId;
+        if (tab_id.isEmpty()) return error.BadRequest;
+        if (m.locateTab(tab_id) != null or m.findWorkspace(.of(tab_id.text)) != null) return error.DuplicateId;
         try m.checkFreshIds(&root, null);
         var copy = try tree.clone(a, root);
         const tab: Tab = .{
-            .id = try a.dupe(u8, tab_id),
+            .id = try tab_id.dupe(a),
             .custom_title = if (title) |t| try a.dupe(u8, t) else null,
             .root = copy,
             .focused = tree.firstPane(&copy).id,
@@ -331,7 +367,7 @@ pub const Model = struct {
     }
 
     /// Closes a tab. Returns its panes: they left the model.
-    pub fn closeTab(m: *Model, tab_id: []const u8) Error![]const Pane {
+    pub fn closeTab(m: *Model, tab_id: TabId) Error![]const Pane {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
         var gone: std.ArrayList(Pane) = .empty;
@@ -349,7 +385,7 @@ pub const Model = struct {
         ws.tabs = try removeAt(Tab, a, ws.tabs, loc.index);
         m.forgetTab(id);
         if (m.tab_history.getPtr(ws.id)) |h| h.remove(id);
-        const was_active = ws.active_tab != null and std.mem.eql(u8, ws.active_tab.?, id);
+        const was_active = ws.active_tab != null and ws.active_tab.?.eql(id);
         if (!was_active) return;
         if (m.tab_history.getPtr(ws.id)) |h| {
             if (h.popValid(ws, wsHasTab)) |prev| {
@@ -360,20 +396,20 @@ pub const Model = struct {
         ws.active_tab = if (ws.tabs.len > 0) ws.tabs[ws.tabs.len - 1].id else null;
     }
 
-    fn wsHasTab(ws: *const Workspace, id: []const u8) bool {
-        for (ws.tabs) |t| if (std.mem.eql(u8, t.id, id)) return true;
+    fn wsHasTab(ws: *const Workspace, id: TabId) bool {
+        for (ws.tabs) |t| if (t.id.eql(id)) return true;
         return false;
     }
 
-    fn forgetTab(m: *Model, id: []const u8) void {
+    fn forgetTab(m: *Model, id: TabId) void {
         _ = m.zoomed.remove(id);
         _ = m.pane_history.remove(id);
     }
 
-    fn activate(m: *Model, ws: *Workspace, tab_id: []const u8) Error!void {
+    fn activate(m: *Model, ws: *Workspace, tab_id: TabId) Error!void {
         const a = m.alloc();
         if (ws.active_tab) |cur| {
-            if (!std.mem.eql(u8, cur, tab_id)) {
+            if (!cur.eql(tab_id)) {
                 const gop = try m.tab_history.getOrPut(a, ws.id);
                 if (!gop.found_existing) gop.value_ptr.* = .{ .limit = tab_history_limit };
                 try gop.value_ptr.push(a, cur);
@@ -382,25 +418,25 @@ pub const Model = struct {
         ws.active_tab = tab_id;
     }
 
-    pub fn selectTab(m: *Model, ws_id: []const u8, tab_id: []const u8) Error!void {
+    pub fn selectTab(m: *Model, ws_id: WorkspaceId, tab_id: TabId) Error!void {
         const ws = m.findWorkspace(ws_id) orelse return error.NotFound;
         if (!wsHasTab(ws, tab_id)) return error.NotFound;
         try m.activate(ws, ws.tabs[tabIndex(ws, tab_id)].id);
     }
 
-    fn tabIndex(ws: *const Workspace, id: []const u8) usize {
-        for (ws.tabs, 0..) |t, i| if (std.mem.eql(u8, t.id, id)) return i;
+    fn tabIndex(ws: *const Workspace, id: TabId) usize {
+        for (ws.tabs, 0..) |t, i| if (t.id.eql(id)) return i;
         unreachable;
     }
 
-    pub fn renameTab(m: *Model, tab_id: []const u8, title: ?[]const u8) Error!void {
+    pub fn renameTab(m: *Model, tab_id: TabId, title: ?[]const u8) Error!void {
         const a = m.alloc();
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         tab.custom_title = if (title) |t| try a.dupe(u8, t) else null;
     }
 
     /// Moves a tab inside its workspace to `index` (clamped).
-    pub fn reorderTab(m: *Model, tab_id: []const u8, index: usize) Error!void {
+    pub fn reorderTab(m: *Model, tab_id: TabId, index: usize) Error!void {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
         const tab = loc.ws.tabs[loc.index];
@@ -410,7 +446,7 @@ pub const Model = struct {
 
     /// Moves a tab to another workspace (pinned and scratch included) and
     /// selects it there. Its panes keep their sessions.
-    pub fn moveTab(m: *Model, tab_id: []const u8, to_ws: []const u8, index: ?usize) Error!void {
+    pub fn moveTab(m: *Model, tab_id: TabId, to_ws: WorkspaceId, index: ?usize) Error!void {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
         const dst = m.findWorkspace(to_ws) orelse return error.NotFound;
@@ -437,10 +473,10 @@ pub const Model = struct {
     /// tab is even after the split.
     pub fn splitPane(
         m: *Model,
-        tab_id: []const u8,
-        target: []const u8,
+        tab_id: TabId,
+        target: PaneId,
         new_pane: Pane,
-        split_id: []const u8,
+        split_id: SplitId,
         dir: tree.Dir,
         position: tree.Position,
         ratio: ?f64,
@@ -450,12 +486,12 @@ pub const Model = struct {
         const a = m.alloc();
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         if (!tree.contains(&tab.root, target)) return error.NotFound;
-        if (new_pane.id.len == 0 or split_id.len == 0) return error.BadRequest;
+        if (new_pane.id.isEmpty() or split_id.isEmpty()) return error.BadRequest;
         if (new_pane.session.len == 0) return error.BadRequest;
-        if (std.mem.eql(u8, new_pane.id, split_id)) return error.DuplicateId;
-        if (m.nodeIdInUse(new_pane.id) or m.nodeIdInUse(split_id)) return error.DuplicateId;
+        if (std.mem.eql(u8, new_pane.id.text, split_id.text)) return error.DuplicateId;
+        if (m.nodeIdInUse(new_pane.id.text) or m.nodeIdInUse(split_id.text)) return error.DuplicateId;
         const pane = try tree.clonePane(a, new_pane);
-        const sid = try a.dupe(u8, split_id);
+        const sid = try split_id.dupe(a);
         _ = try tree.insertBeside(a, &tab.root, target, .{ .pane = pane }, sid, dir, position);
         if (ratio) |r| _ = tree.setRatio(&tab.root, sid, r);
         if (rebalance) tree.rebalance(&tab.root);
@@ -468,7 +504,7 @@ pub const Model = struct {
     /// Closes pane `pane_id`. The last pane of a tab closes the tab. The
     /// next focus is the newest earlier focus that is still in the tab, else
     /// the first pane. With `rebalance`, every ratio is even after.
-    pub fn closePane(m: *Model, pane_id: []const u8, rebalance: bool) Error!CloseResult {
+    pub fn closePane(m: *Model, pane_id: PaneId, rebalance: bool) Error!CloseResult {
         const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
         if (tree.paneCount(&tab.root) <= 1) {
             _ = try m.closeTab(tab.id);
@@ -481,7 +517,7 @@ pub const Model = struct {
 
     /// Removes a pane from a tab with two panes or more, and fixes the
     /// tab's zoom and focus. Cannot fail after its one allocation.
-    fn takeOut(m: *Model, tab: *Tab, pane_id: []const u8) Error!void {
+    fn takeOut(m: *Model, tab: *Tab, pane_id: PaneId) Error!void {
         const a = m.alloc();
         // Reserve the history first: the allocation is the only failure.
         const gop = try m.pane_history.getOrPut(a, tab.id);
@@ -489,42 +525,42 @@ pub const Model = struct {
         const removal = tree.remove(&tab.root, pane_id);
         std.debug.assert(removal == .removed);
         if (m.zoomed.get(tab.id)) |z| {
-            if (std.mem.eql(u8, z, pane_id)) _ = m.zoomed.remove(tab.id);
+            if (z.eql(pane_id)) _ = m.zoomed.remove(tab.id);
         }
         gop.value_ptr.remove(pane_id);
-        if (tab.focused != null and std.mem.eql(u8, tab.focused.?, pane_id)) {
+        if (tab.focused != null and tab.focused.?.eql(pane_id)) {
             const next = gop.value_ptr.popValid(&tab.root, treeHas);
             tab.focused = next orelse tree.firstPane(&tab.root).id;
         }
     }
 
-    fn treeHas(root: *const Node, id: []const u8) bool {
+    fn treeHas(root: *const Node, id: PaneId) bool {
         return tree.contains(root, id);
     }
 
     /// Focuses a pane. Another pane's zoom ends (v1 `focusPane`).
-    pub fn focusPane(m: *Model, pane_id: []const u8) Error!void {
+    pub fn focusPane(m: *Model, pane_id: PaneId) Error!void {
         const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
         try m.focusIn(tab, pane_id);
     }
 
-    fn focusIn(m: *Model, tab: *Tab, pane_id: []const u8) Error!void {
+    fn focusIn(m: *Model, tab: *Tab, pane_id: PaneId) Error!void {
         const a = m.alloc();
         const id = tree.findPane(&tab.root, pane_id).?.id;
-        if (tab.focused != null and std.mem.eql(u8, tab.focused.?, id)) return;
+        if (tab.focused != null and tab.focused.?.eql(id)) return;
         const gop = try m.pane_history.getOrPut(a, tab.id);
         if (!gop.found_existing) gop.value_ptr.* = .{ .limit = pane_history_limit };
         if (tab.focused) |cur| try gop.value_ptr.push(a, cur);
         gop.value_ptr.remove(id);
         if (m.zoomed.get(tab.id)) |z| {
-            if (!std.mem.eql(u8, z, id)) _ = m.zoomed.remove(tab.id);
+            if (!z.eql(id)) _ = m.zoomed.remove(tab.id);
         }
         tab.focused = id;
     }
 
     /// Focuses the next pane in tree order (the previous one with
     /// `backward`), wrapping. Returns the pane that has the focus.
-    pub fn focusNext(m: *Model, tab_id: []const u8, backward: bool) Error![]const u8 {
+    pub fn focusNext(m: *Model, tab_id: TabId, backward: bool) Error!PaneId {
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         const cur = tab.focused orelse tree.firstPane(&tab.root).id;
         var scratch: std.heap.ArenaAllocator = .init(m.arena.child_allocator);
@@ -536,7 +572,7 @@ pub const Model = struct {
 
     /// Zooms a pane of the tab, or with null ends the zoom. A zoomed pane
     /// has the focus.
-    pub fn zoom(m: *Model, tab_id: []const u8, pane_id: ?[]const u8) Error!void {
+    pub fn zoom(m: *Model, tab_id: TabId, pane_id: ?PaneId) Error!void {
         const a = m.alloc();
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         const id = pane_id orelse {
@@ -548,27 +584,27 @@ pub const Model = struct {
         try m.zoomed.put(a, tab.id, pane.id);
     }
 
-    pub fn setRatio(m: *Model, split_id: []const u8, ratio: f64) Error!void {
+    pub fn setRatio(m: *Model, split_id: SplitId, ratio: f64) Error!void {
         for (m.data.workspaces) |*w| {
             for (w.tabs) |*t| if (tree.setRatio(&t.root, split_id, ratio)) return;
         }
         return error.NotFound;
     }
 
-    pub fn rebalanceTab(m: *Model, tab_id: []const u8) Error!void {
+    pub fn rebalanceTab(m: *Model, tab_id: TabId) Error!void {
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         tree.rebalance(&tab.root);
     }
 
     /// Swaps the places of two panes of one tab. The focus stays on its pane
     /// (it moves with the pane).
-    pub fn swapPanes(m: *Model, x: []const u8, y: []const u8) Error!void {
+    pub fn swapPanes(m: *Model, x: PaneId, y: PaneId) Error!void {
         const tab = m.findPaneTab(x) orelse return error.NotFound;
         if (!tree.contains(&tab.root, y)) return error.BadRequest;
         if (!tree.swap(&tab.root, x, y)) return error.BadRequest;
     }
 
-    pub fn setAttention(m: *Model, pane_id: []const u8, attention: tree.Attention) Error!void {
+    pub fn setAttention(m: *Model, pane_id: PaneId, attention: tree.Attention) Error!void {
         const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
         tree.findPaneMut(&tab.root, pane_id).?.attention = attention;
     }
@@ -578,20 +614,20 @@ pub const Model = struct {
     /// The moved pane gets the focus.
     pub fn movePane(
         m: *Model,
-        pane_id: []const u8,
-        dest: []const u8,
+        pane_id: PaneId,
+        dest: PaneId,
         zone: tree.Zone,
-        split_id: []const u8,
+        split_id: SplitId,
         rebalance: bool,
     ) Error!void {
         const a = m.alloc();
-        if (std.mem.eql(u8, pane_id, dest)) return error.BadRequest;
+        if (pane_id.eql(dest)) return error.BadRequest;
         const src = m.findPaneTab(pane_id) orelse return error.NotFound;
         const dst = m.findPaneTab(dest) orelse return error.NotFound;
-        if (split_id.len == 0) return error.BadRequest;
-        if (m.nodeIdInUse(split_id)) return error.DuplicateId;
+        if (split_id.isEmpty()) return error.BadRequest;
+        if (m.nodeIdInUse(split_id.text)) return error.DuplicateId;
         const pane = tree.findPane(&src.root, pane_id).?.*;
-        const sid = try a.dupe(u8, split_id);
+        const sid = try split_id.dupe(a);
         const src_id = src.id;
         const dst_id = dst.id;
         if (src == dst) {
@@ -613,17 +649,17 @@ pub const Model = struct {
     /// workspace `ws_id` (the pane's own when null), after the source tab
     /// when it is in the same workspace. The tab of one pane cannot be
     /// separated.
-    pub fn separatePane(m: *Model, pane_id: []const u8, tab_id: []const u8, ws_id: ?[]const u8) Error!void {
+    pub fn separatePane(m: *Model, pane_id: PaneId, tab_id: TabId, ws_id: ?WorkspaceId) Error!void {
         const a = m.alloc();
         const src = m.findPaneTab(pane_id) orelse return error.NotFound;
         if (tree.paneCount(&src.root) <= 1) return error.BadRequest;
-        if (tab_id.len == 0) return error.BadRequest;
-        if (m.locateTab(tab_id) != null or m.findWorkspace(tab_id) != null) return error.DuplicateId;
+        if (tab_id.isEmpty()) return error.BadRequest;
+        if (m.locateTab(tab_id) != null or m.findWorkspace(.of(tab_id.text)) != null) return error.DuplicateId;
         const src_loc = m.locateTab(src.id).?;
         const ws = if (ws_id) |id| (m.findWorkspace(id) orelse return error.NotFound) else src_loc.ws;
         const pane = tree.findPane(&src.root, pane_id).?.*;
         const at = if (ws == src_loc.ws) src_loc.index + 1 else ws.tabs.len;
-        const new_tab: Tab = .{ .id = try a.dupe(u8, tab_id), .root = .{ .pane = pane }, .focused = pane.id };
+        const new_tab: Tab = .{ .id = try tab_id.dupe(a), .root = .{ .pane = pane }, .focused = pane.id };
         // Take the pane out first: `src` points into `ws.tabs`, and a copy of
         // that slice made before the change would hold the old tab.
         try m.takeOut(src, pane_id);
@@ -637,21 +673,21 @@ pub const Model = struct {
     /// merged tree gets the focus, and any zoom of the destination ends.
     pub fn mergeTab(
         m: *Model,
-        src_id: []const u8,
-        dst_id: []const u8,
-        target: ?[]const u8,
+        src_id: TabId,
+        dst_id: TabId,
+        target: ?PaneId,
         zone: tree.Zone,
-        split_id: []const u8,
+        split_id: SplitId,
         rebalance: bool,
     ) Error!void {
         const a = m.alloc();
-        if (std.mem.eql(u8, src_id, dst_id)) return error.BadRequest;
+        if (src_id.eql(dst_id)) return error.BadRequest;
         const src_loc = m.locateTab(src_id) orelse return error.NotFound;
         const dst0 = m.findTab(dst_id) orelse return error.NotFound;
         if (target) |t| if (!tree.contains(&dst0.root, t)) return error.NotFound;
-        if (split_id.len == 0) return error.BadRequest;
-        if (m.nodeIdInUse(split_id)) return error.DuplicateId;
-        const sid = try a.dupe(u8, split_id);
+        if (split_id.isEmpty()) return error.BadRequest;
+        if (m.nodeIdInUse(split_id.text)) return error.DuplicateId;
+        const sid = try split_id.dupe(a);
         const moved = src_loc.ws.tabs[src_loc.index].root;
         try m.detachTab(src_loc);
         const dst = m.findTab(dst_id).?;
@@ -671,12 +707,12 @@ pub const Model = struct {
     /// `DuplicateId` and changes nothing.
     pub fn makeGrid(
         m: *Model,
-        tab_id: []const u8,
-        source: []const u8,
+        tab_id: TabId,
+        source: PaneId,
         rows: usize,
         columns: usize,
         gen: anytype,
-    ) ![]const []const u8 {
+    ) ![]const PaneId {
         const a = m.alloc();
         const tab = m.findTab(tab_id) orelse return error.NotFound;
         if (!tree.contains(&tab.root, source)) return error.NotFound;
@@ -699,6 +735,54 @@ pub const Model = struct {
     }
 };
 
+// ── Copies for `compact` ───────────────────────────────────────────────────
+
+fn cloneData(a: Allocator, d: Data) Allocator.Error!Data {
+    const projects = try a.alloc(Project, d.projects.len);
+    for (d.projects, projects) |p, *out| out.* = .{
+        .id = try p.id.dupe(a),
+        .name = try a.dupe(u8, p.name),
+        .path = try a.dupe(u8, p.path),
+        .color = try dupeText(a, p.color),
+        .sort_order = p.sort_order,
+        .created_at = p.created_at,
+    };
+    const workspaces = try a.alloc(Workspace, d.workspaces.len);
+    for (d.workspaces, workspaces) |w, *out| {
+        const tabs = try a.alloc(Tab, w.tabs.len);
+        for (w.tabs, tabs) |t, *tab| tab.* = .{
+            .id = try t.id.dupe(a),
+            .custom_title = try dupeText(a, t.custom_title),
+            .root = try tree.clone(a, t.root),
+            .focused = try dupeId(a, t.focused),
+        };
+        out.* = .{ .id = try w.id.dupe(a), .kind = w.kind, .tabs = tabs, .active_tab = try dupeId(a, w.active_tab) };
+    }
+    return .{
+        .version = d.version,
+        .epoch_hint = d.epoch_hint,
+        .imported_v1 = d.imported_v1,
+        .projects = projects,
+        .workspaces = workspaces,
+        .selection = .{ .active_project = try dupeId(a, d.selection.active_project) },
+    };
+}
+
+fn cloneHistory(comptime K: type, comptime V: type, a: Allocator, old: ids.Map(K, Recency(V))) Allocator.Error!ids.Map(K, Recency(V)) {
+    var out: ids.Map(K, Recency(V)) = .empty;
+    var it = old.iterator();
+    while (it.next()) |e| try out.put(a, try e.key_ptr.dupe(a), try e.value_ptr.clone(a));
+    return out;
+}
+
+fn dupeText(a: Allocator, text: ?[]const u8) Allocator.Error!?[]const u8 {
+    return if (text) |t| try a.dupe(u8, t) else null;
+}
+
+fn dupeId(a: Allocator, id: anytype) Allocator.Error!@TypeOf(id) {
+    return if (id) |x| try x.dupe(a) else null;
+}
+
 // ── Slices that grow ────────────────────────────────────────────────────────
 
 fn appendOne(comptime T: type, a: Allocator, old: []T, item: T) Error![]T {
@@ -720,8 +804,8 @@ fn removeAt(comptime T: type, a: Allocator, old: []T, at: usize) Error![]T {
     return out;
 }
 
-fn indexOf(comptime T: type, items: []const T, id: []const u8) ?usize {
-    for (items, 0..) |it, i| if (std.mem.eql(u8, it.id, id)) return i;
+fn indexOf(comptime T: type, items: []const T, id: @FieldType(T, "id")) ?usize {
+    for (items, 0..) |it, i| if (it.id.eql(id)) return i;
     return null;
 }
 
@@ -758,27 +842,27 @@ pub fn validate(gpa: Allocator, data: *const Data) Allocator.Error!?Fault {
     if (data.version == 0 or data.version > version) return Fault.make("version: {d}", .{data.version});
 
     for (data.projects, 0..) |p, i| {
-        if (p.id.len == 0) return Fault.make("projects[{d}].id: empty", .{i});
-        if ((try seen.getOrPut(a, p.id)).found_existing) return Fault.make("projects[{d}].id: duplicate", .{i});
+        if (p.id.isEmpty()) return Fault.make("projects[{d}].id: empty", .{i});
+        if ((try seen.getOrPut(a, p.id.text)).found_existing) return Fault.make("projects[{d}].id: duplicate", .{i});
     }
     var project_workspaces: usize = 0;
     var tabs_seen: std.StringHashMapUnmanaged(void) = .empty;
     var nodes_seen: std.StringHashMapUnmanaged(void) = .empty;
     var ws_seen: std.StringHashMapUnmanaged(void) = .empty;
     for (data.workspaces, 0..) |w, wi| {
-        if (w.id.len == 0) return Fault.make("workspaces[{d}].id: empty", .{wi});
-        if ((try ws_seen.getOrPut(a, w.id)).found_existing) return Fault.make("workspaces[{d}].id: duplicate", .{wi});
+        if (w.id.isEmpty()) return Fault.make("workspaces[{d}].id: empty", .{wi});
+        if ((try ws_seen.getOrPut(a, w.id.text)).found_existing) return Fault.make("workspaces[{d}].id: duplicate", .{wi});
         if (w.kind == .project) {
             project_workspaces += 1;
             var found = false;
-            for (data.projects) |p| found = found or std.mem.eql(u8, p.id, w.id);
+            for (data.projects) |p| found = found or std.mem.eql(u8, p.id.text, w.id.text);
             if (!found) return Fault.make("workspaces[{d}].id: no project", .{wi});
-        } else if ((try seen.getOrPut(a, w.id)).found_existing) {
+        } else if ((try seen.getOrPut(a, w.id.text)).found_existing) {
             return Fault.make("workspaces[{d}].id: also a project", .{wi});
         }
         for (w.tabs, 0..) |t, ti| {
-            if (t.id.len == 0) return Fault.make("workspaces[{d}].tabs[{d}].id: empty", .{ wi, ti });
-            if ((try tabs_seen.getOrPut(a, t.id)).found_existing) {
+            if (t.id.isEmpty()) return Fault.make("workspaces[{d}].tabs[{d}].id: empty", .{ wi, ti });
+            if ((try tabs_seen.getOrPut(a, t.id.text)).found_existing) {
                 return Fault.make("workspaces[{d}].tabs[{d}].id: duplicate", .{ wi, ti });
             }
             var path: [96]u8 = undefined;
@@ -795,7 +879,7 @@ pub fn validate(gpa: Allocator, data: *const Data) Allocator.Error!?Fault {
     if (project_workspaces != data.projects.len) return Fault.make("workspaces: a project has no workspace", .{});
     if (data.selection.active_project) |id| {
         var found = false;
-        for (data.projects) |p| found = found or std.mem.eql(u8, p.id, id);
+        for (data.projects) |p| found = found or p.id.eql(id);
         if (!found) return Fault.make("selection.active_project: no such project", .{});
     }
     return null;
@@ -809,13 +893,13 @@ fn validateNode(
 ) Allocator.Error!?Fault {
     switch (node.*) {
         .pane => |p| {
-            if (p.id.len == 0) return Fault.make("{s}.id: empty", .{path});
+            if (p.id.isEmpty()) return Fault.make("{s}.id: empty", .{path});
             if (p.session.len == 0) return Fault.make("{s}.session: empty", .{path});
-            if ((try seen.getOrPut(a, p.id)).found_existing) return Fault.make("{s}.id: duplicate", .{path});
+            if ((try seen.getOrPut(a, p.id.text)).found_existing) return Fault.make("{s}.id: duplicate", .{path});
         },
         .split => |s| {
-            if (s.id.len == 0) return Fault.make("{s}.id: empty", .{path});
-            if ((try seen.getOrPut(a, s.id)).found_existing) return Fault.make("{s}.id: duplicate", .{path});
+            if (s.id.isEmpty()) return Fault.make("{s}.id: empty", .{path});
+            if ((try seen.getOrPut(a, s.id.text)).found_existing) return Fault.make("{s}.id: duplicate", .{path});
             if (!(s.ratio > 0 and s.ratio < 1)) return Fault.make("{s}.ratio: outside 0 to 1", .{path});
             var buf: [128]u8 = undefined;
             const first = std.fmt.bufPrint(&buf, "{s}.first", .{path}) catch buf[0..];

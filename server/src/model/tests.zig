@@ -13,7 +13,7 @@ const Model = model.Model;
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn mkPane(id: []const u8) tree.Pane {
-    return .{ .id = id, .session = id };
+    return .{ .id = .of(id), .session = id };
 }
 
 fn pane(id: []const u8) Node {
@@ -22,7 +22,7 @@ fn pane(id: []const u8) Node {
 
 fn split(a: std.mem.Allocator, id: []const u8, dir: tree.Dir, ratio: f64, first: Node, second: Node) !Node {
     const s = try a.create(tree.Split);
-    s.* = .{ .id = id, .dir = dir, .ratio = ratio, .first = first, .second = second };
+    s.* = .{ .id = .of(id), .dir = dir, .ratio = ratio, .first = first, .second = second };
     return .{ .split = s };
 }
 
@@ -30,7 +30,7 @@ fn split(a: std.mem.Allocator, id: []const u8, dir: tree.Dir, ratio: f64, first:
 fn newModel() !Model {
     var m = Model.init(testing.allocator);
     errdefer m.deinit();
-    try m.addProject(.{ .id = "p", .name = "P", .path = "/p" });
+    try m.addProject(.{ .id = .of("p"), .name = "P", .path = "/p" });
     return m;
 }
 
@@ -38,21 +38,21 @@ fn newModel() !Model {
 fn threePaneTab(m: *Model, tab_id: []const u8, a: []const u8, b: []const u8, c: []const u8, s1: []const u8, s2: []const u8) !void {
     const arena = m.arena.allocator();
     const root = try split(arena, s1, .horizontal, 0.5, pane(a), try split(arena, s2, .vertical, 0.5, pane(b), pane(c)));
-    try m.createTab("p", tab_id, null, root, null, true);
+    try m.createTab(.of("p"), .of(tab_id), null, root, null, true);
 }
 
-fn paneOrder(m: *Model, tab_id: []const u8) ![]const []const u8 {
-    return tree.paneIds(m.arena.allocator(), &m.findTab(tab_id).?.root);
+fn paneOrder(m: *Model, tab_id: []const u8) ![]const tree.PaneId {
+    return tree.paneIds(m.arena.allocator(), &m.findTab(.of(tab_id)).?.root);
 }
 
 fn expectOrder(m: *Model, tab_id: []const u8, want: []const []const u8) !void {
     const got = try paneOrder(m, tab_id);
     try testing.expectEqual(want.len, got.len);
-    for (want, got) |w, g| try testing.expectEqualStrings(w, g);
+    for (want, got) |w, g| try testing.expectEqualStrings(w, g.text);
 }
 
 fn expectFocus(m: *Model, tab_id: []const u8, want: []const u8) !void {
-    try testing.expectEqualStrings(want, m.findTab(tab_id).?.focused.?);
+    try testing.expectEqualStrings(want, m.findTab(.of(tab_id)).?.focused.?.text);
 }
 
 fn expectValid(m: *const Model) !void {
@@ -92,7 +92,7 @@ fn expectTreeEquals(v: std.json.Value, n: *const Node, erase_names: bool, where:
         .string => |name| {
             try testing.expect(n.* == .pane);
             if (!erase_names) {
-                testing.expectEqualStrings(name, n.pane.id) catch |e| {
+                testing.expectEqualStrings(name, n.pane.id.text) catch |e| {
                     std.debug.print("case: {s}\n", .{where});
                     return e;
                 };
@@ -134,9 +134,9 @@ const Gen = struct {
         return mkPane(id);
     }
 
-    pub fn newSplitId(g: *Gen) ![]const u8 {
+    pub fn newSplitId(g: *Gen) !tree.SplitId {
         g.splits += 1;
-        return std.fmt.allocPrint(g.a, "g{d}", .{g.splits});
+        return .of(try std.fmt.allocPrint(g.a, "g{d}", .{g.splits}));
     }
 };
 
@@ -160,23 +160,23 @@ test "the tree fixtures" {
         if (std.mem.eql(u8, op, "split")) {
             const dir: tree.Dir = if (std.mem.eql(u8, o.get("dir").?.string, "horizontal")) .horizontal else .vertical;
             const pos: tree.Position = if (std.mem.eql(u8, o.get("position").?.string, "first")) .first else .second;
-            const done = try tree.insertBeside(a, &root, o.get("target").?.string, pane(o.get("new").?.string), "fx-new", dir, pos);
+            const done = try tree.insertBeside(a, &root, .of(o.get("target").?.string), pane(o.get("new").?.string), .of("fx-new"), dir, pos);
             try testing.expect(done);
         } else if (std.mem.eql(u8, op, "remove")) {
-            const result = tree.remove(&root, o.get("pane").?.string);
+            const result = tree.remove(&root, .of(o.get("pane").?.string));
             try testing.expectEqualStrings(o.get("result").?.string, @tagName(result));
         } else if (std.mem.eql(u8, op, "rebalance")) {
             tree.rebalance(&root);
         } else if (std.mem.eql(u8, op, "swap")) {
-            try testing.expect(tree.swap(&root, o.get("x").?.string, o.get("y").?.string));
+            try testing.expect(tree.swap(&root, .of(o.get("x").?.string), .of(o.get("y").?.string)));
         } else if (std.mem.eql(u8, op, "insert")) {
             const zone = std.meta.stringToEnum(tree.Zone, o.get("zone").?.string).?;
             const node = try fixtureNode(a, o.get("node").?, &counter);
-            const done = try tree.insertBeside(a, &root, o.get("dest").?.string, node, "fx-new", zone.dir(), zone.position());
+            const done = try tree.insertBeside(a, &root, .of(o.get("dest").?.string), node, .of("fx-new"), zone.dir(), zone.position());
             try testing.expect(done);
         } else if (std.mem.eql(u8, op, "grid")) {
             var gen: Gen = .{ .a = a };
-            const created = try tree.makeGrid(a, &root, o.get("source").?.string, @intCast(o.get("rows").?.integer), @intCast(o.get("columns").?.integer), &gen);
+            const created = try tree.makeGrid(a, &root, .of(o.get("source").?.string), @intCast(o.get("rows").?.integer), @intCast(o.get("columns").?.integer), &gen);
             try testing.expectEqual(@as(usize, @intCast(o.get("rows").?.integer * o.get("columns").?.integer - 1)), created.items.len);
         } else {
             std.debug.print("unknown op {s} in case {s}\n", .{ op, name });
@@ -200,12 +200,12 @@ test "nextPane wraps in tree order" {
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const root = try split(a, "s1", .horizontal, 0.5, pane("a"), try split(a, "s2", .vertical, 0.5, pane("b"), pane("c")));
-    try testing.expectEqualStrings("b", (try tree.nextPane(a, &root, "a", false)).?);
-    try testing.expectEqualStrings("a", (try tree.nextPane(a, &root, "c", false)).?);
-    try testing.expectEqualStrings("c", (try tree.nextPane(a, &root, "a", true)).?);
-    try testing.expectEqual(@as(?[]const u8, null), try tree.nextPane(a, &root, "z", false));
+    try testing.expectEqualStrings("b", (try tree.nextPane(a, &root, .of("a"), false)).?.text);
+    try testing.expectEqualStrings("a", (try tree.nextPane(a, &root, .of("c"), false)).?.text);
+    try testing.expectEqualStrings("c", (try tree.nextPane(a, &root, .of("a"), true)).?.text);
+    try testing.expectEqual(@as(?tree.PaneId, null), try tree.nextPane(a, &root, .of("z"), false));
     const single = pane("only");
-    try testing.expectEqualStrings("only", (try tree.nextPane(a, &single, "only", false)).?);
+    try testing.expectEqualStrings("only", (try tree.nextPane(a, &single, .of("only"), false)).?.text);
 }
 
 test "a grid of fewer than two cells or from an unknown pane does nothing" {
@@ -214,9 +214,9 @@ test "a grid of fewer than two cells or from an unknown pane does nothing" {
     const a = arena_state.allocator();
     var gen: Gen = .{ .a = a };
     var root = pane("a");
-    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, "a", 1, 1, &gen)).items.len);
-    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, "a", 0, 3, &gen)).items.len);
-    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, "z", 2, 2, &gen)).items.len);
+    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, .of("a"), 1, 1, &gen)).items.len);
+    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, .of("a"), 0, 3, &gen)).items.len);
+    try testing.expectEqual(@as(usize, 0), (try tree.makeGrid(a, &root, .of("z"), 2, 2, &gen)).items.len);
     try testing.expect(root == .pane);
 }
 
@@ -225,9 +225,9 @@ test "setRatio finds a split by id and clamps" {
     defer arena_state.deinit();
     const a = arena_state.allocator();
     var root = try split(a, "s1", .horizontal, 0.5, pane("a"), try split(a, "s2", .vertical, 0.5, pane("b"), pane("c")));
-    try testing.expect(tree.setRatio(&root, "s2", 0.99));
-    try testing.expectEqual(@as(f64, 0.85), tree.findSplit(&root, "s2").?.ratio);
-    try testing.expect(!tree.setRatio(&root, "zz", 0.5));
+    try testing.expect(tree.setRatio(&root, .of("s2"), 0.99));
+    try testing.expectEqual(@as(f64, 0.85), tree.findSplit(&root, .of("s2")).?.ratio);
+    try testing.expect(!tree.setRatio(&root, .of("zz"), 0.5));
 }
 
 // ── Model operations ────────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ test "create a tab: the focus is the first pane and the tab is active" {
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
     try expectFocus(&m, "t1", "a");
-    try testing.expectEqualStrings("t1", m.findWorkspace("p").?.active_tab.?);
+    try testing.expectEqualStrings("t1", m.findWorkspace(.of("p")).?.active_tab.?.text);
     try expectValid(&m);
 }
 
@@ -246,15 +246,15 @@ test "create a tab refuses a used id and changes nothing" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    const before = m.findWorkspace("p").?.tabs.len;
+    const before = m.findWorkspace(.of("p")).?.tabs.len;
     // A pane id in use, a split id in use, a tab id in use, and a pane twice.
-    try testing.expectError(error.DuplicateId, m.createTab("p", "t2", null, pane("b"), null, true));
+    try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t2"), null, pane("b"), null, true));
     const arena = m.arena.allocator();
-    try testing.expectError(error.DuplicateId, m.createTab("p", "t2", null, try split(arena, "s1", .horizontal, 0.5, pane("x"), pane("y")), null, true));
-    try testing.expectError(error.DuplicateId, m.createTab("p", "t1", null, pane("x"), null, true));
-    try testing.expectError(error.DuplicateId, m.createTab("p", "t2", null, try split(arena, "q", .horizontal, 0.5, pane("x"), pane("x")), null, true));
-    try testing.expectError(error.NotFound, m.createTab("nope", "t2", null, pane("x"), null, true));
-    try testing.expectEqual(before, m.findWorkspace("p").?.tabs.len);
+    try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t2"), null, try split(arena, "s1", .horizontal, 0.5, pane("x"), pane("y")), null, true));
+    try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t1"), null, pane("x"), null, true));
+    try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t2"), null, try split(arena, "q", .horizontal, 0.5, pane("x"), pane("x")), null, true));
+    try testing.expectError(error.NotFound, m.createTab(.of("nope"), .of("t2"), null, pane("x"), null, true));
+    try testing.expectEqual(before, m.findWorkspace(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -262,12 +262,12 @@ test "split a pane: the new pane is focused and a zoom ends" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.zoom("t1", "b");
-    try testing.expectEqualStrings("b", m.zoomedPane("t1").?);
-    try m.splitPane("t1", "b", mkPane("d"), "s3", .horizontal, .second, null, true, false);
+    try m.zoom(.of("t1"), .of("b"));
+    try testing.expectEqualStrings("b", m.zoomedPane(.of("t1")).?.text);
+    try m.splitPane(.of("t1"), .of("b"), mkPane("d"), .of("s3"), .horizontal, .second, null, true, false);
     try expectOrder(&m, "t1", &.{ "a", "b", "d", "c" });
     try expectFocus(&m, "t1", "d");
-    try testing.expectEqual(@as(?[]const u8, null), m.zoomedPane("t1"));
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
     try expectValid(&m);
 }
 
@@ -275,32 +275,32 @@ test "split with no focus keeps the focus and the zoom" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.zoom("t1", "c");
-    try m.splitPane("t1", "a", mkPane("d"), "s3", .vertical, .first, 0.3, false, false);
+    try m.zoom(.of("t1"), .of("c"));
+    try m.splitPane(.of("t1"), .of("a"), mkPane("d"), .of("s3"), .vertical, .first, 0.3, false, false);
     try expectFocus(&m, "t1", "c");
-    try testing.expectEqualStrings("c", m.zoomedPane("t1").?);
-    try testing.expectEqual(@as(f64, 0.3), tree.findSplit(&m.findTab("t1").?.root, "s3").?.ratio);
+    try testing.expectEqualStrings("c", m.zoomedPane(.of("t1")).?.text);
+    try testing.expectEqual(@as(f64, 0.3), tree.findSplit(&m.findTab(.of("t1")).?.root, .of("s3")).?.ratio);
 }
 
 test "split with rebalance makes every ratio even" {
     var m = try newModel();
     defer m.deinit();
     const arena = m.arena.allocator();
-    try m.createTab("p", "t1", null, try split(arena, "s1", .horizontal, 0.2, pane("a"), pane("b")), null, true);
-    try m.splitPane("t1", "b", mkPane("c"), "s2", .horizontal, .second, 0.9, true, true);
-    try testing.expectApproxEqAbs(@as(f64, 1.0 / 3.0), tree.findSplit(&m.findTab("t1").?.root, "s1").?.ratio, 1e-9);
-    try testing.expectEqual(@as(f64, 0.5), tree.findSplit(&m.findTab("t1").?.root, "s2").?.ratio);
+    try m.createTab(.of("p"), .of("t1"), null, try split(arena, "s1", .horizontal, 0.2, pane("a"), pane("b")), null, true);
+    try m.splitPane(.of("t1"), .of("b"), mkPane("c"), .of("s2"), .horizontal, .second, 0.9, true, true);
+    try testing.expectApproxEqAbs(@as(f64, 1.0 / 3.0), tree.findSplit(&m.findTab(.of("t1")).?.root, .of("s1")).?.ratio, 1e-9);
+    try testing.expectEqual(@as(f64, 0.5), tree.findSplit(&m.findTab(.of("t1")).?.root, .of("s2")).?.ratio);
 }
 
 test "split refuses what it cannot do and changes nothing" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try testing.expectError(error.NotFound, m.splitPane("t1", "zz", mkPane("d"), "s3", .horizontal, .second, null, true, false));
-    try testing.expectError(error.NotFound, m.splitPane("tx", "a", mkPane("d"), "s3", .horizontal, .second, null, true, false));
-    try testing.expectError(error.DuplicateId, m.splitPane("t1", "a", mkPane("b"), "s3", .horizontal, .second, null, true, false));
-    try testing.expectError(error.DuplicateId, m.splitPane("t1", "a", mkPane("d"), "s2", .horizontal, .second, null, true, false));
-    try testing.expectError(error.DuplicateId, m.splitPane("t1", "a", mkPane("d"), "d", .horizontal, .second, null, true, false));
+    try testing.expectError(error.NotFound, m.splitPane(.of("t1"), .of("zz"), mkPane("d"), .of("s3"), .horizontal, .second, null, true, false));
+    try testing.expectError(error.NotFound, m.splitPane(.of("tx"), .of("a"), mkPane("d"), .of("s3"), .horizontal, .second, null, true, false));
+    try testing.expectError(error.DuplicateId, m.splitPane(.of("t1"), .of("a"), mkPane("b"), .of("s3"), .horizontal, .second, null, true, false));
+    try testing.expectError(error.DuplicateId, m.splitPane(.of("t1"), .of("a"), mkPane("d"), .of("s2"), .horizontal, .second, null, true, false));
+    try testing.expectError(error.DuplicateId, m.splitPane(.of("t1"), .of("a"), mkPane("d"), .of("d"), .horizontal, .second, null, true, false));
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
 }
 
@@ -308,14 +308,14 @@ test "close a pane: the next focus is the previous focus, else the first pane" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.focusPane("c");
-    try m.focusPane("b");
+    try m.focusPane(.of("c"));
+    try m.focusPane(.of("b"));
     // History, newest first: c, a. Closing b gives the focus to c.
-    try testing.expectEqual(model.CloseResult.pane_removed, try m.closePane("b", false));
+    try testing.expectEqual(model.CloseResult.pane_removed, try m.closePane(.of("b"), false));
     try expectFocus(&m, "t1", "c");
     try expectOrder(&m, "t1", &.{ "a", "c" });
     // A pane that is not focused: the focus stays.
-    try testing.expectEqual(model.CloseResult.pane_removed, try m.closePane("a", false));
+    try testing.expectEqual(model.CloseResult.pane_removed, try m.closePane(.of("a"), false));
     try expectFocus(&m, "t1", "c");
     try expectValid(&m);
 }
@@ -324,11 +324,11 @@ test "close skips a history entry that left the tree" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.focusPane("b");
-    try m.focusPane("c");
+    try m.focusPane(.of("b"));
+    try m.focusPane(.of("c"));
     // History: b, a. Close b (not focused), then close c: a is next.
-    _ = try m.closePane("b", false);
-    _ = try m.closePane("c", false);
+    _ = try m.closePane(.of("b"), false);
+    _ = try m.closePane(.of("c"), false);
     try expectFocus(&m, "t1", "a");
 }
 
@@ -336,88 +336,88 @@ test "close a zoomed pane ends the zoom" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.zoom("t1", "b");
-    _ = try m.closePane("b", false);
-    try testing.expectEqual(@as(?[]const u8, null), m.zoomedPane("t1"));
+    try m.zoom(.of("t1"), .of("b"));
+    _ = try m.closePane(.of("b"), false);
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
 }
 
 test "close the last pane closes the tab and the next tab is the previous one" {
     var m = try newModel();
     defer m.deinit();
-    try m.createTab("p", "t1", null, pane("a"), null, true);
-    try m.createTab("p", "t2", null, pane("b"), null, true);
-    try m.createTab("p", "t3", null, pane("c"), null, true);
-    try m.selectTab("p", "t2");
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    try m.createTab(.of("p"), .of("t2"), null, pane("b"), null, true);
+    try m.createTab(.of("p"), .of("t3"), null, pane("c"), null, true);
+    try m.selectTab(.of("p"), .of("t2"));
     // History, newest first: t3, t1. Closing t2 (active) gives t3.
-    try testing.expectEqual(model.CloseResult.tab_closed, try m.closePane("b", false));
-    try testing.expectEqualStrings("t3", m.findWorkspace("p").?.active_tab.?);
-    try testing.expectEqual(@as(usize, 2), m.findWorkspace("p").?.tabs.len);
-    try testing.expectError(error.NotFound, m.closePane("b", false));
+    try testing.expectEqual(model.CloseResult.tab_closed, try m.closePane(.of("b"), false));
+    try testing.expectEqualStrings("t3", m.findWorkspace(.of("p")).?.active_tab.?.text);
+    try testing.expectEqual(@as(usize, 2), m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectError(error.NotFound, m.closePane(.of("b"), false));
     try expectValid(&m);
 }
 
 test "close the only tab leaves no active tab" {
     var m = try newModel();
     defer m.deinit();
-    try m.createTab("p", "t1", null, pane("a"), null, true);
-    const gone = try m.closeTab("t1");
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    const gone = try m.closeTab(.of("t1"));
     try testing.expectEqual(@as(usize, 1), gone.len);
-    try testing.expectEqualStrings("a", gone[0].id);
-    try testing.expectEqual(@as(?[]const u8, null), m.findWorkspace("p").?.active_tab);
+    try testing.expectEqualStrings("a", gone[0].id.text);
+    try testing.expectEqual(@as(?model.TabId, null), m.findWorkspace(.of("p")).?.active_tab);
 }
 
 test "focus next and previous wrap, and a zoom follows another focus away" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try testing.expectEqualStrings("b", try m.focusNext("t1", false));
-    try testing.expectEqualStrings("c", try m.focusNext("t1", false));
-    try testing.expectEqualStrings("a", try m.focusNext("t1", false));
-    try testing.expectEqualStrings("c", try m.focusNext("t1", true));
-    try m.zoom("t1", "c");
-    _ = try m.focusNext("t1", false);
-    try testing.expectEqual(@as(?[]const u8, null), m.zoomedPane("t1"));
+    try testing.expectEqualStrings("b", (try m.focusNext(.of("t1"), false)).text);
+    try testing.expectEqualStrings("c", (try m.focusNext(.of("t1"), false)).text);
+    try testing.expectEqualStrings("a", (try m.focusNext(.of("t1"), false)).text);
+    try testing.expectEqualStrings("c", (try m.focusNext(.of("t1"), true)).text);
+    try m.zoom(.of("t1"), .of("c"));
+    _ = try m.focusNext(.of("t1"), false);
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
 }
 
 test "zoom a pane focuses it, and null ends the zoom" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.zoom("t1", "c");
+    try m.zoom(.of("t1"), .of("c"));
     try expectFocus(&m, "t1", "c");
-    try testing.expectEqualStrings("c", m.zoomedPane("t1").?);
-    try m.zoom("t1", null);
-    try testing.expectEqual(@as(?[]const u8, null), m.zoomedPane("t1"));
-    try testing.expectError(error.NotFound, m.zoom("t1", "zz"));
+    try testing.expectEqualStrings("c", m.zoomedPane(.of("t1")).?.text);
+    try m.zoom(.of("t1"), null);
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
+    try testing.expectError(error.NotFound, m.zoom(.of("t1"), .of("zz")));
 }
 
 test "setRatio and rebalance a tab" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.setRatio("s1", 0.7);
-    try testing.expectEqual(@as(f64, 0.7), tree.findSplit(&m.findTab("t1").?.root, "s1").?.ratio);
-    try m.rebalanceTab("t1");
-    try testing.expectEqual(@as(f64, 0.5), tree.findSplit(&m.findTab("t1").?.root, "s1").?.ratio);
-    try testing.expectError(error.NotFound, m.setRatio("zz", 0.5));
+    try m.setRatio(.of("s1"), 0.7);
+    try testing.expectEqual(@as(f64, 0.7), tree.findSplit(&m.findTab(.of("t1")).?.root, .of("s1")).?.ratio);
+    try m.rebalanceTab(.of("t1"));
+    try testing.expectEqual(@as(f64, 0.5), tree.findSplit(&m.findTab(.of("t1")).?.root, .of("s1")).?.ratio);
+    try testing.expectError(error.NotFound, m.setRatio(.of("zz"), 0.5));
 }
 
 test "swap two panes of one tab" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.swapPanes("a", "c");
+    try m.swapPanes(.of("a"), .of("c"));
     try expectOrder(&m, "t1", &.{ "c", "b", "a" });
-    try testing.expectError(error.BadRequest, m.swapPanes("a", "a"));
-    try m.createTab("p", "t2", null, pane("x"), null, false);
-    try testing.expectError(error.BadRequest, m.swapPanes("a", "x"));
+    try testing.expectError(error.BadRequest, m.swapPanes(.of("a"), .of("a")));
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try testing.expectError(error.BadRequest, m.swapPanes(.of("a"), .of("x")));
 }
 
 test "move a pane inside a tab" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.movePane("a", "c", .bottom, "s3", false);
+    try m.movePane(.of("a"), .of("c"), .bottom, .of("s3"), false);
     // a leaves the root; b and c remain in V(b, c); a goes below c.
     try expectOrder(&m, "t1", &.{ "b", "c", "a" });
     try expectFocus(&m, "t1", "a");
@@ -428,12 +428,12 @@ test "move a pane to another tab; its tab closes when it was the last pane" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab("p", "t2", null, pane("x"), null, true);
-    try m.movePane("x", "b", .left, "s3", true);
-    try testing.expectEqual(@as(?*model.Tab, null), m.findTab("t2"));
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, true);
+    try m.movePane(.of("x"), .of("b"), .left, .of("s3"), true);
+    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t2")));
     try expectOrder(&m, "t1", &.{ "a", "x", "b", "c" });
     try expectFocus(&m, "t1", "x");
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace("p").?.tabs.len);
+    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -441,8 +441,8 @@ test "move a pane to another tab when its own tab has more panes" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab("p", "t2", null, pane("x"), null, true);
-    try m.movePane("a", "x", .right, "s3", false);
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, true);
+    try m.movePane(.of("a"), .of("x"), .right, .of("s3"), false);
     try expectOrder(&m, "t1", &.{ "b", "c" });
     try expectOrder(&m, "t2", &.{ "x", "a" });
     try expectFocus(&m, "t2", "a");
@@ -453,10 +453,10 @@ test "move refuses a missing or equal pane and a used split id" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try testing.expectError(error.BadRequest, m.movePane("a", "a", .left, "s3", false));
-    try testing.expectError(error.NotFound, m.movePane("a", "zz", .left, "s3", false));
-    try testing.expectError(error.NotFound, m.movePane("zz", "a", .left, "s3", false));
-    try testing.expectError(error.DuplicateId, m.movePane("a", "b", .left, "s2", false));
+    try testing.expectError(error.BadRequest, m.movePane(.of("a"), .of("a"), .left, .of("s3"), false));
+    try testing.expectError(error.NotFound, m.movePane(.of("a"), .of("zz"), .left, .of("s3"), false));
+    try testing.expectError(error.NotFound, m.movePane(.of("zz"), .of("a"), .left, .of("s3"), false));
+    try testing.expectError(error.DuplicateId, m.movePane(.of("a"), .of("b"), .left, .of("s2"), false));
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
 }
 
@@ -464,17 +464,17 @@ test "separate a pane into a new tab after its tab" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab("p", "t9", null, pane("z"), null, false);
-    try m.separatePane("c", "t2", null);
-    const ws = m.findWorkspace("p").?;
-    try testing.expectEqualStrings("t1", ws.tabs[0].id);
-    try testing.expectEqualStrings("t2", ws.tabs[1].id);
-    try testing.expectEqualStrings("t9", ws.tabs[2].id);
-    try testing.expectEqualStrings("t2", ws.active_tab.?);
+    try m.createTab(.of("p"), .of("t9"), null, pane("z"), null, false);
+    try m.separatePane(.of("c"), .of("t2"), null);
+    const ws = m.findWorkspace(.of("p")).?;
+    try testing.expectEqualStrings("t1", ws.tabs[0].id.text);
+    try testing.expectEqualStrings("t2", ws.tabs[1].id.text);
+    try testing.expectEqualStrings("t9", ws.tabs[2].id.text);
+    try testing.expectEqualStrings("t2", ws.active_tab.?.text);
     try expectOrder(&m, "t1", &.{ "a", "b" });
     try expectOrder(&m, "t2", &.{"c"});
     try expectFocus(&m, "t2", "c");
-    try testing.expectError(error.BadRequest, m.separatePane("c", "t3", null));
+    try testing.expectError(error.BadRequest, m.separatePane(.of("c"), .of("t3"), null));
     try expectValid(&m);
 }
 
@@ -483,13 +483,13 @@ test "merge a tab beside a pane, and at the edge" {
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     const arena = m.arena.allocator();
-    try m.createTab("p", "t2", null, try split(arena, "s5", .vertical, 0.5, pane("x"), pane("y")), null, false);
-    try m.createTab("p", "t3", null, pane("w"), null, false);
-    try m.mergeTab("t2", "t1", "a", .right, "s6", false);
+    try m.createTab(.of("p"), .of("t2"), null, try split(arena, "s5", .vertical, 0.5, pane("x"), pane("y")), null, false);
+    try m.createTab(.of("p"), .of("t3"), null, pane("w"), null, false);
+    try m.mergeTab(.of("t2"), .of("t1"), .of("a"), .right, .of("s6"), false);
     try expectOrder(&m, "t1", &.{ "a", "x", "y", "b", "c" });
     try expectFocus(&m, "t1", "x");
-    try testing.expectEqual(@as(?*model.Tab, null), m.findTab("t2"));
-    try m.mergeTab("t3", "t1", null, .top, "s7", true);
+    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t2")));
+    try m.mergeTab(.of("t3"), .of("t1"), null, .top, .of("s7"), true);
     try expectOrder(&m, "t1", &.{ "w", "a", "x", "y", "b", "c" });
     try expectFocus(&m, "t1", "w");
     try expectValid(&m);
@@ -499,22 +499,22 @@ test "merge ends the zoom of the destination and refuses bad requests" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab("p", "t2", null, pane("x"), null, false);
-    try m.zoom("t1", "a");
-    try testing.expectError(error.BadRequest, m.mergeTab("t1", "t1", null, .left, "s3", false));
-    try testing.expectError(error.NotFound, m.mergeTab("t2", "t1", "zz", .left, "s3", false));
-    try testing.expectError(error.DuplicateId, m.mergeTab("t2", "t1", "a", .left, "s2", false));
-    try testing.expect(m.findTab("t2") != null);
-    try m.mergeTab("t2", "t1", "a", .left, "s3", false);
-    try testing.expectEqual(@as(?[]const u8, null), m.zoomedPane("t1"));
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try m.zoom(.of("t1"), .of("a"));
+    try testing.expectError(error.BadRequest, m.mergeTab(.of("t1"), .of("t1"), null, .left, .of("s3"), false));
+    try testing.expectError(error.NotFound, m.mergeTab(.of("t2"), .of("t1"), .of("zz"), .left, .of("s3"), false));
+    try testing.expectError(error.DuplicateId, m.mergeTab(.of("t2"), .of("t1"), .of("a"), .left, .of("s2"), false));
+    try testing.expect(m.findTab(.of("t2")) != null);
+    try m.mergeTab(.of("t2"), .of("t1"), .of("a"), .left, .of("s3"), false);
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
 }
 
 test "make a grid" {
     var m = try newModel();
     defer m.deinit();
-    try m.createTab("p", "t1", null, pane("a"), null, true);
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
     var gen: Gen = .{ .a = m.arena.allocator() };
-    const created = try m.makeGrid("t1", "a", 2, 2, &gen);
+    const created = try m.makeGrid(.of("t1"), .of("a"), 2, 2, &gen);
     try testing.expectEqual(@as(usize, 3), created.len);
     try expectOrder(&m, "t1", &.{ "a", "n2", "n1", "n3" });
     try expectFocus(&m, "t1", "a");
@@ -524,98 +524,98 @@ test "make a grid" {
 test "a grid with a used id fails and changes nothing" {
     var m = try newModel();
     defer m.deinit();
-    try m.createTab("p", "t1", null, pane("a"), null, true);
-    try m.createTab("p", "t2", null, pane("n2"), null, true);
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    try m.createTab(.of("p"), .of("t2"), null, pane("n2"), null, true);
     var gen: Gen = .{ .a = m.arena.allocator() };
-    try testing.expectError(error.DuplicateId, m.makeGrid("t1", "a", 2, 2, &gen));
+    try testing.expectError(error.DuplicateId, m.makeGrid(.of("t1"), .of("a"), 2, 2, &gen));
     try expectOrder(&m, "t1", &.{"a"});
     var gen2: Gen = .{ .a = m.arena.allocator() };
-    try testing.expectError(error.BadRequest, m.makeGrid("t1", "a", 1, 1, &gen2));
-    try testing.expectError(error.NotFound, m.makeGrid("t1", "zz", 2, 2, &gen2));
+    try testing.expectError(error.BadRequest, m.makeGrid(.of("t1"), .of("a"), 1, 1, &gen2));
+    try testing.expectError(error.NotFound, m.makeGrid(.of("t1"), .of("zz"), 2, 2, &gen2));
 }
 
 test "move a tab to another workspace keeps its tree and selects it" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace("pinned", .pinned);
+    try m.addWorkspace(.of("pinned"), .pinned);
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab("p", "t2", null, pane("x"), null, false);
-    try m.focusPane("c");
-    try m.moveTab("t1", "pinned", null);
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace("p").?.tabs.len);
-    try testing.expectEqualStrings("t2", m.findWorkspace("p").?.active_tab.?);
-    try testing.expectEqualStrings("t1", m.findWorkspace("pinned").?.active_tab.?);
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try m.focusPane(.of("c"));
+    try m.moveTab(.of("t1"), .of("pinned"), null);
+    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectEqualStrings("t2", m.findWorkspace(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findWorkspace(.of("pinned")).?.active_tab.?.text);
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
     try expectFocus(&m, "t1", "c");
-    try testing.expectError(error.BadRequest, m.moveTab("t1", "pinned", null));
-    try testing.expectError(error.NotFound, m.moveTab("t1", "nope", null));
+    try testing.expectError(error.BadRequest, m.moveTab(.of("t1"), .of("pinned"), null));
+    try testing.expectError(error.NotFound, m.moveTab(.of("t1"), .of("nope"), null));
     try expectValid(&m);
 }
 
 test "reorder tabs" {
     var m = try newModel();
     defer m.deinit();
-    try m.createTab("p", "t1", null, pane("a"), null, true);
-    try m.createTab("p", "t2", null, pane("b"), null, true);
-    try m.createTab("p", "t3", null, pane("c"), null, true);
-    try m.reorderTab("t3", 0);
-    const ws = m.findWorkspace("p").?;
-    try testing.expectEqualStrings("t3", ws.tabs[0].id);
-    try testing.expectEqualStrings("t1", ws.tabs[1].id);
-    try m.reorderTab("t3", 99);
-    try testing.expectEqualStrings("t3", m.findWorkspace("p").?.tabs[2].id);
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    try m.createTab(.of("p"), .of("t2"), null, pane("b"), null, true);
+    try m.createTab(.of("p"), .of("t3"), null, pane("c"), null, true);
+    try m.reorderTab(.of("t3"), 0);
+    const ws = m.findWorkspace(.of("p")).?;
+    try testing.expectEqualStrings("t3", ws.tabs[0].id.text);
+    try testing.expectEqualStrings("t1", ws.tabs[1].id.text);
+    try m.reorderTab(.of("t3"), 99);
+    try testing.expectEqualStrings("t3", m.findWorkspace(.of("p")).?.tabs[2].id.text);
 }
 
 test "remove a project removes its workspace and lists its panes" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = "q", .name = "Q", .path = "/q" });
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q" });
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.selectProject("p");
-    const gone = try m.removeProject("p");
+    try m.selectProject(.of("p"));
+    const gone = try m.removeProject(.of("p"));
     try testing.expectEqual(@as(usize, 3), gone.len);
-    try testing.expectEqual(@as(?*model.Project, null), m.findProject("p"));
-    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace("p"));
-    try testing.expectEqual(@as(?*model.Tab, null), m.findTab("t1"));
-    try testing.expectEqual(@as(?[]const u8, null), m.data.selection.active_project);
-    try testing.expectError(error.NotFound, m.removeProject("p"));
+    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("p")));
+    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("p")));
+    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t1")));
+    try testing.expectEqual(@as(?model.ProjectId, null), m.data.selection.active_project);
+    try testing.expectError(error.NotFound, m.removeProject(.of("p")));
     try expectValid(&m);
 }
 
 test "a project id is not reused, and workspaces other than projects need a kind" {
     var m = try newModel();
     defer m.deinit();
-    try testing.expectError(error.DuplicateId, m.addProject(.{ .id = "p", .name = "P2", .path = "/p2" }));
-    try testing.expectError(error.BadRequest, m.addWorkspace("w", .project));
-    try m.addWorkspace("w", .widget);
-    try testing.expectError(error.DuplicateId, m.addWorkspace("w", .quick));
-    try testing.expectError(error.DuplicateId, m.addWorkspace("p", .quick));
+    try testing.expectError(error.DuplicateId, m.addProject(.{ .id = .of("p"), .name = "P2", .path = "/p2" }));
+    try testing.expectError(error.BadRequest, m.addWorkspace(.of("w"), .project));
+    try m.addWorkspace(.of("w"), .widget);
+    try testing.expectError(error.DuplicateId, m.addWorkspace(.of("w"), .quick));
+    try testing.expectError(error.DuplicateId, m.addWorkspace(.of("p"), .quick));
 }
 
 test "attention and rename" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.setAttention("b", .failed);
-    try testing.expectEqual(tree.Attention.failed, m.findPane("b").?.attention);
-    try m.renameTab("t1", "build");
-    try testing.expectEqualStrings("build", m.findTab("t1").?.custom_title.?);
-    try m.renameTab("t1", null);
-    try testing.expectEqual(@as(?[]const u8, null), m.findTab("t1").?.custom_title);
+    try m.setAttention(.of("b"), .failed);
+    try testing.expectEqual(tree.Attention.failed, m.findPane(.of("b")).?.attention);
+    try m.renameTab(.of("t1"), "build");
+    try testing.expectEqualStrings("build", m.findTab(.of("t1")).?.custom_title.?);
+    try m.renameTab(.of("t1"), null);
+    try testing.expectEqual(@as(?[]const u8, null), m.findTab(.of("t1")).?.custom_title);
 }
 
 test "separate a pane that is a direct child of the root, and the focused one" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.focusPane("a");
-    try m.separatePane("a", "t2", null);
+    try m.focusPane(.of("a"));
+    try m.separatePane(.of("a"), .of("t2"), null);
     try expectOrder(&m, "t1", &.{ "b", "c" });
     try expectOrder(&m, "t2", &.{"a"});
     try expectFocus(&m, "t1", "b");
     try expectValid(&m);
-    try m.focusPane("c");
-    try m.separatePane("c", "t3", null);
+    try m.focusPane(.of("c"));
+    try m.separatePane(.of("c"), .of("t3"), null);
     try expectOrder(&m, "t1", &.{"b"});
     try expectFocus(&m, "t1", "b");
     try expectValid(&m);
@@ -625,12 +625,12 @@ test "a pane id and a split id never match" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try testing.expectError(error.DuplicateId, m.splitPane("t1", "a", mkPane("s1"), "s9", .horizontal, .second, null, true, false));
-    try testing.expectError(error.DuplicateId, m.splitPane("t1", "a", mkPane("d"), "b", .horizontal, .second, null, true, false));
-    try m.createTab("p", "t2", null, pane("x"), null, false);
-    try testing.expectError(error.DuplicateId, m.movePane("x", "a", .left, "c", false));
-    try testing.expectError(error.DuplicateId, m.mergeTab("t2", "t1", "a", .left, "a", false));
-    try testing.expectError(error.DuplicateId, m.createTab("p", "t3", null, pane("s2"), null, false));
+    try testing.expectError(error.DuplicateId, m.splitPane(.of("t1"), .of("a"), mkPane("s1"), .of("s9"), .horizontal, .second, null, true, false));
+    try testing.expectError(error.DuplicateId, m.splitPane(.of("t1"), .of("a"), mkPane("d"), .of("b"), .horizontal, .second, null, true, false));
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try testing.expectError(error.DuplicateId, m.movePane(.of("x"), .of("a"), .left, .of("c"), false));
+    try testing.expectError(error.DuplicateId, m.mergeTab(.of("t2"), .of("t1"), .of("a"), .left, .of("a"), false));
+    try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t3"), null, pane("s2"), null, false));
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
     try expectValid(&m);
 }
@@ -639,11 +639,11 @@ test "input that validate would refuse is refused" {
     var m = try newModel();
     defer m.deinit();
     const arena = m.arena.allocator();
-    try testing.expectError(error.BadRequest, m.createTab("p", "t1", null, .{ .pane = .{ .id = "a", .session = "" } }, null, true));
-    try testing.expectError(error.BadRequest, m.createTab("p", "t1", null, try split(arena, "s", .horizontal, 7.0, pane("a"), pane("b")), null, true));
-    try m.createTab("p", "t1", null, pane("a"), null, true);
-    try testing.expectError(error.BadRequest, m.splitPane("t1", "a", .{ .id = "d", .session = "" }, "s9", .horizontal, .second, null, true, false));
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace("p").?.tabs.len);
+    try testing.expectError(error.BadRequest, m.createTab(.of("p"), .of("t1"), null, .{ .pane = .{ .id = .of("a"), .session = "" } }, null, true));
+    try testing.expectError(error.BadRequest, m.createTab(.of("p"), .of("t1"), null, try split(arena, "s", .horizontal, 7.0, pane("a"), pane("b")), null, true));
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    try testing.expectError(error.BadRequest, m.splitPane(.of("t1"), .of("a"), .{ .id = .of("d"), .session = "" }, .of("s9"), .horizontal, .second, null, true, false));
+    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -724,11 +724,11 @@ test "a tab id twice is a fault" {
 test "a model writes and reads back the same" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace("pinned", .pinned);
+    try m.addWorkspace(.of("pinned"), .pinned);
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.renameTab("t1", "build \"it\"");
-    try m.setAttention("c", .done);
-    try m.selectProject("p");
+    try m.renameTab(.of("t1"), "build \"it\"");
+    try m.setAttention(.of("c"), .done);
+    try m.selectProject(.of("p"));
     m.data.imported_v1 = true;
 
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -739,9 +739,9 @@ test "a model writes and reads back the same" {
     var back = try file.parse(testing.allocator, out.written(), &fault);
     defer back.deinit();
     try testing.expect(back.data.imported_v1);
-    try testing.expectEqualStrings("build \"it\"", back.findTab("t1").?.custom_title.?);
-    try testing.expectEqual(tree.Attention.done, back.findPane("c").?.attention);
-    try testing.expectEqualStrings("p", back.data.selection.active_project.?);
+    try testing.expectEqualStrings("build \"it\"", back.findTab(.of("t1")).?.custom_title.?);
+    try testing.expectEqual(tree.Attention.done, back.findPane(.of("c")).?.attention);
+    try testing.expectEqualStrings("p", back.data.selection.active_project.?.text);
     try testing.expectEqual(@as(usize, 2), back.data.workspaces.len);
     try expectOrder(&back, "t1", &.{ "a", "b", "c" });
 
@@ -796,4 +796,92 @@ test "save and load go through a file" {
     var empty = try file.load(testing.allocator, testing.io, missing, &fault);
     defer empty.deinit();
     try testing.expectEqual(@as(usize, 0), empty.data.projects.len);
+}
+
+test "an id is a plain string in the file" {
+    var m = try newModel();
+    defer m.deinit();
+    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.selectProject(.of("p"));
+    const text = try written(&m);
+    defer testing.allocator.free(text);
+    for ([_][]const u8{ "\"id\": \"p\"", "\"id\": \"t1\"", "\"id\": \"s1\"", "\"id\": \"a\"", "\"focused\": \"a\"", "\"active_tab\": \"t1\"", "\"active_project\": \"p\"" }) |want| {
+        if (std.mem.indexOf(u8, text, want) == null) {
+            std.debug.print("missing: {s}\n", .{want});
+            return error.TestUnexpectedResult;
+        }
+    }
+}
+
+// ── Compaction ──────────────────────────────────────────────────────────────
+
+fn written(m: *Model) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    errdefer out.deinit();
+    try file.write(m, &out.writer);
+    return out.toOwnedSlice();
+}
+
+test "compact frees the memory of old edits and keeps the model" {
+    var m = try newModel();
+    defer m.deinit();
+    try m.addWorkspace(.of("pinned"), .pinned);
+    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try m.renameTab(.of("t1"), "build");
+    try m.selectProject(.of("p"));
+    try m.compact();
+    const small = m.arena.queryCapacity();
+
+    // Many edits that end where they started.
+    var pane_buf: [16]u8 = undefined;
+    var split_buf: [16]u8 = undefined;
+    for (0..2000) |i| {
+        const pane_id = try std.fmt.bufPrint(&pane_buf, "e{d}", .{i});
+        const split_id = try std.fmt.bufPrint(&split_buf, "f{d}", .{i});
+        try m.splitPane(.of("t1"), .of("c"), mkPane(pane_id), .of(split_id), .horizontal, .second, null, true, false);
+        _ = try m.closePane(.of(pane_id), false);
+        try m.renameTab(.of("t1"), "build");
+    }
+    try m.focusPane(.of("b"));
+    try m.focusPane(.of("c"));
+    try m.zoom(.of("t1"), .of("a"));
+    try m.selectTab(.of("p"), .of("t2"));
+    try testing.expect(m.arena.queryCapacity() > 4 * small);
+
+    const before = try written(&m);
+    defer testing.allocator.free(before);
+    try m.compact();
+    try testing.expect(m.arena.queryCapacity() <= 2 * small);
+    const after = try written(&m);
+    defer testing.allocator.free(after);
+    try testing.expectEqualStrings(before, after);
+    try expectValid(&m);
+
+    // The zoom and both histories are in the new arena.
+    try testing.expectEqualStrings("a", m.zoomedPane(.of("t1")).?.text);
+    _ = try m.closePane(.of("a"), false);
+    try expectFocus(&m, "t1", "c");
+    _ = try m.closeTab(.of("t2"));
+    try testing.expectEqualStrings("t1", m.findWorkspace(.of("p")).?.active_tab.?.text);
+}
+
+test "save compacts the model" {
+    var m = try newModel();
+    defer m.deinit();
+    try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
+    try m.compact();
+    const small = m.arena.queryCapacity();
+    for (0..2000) |_| try m.renameTab(.of("t1"), "a title that takes some bytes");
+    try testing.expect(m.arena.queryCapacity() > 4 * small);
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_len = try tmp.dir.realPath(testing.io, &path_buf);
+    const path = try std.fmt.allocPrint(testing.allocator, "{s}/model.json", .{path_buf[0..dir_len]});
+    defer testing.allocator.free(path);
+    try file.save(testing.allocator, testing.io, &m, path);
+    try testing.expect(m.arena.queryCapacity() <= 2 * small);
+    try testing.expectEqualStrings("a title that takes some bytes", m.findTab(.of("t1")).?.custom_title.?);
 }
