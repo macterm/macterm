@@ -1223,8 +1223,8 @@ const Server = struct {
             m.CommandRun => s.runCommand(p, re, args),
             m.LinkOpen => s.linkOpen(p, re, args),
             m.LinkClose => {
-                if (!s.links.closeKey(p.id, args.key_id))
-                    return s.replyError(p.id, re, "not_found", "This connection has no link with this key id.");
+                if (!s.links.closeKey(args.key_id))
+                    return s.replyError(p.id, re, "not_found", "No link has this key id.");
                 s.reply(p.id, re, m.LinkClose, .{});
             },
             else => s.replyError(p.id, re, "unknown_method", "The server has no such method."),
@@ -1296,7 +1296,7 @@ const Server = struct {
         };
         s.pending_peers.append(s.gpa, opened.peer_fd) catch {
             lib_posix.close(opened.peer_fd);
-            s.links.closeOwner(p.id);
+            _ = s.links.closeKey(args.key_id);
             return s.replyError(p.id, re, "unavailable", "The server cannot open a link.");
         };
         s.reply(p.id, re, m.LinkOpen, .{ .port = opened.port });

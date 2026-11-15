@@ -17,8 +17,9 @@
 //! - The client's address moves only on an authenticated packet with a counter
 //!   higher than any before (`Opened.newest`).
 //! - A link that gets no authenticated packet within `first_packet_ms`, or
-//!   within `idle_ms` after the last, ends. The owner's end (the ssh
-//!   connection that asked) ends all of its links.
+//!   within `idle_ms` after the last, ends. It outlives the ssh connection that
+//!   asked, because roaming exists for that case. When the table is full, the
+//!   link with the oldest packet ends to make room.
 //! - The key lives only in this process's memory, and is wiped when the link
 //!   ends.
 
@@ -123,7 +124,16 @@ pub const Host = struct {
     /// Opens a link for `owner`. `ports` is the first and last port to try.
     /// `seed` picks where in the range to start (any random u32).
     pub fn open(h: *Host, owner: u64, key: [packet.key_len]u8, key_id: u32, now: i64, ports: [2]u16, seed: u32) OpenError!Opened {
-        if (h.links.items.len >= max_links) return error.TooMany;
+        if (h.links.items.len >= max_links) {
+            // A link that nobody closed (a crash, a sleep) must not lock
+            // out a new one: the one that heard last goes.
+            var oldest: *Link = h.links.items[0];
+            for (h.links.items) |l| if (l.last_rx < oldest.last_rx) {
+                oldest = l;
+            };
+            oldest.dead = true;
+            h.reap();
+        }
         // The nonce is the counter alone, so one key under two ids would
         // repeat nonces.
         for (h.links.items) |l| if (l.codec.key_id == key_id or std.crypto.timing_safe.eql([packet.key_len]u8, l.codec.key, key)) return error.KeyInUse;
@@ -155,15 +165,10 @@ pub const Host = struct {
         return .{ .port = h.port, .peer_fd = pair[1] };
     }
 
-    /// Ends the links of `owner`, or the one with this key id.
-    pub fn closeOwner(h: *Host, owner: u64) void {
-        for (h.links.items) |l| if (l.owner == owner) {
-            l.dead = true;
-        };
-    }
-
-    pub fn closeKey(h: *Host, owner: u64, key_id: u32) bool {
-        for (h.links.items) |l| if (l.owner == owner and l.codec.key_id == key_id) {
+    /// Ends the link with this key id. Any client may: they all have the
+    /// user's uid, and a link outlives the connection that opened it.
+    pub fn closeKey(h: *Host, key_id: u32) bool {
+        for (h.links.items) |l| if (l.codec.key_id == key_id and !l.dead) {
             l.dead = true;
             return true;
         };
@@ -321,7 +326,7 @@ pub const Host = struct {
     }
 
     /// Closes the links that ended. The server calls it after it ended some
-    /// (`closeOwner`), so a socket does not wait for the next wake.
+    /// (`closeKey`), so a socket does not wait for the next wake.
     pub fn reap(h: *Host) void {
         var i: usize = 0;
         while (i < h.links.items.len) {
@@ -533,7 +538,7 @@ test "a link with no packet ends, the socket closes with the last link" {
     try testing.expect(h.udp < 0);
 }
 
-test "the owner's end closes its links, a key id is used once" {
+test "a key id and a key are used once, and a link closes by its key id" {
     var h = Host.init(testing.allocator);
     defer h.deinit();
     const a = try h.open(1, testKey(), 1, 0, .{ 62301, 62399 }, 0);
@@ -541,7 +546,8 @@ test "the owner's end closes its links, a key id is used once" {
     try testing.expectError(error.KeyInUse, h.open(2, testKey(), 1, 0, .{ 62301, 62399 }, 0));
     // The same key under another id is refused too.
     try testing.expectError(error.KeyInUse, h.open(2, testKey(), 2, 0, .{ 62301, 62399 }, 0));
-    h.closeOwner(1);
+    try testing.expect(h.closeKey(1));
+    try testing.expect(!h.closeKey(1));
     runHost(&h, 1);
     try testing.expectEqual(@as(usize, 0), h.links.items.len);
 }
