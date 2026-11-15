@@ -447,7 +447,7 @@ n.call("session.kill", id="att")
 PY
 }
 
-@test "server: link.open opens a UDP port for the link, link.close and the end of the connection free it" {
+@test "server: link.open opens a UDP port for the link, link.close frees it" {
   MACTERM_LINK_PORTS=62501-62599 "$ZMX" server
   python3 - <<'PY'
 import socket, time
@@ -490,12 +490,6 @@ c.call("link.close", key_id=11)
 assert free(port)
 assert c.request("link.close", key_id=11)["err"]["code"] == "not_found"
 
-# The end of the connection ends its links.
-c2 = ServerClient(level=3)
-port = c2.call("link.open", secret=key, key_id=13)["port"]
-assert bound(port)
-c2.close()
-assert free(port)
 PY
 }
 

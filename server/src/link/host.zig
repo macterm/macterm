@@ -31,6 +31,12 @@ const lib_posix = @import("../posix.zig");
 /// A link that gets no authenticated packet this long after it opened ends.
 pub const first_packet_ms: i64 = 60 * 1000;
 
+/// A link that hears nothing for this long stops sending (design/009 §2:
+/// three missed keepalives). It sends again after its next authenticated
+/// packet. This bounds what a replayed packet from a victim's address can
+/// cost, and what a closed laptop costs.
+pub const quiet_ms: i64 = 30 * 1000;
+
 /// An open link that hears nothing for this long ends. This is also the life
 /// of a key that nobody uses.
 pub const idle_ms: i64 = 24 * 60 * 60 * 1000;
@@ -88,7 +94,7 @@ pub const Link = struct {
     }
 };
 
-pub const OpenError = error{ TooMany, KeyInUse, NoPort, Disabled, OutOfMemory, System };
+pub const OpenError = error{ TooMany, KeyInUse, NoPort, OutOfMemory, System };
 
 pub const Opened = struct {
     port: u16,
@@ -118,7 +124,9 @@ pub const Host = struct {
     /// `seed` picks where in the range to start (any random u32).
     pub fn open(h: *Host, owner: u64, key: [packet.key_len]u8, key_id: u32, now: i64, ports: [2]u16, seed: u32) OpenError!Opened {
         if (h.links.items.len >= max_links) return error.TooMany;
-        for (h.links.items) |l| if (l.codec.key_id == key_id) return error.KeyInUse;
+        // The nonce is the counter alone, so one key under two ids would
+        // repeat nonces.
+        for (h.links.items) |l| if (l.codec.key_id == key_id or std.crypto.timing_safe.eql([packet.key_len]u8, l.codec.key, key)) return error.KeyInUse;
         if (h.udp < 0) try h.openUdp(ports, seed);
         errdefer if (h.links.items.len == 0) h.closeUdp();
 
@@ -140,7 +148,10 @@ pub const Host = struct {
             .opened_at = now,
             .last_rx = now,
         };
-        h.links.append(h.gpa, l) catch return error.OutOfMemory;
+        h.links.append(h.gpa, l) catch {
+            l.codec.deinit();
+            return error.OutOfMemory;
+        };
         return .{ .port = h.port, .peer_fd = pair[1] };
     }
 
@@ -160,11 +171,6 @@ pub const Host = struct {
     }
 
     // ── The poll loop ───────────────────────────────────────────────────────
-
-    /// How many descriptors `pollFds` adds.
-    pub fn fdCount(h: *const Host) usize {
-        return if (h.udp < 0) 0 else 1 + h.links.items.len;
-    }
 
     /// Adds the UDP socket, then the `inner` end of each link.
     pub fn pollFds(h: *const Host, fds: *std.ArrayList(lib_posix.pollfd), gpa: std.mem.Allocator) !void {
@@ -205,7 +211,7 @@ pub const Host = struct {
     pub fn timeout(h: *const Host, now: i64) i32 {
         var next: ?i64 = null;
         for (h.links.items) |l| {
-            var d = if (l.remote == null) l.opened_at + first_packet_ms else l.st.deadline(now);
+            var d = if (l.remote == null) l.opened_at + first_packet_ms else if (now - l.last_rx >= quiet_ms) l.last_rx + idle_ms else l.st.deadline(now);
             d = @min(d, l.last_rx + idle_ms);
             next = @min(next orelse d, d);
         }
@@ -286,6 +292,7 @@ pub const Host = struct {
 
     fn transmit(h: *Host, l: *Link, now: i64) void {
         const remote = l.remote orelse return;
+        if (now - l.last_rx >= quiet_ms) return;
         var payload: [packet.max_payload]u8 = undefined;
         var out: [packet.max_packet]u8 = undefined;
         var n: usize = 0;
@@ -532,6 +539,8 @@ test "the owner's end closes its links, a key id is used once" {
     const a = try h.open(1, testKey(), 1, 0, .{ 62301, 62399 }, 0);
     defer lib_posix.close(a.peer_fd);
     try testing.expectError(error.KeyInUse, h.open(2, testKey(), 1, 0, .{ 62301, 62399 }, 0));
+    // The same key under another id is refused too.
+    try testing.expectError(error.KeyInUse, h.open(2, testKey(), 2, 0, .{ 62301, 62399 }, 0));
     h.closeOwner(1);
     runHost(&h, 1);
     try testing.expectEqual(@as(usize, 0), h.links.items.len);
@@ -541,4 +550,48 @@ test "a range with no free port is refused" {
     var h = Host.init(testing.allocator);
     defer h.deinit();
     try testing.expectError(error.NoPort, h.open(1, testKey(), 1, 0, .{ 5, 4 }, 0));
+}
+
+test "only a newer authenticated packet moves the client, and a quiet link stops sending" {
+    var h = Host.init(testing.allocator);
+    defer h.deinit();
+    const o = try h.open(1, testKey(), 3, 0, .{ 62401, 62499 }, 0);
+    defer lib_posix.close(o.peer_fd);
+    var a = try TestClient.init(o.port, 3);
+    defer a.deinit();
+    var b = try TestClient.init(o.port, 3);
+    defer b.deinit();
+    b.codec.deinit();
+    b.codec = packet.Link.init(testKey(), 3, .client_to_host);
+
+    // Two sealed packets with counters 1 and 2 (the same key and direction).
+    var p1: [packet.max_packet]u8 = undefined;
+    var p2: [packet.max_packet]u8 = undefined;
+    const s1 = try a.codec.seal(&p1, "\x02\x00\x00\x00\x00\x00\x00\x00\x00");
+    const s2 = try a.codec.seal(&p2, "\x02\x00\x00\x00\x00\x00\x00\x00\x00");
+    var addr: c.sockaddr.in = std.mem.zeroes(c.sockaddr.in);
+    addr.family = c.AF.INET;
+    addr.port = std.mem.nativeToBig(u16, o.port);
+    addr.addr = std.mem.nativeToBig(u32, 0x7f000001);
+    const to: *const c.sockaddr = @ptrCast(&addr);
+
+    // Counter 2 from socket A: A is the client.
+    _ = c.sendto(a.fd, s2.ptr, s2.len, 0, to, @sizeOf(c.sockaddr.in));
+    sleepMs(5);
+    runHost(&h, 10);
+    const first = h.links.items[0].remote.?;
+    // Counter 1 (older) from socket B: authentic, but it does not move the client.
+    _ = c.sendto(b.fd, s1.ptr, s1.len, 0, to, @sizeOf(c.sockaddr.in));
+    sleepMs(5);
+    runHost(&h, 20);
+    try testing.expect(h.links.items[0].remote.?.eql(&first));
+
+    // Silence: nothing goes out after `quiet_ms`.
+    var buf: [packet.max_packet]u8 = undefined;
+    while (c.recvfrom(a.fd, &buf, buf.len, 0, null, null) >= 0) {}
+    _ = c.write(o.peer_fd, "late", 4);
+    runHost(&h, 20 + quiet_ms + 5);
+    sleepMs(5);
+    try testing.expect(c.recvfrom(a.fd, &buf, buf.len, 0, null, null) < 0);
+    try testing.expect(h.links.items[0].st.sent == 0);
 }

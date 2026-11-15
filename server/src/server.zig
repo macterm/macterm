@@ -1262,19 +1262,18 @@ const Server = struct {
     // ── Running a command ───────────────────────────────────────────────────
 
     /// The first and last UDP port of a link, from `MACTERM_LINK_PORTS`
-    /// (`first-last`), or null when `MACTERM_LINK=off`. A host that turns the
-    /// link off sets it in the environment of its server.
+    /// (`first-last`). Null when the link is off: `MACTERM_LINK=off`, or a
+    /// range that does not parse (fail closed: a typo must not open a port
+    /// outside a firewall's range).
     fn linkPorts() ?[2]u16 {
         if (std.c.getenv("MACTERM_LINK")) |v| if (std.mem.eql(u8, std.mem.span(v), "off")) return null;
         const range = std.c.getenv("MACTERM_LINK_PORTS") orelse
             return .{ link_host.default_first_port, link_host.default_last_port };
         const text = std.mem.span(range);
-        const dash = std.mem.findScalar(u8, text, '-') orelse
-            return .{ link_host.default_first_port, link_host.default_last_port };
-        const first = std.fmt.parseInt(u16, text[0..dash], 10) catch
-            return .{ link_host.default_first_port, link_host.default_last_port };
-        const last = std.fmt.parseInt(u16, text[dash + 1 ..], 10) catch
-            return .{ link_host.default_first_port, link_host.default_last_port };
+        const dash = std.mem.findScalar(u8, text, '-') orelse return null;
+        const first = std.fmt.parseInt(u16, text[0..dash], 10) catch return null;
+        const last = std.fmt.parseInt(u16, text[dash + 1 ..], 10) catch return null;
+        if (first == 0 or first > last) return null;
         return .{ first, last };
     }
 
@@ -1285,7 +1284,9 @@ const Server = struct {
             return s.replyError(p.id, re, "invalid_args", "The key is not 32 bytes.");
         var seed: u32 = undefined;
         s.io.random(std.mem.asBytes(&seed));
-        const opened = s.links.open(p.id, args.secret.bytes[0..32].*, args.key_id, s.now(), ports, seed) catch |err| {
+        var key: [32]u8 = args.secret.bytes[0..32].*;
+        defer std.crypto.secureZero(u8, &key);
+        const opened = s.links.open(p.id, key, args.key_id, s.now(), ports, seed) catch |err| {
             std.log.warn("server: link.open failed: {s}", .{@errorName(err)});
             return switch (err) {
                 error.KeyInUse => s.replyError(p.id, re, "invalid_args", "Another link has this key id."),
@@ -1833,7 +1834,6 @@ const Server = struct {
                     if (r.out_fd >= 0) lib_posix.close(r.out_fd);
                     r.out_fd = -1;
                 };
-                s.links.closeOwner(p.id);
                 lib_posix.close(p.fd);
                 p.in.deinit(s.gpa);
                 p.out.deinit(s.gpa);

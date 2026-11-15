@@ -75,11 +75,6 @@ pub const Stream = struct {
         return n;
     }
 
-    /// True when the peer has acknowledged everything that we queued.
-    pub fn idle(s: *const Stream) bool {
-        return s.out.items.len == 0;
-    }
-
     /// The bytes that this payload delivers, in order, or null for a payload
     /// that delivers nothing (an ACK, a duplicate, a gap, an unknown tag).
     /// An ACK moves the window. A DATA asks for an ACK.
@@ -150,7 +145,9 @@ pub const Stream = struct {
     pub fn deadline(s: *const Stream, now: i64) i64 {
         var at = s.last_tx + keepalive_ms;
         if (s.sent > s.acked) at = @min(at, s.resend_at);
-        if (s.ack_due or s.sent < s.acked + s.out.items.len) at = now;
+        // Something can go out now only if it fits in the window.
+        const can = @min(s.acked + s.out.items.len, s.acked + window);
+        if (s.ack_due or s.sent < can) at = now;
         return at;
     }
 };
@@ -197,8 +194,8 @@ test "bytes arrive in order, both ways" {
     }
     try testing.expectEqualStrings("hello", at_b.items);
     try testing.expectEqualStrings("world", at_a.items);
-    try testing.expect(a.idle());
-    try testing.expect(b.idle());
+    try testing.expect(a.out.items.len == 0);
+    try testing.expect(b.out.items.len == 0);
 }
 
 test "a lossy link still delivers every byte once, in order" {
@@ -217,12 +214,12 @@ test "a lossy link still delivers every byte once, in order" {
     var n1: usize = 0;
     var n2: usize = 0;
     var now: i64 = 0;
-    while (now < 60_000 and !(left.len == 0 and a.idle())) : (now += 50) {
+    while (now < 60_000 and !(left.len == 0 and a.out.items.len == 0)) : (now += 50) {
         if (left.len > 0) left = left[try a.write(left)..];
         try pump(&a, &b, now, dropEveryThird, &n1, &at_b);
         try pump(&b, &a, now, dropEveryThird, &n2, &sink_a);
     }
-    try testing.expect(a.idle());
+    try testing.expect(a.out.items.len == 0);
     try testing.expectEqualSlices(u8, &data, at_b.items);
 }
 
@@ -266,6 +263,17 @@ test "the window and the queue are bounded" {
     var sent: u64 = 0;
     while (s.next(0, &buf)) |p| sent += p.len - 9;
     try testing.expectEqual(window, sent);
+}
+
+test "a full window does not ask for an immediate wake" {
+    var s = Stream.init(testing.allocator);
+    defer s.deinit();
+    var big: [window + 1000]u8 = undefined;
+    @memset(&big, 'x');
+    _ = try s.write(&big);
+    var buf: [packet.max_payload]u8 = undefined;
+    while (s.next(0, &buf)) |_| {}
+    try testing.expect(s.deadline(1) > 1);
 }
 
 test "a quiet stream sends a keepalive, and the timeout doubles" {
