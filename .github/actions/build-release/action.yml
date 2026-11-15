@@ -1,9 +1,8 @@
 name: Build Release
 description: >-
   Build the universal Release app and its DMG with scripts/build.sh: the
-  pinned Xcode, GhosttyKit from setup, the server from build/server, and,
-  for a build that ships,
-  the stable signing certificate and the Sparkle public key.
+  setup of app-setup, and, for a build that ships, the stable signing
+  certificate and the Sparkle public key.
 
 # One recipe for every Release build. release.yml (stable and beta),
 # release-tip.yml (tip) and test.yml ("Release Build", on every pull request)
@@ -13,8 +12,8 @@ description: >-
 # concurrency, its gates and its publish steps stay where they are.
 #
 # The caller checks out the commit first (with tags: the version comes from
-# them), and downloads the `server` artifact of server-build.yml into
-# build/server. The app lands in build/export/Macterm.app and the DMG in
+# them), in a job that needs a run of server-build.yml: app-setup downloads
+# its `server` artifact. The app lands in build/export/Macterm.app and the DMG in
 # build/.
 #
 # DerivedData is deliberately NOT cached: a Release build is a clean build, so
@@ -45,48 +44,16 @@ inputs:
 outputs:
   xcode-version:
     description: The selected Xcode version.
-    value: ${{ steps.xcode.outputs.version }}
+    value: ${{ steps.setup.outputs.xcode-version }}
 
 runs:
   using: composite
   steps:
-    - uses: jdx/mise-action@v5.2.7
-
-    # Pin the toolchain: the macOS 27 runner defaults to whatever Xcode the image
-    # currently ships, which is how macterm#340's type-check failure stayed
-    # invisible. See the action for the full rationale.
-    - name: Select Xcode
-      id: xcode
-      uses: ./.github/actions/select-xcode
-
-    # ISO week (YYYY-Www) — makes the GhosttyKit cache self-refresh weekly.
-    - name: Cache Epoch
-      id: epoch
-      shell: bash
-      run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-    # GhosttyKit + bundled resources: the same key as the test
-    # workflow, so a release rides the cache it keeps warm.
-    - name: Cache GhosttyKit
-      uses: actions/cache@v6
+    - name: App Setup
+      id: setup
+      uses: ./.github/actions/app-setup
       with:
-        path: |
-          GhosttyKit.xcframework
-          Macterm/Resources/ghostty
-          Macterm/Resources/terminfo
-          .ghosttykit-tag
-        # The tag stamp is cached with the artifacts it describes (test.yml).
-        #
-        # NO restore-keys fallback: pairing a time-rolling key with a prefix
-        # restore-key re-saves stale content under the fresh key forever (see
-        # test.yml). Without it a new week re-downloads the current `latest`.
-        key: ghosttykit-${{ hashFiles('scripts/setup.sh') }}-${{ steps.epoch.outputs.week }}
-
-    - name: Setup GhosttyKit
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: mise run setup --verbose
+        github-token: ${{ inputs.github-token }}
 
     # The stable certificate keeps users' TCC grants across updates. The
     # rationale and the failure modes live in that action.

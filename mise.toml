@@ -161,20 +161,10 @@ run = """
 [tasks.test]
 description = "Run the test suite"
 usage = 'flag "-v --verbose" help="Stream raw output instead of the spinner"'
-# Tests are hosted inside the debug app, so the app and CLI sources are inputs
-# too, as is project.yml (test.sh regenerates the Xcode project from it).
-# DerivedData is a build dir, not a stable artifact to stat, hence `auto`.
-sources = [
-  "Macterm/**/*.swift",
-  "CLI/**/*.swift",
-  "MactermTests/**/*.swift",
-  "Macterm/Info.plist",
-  "project.yml",
-  "Configs/*.xcconfig",
-  "scripts/test.sh",
-  "scripts/setup.sh",
-]
-outputs = { auto = true }
+# No `sources`: the tests read files of every kind (the server and its
+# schema, the golden files, assets, extensions, the website checkout), so a
+# list of inputs would miss one, and the task would report a pass and run
+# nothing. xcodebuild skips what did not change itself.
 run = """
   source scripts/_lib.sh
   if [[ "$usage_verbose" == "true" ]]; then

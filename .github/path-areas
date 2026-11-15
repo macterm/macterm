@@ -1,0 +1,68 @@
+# The one table of path areas that the workflows read to decide what changed.
+# scripts/changed-areas.sh reads it and writes `<area>=true|false` for each
+# area to the step output. A change to this file or to that script sets every
+# area to true.
+#
+# One line for each pattern: the area, then a bash pattern for a path from the
+# root of the repository. In a bash pattern `*` also matches `/`, so `server/*`
+# is every file under server/, and `*.swift` is every Swift file.
+#
+# Readers: test.yml (app, extensions), checks.yml (style), server.yml (server),
+# session-bench.yml (bench), docs.yml (docs).
+
+# The app, its tests and everything that they build or read.
+app   *.swift
+app   project.yml
+app   Configs/*
+app   mise.toml
+app   scripts/*
+app   .github/workflows/test.yml
+# The Xcode pin and the build recipes.
+app   .github/actions/*
+# The app bundles the server built from these.
+app   server/*
+app   protocol/*
+app   .github/workflows/server-build.yml
+# Everything in the bundle: the icon, Info.plist, the entitlements, the
+# String Catalogs and the resources.
+app   Macterm/*
+# The adaptive icon's helper and its private interfaces.
+app   IconRenderer/*
+# The schemas, frames and golden files that the unit tests read.
+app   assets/*
+app   MactermTests/*
+
+# The extensions anyone can install: the unit tests read each through the
+# validator. Nothing else needs to run for them.
+extensions  extensions/*
+
+# Format and lint. scripts/* because format.sh, lint.sh and _lib.sh are the
+# job bodies; mise.toml because it pins the swiftformat and swiftlint versions.
+style  *.swift
+style  mise.toml
+style  scripts/*
+style  .swiftformat
+style  .swiftlint.yml
+style  .github/workflows/checks.yml
+
+# The session server and the protocol.
+server  server/*
+server  protocol/*
+server  Macterm/Protocol/*
+server  scripts/build-server.sh
+server  scripts/protocol.sh
+server  scripts/server-zig.sh
+server  .github/workflows/server.yml
+
+# The session layer benchmark.
+bench  server/*
+bench  protocol/*
+bench  scripts/session_bench.py
+bench  scripts/session_bench_limits.json
+bench  scripts/build-server.sh
+bench  .github/workflows/session-bench.yml
+bench  .github/workflows/server-build.yml
+
+# The site build against the schemas and icons.
+docs  assets/*
+docs  .github/workflows/docs.yml

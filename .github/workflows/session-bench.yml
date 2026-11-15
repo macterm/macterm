@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The files that the pull request changes, from the merge commit, as in
-  # server.yml. A run by hand always measures.
+  # The `bench` area of .github/path-areas. A run by hand always measures.
   changes:
     name: Find Session Layer Changes
     runs-on: ubuntu-latest
@@ -35,15 +34,7 @@ jobs:
       - name: Find Session Layer Changes
         id: changes
         shell: bash
-        run: |
-          bench=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            files="$(git diff --no-renames --name-only HEAD^1 HEAD)"
-            if ! grep -qE '^(server/|protocol/|scripts/session_bench(\.py|_limits\.json)$|scripts/build-server\.sh$|\.github/workflows/(session-bench|server-build)\.yml$)' <<<"$files"; then
-              bench=false
-            fi
-          fi
-          echo "bench=$bench" | tee -a "$GITHUB_OUTPUT"
+        run: scripts/changed-areas.sh
 
   # The session server of this commit (server-build.yml).
   server:

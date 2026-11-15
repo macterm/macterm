@@ -1,0 +1,81 @@
+name: App Setup
+description: >-
+  Prepare a job that builds the app: mise, the pinned Xcode, GhosttyKit and the
+  bundled ghostty resources (from the cache or from setup), and the session
+  server (from the `server` artifact of server-build.yml, or from setup).
+
+# One setup for every job that builds the app: the Unit and End-to-end jobs of
+# test.yml, docs-tests.yml, and build-release (release.yml, release-tip.yml and
+# the Release Build of test.yml). The caller checks out the commit first.
+
+inputs:
+  server-artifact:
+    description: >-
+      The name of the artifact of server-build.yml to download into
+      build/server before setup. Empty: setup gets the server itself (the
+      prebuilt of the tree, or a Zig build).
+    default: server
+  github-token:
+    description: For the release downloads of setup.
+    default: ${{ github.token }}
+
+outputs:
+  xcode-version:
+    description: The selected Xcode version. Feed it to any build-product cache key.
+    value: ${{ steps.xcode.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@v5.2.7
+
+    # Pin the toolchain: the macOS 27 runner defaults to whatever Xcode the
+    # image currently ships, which is how macterm#340's type-check failure
+    # stayed invisible. See the action for the full rationale.
+    - name: Select Xcode
+      id: xcode
+      uses: ./.github/actions/select-xcode
+
+    # ISO week (YYYY-Www): makes the GhosttyKit cache refresh itself weekly.
+    - name: Cache Epoch
+      id: epoch
+      shell: bash
+      run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+    # GhosttyKit and the bundled resources: the download of setup.sh that does
+    # not depend on the source. setup.sh is a presence check, so a restored
+    # cache makes it a no-op. The key is the hash of setup.sh (the pin) and the
+    # ISO week.
+    #
+    # NO `restore-keys` fallback ON PURPOSE: pairing a time-rolling key with a
+    # prefix restore-key re-baptizes last week's content under the fresh key
+    # forever (the week rolls → exact key misses → prefix restores the stale
+    # cache → the presence-check setup no-ops → actions/cache saves the SAME
+    # stale bytes under the new key). Without the fallback, a new week starts
+    # empty, setup downloads once, and the fresh content is cached.
+    - name: Cache GhosttyKit
+      uses: actions/cache@v6
+      with:
+        path: |
+          GhosttyKit.xcframework
+          Macterm/Resources/ghostty
+          Macterm/Resources/terminfo
+          .ghosttykit-tag
+        # The tag stamp is cached WITH the artifacts it describes. setup.sh
+        # reads a missing stamp as "provenance unknown" and warns, which a
+        # restored tree is not: this key hashes setup.sh, so the pin these
+        # artifacts came from is exactly the one it names.
+        key: ghosttykit-${{ hashFiles('scripts/setup.sh') }}-${{ steps.epoch.outputs.week }}
+
+    - name: Download the Server
+      if: inputs.server-artifact != ''
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.server-artifact }}
+        path: build/server
+
+    - name: Setup GhosttyKit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: mise run setup --verbose
