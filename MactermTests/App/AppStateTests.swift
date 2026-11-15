@@ -346,6 +346,31 @@ struct AppStateTests {
     }
 
     @Test
+    func a_claim_is_sent_once_until_the_session_answers() throws {
+        // The session answers a network trip later. The focus reports in the
+        // meantime send nothing more.
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let p = seedProject(state)
+        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let source = try #require(tab.splitRoot.allPanes().first)
+        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.answers = false
+
+        state.claimSessionLeadership(mirrored)
+        state.claimSessionLeadership(mirrored)
+        #expect(session.claimed == [mirrored.surfaces[0].id])
+
+        // The channel ended before the answer: the claim may be lost, so the
+        // next focus sends it again.
+        mirrored.surfaces[0].receiveLead(nil)
+        state.claimSessionLeadership(mirrored)
+        #expect(session.claimed == [mirrored.surfaces[0].id, mirrored.surfaces[0].id])
+    }
+
+    @Test
     func focusing_a_remote_mirror_claims_as_a_local_one_does() throws {
         // A remote pane is a session of the host's server, and the claim is a
         // message on its channel, never input. So it claims as a local pane.
@@ -380,8 +405,12 @@ struct AppStateTests {
         session.attach([source.surfaces[0], mirrored.surfaces[0]])
 
         state.closePane(source.id, projectID: p.id)
-
         #expect(session.claimed.isEmpty)
+
+        // The session makes the client that remains lead, and says so.
+        mirrored.surfaces[0].receiveLead(true)
+        #expect(state.isLeader(mirrored))
+        #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
 
     @Test

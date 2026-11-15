@@ -14,13 +14,12 @@ extension Notification.Name {
     /// attach with no login: `AppState.reconnectDroppedRemotePanes`.
     static let remoteHostDidConnect = Notification.Name("MactermRemoteHostDidConnect")
     /// A pane's surface received its first real size (`object` is the
-    /// surface's id) — the moment a leadership claim can be delivered to it (#345):
-    /// a claim before this is refused, and a mirror that came up in the key
-    /// window would otherwise never take the pty.
+    /// surface's id). A leadership claim before it is refused, so the key
+    /// window claims again (#345).
     static let terminalSurfaceSized = Notification.Name("MactermTerminalSurfaceSized")
-    /// A surface's client started to lead its session (`object` is the
-    /// surface's id): the session's `lead` message. `AppState` lets the key
-    /// window claim again when the session chose a client outside it.
+    /// The session's first `lead` message for a surface after an attach, or
+    /// one that says it leads (`object` is the surface's id). The key window
+    /// claims again (`AppState.claimLeadershipForKeyWindow`).
     static let terminalSessionLead = Notification.Name("MactermTerminalSessionLead")
     /// A pane's `hasUnacknowledgedBell` flipped (`object` is the pane's id).
     /// Observed by `AppState`, which acknowledges it on the spot when the pane

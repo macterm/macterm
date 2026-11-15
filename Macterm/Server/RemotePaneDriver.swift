@@ -254,7 +254,7 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneForeground(foreground)
         }
 
-        func paneLead(_ leader: Bool) {
+        func paneLead(_ leader: Bool?) {
             surface.paneLead(leader)
         }
 

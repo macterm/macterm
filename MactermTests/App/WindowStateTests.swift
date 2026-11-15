@@ -1031,6 +1031,36 @@ struct WindowStateTests {
     }
 
     @Test
+    func the_first_lead_after_an_attach_makes_the_key_window_claim() async throws {
+        // A claim that went out while the channel was down is lost. The first
+        // `lead` of the new attach posts `.terminalSessionLead`, and the
+        // observer lets the key window claim again.
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let (project, ws) = try seedProject(state, tabs: 1)
+        let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
+        let a = WindowState(activeProjectID: project.id)
+        let b = WindowState(activeProjectID: project.id)
+        state.registerWindow(a)
+        state.registerWindow(b)
+        let forA = pane.surface(for: a.id)
+        let forB = pane.surface(for: b.id)
+        forB.receiveLead(true)
+        state.noteKeyWindow(a)
+        session.claimed = []
+
+        forA.receiveLead(nil)
+        forA.receiveLead(false)
+
+        let deadline = Date().addingTimeInterval(5)
+        while session.claimed.isEmpty, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(session.claimed.contains(forA.id))
+        #expect(forA.isLeader)
+    }
+
+    @Test
     func a_surface_that_gets_its_size_in_the_key_windows_tab_claims_leadership() throws {
         // The claim on key change is refused until the surface has a size;
         // the surface-sized report sends it again.

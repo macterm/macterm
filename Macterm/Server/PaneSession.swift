@@ -22,7 +22,8 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneSnapshot(started: Bool)
     func paneForeground(_ foreground: MactermProtocol.Foreground)
     /// The session says whether this client leads: its size is the pty's.
-    func paneLead(_ leader: Bool)
+    /// Nil when the channel ended: the next attach tells again.
+    func paneLead(_ leader: Bool?)
     /// The shell exited. The session ended.
     func paneExited(code: UInt8?, signal: UInt8?)
     /// The channel ended with no exit. The session tries to connect again,
@@ -42,7 +43,7 @@ protocol PaneInputRoute: AnyObject, Sendable {
 }
 
 extension PaneSessionHost {
-    func paneLead(_: Bool) {}
+    func paneLead(_: Bool?) {}
     func paneLinkLost() {}
 }
 
@@ -236,6 +237,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             uninstall()
+            host.paneLead(nil)
             tries += 1
             if !reconnects {
                 host.paneLinkLost()

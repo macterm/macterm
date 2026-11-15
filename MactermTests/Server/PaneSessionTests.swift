@@ -96,6 +96,7 @@ struct PaneSessionTests {
             connections.current?.close()
             try await host.waitFor { $0.linkLost > 0 }
             try await host.waitFor { $0.resets >= 2 && $0.screen.contains("before-lost") }
+            #expect(host.snapshot().leads.contains { $0 == nil }, "the lost channel forgets the lead")
             session.stop()
         }
     }

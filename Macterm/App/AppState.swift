@@ -680,10 +680,10 @@ final class AppState {
     /// view I'm working in", so every session of the tab it shows is claimed
     /// at once. Runs on every key-window and key-tab change, when a surface
     /// gets its first size (a surface with no size refuses the claim), and
-    /// when the session hands leadership to a client of ours
-    /// (`.terminalSessionLead`), as it does when the leader leaves. A client
-    /// from outside the model that takes leadership by typing is left alone
-    /// until the next of these.
+    /// when the session tells a client of ours its first `lead` after an
+    /// attach, or that it leads (`.terminalSessionLead`). A client from
+    /// outside the model that takes leadership by typing keeps it until one
+    /// of these.
     func claimLeadershipForKeyWindow() {
         guard let key = keyWindow, let projectID = key.activeProjectID,
               let tab = selectedTab(for: projectID, in: key)
@@ -1963,19 +1963,23 @@ final class AppState {
     /// to it. The session moves leadership by itself only on typed input, so
     /// it would leave the pty sized for the view the user just left.
     ///
-    /// **Sent only while the session has not said that this client leads.**
-    /// The claim is a message on the pane's channel, never input, so a claim
-    /// that is not needed costs one message and nothing else. A surface that
-    /// has no size yet (an off-screen tab, the incubator) refuses it; its
-    /// first size claims again (`.terminalSurfaceSized`).
+    /// **Sent only while the session has not said that this client leads,**
+    /// and once until the session answers (`PaneSurface.claimSent`). The
+    /// claim is a message on the pane's channel, never input, so it clears
+    /// no selection. A surface that has no size yet (an off-screen tab, the
+    /// incubator) refuses it; its first size claims again
+    /// (`.terminalSurfaceSized`).
     ///
     /// **Synchronous, not debounced.** The session drops a non-leader's mouse
     /// reports and control keys (it forwards a non-leader's input only on
     /// `isUserInput`), and `mouseDown` reports focus BEFORE it forwards the
     /// click, so the claim reaches the session ahead of the click.
     func claimSessionLeadership(_ surface: PaneSurface) {
-        guard surface.lead != true else { return }
+        guard surface.lead != true, !surface.claimSent else { return }
+        // Set first: an answer that comes before `sendClaim` returns clears it.
+        surface.claimSent = true
         let delivered = sendClaim(surface)
+        if !delivered { surface.claimSent = false }
         logger.debug(
             "claim \(surface.pane.sessionName, privacy: .public) by \(surface.id, privacy: .public) delivered=\(delivered, privacy: .public)"
         )

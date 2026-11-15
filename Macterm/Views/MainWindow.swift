@@ -1054,8 +1054,9 @@ struct WorkspaceView: View {
     }
 
     /// Whether this window should show the notice instead of the tab: it is
-    /// not the key window and every pane of its tab is a non-leader — the tab
-    /// is being worked in from another window. The KEY window always renders
+    /// not the key window, and every pane of its tab is a non-leader that
+    /// another surface of Macterm shows — the tab is being worked in from
+    /// another window. A pane that a client outside Macterm leads only dims. The KEY window always renders
     /// its panes even while they are non-leaders, because its claim can only
     /// land once the surfaces exist and have a size; hiding them would leave
     /// the claim refused and the notice up forever.
@@ -1063,6 +1064,7 @@ struct WorkspaceView: View {
         guard appState.keyWindowID != windowState.id else { return false }
         let panes = tab.splitRoot.allPanes()
         return !panes.isEmpty && appState.nonLeaderPaneIDs(in: tab, window: windowState.id).count == panes.count
+            && panes.allSatisfy { appState.isMirrored($0) }
     }
 
     @ViewBuilder

@@ -47,21 +47,32 @@ final class PaneSurface: Identifiable {
     /// guarantees is alive.
     var reattachTick = 0
     /// What the session's last `lead` message said about this surface's
-    /// client: true when its size is the pty's. Nil until the session says.
-    /// The session decides leadership (design 004 §5); the app only reads it.
-    /// A surface is drawn dimmed only on an explicit false (`isLeader`).
+    /// client: true when its size is the pty's. Nil until the session says,
+    /// and again after the channel ended. The session decides leadership
+    /// (design 004 §5); the app only reads it.
     private(set) var lead: Bool?
 
-    /// Whether this surface's client drives its session's pty size. A client
-    /// that the session has not answered yet counts as the leader, so a new
-    /// pane never dims before its first attach.
+    /// Whether this surface's client drives its session's pty size. Only an
+    /// explicit false dims: a client that the session has not answered yet
+    /// counts as the leader, so a new pane never dims before its attach.
     var isLeader: Bool { lead != false }
 
-    /// The session's `lead` message for this surface's client. Called from the
-    /// view's channel, and from tests.
-    func receiveLead(_ leader: Bool) {
+    /// A claim went out and the session has not answered since. Stops the
+    /// repeated focus reports of one click from sending a claim each.
+    @ObservationIgnored
+    var claimSent = false
+
+    /// The session's `lead` message for this surface's client, or nil when
+    /// the channel ended. The first answer after an attach, and every true,
+    /// let the key window claim again (`.terminalSessionLead`): a claim that
+    /// went out while the channel was down is lost.
+    func receiveLead(_ leader: Bool?) {
+        let first = lead == nil
         lead = leader
-        if leader { NotificationCenter.default.post(name: .terminalSessionLead, object: id) }
+        claimSent = false
+        if let leader, leader || first {
+            NotificationCenter.default.post(name: .terminalSessionLead, object: id)
+        }
     }
 
     func requestReattach() {
@@ -233,6 +244,7 @@ final class PaneSurface: Identifiable {
         isReadOnly = false
         view.onLead = nil
         lead = nil
+        claimSent = false
         view.onMouseShapeChange = nil
         view.onPromptTitle = nil
         view.onSetTabTitle = nil

@@ -11,11 +11,15 @@ final class FakeSessionLeads {
     var claimed: [UUID] = []
     /// False makes every claim fail as a surface with no size does.
     var deliverable = true
+    /// False sends the claim but leaves the answer out, as a session that is
+    /// a network trip away has not answered yet.
+    var answers = true
 
     init(_ state: AppState) {
         state.sendClaim = { [weak self, weak state] surface in
             guard let self, let state, deliverable else { return false }
             claimed.append(surface.id)
+            guard answers else { return true }
             for client in state.clients(of: surface.pane.sessionName) {
                 client.receiveLead(client === surface)
             }

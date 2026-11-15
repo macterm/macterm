@@ -361,8 +361,8 @@ final class GhosttyTerminalNSView: NSView {
     var onFocus: (() -> Void)?
     var onInteraction: (() -> Void)?
     /// The session's `lead` message: whether this client leads (its size is
-    /// the pty's). `PaneSurface` keeps it.
-    var onLead: ((Bool) -> Void)?
+    /// the pty's), or nil when the channel ended. `PaneSurface` keeps it.
+    var onLead: ((Bool?) -> Void)?
     /// The surface has a real size for the first time: from here on a
     /// leadership claim can be sent (`sendLeadershipClaim` refuses before it).
     var onSurfaceSized: (() -> Void)?

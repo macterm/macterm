@@ -10,8 +10,8 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         var linkLost = 0
         var resets = 0
         var foreground: MactermProtocol.Foreground?
-        /// Each `lead` message, in order.
-        var leads: [Bool] = []
+        /// Each `lead` message, in order. A nil is an end of the channel.
+        var leads: [Bool?] = []
     }
 
     private let lock = NSLock()
@@ -55,7 +55,7 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneSnapshot(started _: Bool) {}
-    func paneLead(_ leader: Bool) {
+    func paneLead(_ leader: Bool?) {
         lock.lock()
         state.leads.append(leader)
         lock.unlock()
