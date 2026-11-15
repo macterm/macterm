@@ -18,7 +18,7 @@
     "zmxPath": {
       "type": "string",
       "deprecated": true,
-      "description": "Old. Macterm 1 used this key to find zmx on the remote host. Macterm 2 installs its own server on the host, so it ignores this key. A file that has it still reads."
+      "description": "Old. Earlier versions used this key to find zmx on the remote host. Macterm now installs its own server on the host, so it ignores this key. A file that has it still reads."
     },
     "tabs": {
       "type": "array",

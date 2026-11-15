@@ -13,7 +13,7 @@ private let logger = Logger(subsystem: appBundleID, category: "ControlHandler")
 final class ControlHandler {
     private let appState: AppState
     private let projectStore: ProjectStore
-    /// Follows `appState.zmx` so tests that stub the client (the established
+    /// Follows `appState.sessionClient` so tests that stub the client (the established
     /// AppStateTests pattern) drive this handler too.
     private var sessionClient: SessionClient { appState.sessionClient }
 

@@ -126,8 +126,7 @@ struct HostCommandsTests {
         // pane's critical path. Sourcing them — inline, in a subshell, or
         // with stdin detached — produced three distinct pane-killers on real
         // hosts (exec hijack of our fds, tty-stdin read-block, profile
-        // exec-loop spin). PATH comes from the fallback dir list; anything
-        // else is the project's explicit zmxPath.
+        // exec-loop spin). PATH comes from the fallback dir list.
         let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
         for wire in [attach(), create(), HostCommands.plainShellCommand(directory: "~"), probe] {
             #expect(!wire.contains(".profile"))
@@ -212,7 +211,7 @@ struct HostCommandsTests {
 
     @Test
     func assert_single_quote_free_replaces_a_script_carrying_a_single_quote() {
-        // A `'` in a user-controlled field (project dir / zmxPath) would, once
+        // A `'` in a user-controlled field (the project dir) would, once
         // wrapped by `shellQuote`, become `'\''` — which fish/nu tokenize
         // differently than POSIX sh, the exact breakage the invariant prevents.
         // Such a script is swapped for a diagnostic that is itself quote-free.

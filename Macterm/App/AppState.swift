@@ -1129,8 +1129,8 @@ final class AppState {
         (NSApp?.windows ?? []).contains { $0.isVisible && $0.occlusionState.contains(.visible) }
     }
 
-    /// zmx session-persistence client. Injectable so tests can observe
-    /// session kills without a real daemon.
+    /// The session paths of the panes. Injectable so tests can observe
+    /// session kills without a real server.
     @ObservationIgnored
     var sessionClient: SessionClient = .live
 

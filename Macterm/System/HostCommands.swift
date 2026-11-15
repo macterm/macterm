@@ -6,11 +6,10 @@ import Foundation
 /// - **The host scripts** (`Scripts`, `server/host/`): the check, the
 ///   attach and the install of the host's server, sent as
 ///   `sh -c '<script>' macterm <arguments>` (`command`).
-/// - **A pane's command** (`sessionCommand`, `plainShellCommand`): it runs
+/// - **A pane's command** (`plainShellCommand`, for a host with no server): it runs
 ///   on the tty of an ssh channel over the host's one connection
 ///   (`SSHConnections.ttyArguments`, 0057). The login happened before, in
-///   the master, so the channel never asks. Persistence lives in the
-///   host's server.
+///   the master, so the channel never asks. It has no persistence.
 /// - **A background read** (`gitProbeScript`): the host's server runs it
 ///   (`RemoteHosts.run`, 0058). It opens no connection of its own.
 ///

@@ -17,7 +17,7 @@ private let logger = Logger(subsystem: appBundleID, category: "SessionClient")
 struct SessionClient {
     /// True when new local panes run as sessions of the bundled server:
     /// the server is in the bundle and nothing forces a plain shell
-    /// (`liveBypass`). Decides the surface mode of a NEW local pane.
+    /// (`liveBypass`, which also refuses a missing runtime directory). Decides the surface mode of a NEW local pane.
     var runsSessions: @Sendable () -> Bool
     /// True whenever the server is bundled, independent of the bypass.
     /// Kill paths use this (not `runsSessions`) so we can still tear down
@@ -43,7 +43,8 @@ struct SessionClient {
 
 extension SessionClient {
     static let live: SessionClient = {
-        let bundled = LocalServer.bundled != nil
+        // The binary only: a kill must not depend on the runtime directory.
+        let bundled = Bundle.main.url(forResource: "zmx", withExtension: nil, subdirectory: "zmx") != nil
 
         @Sendable
         func runsSessions() -> Bool {
@@ -76,7 +77,7 @@ extension SessionClient {
         )
     }()
 
-    /// No-op client for tests / when zmx is unavailable.
+    /// No-op client for tests.
     static let noop = SessionClient(
         runsSessions: { false },
         isBundled: { false },
@@ -86,9 +87,9 @@ extension SessionClient {
         endV1Sessions: { _ in true }
     )
 
-    /// Why this process starts new panes without zmx, or nil when it wraps
-    /// them. Decided once per process, so `live.runsSessions` and the
-    /// Settings notice always agree.
+    /// Why this process starts new panes as plain shells, or nil when they
+    /// run in sessions. Decided once per process, so `live.runsSessions` and
+    /// the Settings notice always agree.
     static var liveBypass: ZmxBypass? {
         liveBypassCache.withLock { cached in
             if let cached { return cached }
@@ -191,7 +192,7 @@ enum ZmxReaper {
     }
 }
 
-/// Why new panes start as plain shells, without `zmx connect`
+/// Why new panes start as plain shells, with no session
 /// (`SessionClient.liveBypass`).
 enum ZmxBypass: Equatable {
     /// The unit-test host is the full app: it boots, spawns the active

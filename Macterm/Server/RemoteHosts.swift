@@ -265,7 +265,7 @@ final class RemoteHosts {
         undecline(destination)
         if case let .preparing(_, task) = hosts[destination] { await task.value }
         drop(destination)
-        let route = try await connections.connect(destination)
+        _ = try await connections.connect(destination)
         do {
             let link = try await servers.connect(destination)
             if case let .ready(old) = hosts[destination] { old.close() }

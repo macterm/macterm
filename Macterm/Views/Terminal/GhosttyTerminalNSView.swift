@@ -116,21 +116,19 @@ final class GhosttyTerminalNSView: NSView {
     private let shell: String?
     /// Extra environment variables for the spawned shell.
     private let env: [String: String]?
-    /// The pane's zmx session name. The surface's shell runs under
-    /// `zmx attach <sessionName>` (ghostty `command-wrapper`), so it survives
-    /// app quit and the same name re-attaches the live daemon on relaunch.
-    /// For a remote pane the same name identifies the session on the REMOTE
-    /// host's daemon instead.
+    /// The pane's session name. The surface's shell runs in the server's
+    /// session of this name, so it survives app quit and the same name
+    /// attaches again on relaunch. For a remote pane the same name names the
+    /// session on the host's server.
     let sessionName: String
     /// Stable identity for view-lifetime coordination. Unlike an object address,
     /// this cannot be reused when a surface is destroyed and recreated.
     let paneID: UUID
 
     /// The parsed `[user@]host:dir` spec when this pane belongs to a remote
-    /// project (#104); nil for local panes. A remote surface runs
-    /// `ssh -t … zmx attach` directly as its command — never under the local
-    /// zmx wrapper (nested zmx is broken upstream) — so all the local
-    /// persistence machinery (the local session channel) stays off.
+    /// project (#104); nil for local panes. A remote surface runs from a
+    /// channel on the host's link (`RemotePaneDriver`), never from a local
+    /// session.
     let remoteSpec: ProjectPath?
 
     /// Whether this surface belongs to a remote project. Read by the poll
@@ -721,7 +719,7 @@ final class GhosttyTerminalNSView: NSView {
 
         // A palette `run:` action's command, carried in the environment
         // (`CustomPaletteLaunch`): run before the shell by the bundled CLI,
-        // inside the zmx session, so it is never typed and never reaches the
+        // inside the session, so it is never typed and never reaches the
         // shell's history. Without the CLI, the fixed line that runs it is
         // typed instead — it reads the command from the same variable.
         var typedInput = command
@@ -736,7 +734,7 @@ final class GhosttyTerminalNSView: NSView {
         }
         let wrapperArgv: [UnsafePointer<CChar>?] = wrapper.map { cString($0) }
 
-        // Declared `run` is typed into the (wrapped) shell verbatim, as if the
+        // Declared `run` is typed into the shell verbatim, as if the
         // user had entered it at the prompt. No shell-syntax handling: cwd is
         // set above, not via an injected `cd`.
         if let typedInput, !typedInput.isEmpty {
@@ -786,7 +784,7 @@ final class GhosttyTerminalNSView: NSView {
 
         // The command_wrapper argv (a `const char* const*`) needs the pointer
         // array itself to have a stable base for the duration of the spawn;
-        // bind it just around `makeSurface`. Empty wrapper → no zmx (bypass).
+        // bind it just around `makeSurface`. Empty wrapper → no palette command.
         if wrapperArgv.isEmpty {
             makeSurface()
         } else {
