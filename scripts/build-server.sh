@@ -8,8 +8,8 @@
 #                                        changes that are not committed
 #   scripts/build-server.sh build <dir>  build into <dir>
 #
-# The key is the git tree hash of server/ and protocol/ and the blob hash of
-# this script, from the working tree (committed or not), hashed together. This
+# The key is the git tree hash of server/ (without its AGENTS.md and CLAUDE.md)
+# and protocol/ and the blob hash of this script, from the working tree (committed or not), hashed together. This
 # script holds the Zig version and every build flag, so a change to either is
 # a new key. A prebuilt named for a key is therefore the build of exactly that
 # source (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
@@ -28,6 +28,8 @@ TARGETS=(universal-macos x86_64-linux aarch64-linux)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCES=(server protocol scripts/build-server.sh)
+# The map of the code for agents is not source. An edit to it makes no new key.
+NOT_SOURCES=(server/AGENTS.md server/CLAUDE.md)
 
 existing_sources() {
   local path
@@ -48,6 +50,25 @@ key_from_tree() {
     shasum -a 256 | cut -c1-16
 }
 
+# The tree in the index "$1" without NOT_SOURCES.
+write_source_tree() {
+  GIT_INDEX_FILE="$1" git -C "$ROOT" rm -q --cached --ignore-unmatch -- "${NOT_SOURCES[@]}" >/dev/null &&
+    GIT_INDEX_FILE="$1" git -C "$ROOT" write-tree
+}
+
+# The key of a commit.
+key_of_commit() {
+  local index tree
+  index="$(mktemp -u "${TMPDIR:-/tmp}/macterm-server-index.XXXXXX")"
+  if ! GIT_INDEX_FILE="$index" git -C "$ROOT" read-tree "$1^{tree}" ||
+    ! tree="$(write_source_tree "$index")"; then
+    rm -f "$index"
+    return 1
+  fi
+  rm -f "$index"
+  key_from_tree "$tree"
+}
+
 # The key of the working tree. For a clean tree it is the key of HEAD.
 server_key() {
   local index tree
@@ -57,7 +78,7 @@ server_key() {
   local paths=()
   while IFS= read -r p; do paths+=("$p"); done < <(existing_sources)
   if ! GIT_INDEX_FILE="$index" git -C "$ROOT" add -A -- "${paths[@]}" ||
-    ! tree="$(GIT_INDEX_FILE="$index" git -C "$ROOT" write-tree)"; then
+    ! tree="$(write_source_tree "$index")"; then
     rm -f "$index"
     return 1
   fi
@@ -68,7 +89,9 @@ server_key() {
 is_dirty() {
   local paths=()
   while IFS= read -r p; do paths+=("$p"); done < <(existing_sources)
-  [[ -n "$(git -C "$ROOT" status --porcelain -- "${paths[@]}")" ]]
+  local excludes=()
+  for p in "${NOT_SOURCES[@]}"; do excludes+=(":(exclude)$p"); done
+  [[ -n "$(git -C "$ROOT" status --porcelain -- "${paths[@]}" "${excludes[@]}")" ]]
 }
 
 # Tar and gzip with no owner, no time and no name in the header, so the same
@@ -138,7 +161,7 @@ case "${1:-}" in
   key) server_key ;;
   key-of)
     [[ -n "${2:-}" ]] || { echo "usage: $0 key-of <commit>" >&2; exit 2; }
-    key_from_tree "$2^{tree}"
+    key_of_commit "$2"
     ;;
   dirty) is_dirty ;;
   build)
