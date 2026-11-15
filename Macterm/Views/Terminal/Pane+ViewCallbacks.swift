@@ -21,13 +21,6 @@ extension Pane {
         view.onInteraction = { [weak self] in
             self?.recordUserInteraction()
         }
-        // Typed input is what zmx moves leadership on, local or remote. The
-        // report carries the surface, the client that the user typed in (see
-        // `.terminalUserInput`).
-        view.onUserInput = { [weak view] in
-            guard let surface = view?.owningSurface else { return }
-            NotificationCenter.default.post(name: .terminalUserInput, object: surface.id)
-        }
         view.onSurfaceSized = { [weak view] in
             guard let surface = view?.owningSurface else { return }
             NotificationCenter.default.post(name: .terminalSurfaceSized, object: surface.id)

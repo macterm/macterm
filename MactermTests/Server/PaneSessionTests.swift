@@ -51,6 +51,35 @@ struct PaneSessionTests {
     }
 
     @Test
+    func the_host_hears_the_sessions_lead_for_each_client() async throws {
+        try await withServer { server in
+            let name = "ps-lead-\(UInt32.random(in: 0 ... .max))"
+            let first = RecordingPaneHost()
+            let a = PaneSession(
+                name: name,
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.leads == [true] && $0.screen.contains("up-ok") }
+
+            // A second client of the session does not lead, and hears so.
+            let second = RecordingPaneHost()
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            b.start()
+            try await second.waitFor { $0.leads == [false] }
+
+            b.claim(grid: nil)
+            try await second.waitFor { $0.leads == [false, true] }
+            try await first.waitFor { $0.leads == [true, false] }
+            a.stop()
+            b.stop()
+        }
+    }
+
+    @Test
     func a_lost_connection_is_made_again_and_the_screen_is_drawn_again() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()

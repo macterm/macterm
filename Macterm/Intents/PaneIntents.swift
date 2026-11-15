@@ -60,10 +60,6 @@ struct RunCommandInMactermPaneIntent: AppIntent {
         else {
             throw MactermIntentError.noSurface
         }
-        // Injected input makes zmx hand this client leadership (its
-        // `isUserInput` rule) with no focus change to notice it by — record it,
-        // or the non-leader dim points at the wrong mirror.
-        ctx.appState.noteSessionLeader(target.pane)
         logger.info("intent: ran a command in \(target.pane.sessionName, privacy: .public)")
         return .result()
     }
@@ -121,7 +117,6 @@ struct SendKeyToMactermPaneIntent: AppIntent {
         else {
             throw MactermIntentError.noSurface
         }
-        ctx.appState.noteSessionLeader(target.pane)
         logger.info("intent: sent \(key, privacy: .public) to \(target.pane.sessionName, privacy: .public)")
         return .result()
     }

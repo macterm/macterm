@@ -99,7 +99,6 @@ extension AppState {
         for name in Set(olds.map(\.sessionName)) {
             olds.first { $0.sessionName == name }?.killPersistentSession(using: zmx)
         }
-        pruneSessionLeaders()
         for pane in replacements.values {
             warmIfUnrendered(pane, in: tab)
         }

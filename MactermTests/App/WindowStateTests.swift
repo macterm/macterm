@@ -527,7 +527,7 @@ struct WindowStateTests {
         // A second window's surface is a real client of the session: focusing
         // a pane there claims the pty and dims the other window's view.
         let state = makeAppState()
-        state.sendClaim = { _ in true }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let tab = try #require(ws.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
@@ -538,13 +538,14 @@ struct WindowStateTests {
         state.noteKeyWindow(a)
         let forA = pane.surface(for: a.id)
         let forB = pane.surface(for: b.id)
+        session.attach([forA, forB])
         #expect(state.isMirrored(pane))
-        #expect(state.isLeader(forA), "a's view leads until b's is focused")
+        #expect(forA.isLeader, "a's view leads until b's is focused")
 
         state.focusPane(pane.id, projectID: project.id, windowID: b.id)
 
-        #expect(state.isLeader(forB))
-        #expect(!state.isLeader(forA))
+        #expect(forB.isLeader)
+        #expect(!forA.isLeader)
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id) == [pane.id])
         #expect(state.nonLeaderPaneIDs(in: tab, window: b.id).isEmpty)
     }
@@ -914,10 +915,7 @@ struct WindowStateTests {
         // window must hand the pty to all of its panes at once, without a
         // click in each.
         let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
@@ -930,16 +928,19 @@ struct WindowStateTests {
         state.registerWindow(b)
         state.noteKeyWindow(a)
         let panes = tab.splitRoot.allPanes()
-        claimed = []
+        for pane in panes {
+            session.attach([pane.surface(for: a.id), pane.surface(for: b.id)])
+        }
+        session.claimed = []
 
         state.noteKeyWindow(b)
-        #expect(Set(claimed) == Set(panes.map { $0.surface(for: b.id).id }))
+        #expect(Set(session.claimed) == Set(panes.map { $0.surface(for: b.id).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id) == Set(panes.map(\.id)))
         #expect(state.nonLeaderPaneIDs(in: tab, window: b.id).isEmpty)
 
-        claimed = []
+        session.claimed = []
         state.noteKeyWindow(a)
-        #expect(Set(claimed) == Set(panes.map { $0.surface(for: a.id).id }))
+        #expect(Set(session.claimed) == Set(panes.map { $0.surface(for: a.id).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id).isEmpty)
     }
 
@@ -947,24 +948,22 @@ struct WindowStateTests {
     func becoming_key_leaves_a_same_tab_mirror_pairs_leader_alone() throws {
         // `pane mirror` puts two panes on one session in ONE tab. The whole-tab
         // claim must not hand the pty to whichever pane comes last in tree
-        // order — the source lost leadership to its own mirror on every key
+        // order: the source lost leadership to its own mirror on every key
         // change.
         let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        _ = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        claimed = []
+        session.attach([source.surface(for: a.id), mirrored.surface(for: a.id)])
 
         state.noteKeyWindow(a)
 
-        #expect(claimed.isEmpty, "the source already leads; nothing moves")
+        #expect(session.claimed.isEmpty, "the source already leads; nothing moves")
         #expect(state.isLeader(source))
     }
 
@@ -1006,45 +1005,12 @@ struct WindowStateTests {
     }
 
     @Test
-    func a_retired_surface_leaves_no_stale_leader_record() throws {
-        // b (key) leads through its surface. b moves to another tab, which
-        // retires its surface of this one. The record for it must go, so that
-        // a leads again and is not judged against a client that is gone.
+    func a_lead_for_a_client_outside_the_key_window_makes_the_key_window_claim() throws {
+        // The session makes the next client lead when the leader leaves, and
+        // that client can be in a window that is not key. The key window's
+        // surfaces claim again, as on any key change.
         let state = makeAppState()
-        state.sendClaim = { _ in true }
-        let (project, ws) = try seedProject(state, tabs: 2)
-        let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        let a = WindowState(activeProjectID: project.id)
-        let b = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        state.registerWindow(b)
-        state.noteKeyWindow(a)
-        state.selectTab(ws.tabs[0].id, projectID: project.id)
-        state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
-        state.noteKeyWindow(b)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
-        state.focusPane(pane.id, projectID: project.id, windowID: b.id)
-        #expect(state.isLeader(forB))
-        #expect(!state.isLeader(forA))
-
-        state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
-
-        #expect(pane.surfaces.count == 1)
-        #expect(state.isLeader(forA))
-        #expect(!state.isMirrored(pane))
-    }
-
-    @Test
-    func a_client_coming_up_elsewhere_makes_the_key_window_reassert() throws {
-        // A fresh client on a session the key window leads is exactly what
-        // zmx makes leader when the previous leader detached, so the key
-        // window claims again rather than trusting its record.
-        let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
@@ -1054,79 +1020,69 @@ struct WindowStateTests {
         state.noteKeyWindow(a)
         let forA = pane.surface(for: a.id)
         let forB = pane.surface(for: b.id)
-        #expect(state.isLeader(forA))
-        claimed = []
+        session.attach([forB, forA])
+        session.claimed = []
 
-        state.surfaceDidGetSize(surfaceID: forB.id)
+        state.claimLeadershipForKeyWindow()
 
-        #expect(claimed == [forA.id])
-        #expect(state.isLeader(forA))
+        #expect(session.claimed == [forA.id])
+        #expect(forA.isLeader)
+        #expect(!forB.isLeader)
     }
 
     @Test
     func a_surface_that_gets_its_size_in_the_key_windows_tab_claims_leadership() throws {
         // The claim on key change is refused until the surface has a size;
-        // the surface-sized report re-sends it.
+        // the surface-sized report sends it again.
         let state = makeAppState()
-        var deliverable = false
-        var claimed: [UUID] = []
-        state.sendClaim = { surface in
-            guard deliverable else { return false }
-            claimed.append(surface.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
+        session.deliverable = false
         let (project, ws) = try seedProject(state, tabs: 1)
         let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
         let b = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.registerWindow(b)
-        state.noteKeyWindow(b)
+        let forA = pane.surface(for: a.id)
         let forB = pane.surface(for: b.id)
-        #expect(claimed.isEmpty, "nothing recorded while undeliverable")
+        session.attach([forA, forB])
+        state.noteKeyWindow(b)
+        #expect(session.claimed.isEmpty)
 
-        deliverable = true
-        state.surfaceDidGetSize(surfaceID: forB.id)
+        session.deliverable = true
+        state.claimLeadershipForKeyWindow()
 
-        #expect(claimed == [forB.id])
-        #expect(state.isLeader(forB))
+        #expect(session.claimed == [forB.id])
+        #expect(forB.isLeader)
     }
 
-    /// The model counts one client, so `isMirrored` is false and the gated
-    /// claim never sent. A client the model does not know of could lead,
-    /// and zmx then drops the visible pane's control keys. The pane in the
-    /// key window's tab claims on its first size whatever the count says.
+    /// A client that the model does not know of (a `zmx connect` from
+    /// another terminal) can lead. The session says so, and the key window's
+    /// pane claims on its next size or key change.
     @Test
-    func the_key_windows_pane_claims_on_first_size_with_one_known_client() throws {
+    func the_key_windows_pane_claims_back_from_a_client_outside_the_model() throws {
         let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        state.noteKeyWindow(a)
         let surface = pane.surface(for: a.id)
+        surface.receiveLead(false)
         #expect(!state.isMirrored(pane))
-        #expect(claimed.isEmpty, "becoming key claims nothing for a sole client")
 
-        state.surfaceDidGetSize(surfaceID: surface.id)
+        state.noteKeyWindow(a)
 
-        #expect(claimed == [surface.id])
+        #expect(session.claimed == [surface.id])
         #expect(state.isLeader(pane))
     }
 
     /// A pane that comes up in a window that is NOT key claims nothing on
     /// its own: leadership follows the key window's tab.
     @Test
-    func a_sole_pane_in_a_background_window_does_not_claim_on_first_size() throws {
+    func a_pane_in_a_background_window_does_not_claim() throws {
         let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 2)
         let a = WindowState(activeProjectID: project.id)
         let b = WindowState(activeProjectID: project.id)
@@ -1137,35 +1093,12 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
         let background = try #require(ws.tabs[1].splitRoot.allPanes().first)
         let surface = background.surface(for: b.id)
-        claimed = []
+        surface.receiveLead(false)
+        session.claimed = []
 
-        state.surfaceDidGetSize(surfaceID: surface.id)
+        state.claimLeadershipForKeyWindow()
 
-        #expect(claimed.isEmpty)
-    }
-
-    /// A remote pane's zmx lives on the host and may predate the Claim tag,
-    /// so the unconditional claim never goes to it either.
-    @Test
-    func a_remote_pane_never_claims_on_first_size() throws {
-        let state = makeAppState()
-        var claimed: [UUID] = []
-        state.sendClaim = { claimed.append($0.id)
-            return true
-        }
-        let project = Project(name: "r", path: "me@host:/srv/app", sortOrder: 0)
-        state.restoreSelection(projects: [project])
-        state.selectProject(project)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
-        #expect(pane.isRemote)
-        let a = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        state.noteKeyWindow(a)
-        let surface = pane.surface(for: a.id)
-
-        state.surfaceDidGetSize(surfaceID: surface.id)
-
-        #expect(claimed.isEmpty)
+        #expect(!session.claimed.contains(surface.id))
     }
 
     @Test

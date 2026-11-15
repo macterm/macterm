@@ -56,7 +56,6 @@ enum ProjectMemoryActions {
             appState.presentToast(String(localized: "The terminal of that pane is not live yet."))
             return
         }
-        appState.noteSessionLeader(pane)
     }
 
     private static func existingDirectory(_ path: String?) -> String? {
