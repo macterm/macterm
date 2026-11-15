@@ -13,11 +13,12 @@
     },
     "path": {
       "type": "string",
-      "description": "Where the project lives, in the scp style. An absolute path, or a path that starts with ~, is a local directory (for example \"~/dev/api\"). The reserved literal \"<pinned>\" marks this file as the pinned-tabs layout (pinned.yaml), which Macterm keeps up to date by itself. \"[user@]host:dir\" is a directory on a remote host (for example \"devbox:~/dev/api\"). The host can be an ssh-config alias. Port and identity come from ~/.ssh/config. ControlMaster there makes splits fast. This value is the identity of the project: Macterm matches files to projects by this value. The match expands ~ and normalizes ./.. segments. It does not resolve symlinks (including /tmp → /private/tmp), and it does not resolve letter case. Write the directory exactly as the file system reports it. Remote paths match by structure (same user, host and directory). The panes of a remote project run persistent zmx sessions on the host over ssh. zmx must be installed there."
+      "description": "Where the project lives, in the scp style. An absolute path, or a path that starts with ~, is a local directory (for example \"~/dev/api\"). The reserved literal \"<pinned>\" marks this file as the pinned-tabs layout (pinned.yaml), which Macterm keeps up to date by itself. \"[user@]host:dir\" is a directory on a remote host (for example \"devbox:~/dev/api\"). The host can be an ssh-config alias. Port and identity come from ~/.ssh/config. ControlMaster there makes splits fast. This value is the identity of the project: Macterm matches files to projects by this value. The match expands ~ and normalizes ./.. segments. It does not resolve symlinks (including /tmp → /private/tmp), and it does not resolve letter case. Write the directory exactly as the file system reports it. Remote paths match by structure (same user, host and directory). The panes of a remote project run persistent sessions of the Macterm server on the host, over ssh. Macterm installs the server there."
     },
     "zmxPath": {
       "type": "string",
-      "description": "The absolute path to zmx on the remote host. Macterm uses it as written, in place of resolving `zmx` through PATH. It applies only to a remote `path`. Set it when the pane shows \"zmx not found in PATH\". Non-interactive ssh gets a bare PATH. On some hosts, Macterm cannot resolve zmx by itself: a host with a network-mounted home, a host with an unusual /bin/sh, and a host whose PATH is set only in a non-POSIX shell. Example: \"~/bin/zmx\" or \"/usr/local/bin/zmx\". Leave it out to find zmx in PATH."
+      "deprecated": true,
+      "description": "Old. Macterm 1 used this key to find zmx on the remote host. Macterm 2 installs its own server on the host, so it ignores this key. A file that has it still reads."
     },
     "tabs": {
       "type": "array",

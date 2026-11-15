@@ -441,7 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // an older build left running (design/002) before most panes ask it
         // for their sessions. A pane's `zmx connect` starts the server too,
         // so nothing waits for this.
-        if ZmxClient.liveBypass == nil {
+        if SessionClient.liveBypass == nil {
             Task { await LocalSessions.shared.prepare() }
         }
         // Registering here is what lets a Services-menu pick launch the app:
@@ -866,7 +866,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SSHConnections.shared.onConnectionExit = { SSHLoginPrompts.shared.cancel(sshPID: $0) }
         SSHConnections.shared.onLoginNotice = { SSHLoginPrompts.shared.showNotice(host: $0, sshPID: $1, line: $2) }
         // The unit-test host must not end a master of the developer's Debug app.
-        if ZmxClient.liveBypass != .unitTestHost {
+        if SessionClient.liveBypass != .unitTestHost {
             Task { await SSHConnections.shared.endStaleConnections() }
         }
         finderServices.attach(appState: appState, projectStore: projectStore)
@@ -937,7 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // interrupted by quit than one in a workspace pane. The full prompt
         // returns only when zmx is unavailable (sessions genuinely die with
         // the app).
-        let persistenceActive = (appState?.zmx ?? .live).isBundled()
+        let persistenceActive = (appState?.sessionClient ?? .live).isBundled()
         if persistenceActive {
             AppTerminationState.isTerminating = true
             return .terminateNow

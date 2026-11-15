@@ -526,7 +526,7 @@ enum WorkspaceSerializer {
                 sessionName: p.sessionName,
                 workingDirectory: liveCwd,
                 hostSessionDirectory: p.isRemote ? p.hostSessionDirectory.map { known in
-                    SurfaceRegistry.shared.view(of: p)?.currentPwd.flatMap { RemoteSpawn.isSafeHostFolder($0) ? $0 : nil } ?? known
+                    SurfaceRegistry.shared.view(of: p)?.currentPwd.flatMap { HostCommands.isSafeHostFolder($0) ? $0 : nil } ?? known
                 } : nil
             ))
         case let .split(b):

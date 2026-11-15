@@ -65,7 +65,7 @@ final class LayoutFileService {
         let ownSlug = ProjectSlug.slug(from: project.name)
         let reservedSlugs = sameDirectorySiblingSlugs(of: project, in: siblingProjects).subtracting([ownSlug])
         let target = try projectFiles.write(
-            ProjectFile(name: project.name, path: project.path, zmxPath: project.zmxPath, tabs: layout.tabs),
+            ProjectFile(name: project.name, path: project.path, tabs: layout.tabs),
             projectName: project.name,
             reservedSlugs: reservedSlugs
         )

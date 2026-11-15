@@ -130,7 +130,7 @@ final class GhosttyTerminalNSView: NSView {
     /// project (#104); nil for local panes. A remote surface runs
     /// `ssh -t … zmx attach` directly as its command — never under the local
     /// zmx wrapper (nested zmx is broken upstream) — so all the local
-    /// persistence machinery (wrapper, ZMX_DIR pin, `isZmxWrapped`) stays off.
+    /// persistence machinery (the local session channel) stays off.
     let remoteSpec: ProjectPath?
 
     /// Whether this surface belongs to a remote project. Read by the poll
@@ -138,15 +138,11 @@ final class GhosttyTerminalNSView: NSView {
     /// pane's real foreground process.
     var isRemote: Bool { remoteSpec != nil }
 
-    /// Optional explicit remote zmx path (#104), used verbatim in the spawn
-    /// command instead of PATH-resolving `zmx`. nil = PATH lookup.
-    private let remoteZmxPath: String?
-
-    /// Whether this surface actually spawned under the zmx wrapper (false when
-    /// zmx is unbundled or the socket-path budget forced a bypass). Read by
-    /// the resolver-cache retry: only wrapped panes are expected to appear in
-    /// `zmx ls`.
-    private(set) var isZmxWrapped = false
+    /// Whether this surface runs from a session of the local server (a
+    /// channel surface). False for a plain shell (no bundled server, or a
+    /// bypass), also when a palette command wraps that shell. Its own
+    /// `foregroundPID` and tty are then the pane's real ones.
+    var runsInLocalSession: Bool { remoteSpec == nil && channelRuntime != nil }
 
     /// The channel that feeds this surface, when it runs from one
     /// (`startChannel`). Read on libghostty's io thread by the manual
@@ -591,8 +587,7 @@ final class GhosttyTerminalNSView: NSView {
         command: String? = nil,
         shell: String? = nil,
         env: [String: String]? = nil,
-        remoteSpec: ProjectPath? = nil,
-        remoteZmxPath: String? = nil
+        remoteSpec: ProjectPath? = nil
     ) {
         self.paneID = paneID
         self.workingDirectory = workingDirectory
@@ -601,7 +596,6 @@ final class GhosttyTerminalNSView: NSView {
         self.shell = shell
         self.env = env
         self.remoteSpec = remoteSpec
-        self.remoteZmxPath = remoteZmxPath
         super.init(frame: .zero)
         setupTrackingArea()
         registerForDraggedTypes(Array(Self.dropTypes))
@@ -678,7 +672,7 @@ final class GhosttyTerminalNSView: NSView {
         // A remote pane runs from a channel on the host's link
         // (`startRemoteChannel`). Without a server to ask (the unit-test
         // host) it keeps the fixed line below.
-        let remoteChannel = remoteSpec != nil && ZmxClient.liveBypass != .unitTestHost
+        let remoteChannel = remoteSpec != nil && SessionClient.liveBypass != .unitTestHost
         if remoteChannel {
             // Nothing to set: no command and no environment on this Mac.
         } else if remoteSpec != nil {
@@ -715,20 +709,14 @@ final class GhosttyTerminalNSView: NSView {
             }
         }
 
-        // Wrap the resolved shell in its v2 session for persistence (LOCAL
-        // panes only — a remote pane's persistence is the remote daemon's
-        // job). The `command_wrapper` argv is prepended to ghostty's
-        // fully-resolved command (after login(1) + shell integration), so
-        // OSC 7 cwd / OSC 133 framing stay intact — `zmx connect
-        // <sessionName> --` makes the session with that command through the
-        // server when it is missing, and attaches the live session on
-        // relaunch. nil executable (zmx unbundled or over the socket-path
-        // budget) → no wrapper, a plain unpersisted shell.
+        // A local pane runs from a channel (`startChannel`) when the bundled
+        // server can make its session: the server runs the launch that
+        // libghostty resolves, so the shell persists. With no bundled server,
+        // or a bypass (`SessionClient.liveBypass`), the pane is a plain,
+        // unpersisted shell on the surface's own pty.
         // The argv element buffers come from `cString` (freed in
         // destroySurface); the pointer array is bound around the spawn below.
-        // A local pane whose session can be made runs from a channel
-        // (`startChannel`): no client on a pty, so no session wrapper.
-        let channelMode = remoteSpec == nil && ZmxClient.live.executableURL() != nil
+        let channelMode = remoteSpec == nil && SessionClient.live.runsSessions()
         var wrapper: [String] = []
 
         // A palette `run:` action's command, carried in the environment
@@ -814,20 +802,10 @@ final class GhosttyTerminalNSView: NSView {
         }
 
         if channelLaunch != nil {
-            isZmxWrapped = true
             startChannel(surface: surface)
             NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
         } else if remoteChannel {
             startChannel(surface: surface)
-        }
-
-        // A wrapped spawn created (or reattached) a zmx session — the
-        // resolver's name→leader-pid cache needs a refresh to see it. (The
-        // session registers asynchronously, so the first refresh may miss;
-        // AppState retries while a wrapped pane is absent from `zmx ls`.)
-        if !wrapperArgv.isEmpty {
-            isZmxWrapped = true
-            NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
         }
 
         syncColorScheme()

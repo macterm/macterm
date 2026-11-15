@@ -19,7 +19,7 @@ struct ScratchTabsTests {
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: ProjectFileStore(directoryURL: projectsDir)
         )
-        state.zmx = .noop
+        state.sessionClient = .noop
         state.incubatePane = { _ in }
         return state
     }

@@ -30,18 +30,18 @@ struct AppStateDesktopWidgetsTests {
         state.nativeDesktopWidgetFrames = { [] }
         // A listing that fails reattaches every restored widget — the
         // default here, so no test respawns a session it didn't ask to.
-        var zmx = recordingZmx(into: WidgetKills())
-        zmx.listSessions = { nil }
-        state.zmx = zmx
+        var sessionClient = recordingClient(into: WidgetKills())
+        sessionClient.listSessions = { nil }
+        state.sessionClient = sessionClient
         return state
     }
 
-    private func recordingZmx(into killed: WidgetKills) -> ZmxClient {
-        ZmxClient(
-            executableURL: { nil },
+    private func recordingClient(into killed: WidgetKills) -> SessionClient {
+        SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { name in await killed.append(name) },
-            killRemoteSession: { _, name, _ in await killed.append(name) },
+            killRemoteSession: { _, name in await killed.append(name) },
             listSessions: { [] },
             endV1Sessions: { _ in true }
         )
@@ -270,15 +270,15 @@ struct AppStateDesktopWidgetsTests {
         let widgetSession = try #require(widget.pane?.sessionName)
 
         let ended = WidgetKills()
-        var zmx = recordingZmx(into: ended)
-        zmx.endV1Sessions = { names in
+        var sessionClient = recordingClient(into: ended)
+        sessionClient.endV1Sessions = { names in
             for name in names {
                 await ended.append(name)
             }
             return true
         }
         let state = makeState(storeURL: storeURL, dir: dir)
-        state.zmx = zmx
+        state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { false }, write: {})
         state.restoreSelection(projects: [])
 
@@ -293,7 +293,7 @@ struct AppStateDesktopWidgetsTests {
         let (state, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let killed = WidgetKills()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         state.restoreSelection(projects: [])
         let keep = state.createDesktopWidget()
         let gone = state.createDesktopWidget()
@@ -314,7 +314,7 @@ struct AppStateDesktopWidgetsTests {
         let (state, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let killed = WidgetKills()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         state.restoreSelection(projects: [])
         let widget = state.createDesktopWidget(command: "htop")
         let oldSession = try #require(widget.pane?.sessionName)
@@ -660,9 +660,9 @@ extension AppStateDesktopWidgetsTests {
 
         let killed = WidgetKills()
         let state = makeState(storeURL: storeURL, dir: dir)
-        var zmx = recordingZmx(into: killed)
-        zmx.listSessions = { nil }
-        state.zmx = zmx
+        var sessionClient = recordingClient(into: killed)
+        sessionClient.listSessions = { nil }
+        state.sessionClient = sessionClient
         state.restoreSelection(projects: [])
 
         #expect(state.desktopWidgets.map(\.name) == ["kept", "added"])
@@ -754,9 +754,9 @@ extension AppStateDesktopWidgetsTests {
         let lostSession = try #require(lost.pane?.sessionName)
 
         let state = makeState(storeURL: storeURL, dir: dir)
-        var zmx = recordingZmx(into: WidgetKills())
-        zmx.listSessions = { [LocalSession(name: survivorSession)] }
-        state.zmx = zmx
+        var sessionClient = recordingClient(into: WidgetKills())
+        sessionClient.listSessions = { [LocalSession(name: survivorSession)] }
+        state.sessionClient = sessionClient
         let presenter = RecordingPresenter()
         state.attachDesktopWidgetPresenter(presenter)
         let restored = state.restoreDesktopWidgets(WorkspaceStore(fileURL: storeURL).load().desktopWidgets)

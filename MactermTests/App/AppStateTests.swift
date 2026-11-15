@@ -222,7 +222,7 @@ struct AppStateTests {
         // mirror path rather than a hand-built pane.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
@@ -2167,17 +2167,17 @@ struct AppStateTests {
 
     // MARK: - zmx session lifecycle on close paths
 
-    /// A ZmxClient that records every killed session name. Remote kills are
+    /// A SessionClient that records every killed session name. Remote kills are
     /// recorded into `remoteKilled` (when given) so a test can assert routing.
-    private func recordingZmx(
+    private func recordingClient(
         into killed: KilledSessions,
         remoteInto remoteKilled: KilledSessions? = nil
-    ) -> ZmxClient {
-        ZmxClient(
-            executableURL: { nil },
+    ) -> SessionClient {
+        SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { name in await killed.append(name) },
-            killRemoteSession: { _, name, _ in await (remoteKilled ?? killed).append(name) },
+            killRemoteSession: { _, name in await (remoteKilled ?? killed).append(name) },
             listSessions: { [] },
             endV1Sessions: { _ in true }
         )
@@ -2187,7 +2187,7 @@ struct AppStateTests {
     func closeTab_kills_every_panes_session() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2216,7 +2216,7 @@ struct AppStateTests {
         // has to outlive it, or the work still on screen elsewhere dies.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
@@ -2237,7 +2237,7 @@ struct AppStateTests {
         // the daemon has to die or it lingers as a clients==0 orphan.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
@@ -2263,7 +2263,7 @@ struct AppStateTests {
         // leak the session. This is why releaseSessions takes the whole batch.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
@@ -2285,7 +2285,7 @@ struct AppStateTests {
         let killed = KilledSessions()
         let remoteKilled = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed, remoteInto: remoteKilled)
+        state.sessionClient = recordingClient(into: killed, remoteInto: remoteKilled)
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2301,13 +2301,13 @@ struct AppStateTests {
 
     // MARK: - Process-exit routing (#281)
 
-    /// A ZmxClient that records remote kills.
-    private func remoteKillRecordingZmx(_ remoteKilled: KilledSessions) -> ZmxClient {
-        ZmxClient(
-            executableURL: { nil },
+    /// A SessionClient that records remote kills.
+    private func remoteKillRecordingClient(_ remoteKilled: KilledSessions) -> SessionClient {
+        SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { _ in },
-            killRemoteSession: { _, name, _ in await remoteKilled.append(name) },
+            killRemoteSession: { _, name in await remoteKilled.append(name) },
             listSessions: { [] },
             endV1Sessions: { _ in true }
         )
@@ -2317,7 +2317,7 @@ struct AppStateTests {
     func process_exit_closes_a_local_pane() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let tab = try #require(state.workspaces[p.id]?.activeTab)
@@ -2344,7 +2344,7 @@ struct AppStateTests {
         _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
-        state.zmx = remoteKillRecordingZmx(remoteKilled)
+        state.sessionClient = remoteKillRecordingClient(remoteKilled)
 
         state.handleProcessExit(pane.id, projectID: p.id)
 
@@ -2357,7 +2357,7 @@ struct AppStateTests {
     func closePane_kills_only_that_panes_session() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2374,7 +2374,7 @@ struct AppStateTests {
     func moveTab_kills_nothing() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         let moving = try #require(state.workspaces[p1.id]?.tabs.first?.id)
@@ -2787,8 +2787,8 @@ struct AppStateTests {
         writer.saveWorkspaces()
 
         let ended = KilledSessions()
-        var zmx = ZmxClient.noop
-        zmx.endV1Sessions = { names in
+        var sessionClient = SessionClient.noop
+        sessionClient.endV1Sessions = { names in
             for name in names {
                 await ended.append(name)
             }
@@ -2800,7 +2800,7 @@ struct AppStateTests {
             projectFiles: makeProjectFileStore(),
             quickTerminal: QuickTerminalSplitState()
         )
-        state.zmx = zmx
+        state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
         state.restoreSelection(projects: [])
 
@@ -2819,12 +2819,12 @@ struct AppStateTests {
             quickTerminal: QuickTerminalSplitState()
         )
         let calls = LockedBox(0)
-        var counting = ZmxClient.noop
+        var counting = SessionClient.noop
         counting.endV1Sessions = { _ in
             calls.mutate { $0 += 1 }
             return true
         }
-        again.zmx = counting
+        again.sessionClient = counting
         again.v1SessionsEnded = state.v1SessionsEnded
         again.restoreSelection(projects: [])
         try await Task.sleep(for: .milliseconds(100))
@@ -2840,8 +2840,8 @@ struct AppStateTests {
         writer.saveWorkspaces()
 
         let calls = LockedBox(0)
-        var zmx = ZmxClient.noop
-        zmx.endV1Sessions = { _ in
+        var sessionClient = SessionClient.noop
+        sessionClient.endV1Sessions = { _ in
             calls.mutate { $0 += 1 }
             return false
         }
@@ -2851,7 +2851,7 @@ struct AppStateTests {
             projectFiles: makeProjectFileStore(),
             quickTerminal: QuickTerminalSplitState()
         )
-        state.zmx = zmx
+        state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
         state.restoreSelection(projects: [])
 

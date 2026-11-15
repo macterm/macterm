@@ -87,7 +87,7 @@ extension AppState {
     private func endSessions(of widget: DesktopWidget) {
         for pane in widget.tab.splitRoot.allPanes() {
             SurfaceRegistry.shared.destroySurfaces(of: pane)
-            pane.killPersistentSession(using: zmx)
+            pane.killPersistentSession(using: sessionClient)
         }
     }
 
@@ -294,8 +294,8 @@ extension AppState {
     /// reattach, never toward respawning over sessions that may be alive.
     func materializeRestoredDesktopWidgets(_ ids: Set<UUID>) async {
         guard !ids.isEmpty else { return }
-        let alive: Set<String>? = if zmx.isBundled() {
-            await zmx.listSessions().map { Set($0.filter(\.isRunning).map(\.name)) }
+        let alive: Set<String>? = if sessionClient.isBundled() {
+            await sessionClient.listSessions().map { Set($0.filter(\.isRunning).map(\.name)) }
         } else {
             []
         }

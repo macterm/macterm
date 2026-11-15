@@ -1214,7 +1214,7 @@ struct WindowStateTests {
         // `selectedTab` while nothing maintained it — the workspace hook,
         // reconcile and align all skip the pinned workspace.
         let state = makeAppState()
-        state.zmx = .noop
+        state.sessionClient = .noop
         state.incubatePane = { _ in }
         _ = try seedProject(state, tabs: 1)
         state.ensurePinnedWorkspace()
@@ -1246,7 +1246,7 @@ struct WindowStateTests {
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
         let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
-        writer.zmx = .noop
+        writer.sessionClient = .noop
         writer.incubatePane = { _ in }
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
@@ -1260,7 +1260,7 @@ struct WindowStateTests {
         writer.saveWorkspaces()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
-        reader.zmx = .noop
+        reader.sessionClient = .noop
         reader.incubatePane = { _ in }
         reader.restoreSelection(projects: [p])
         await reader.materializeRestoredPinnedTabs()

@@ -385,8 +385,7 @@ final class SurfaceRegistry {
             command: hasBuilt ? nil : pane.command,
             shell: pane.shell,
             env: mergedEnv,
-            remoteSpec: pane.remoteSpec,
-            remoteZmxPath: pane.remoteZmxPath
+            remoteSpec: pane.remoteSpec
         )
         entries[pane.id]?.hasBuiltView = true
         return view

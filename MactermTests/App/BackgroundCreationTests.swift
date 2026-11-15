@@ -20,7 +20,7 @@ struct BackgroundCreationTests {
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: ProjectFileStore(directoryURL: projectsDir)
         )
-        state.zmx = .noop
+        state.sessionClient = .noop
         return state
     }
 

@@ -69,16 +69,14 @@ struct SplitNodeTests {
     }
 
     @Test
-    func splitting_inherits_the_remote_hosts_zmx_path() throws {
+    func splitting_a_remote_pane_makes_a_remote_child() throws {
         let source = Pane(projectPath: "host:~/repo", projectID: UUID())
-        source.remoteZmxPath = "/opt/custom/bin/zmx"
         let (tree, id) = SplitNode.pane(source).splitting(
             paneID: source.id, direction: .horizontal, position: .second,
             projectPath: source.projectPath, projectID: source.projectID
         )
         let childID = try #require(id)
         let child = try #require(tree.findPane(id: childID))
-        #expect(child.remoteZmxPath == source.remoteZmxPath)
         #expect(child.isRemote)
         #expect(SurfaceRegistry.shared.view(of: child) == nil)
     }

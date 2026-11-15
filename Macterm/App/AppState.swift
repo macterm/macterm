@@ -1132,7 +1132,7 @@ final class AppState {
     /// zmx session-persistence client. Injectable so tests can observe
     /// session kills without a real daemon.
     @ObservationIgnored
-    var zmx: ZmxClient = .live
+    var sessionClient: SessionClient = .live
 
     /// The quick terminal's split state once this AppState has adopted it
     /// (`adoptQuickTerminal`) — the one whose tab the snapshot carries and
@@ -1396,11 +1396,11 @@ final class AppState {
     /// server's `session.list`. Per-tick foreground resolution reads the
     /// cache with cheap syscalls only. A failed listing keeps the cache.
     private func refreshZmxCacheIfDue() {
-        guard !zmxRefreshInFlight, zmx.isBundled() else { return }
+        guard !zmxRefreshInFlight, sessionClient.isBundled() else { return }
         guard zmxRefreshGate.shouldRefresh(now: Date()) else { return }
         zmxRefreshInFlight = true
-        Task { [weak self, zmx] in
-            let sessions = await zmx.listSessions()
+        Task { [weak self, sessionClient] in
+            let sessions = await sessionClient.listSessions()
             if let sessions { ZmxForegroundResolver.updateCache(sessions) }
             let names = Set((sessions ?? []).filter(\.isRunning).map(\.name))
             // A failed listing keeps the last answer: nothing is known.
@@ -1421,7 +1421,7 @@ final class AppState {
         let missingWrapped = workspaces.values
             .flatMap(\.tabs)
             .flatMap { $0.splitRoot.allPanes() }
-            .contains { SurfaceRegistry.shared.view(of: $0)?.isZmxWrapped == true && !map.contains($0.sessionName) }
+            .contains { SurfaceRegistry.shared.view(of: $0)?.runsInLocalSession == true && !map.contains($0.sessionName) }
         if missingWrapped, zmxRetryBudget > 0 {
             zmxRetryBudget -= 1
             zmxRefreshGate.noteSessionLifecycle()
@@ -1569,8 +1569,6 @@ final class AppState {
                 activeProjectID = id
                 recordProjectVisit(id)
                 ensureWorkspace(projectID: id, path: project.path)
-                // Reattaching remote panes need the zmx path before warm/render.
-                stampRemoteZmxPath(project)
                 acknowledgeActiveTab(projectID: id)
                 warmFocusedProject()
             }
@@ -1578,7 +1576,7 @@ final class AppState {
         // Pinned live tabs materialize async, after the server says which
         // sessions survived (#285) — ahead of the loadFailed gate, since
         // pinned records come from pinned.yaml, not the snapshot.
-        Task { await materializeRestoredPinnedTabs(projects: projects) }
+        Task { await materializeRestoredPinnedTabs() }
         // A failed snapshot LOAD gives no names: nothing is ended (an empty
         // claim set would mark every live session an orphan).
         guard !workspaceStore.loadFailed else { return }
@@ -1648,7 +1646,6 @@ final class AppState {
             window?.activeProjectID = project.id
             recordProjectVisit(project.id)
             ensureWorkspace(projectID: project.id, path: project.path)
-            stampRemoteZmxPath(project)
             // The window now selects a tab of this project.
             settleWindowSelections()
         }
@@ -1659,26 +1656,12 @@ final class AppState {
         activeProjectID = project.id
         recordProjectVisit(project.id)
         ensureWorkspace(projectID: project.id, path: project.path)
-        // Stamp the remote zmx path onto every pane BEFORE any surface spawns
-        // (warmFocusedProject / render → ensureNSView reads it). It's a host
-        // property re-derived from the project on each open, not persisted.
-        stampRemoteZmxPath(project)
         acknowledgeActiveTab(projectID: project.id)
         reconnectDroppedRemotePanes(trigger: .projectSelected)
         warmFocusedProject()
         // Creating a workspace doesn't change any tab selection (the poll's
         // usual wake signal), so bump it directly.
         notePollEvent()
-    }
-
-    /// Apply `project.zmxPath` to every pane in its workspace, so the remote
-    /// spawn/kill/probe commands use it. Idempotent; safe to call on each
-    /// open. No-op for local projects (nil path leaves PATH resolution).
-    func stampRemoteZmxPath(_ project: Project) {
-        guard let ws = workspaces[project.id] else { return }
-        for pane in ws.tabs.flatMap({ $0.splitRoot.allPanes() }) {
-            pane.remoteZmxPath = project.zmxPath
-        }
     }
 
     /// Start the shells for every tab of the focused project, not just the
@@ -1815,8 +1798,8 @@ final class AppState {
     private func endV1SessionsOnce(names: Set<String>) {
         guard !v1SessionsEnded.read() else { return }
         let flag = v1SessionsEnded
-        Task { [zmx] in
-            guard await zmx.endV1Sessions(names.sorted()) else { return }
+        Task { [sessionClient] in
+            guard await sessionClient.endV1Sessions(names.sorted()) else { return }
             await MainActor.run { flag.write() }
         }
     }
@@ -1827,14 +1810,14 @@ final class AppState {
     /// the listing, so a pane made in between is never judged against an
     /// older set. A failed listing ends nothing.
     private func sweepLocalOrphans() {
-        Task { [zmx, weak self] in
-            guard let sessions = await zmx.listSessions() else { return }
+        Task { [sessionClient, weak self] in
+            guard let sessions = await sessionClient.listSessions() else { return }
             guard let known = await MainActor.run(body: { self?.claimedSessionNames() }) else { return }
             let orphans = ZmxReaper.localOrphans(in: sessions, known: known)
             guard !orphans.isEmpty else { return }
             logger.info("Ending \(orphans.count, privacy: .public) orphan local session(s)")
             for name in orphans {
-                await zmx.killSession(name)
+                await sessionClient.killSession(name)
             }
         }
     }
@@ -1925,7 +1908,7 @@ final class AppState {
     func releaseSessions(_ panes: [Pane]) {
         let retained = retainedSessionNames(excluding: panes)
         for pane in panes where !retained.contains(pane.sessionName) {
-            pane.killPersistentSession(using: zmx)
+            pane.killPersistentSession(using: sessionClient)
         }
         handOverLeadership(from: panes, retained: retained)
         pruneSessionLeaders()
@@ -2431,13 +2414,11 @@ final class AppState {
     /// `run:` semantics). Returns the new tab's ID, nil when the project has
     /// no live workspace. `focus: false` preserves any existing selection and
     /// history, and warms unrendered panes so their shells start without a visit.
-    /// Stamp the host's zmx path before either SwiftUI or the incubator spawns.
     @discardableResult
     func createTab(
         projectID: UUID,
         projectPath: String,
         sessionSlug: String? = nil,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
@@ -2445,7 +2426,7 @@ final class AppState {
         guard let ws = workspaces[projectID] else { return nil }
         let tab = ModelWriter.tabCreate(
             in: ws,
-            projectPath: projectPath, sessionSlug: sessionSlug, remoteZmxPath: remoteZmxPath,
+            projectPath: projectPath, sessionSlug: sessionSlug,
             command: command, env: env, focus: focus
         )
         if !focus {
@@ -2509,7 +2490,6 @@ final class AppState {
             projectID: projectID,
             projectPath: workingDirectory,
             sessionSlug: projectSessionSlug,
-            remoteZmxPath: projects.first(where: { $0.id == projectID })?.zmxPath,
             command: command,
             env: env,
             focus: focus
@@ -2995,8 +2975,7 @@ final class AppState {
             paneID,
             direction: direction,
             projectID: projectID,
-            projectDirectory: projectDirectory,
-            remoteZmxPath: projects.first(where: { $0.id == projectID })?.zmxPath
+            projectDirectory: projectDirectory
         )
     }
 
@@ -3008,7 +2987,6 @@ final class AppState {
         position: SplitPosition = .second,
         projectID: UUID,
         projectDirectory: String,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
@@ -3017,13 +2995,6 @@ final class AppState {
               let tab = ws.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil }),
               let pane = tab.splitRoot.findPane(id: paneID)
         else { return nil }
-        // The CLI can split a never-opened remote tab. Stamp the whole tab
-        // before splitting, so the new sibling inherits the source's path.
-        if let remoteZmxPath {
-            for existing in tab.splitRoot.allPanes() {
-                existing.remoteZmxPath = remoteZmxPath
-            }
-        }
         // nil = inherit (the source pane's live cwd, else its own
         // `projectPath`) — never coerced to the project root, which would
         // turn a remote pane's split into a local shell.

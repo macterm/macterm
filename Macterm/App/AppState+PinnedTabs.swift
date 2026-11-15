@@ -359,13 +359,13 @@ extension AppState {
     /// tab's own sessions die — and stays lazy there on purpose: eagerly
     /// respawning at the moment of death would be a crash loop for a `run:`
     /// that exits immediately.
-    func materializeRestoredPinnedTabs(projects: [Project] = []) async {
+    func materializeRestoredPinnedTabs() async {
         guard !pinnedRecords.isEmpty else { return }
         var aliveNames: Set<String>?
         if pendingPinnedLiveRestores.isEmpty {
             aliveNames = []
-        } else if zmx.isBundled() {
-            if let sessions = await zmx.listSessions() {
+        } else if sessionClient.isBundled() {
+            if let sessions = await sessionClient.listSessions() {
                 aliveNames = Set(sessions.filter(\.isRunning).map(\.name))
             }
         } else {
@@ -392,7 +392,6 @@ extension AppState {
                 if survived {
                     let tab = WorkspaceSerializer.restoreTab(snapshot, projectID: PinnedTabs.workspaceID)
                     insertPinnedTabAligned(tab, activate: false)
-                    stampPinnedRemoteZmxPath(tab, record: record, projects: projects)
                     continue
                 }
                 logger.info("pinned tab \(record.id, privacy: .public): sessions died; respawning from layout")
@@ -400,7 +399,6 @@ extension AppState {
             ensurePinnedWorkspace()
             guard let tab = buildDeclaredPinnedTab(record) else { continue }
             insertPinnedTabAligned(tab, activate: false)
-            stampPinnedRemoteZmxPath(tab, record: record, projects: projects)
         }
         if let ws = pinnedWorkspace, ws.activeTabID == nil {
             // Restore the selection the user quit with (persisted alongside
@@ -414,20 +412,6 @@ extension AppState {
         pendingPinnedActiveTabID = nil
         warmPinnedTabs()
         saveWorkspaces()
-    }
-
-    /// `remoteZmxPath` is a host property re-derived on every open — but the
-    /// pinned workspace has no project to derive it from, so a pinned remote
-    /// pane inherits it from the ORIGIN project the tab was pinned from.
-    /// Without this, a relaunch rebuilds the pane with a nil zmx path and the
-    /// remote attach/probe breaks on hosts that need the explicit path.
-    private func stampPinnedRemoteZmxPath(_ tab: TerminalTab, record: PinnedTabRecord, projects: [Project]) {
-        guard let origin = projects.first(where: { $0.id == record.originProjectID }),
-              origin.zmxPath != nil
-        else { return }
-        for pane in tab.splitRoot.allPanes() where pane.isRemote {
-            pane.remoteZmxPath = origin.zmxPath
-        }
     }
 
     /// Start every pinned pane's shell off-screen via the shared stagger

@@ -48,14 +48,6 @@ final class Pane: Identifiable {
     /// `projectPath` — they read this instead.
     @ObservationIgnored
     let remoteSpec: ProjectPath?
-    /// Optional explicit remote zmx path (#104), from the pane's `Project`.
-    /// Not part of pane identity and not persisted — `AppState` stamps it from
-    /// the project on open and before publishing new tabs; new splits inherit
-    /// it from their source (it's a host property, re-derivable on every open).
-    /// Read by `ensureNSView` (spawn) and
-    /// `killPersistentSession` (teardown). nil = resolve `zmx` via PATH.
-    @ObservationIgnored
-    var remoteZmxPath: String?
     /// For a remote pane, the host folder of its session, once its session
     /// ran on the host's server (0057): the folder of its creation, then the
     /// shell's own (OSC 7) at each save. nil: the pane never had a v2
@@ -775,7 +767,7 @@ final class Pane: Identifiable {
     /// host's one connection. nil for a local pane.
     nonisolated var remoteDestination: String? {
         guard case let .remote(user, host, _) = remoteSpec else { return nil }
-        return RemoteSpawn.destination(user: user, host: host)
+        return HostCommands.destination(user: user, host: host)
     }
 
     /// The remote-side busy verdict alone (see
@@ -933,9 +925,6 @@ final class Pane: Identifiable {
             sessionName: source.sessionName,
             isMirror: true
         )
-        // A host property, not pane identity — re-derived per open exactly as
-        // AppState stamps it, so the mirror can tear down over ssh too.
-        remoteZmxPath = source.remoteZmxPath
         hostSessionDirectory = source.hostSessionDirectory
     }
 
@@ -945,26 +934,25 @@ final class Pane: Identifiable {
     /// notification click after a move finds the tab in its new project.
     ///
     /// Session identity (`sessionName`, `sessionSlug`, `projectPath`,
-    /// `remoteSpec`, `remoteZmxPath`) is deliberately NOT touched: the shell
+    /// `remoteSpec`) is deliberately NOT touched: the shell
     /// keeps running on its original host under its original name, so a
     /// remote pane moved into a local project still tears down over ssh.
     func rebind(projectID: UUID) {
         self.projectID = projectID
     }
 
-    /// Permanently kill this pane's zmx session. Call ONLY when the pane is
+    /// Permanently kill this pane's session. Call ONLY when the pane is
     /// gone for good (closed, tab/project removed, dropped by a layout apply)
     /// — NOT on transient teardown (window hide, tab-switch churn), where the
     /// session must survive. Fire-and-forget: close paths aren't blocked on
-    /// it; `LocalSessions.requestTimeout` (local) and ZmxClient's subprocess
+    /// it; `LocalSessions.requestTimeout` (local) and the host link's request
     /// timeout (remote) bound a stuck peer. The client is
     /// a parameter so AppState's injectable instance flows through in tests.
-    func killPersistentSession(using zmx: ZmxClient) {
+    func killPersistentSession(using sessionClient: SessionClient) {
         let name = sessionName
         if let remote = remoteSpec {
-            let zmxPath = remoteZmxPath
             Task {
-                await zmx.killRemoteSession(remote, name, zmxPath)
+                await sessionClient.killRemoteSession(remote, name)
                 // Post AFTER the kill so observers that re-list sessions see
                 // the post-kill state instead of racing the still-alive one.
                 NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
@@ -972,7 +960,7 @@ final class Pane: Identifiable {
             return
         }
         Task {
-            await zmx.killSession(name)
+            await sessionClient.killSession(name)
             NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
         }
     }

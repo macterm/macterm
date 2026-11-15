@@ -77,7 +77,7 @@ extension AppState {
         // sits above it with its own tutorial already printed.
         selectProject(project)
         saveWorkspaces()
-        Task { await materializeRestoredPinnedTabs(projects: projectStore.projects) }
+        Task { await materializeRestoredPinnedTabs() }
         return true
     }
 }

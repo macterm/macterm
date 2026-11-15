@@ -615,7 +615,6 @@ final class Workspace: Identifiable {
     fileprivate func createTab(
         projectPath: String,
         sessionSlug: String? = nil,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
@@ -627,11 +626,6 @@ final class Workspace: Identifiable {
             command: command,
             env: env
         )
-        // Selection hooks may create window mirrors synchronously. Give them
-        // the host configuration too, before publishing the new tab.
-        for pane in tab.splitRoot.allPanes() {
-            pane.remoteZmxPath = remoteZmxPath
-        }
         tabs.append(tab)
         if focus {
             if let current = activeTabID { tabHistory.push(current) }
@@ -781,7 +775,6 @@ enum ModelWriter {
         in workspace: Workspace,
         projectPath: String,
         sessionSlug: String? = nil,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
@@ -789,7 +782,6 @@ enum ModelWriter {
         workspace.createTab(
             projectPath: projectPath,
             sessionSlug: sessionSlug,
-            remoteZmxPath: remoteZmxPath,
             command: command,
             env: env,
             focus: focus

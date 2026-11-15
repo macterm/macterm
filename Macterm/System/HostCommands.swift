@@ -1,8 +1,11 @@
 import Foundation
 
-/// Builds the commands behind remote projects (#104). Pure string assembly:
-/// every command line is unit-testable without a host.
+/// Builds the commands that run on a remote host (#104). Pure string
+/// assembly: every command line is unit-testable without a host.
 ///
+/// - **The host scripts** (`Scripts`, `server/host/`): the check, the
+///   attach and the install of the host's server, sent as
+///   `sh -c '<script>' macterm <arguments>` (`command`).
 /// - **A pane's command** (`sessionCommand`, `plainShellCommand`): it runs
 ///   on the tty of an ssh channel over the host's one connection
 ///   (`SSHConnections.ttyArguments`, 0057). The login happened before, in
@@ -14,7 +17,7 @@ import Foundation
 /// Port, identity, ControlMaster, and IPv6 literals are deliberately not
 /// expressible here — point the host field at an `~/.ssh/config` alias for
 /// those (the same stance the `path:` grammar took in #137).
-enum RemoteSpawn {
+enum HostCommands {
     /// The ssh destination for a parsed remote: `user@host` or bare `host`.
     static func destination(user: String?, host: String) -> String {
         if let user, !user.isEmpty { return "\(user)@\(host)" }
@@ -52,9 +55,8 @@ enum RemoteSpawn {
     /// - subshell + stdin</dev/null: a profile exec'ing a login shell that
     ///   re-reads the same profile spins in an exec loop no fd isolation
     ///   can unblock.
-    /// The fallback dir list below covers where zmx actually lives in
-    /// practice (`~/bin` included), and the project `zmxPath` covers
-    /// everything else, deterministically.
+    /// The fallback dir list below covers where tools live in practice
+    /// (`~/bin` included).
     static let remoteEnvPreamble =
         "PATH=\"$PATH:$HOME/bin:$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin\"; "
             + "export PATH; "
@@ -169,11 +171,6 @@ enum RemoteSpawn {
         return preamble
     }
 
-    /// Where the host's server lives (`server/host/attach.sh`, `d` and `b`).
-    static func hostServerBinary(key: String) -> String {
-        "$HOME/.local/share/macterm/bin/macterm-\(key)"
-    }
-
     /// What a new remote session needs from the host, in one command that the
     /// host's server runs (`command.run`): the first line says if the folder
     /// is there (`ok`) or the pane falls back to the home folder (`home`),
@@ -261,7 +258,7 @@ enum RemoteSpawn {
     /// don't escape `'`), which would violate the single-quote-free wire-format
     /// invariant: `shellQuote` would then emit `'\''`, and fish/nu tokenize that
     /// differently than POSIX sh. Callers that feed user-controlled fields
-    /// (project directory, `zmxPath`) must reject `'` upstream — see
+    /// (the project directory) must reject `'` upstream — see
     /// `assertSingleQuoteFree` — so this can never receive one in practice.
     static func posixDoubleQuote(_ value: String) -> String {
         var escaped = ""
@@ -316,5 +313,72 @@ enum RemoteSpawn {
         }
         let rest = String(directory[directory.index(after: slashIndex)...])
         return rest.isEmpty ? "\(tildeSegment)/" : "\(tildeSegment)/\(posixDoubleQuote(rest))"
+    }
+
+    /// The script with no comment lines and no empty lines, its lines joined
+    /// with spaces. sshd gives the command to the user's login shell, and csh
+    /// refuses a newline in single quotes. So each line of a host script is
+    /// valid when it is joined to the next.
+    static func oneLine(_ script: String) -> String {
+        script.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            .joined(separator: " ")
+    }
+
+    /// nil when the script has a single quote, a newline or a `!` that csh
+    /// reads as history (one that a blank, `=` or `(` does not follow), or an argument
+    /// is not one plain word. Fail closed: nothing goes to the host then.
+    static func command(_ script: String, _ arguments: [String]) -> String? {
+        guard !script.contains("'"), !script.contains(where: \.isNewline), !hasHistoryMark(script),
+              arguments.allSatisfy(isWord)
+        else { return nil }
+        return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
+    }
+
+    static func hasHistoryMark(_ script: String) -> Bool {
+        let characters = Array(script)
+        return characters.indices.contains { index in
+            characters[index] == "!" && index + 1 < characters.count
+                && !(characters[index + 1].isWhitespace || "=(".contains(characters[index + 1]))
+        }
+    }
+
+    /// Letters, digits and `-`, at most 64: a build key, a checksum, a host id.
+    static func isWord(_ text: String) -> Bool {
+        !text.isEmpty && text.count <= 64 && text.unicodeScalars.allSatisfy {
+            ("a" ... "z").contains($0) || ("A" ... "Z").contains($0) || ("0" ... "9").contains($0) || $0 == "-"
+        }
+    }
+}
+
+extension HostCommands {
+    /// The scripts that run on a host (`server/host/`, in the bundle at
+    /// `Contents/Resources/host`). The app sends each one as
+    /// `sh -c '<script>' macterm <arguments>` (`HostCommands.command`), so a
+    /// script has no single quote and each argument is one word.
+    struct Scripts: Equatable {
+        var attach: String
+        var install: String
+
+        static var bundled: Scripts? {
+            Bundle.main.resourceURL.flatMap { load(from: $0.appendingPathComponent("host", isDirectory: true)) }
+        }
+
+        /// Each script as the one line that goes to the host (`oneLine`).
+        static func load(from directory: URL) -> Scripts? {
+            guard let attach = try? String(contentsOf: directory.appendingPathComponent("attach.sh"), encoding: .utf8),
+                  let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8)
+            else { return nil }
+            return Scripts(attach: HostCommands.oneLine(attach), install: HostCommands.oneLine(install))
+        }
+
+        func attachCommand(key: String) -> String? {
+            HostCommands.command(attach, [key])
+        }
+
+        func installCommand(key: String, sha256: String, hostID: String) -> String? {
+            HostCommands.command(install, [key, sha256, hostID])
+        }
     }
 }

@@ -6,7 +6,7 @@ private let logger = Logger(subsystem: appBundleID, category: "ControlHandler")
 
 /// Dispatches decoded control-socket requests into app state. Pure
 /// translate-and-delegate: every operation calls the same `AppState` /
-/// `ProjectStore` / `ZmxClient` methods the UI uses — no business logic of
+/// `ProjectStore` / `SessionClient` methods the UI uses — no business logic of
 /// its own. Injectable stores make it fully testable with the tempdir
 /// pattern used by `AppStateTests`.
 @MainActor
@@ -15,7 +15,7 @@ final class ControlHandler {
     private let projectStore: ProjectStore
     /// Follows `appState.zmx` so tests that stub the client (the established
     /// AppStateTests pattern) drive this handler too.
-    private var zmx: ZmxClient { appState.zmx }
+    private var sessionClient: SessionClient { appState.sessionClient }
 
     init(appState: AppState, projectStore: ProjectStore) {
         self.appState = appState
@@ -487,7 +487,7 @@ final class ControlHandler {
     }
 
     private func sessionList() async throws -> ControlData {
-        guard let sessions = await zmx.listSessions() else {
+        guard let sessions = await sessionClient.listSessions() else {
             throw ControlError(
                 code: .internalError,
                 message: "zmx session listing unavailable",
@@ -863,7 +863,6 @@ final class ControlHandler {
             position: placement.position,
             projectID: project.id,
             projectDirectory: project.path,
-            remoteZmxPath: project.zmxPath,
             command: args.run,
             focus: args.focus ?? true
         ), let newPane = target.tab.splitRoot.findPane(id: newID)
@@ -1374,7 +1373,7 @@ final class ControlHandler {
         guard let name = args.session, !name.isEmpty else {
             throw ControlError(code: .badRequest, message: "session.kill requires a session name")
         }
-        guard let sessions = await zmx.listSessions() else {
+        guard let sessions = await sessionClient.listSessions() else {
             throw ControlError(code: .internalError, message: "zmx session listing unavailable")
         }
         guard sessions.contains(where: { $0.name == name && $0.isRunning }) else {
@@ -1384,7 +1383,7 @@ final class ControlHandler {
                 action: "run `macterm session list` to see live sessions"
             )
         }
-        await zmx.killSession(name)
+        await sessionClient.killSession(name)
         return ControlData()
     }
 

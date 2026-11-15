@@ -77,20 +77,6 @@ struct WorkspaceTests {
         #expect(selections == 1)
     }
 
-    @Test(arguments: [false, true])
-    func createTab_stamps_remote_configuration_before_publishing_selection(focus: Bool) {
-        let ws = Workspace(id: UUID(), tabs: [], activeTabID: nil)
-        let zmxPath = "/opt/custom/bin/zmx"
-        var reportedPaths: [String?] = []
-        ws.onActiveTabChanged = { reportedPaths.append(ws.activeTab?.focusedPane?.remoteZmxPath) }
-
-        let tab = ModelWriter.tabCreate(in: ws, projectPath: "host:~/repo", remoteZmxPath: zmxPath, focus: focus)
-
-        #expect(tab.focusedPane?.remoteZmxPath == zmxPath)
-        #expect(reportedPaths == [zmxPath])
-        ws.onActiveTabChanged = nil
-    }
-
     @Test
     func adoptTab_appends_existing_tab_and_selects_it() {
         let ws = makeWorkspace()

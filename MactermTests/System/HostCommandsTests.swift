@@ -2,7 +2,7 @@ import Foundation
 @testable import Macterm
 import Testing
 
-struct RemoteSpawnTests {
+struct HostCommandsTests {
     private let remote = ProjectPath.remote(user: nil, host: "devbox", directory: "~/dev/api")
 
     // MARK: - Pane command
@@ -10,17 +10,17 @@ struct RemoteSpawnTests {
     private let key = "0123abcd"
 
     private func attach(_ session: String = "macterm-api-abc123") -> String {
-        RemoteSpawn.createProbeScript(directory: "~/dev/api")
+        HostCommands.createProbeScript(directory: "~/dev/api")
     }
 
     private func create(_ directory: String = "~/dev/api") -> String {
-        RemoteSpawn.createProbeScript(directory: directory)
+        HostCommands.createProbeScript(directory: directory)
     }
 
     @Test
     func a_hostile_folder_stays_text_in_the_host_command() throws {
         // A folder can come from the host (OSC 7). It must never run.
-        let command = RemoteSpawn.plainShellCommand(directory: "/nonexistent;echo INJECTED")
+        let command = HostCommands.plainShellCommand(directory: "/nonexistent;echo INJECTED")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
@@ -37,17 +37,17 @@ struct RemoteSpawnTests {
 
     @Test
     func a_folder_that_the_host_reported_must_be_a_plain_path() {
-        #expect(RemoteSpawn.isSafeHostFolder("/srv/app src"))
-        #expect(RemoteSpawn.isSafeHostFolder("~/dev"))
-        #expect(!RemoteSpawn.isSafeHostFolder("relative"))
-        #expect(!RemoteSpawn.isSafeHostFolder("/srv\\x"))
-        #expect(!RemoteSpawn.isSafeHostFolder("/srv/it's"))
-        #expect(!RemoteSpawn.isSafeHostFolder("/srv\nrm -rf ~"))
+        #expect(HostCommands.isSafeHostFolder("/srv/app src"))
+        #expect(HostCommands.isSafeHostFolder("~/dev"))
+        #expect(!HostCommands.isSafeHostFolder("relative"))
+        #expect(!HostCommands.isSafeHostFolder("/srv\\x"))
+        #expect(!HostCommands.isSafeHostFolder("/srv/it's"))
+        #expect(!HostCommands.isSafeHostFolder("/srv\nrm -rf ~"))
     }
 
     @Test
     func a_plain_shell_is_a_login_shell_in_the_folder() {
-        let plain = RemoteSpawn.plainShellCommand(directory: "~/dev/api")
+        let plain = HostCommands.plainShellCommand(directory: "~/dev/api")
         #expect(plain.hasPrefix("sh -c '"))
         #expect(plain.contains("cd ~/\"dev/api\""))
         #expect(plain.contains("if [ -n \"$SHELL\" ]; then exec \"$SHELL\" -l; else exec /bin/sh; fi"))
@@ -69,16 +69,16 @@ struct RemoteSpawnTests {
         // `-o SetEnv=TERM=xterm-ghostty` from the client because its wrapper has
         // no remote-side script; ours reads the remote DB directly, so it needs
         // no cache and works where env requests are dropped.
-        for cmd in [attach(), RemoteSpawn.plainShellCommand(directory: "~")] {
+        for cmd in [attach(), HostCommands.plainShellCommand(directory: "~")] {
             #expect(cmd.contains("if ! infocmp \"$TERM\" >/dev/null 2>&1; then "))
             #expect(cmd.contains("if infocmp xterm-ghostty >/dev/null 2>&1; then TERM=xterm-ghostty;"))
             #expect(cmd.contains("else TERM=xterm-256color; fi; export TERM; fi;"))
         }
         // Nested `if`, never `&&`/`||` chaining — the chained form's
         // left-to-right precedence binds the else-branch wrong.
-        #expect(!RemoteSpawn.remoteTermPreamble.contains("||"))
+        #expect(!HostCommands.remoteTermPreamble.contains("||"))
         // Pane-only: a background read has no terminal to describe.
-        let probe = RemoteSpawn.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
         #expect(!probe.contains("infocmp"))
     }
 
@@ -93,9 +93,9 @@ struct RemoteSpawnTests {
         // color support") on any host where TERM isn't xterm-ghostty — which
         // `remoteTermPreamble` can't fix, since it only ever downgrades.
         #expect(attach().contains("COLORTERM=truecolor; export COLORTERM;"))
-        #expect(RemoteSpawn.plainShellCommand(directory: "~").contains("COLORTERM=truecolor; export COLORTERM;"))
+        #expect(HostCommands.plainShellCommand(directory: "~").contains("COLORTERM=truecolor; export COLORTERM;"))
         // Pane-only: a background read renders nothing.
-        let probe = RemoteSpawn.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
         #expect(!probe.contains("COLORTERM"))
     }
 
@@ -104,18 +104,18 @@ struct RemoteSpawnTests {
         // Claude Code sends OSC 9;4 progress — the agent's busy/done dot —
         // only to TERM_PROGRAM=ghostty at 1.2.0 or later, and ssh carries
         // neither variable on its own.
-        #expect(attach().contains(RemoteSpawn.remoteTerminalProgramPreamble))
-        #expect(RemoteSpawn.remoteTerminalProgramPreamble.hasPrefix("TERM_PROGRAM=ghostty; export TERM_PROGRAM; "))
-        let preamble = RemoteSpawn.terminalProgramPreamble(version: "1.3.2-main+b368389")
+        #expect(attach().contains(HostCommands.remoteTerminalProgramPreamble))
+        #expect(HostCommands.remoteTerminalProgramPreamble.hasPrefix("TERM_PROGRAM=ghostty; export TERM_PROGRAM; "))
+        let preamble = HostCommands.terminalProgramPreamble(version: "1.3.2-main+b368389")
         #expect(preamble.contains("TERM_PROGRAM_VERSION=1.3.2-main+b368389; export TERM_PROGRAM_VERSION;"))
-        let probe = RemoteSpawn.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
         #expect(!probe.contains("TERM_PROGRAM"))
     }
 
     @Test
     func terminal_program_preamble_drops_a_version_that_is_not_plain() {
         for version in [nil, "", "1.3; rm -rf ~", "1.3 beta", "1.3\"", "$(id)"] {
-            let preamble = RemoteSpawn.terminalProgramPreamble(version: version)
+            let preamble = HostCommands.terminalProgramPreamble(version: version)
             #expect(preamble == "TERM_PROGRAM=ghostty; export TERM_PROGRAM; ")
         }
     }
@@ -128,8 +128,8 @@ struct RemoteSpawnTests {
         // hosts (exec hijack of our fds, tty-stdin read-block, profile
         // exec-loop spin). PATH comes from the fallback dir list; anything
         // else is the project's explicit zmxPath.
-        let probe = RemoteSpawn.gitProbeScript(directory: "~/dev/api")
-        for wire in [attach(), create(), RemoteSpawn.plainShellCommand(directory: "~"), probe] {
+        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
+        for wire in [attach(), create(), HostCommands.plainShellCommand(directory: "~"), probe] {
             #expect(!wire.contains(".profile"))
             #expect(!wire.contains("/etc/profile"))
         }
@@ -139,7 +139,7 @@ struct RemoteSpawnTests {
     func pane_command_script_is_single_quote_free() {
         // Single quotes in the script would break the `sh -c '<script>'`
         // wrapper on a non-POSIX login shell: the only two wrap it.
-        let cmd = RemoteSpawn.plainShellCommand(directory: "/srv/app")
+        let cmd = HostCommands.plainShellCommand(directory: "/srv/app")
         #expect(cmd.count { $0 == "'" } == 2)
     }
 
@@ -147,10 +147,10 @@ struct RemoteSpawnTests {
 
     @Test
     func shell_quote_survives_spaces_dollars_and_quotes() {
-        #expect(RemoteSpawn.shellQuote("plain") == "'plain'")
-        #expect(RemoteSpawn.shellQuote("with space") == "'with space'")
-        #expect(RemoteSpawn.shellQuote("$HOME") == "'$HOME'")
-        #expect(RemoteSpawn.shellQuote("it's") == "'it'\\''s'")
+        #expect(HostCommands.shellQuote("plain") == "'plain'")
+        #expect(HostCommands.shellQuote("with space") == "'with space'")
+        #expect(HostCommands.shellQuote("$HOME") == "'$HOME'")
+        #expect(HostCommands.shellQuote("it's") == "'it'\\''s'")
     }
 
     @Test
@@ -158,17 +158,17 @@ struct RemoteSpawnTests {
         // A quoted tilde is a literal directory named "~" — the tilde segment
         // must stay bare so sh expands it. Double quotes, so the containing
         // sh -c script stays single-quote-free.
-        #expect(RemoteSpawn.quoteRemoteDirectory("~") == "~")
-        #expect(RemoteSpawn.quoteRemoteDirectory("~/dev/api") == "~/\"dev/api\"")
-        #expect(RemoteSpawn.quoteRemoteDirectory("~/dir with space") == "~/\"dir with space\"")
-        #expect(RemoteSpawn.quoteRemoteDirectory("~deploy/app") == "~deploy/\"app\"")
-        #expect(RemoteSpawn.quoteRemoteDirectory("~deploy") == "~deploy")
+        #expect(HostCommands.quoteRemoteDirectory("~") == "~")
+        #expect(HostCommands.quoteRemoteDirectory("~/dev/api") == "~/\"dev/api\"")
+        #expect(HostCommands.quoteRemoteDirectory("~/dir with space") == "~/\"dir with space\"")
+        #expect(HostCommands.quoteRemoteDirectory("~deploy/app") == "~deploy/\"app\"")
+        #expect(HostCommands.quoteRemoteDirectory("~deploy") == "~deploy")
     }
 
     @Test
     func remote_directory_quotes_plain_paths_whole() {
-        #expect(RemoteSpawn.quoteRemoteDirectory("/srv/my app") == "\"/srv/my app\"")
-        #expect(RemoteSpawn.quoteRemoteDirectory("work/api") == "\"work/api\"")
+        #expect(HostCommands.quoteRemoteDirectory("/srv/my app") == "\"/srv/my app\"")
+        #expect(HostCommands.quoteRemoteDirectory("work/api") == "\"work/api\"")
     }
 
     // MARK: - Security: tilde-segment injection (§5.3)
@@ -179,12 +179,12 @@ struct RemoteSpawnTests {
         // tilde segment carrying `$(...)`, backticks, or spaces is NOT expandable
         // config — it's an injection vector — so the WHOLE string is
         // double-quoted (escaping `$`/backtick), never emitted raw into the `cd`.
-        #expect(RemoteSpawn.quoteRemoteDirectory("~$(touch /tmp/pwned)/sub") == "\"~\\$(touch /tmp/pwned)/sub\"")
+        #expect(HostCommands.quoteRemoteDirectory("~$(touch /tmp/pwned)/sub") == "\"~\\$(touch /tmp/pwned)/sub\"")
         // Slashless form must also be quoted (was previously returned verbatim).
-        #expect(RemoteSpawn.quoteRemoteDirectory("~$(id)") == "\"~\\$(id)\"")
-        #expect(RemoteSpawn.quoteRemoteDirectory("~`id`") == "\"~\\`id\\`\"")
+        #expect(HostCommands.quoteRemoteDirectory("~$(id)") == "\"~\\$(id)\"")
+        #expect(HostCommands.quoteRemoteDirectory("~`id`") == "\"~\\`id\\`\"")
         // A username with a space is not a valid bare-safe name → fully quoted.
-        #expect(RemoteSpawn.quoteRemoteDirectory("~evil user/app") == "\"~evil user/app\"")
+        #expect(HostCommands.quoteRemoteDirectory("~evil user/app") == "\"~evil user/app\"")
     }
 
     @Test
@@ -192,7 +192,7 @@ struct RemoteSpawnTests {
         // Every bare (unquoted) result must be free of shell-active characters,
         // so nothing a tilde path can carry reaches `sh` unquoted.
         for input in ["~", "~/dev/api", "~deploy/app", "~$(cmd)/x", "~a b/c", "/abs/$x"] {
-            let quoted = RemoteSpawn.quoteRemoteDirectory(input)
+            let quoted = HostCommands.quoteRemoteDirectory(input)
             // Strip the double-quoted spans; whatever remains bare must be inert.
             let bareParts = quoted.split(separator: "\"", omittingEmptySubsequences: false)
                 .enumerated().filter { $0.offset.isMultiple(of: 2) }.map(\.element).joined()
@@ -207,7 +207,7 @@ struct RemoteSpawnTests {
     @Test
     func assert_single_quote_free_passes_clean_scripts_through() {
         let clean = "PATH=$PATH; exec \"zmx\" attach \"macterm-x-abc\""
-        #expect(RemoteSpawn.assertSingleQuoteFree(clean) == clean)
+        #expect(HostCommands.assertSingleQuoteFree(clean) == clean)
     }
 
     @Test
@@ -217,7 +217,7 @@ struct RemoteSpawnTests {
         // differently than POSIX sh, the exact breakage the invariant prevents.
         // Such a script is swapped for a diagnostic that is itself quote-free.
         let dirty = "cd \"~/it's-a-dir\"; exec zmx"
-        let result = RemoteSpawn.assertSingleQuoteFree(dirty)
+        let result = HostCommands.assertSingleQuoteFree(dirty)
         #expect(result != dirty)
         #expect(!result.contains("'"))
         #expect(result.contains("unsupported single quote"))
@@ -226,27 +226,27 @@ struct RemoteSpawnTests {
 
     @Test
     func posix_double_quote_escapes_shell_metacharacters() {
-        #expect(RemoteSpawn.posixDoubleQuote("plain") == "\"plain\"")
-        #expect(RemoteSpawn.posixDoubleQuote("a$b") == "\"a\\$b\"")
-        #expect(RemoteSpawn.posixDoubleQuote("a\"b") == "\"a\\\"b\"")
-        #expect(RemoteSpawn.posixDoubleQuote("a`b") == "\"a\\`b\"")
-        #expect(RemoteSpawn.posixDoubleQuote("a\\b") == "\"a\\\\b\"")
+        #expect(HostCommands.posixDoubleQuote("plain") == "\"plain\"")
+        #expect(HostCommands.posixDoubleQuote("a$b") == "\"a\\$b\"")
+        #expect(HostCommands.posixDoubleQuote("a\"b") == "\"a\\\"b\"")
+        #expect(HostCommands.posixDoubleQuote("a`b") == "\"a\\`b\"")
+        #expect(HostCommands.posixDoubleQuote("a\\b") == "\"a\\\\b\"")
     }
 
     // MARK: - Destination
 
     @Test
     func destination_composes_user_and_host() {
-        #expect(RemoteSpawn.destination(user: nil, host: "devbox") == "devbox")
-        #expect(RemoteSpawn.destination(user: "me", host: "devbox") == "me@devbox")
+        #expect(HostCommands.destination(user: nil, host: "devbox") == "devbox")
+        #expect(HostCommands.destination(user: "me", host: "devbox") == "me@devbox")
     }
 
     // MARK: - Git probe
 
     @Test
     func git_probe_runs_the_six_reads_in_one_command() {
-        let script = RemoteSpawn.gitProbeScript(directory: "~/dev/api")
-        #expect(script.hasPrefix(RemoteSpawn.remoteEnvPreamble))
+        let script = HostCommands.gitProbeScript(directory: "~/dev/api")
+        #expect(script.hasPrefix(HostCommands.remoteEnvPreamble))
         #expect(script.contains("cd ~/\"dev/api\" 2>/dev/null || exit 2"))
         #expect(script.contains("command -v git >/dev/null 2>&1 || exit 3"))
         #expect(script.contains("status --porcelain=v2 --branch --show-stash 2>/dev/null) || exit 4"))
@@ -271,6 +271,6 @@ struct RemoteSpawnTests {
     func git_probe_reads_a_folder_with_a_single_quote() {
         // The script is one argument of `command.run`, not text that a login
         // shell parses, so a single quote inside double quotes is safe.
-        #expect(RemoteSpawn.gitProbeScript(directory: "/it's").contains("cd \"/it's\" 2>/dev/null || exit 2"))
+        #expect(HostCommands.gitProbeScript(directory: "/it's").contains("cd \"/it's\" 2>/dev/null || exit 2"))
     }
 }

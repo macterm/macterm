@@ -122,7 +122,7 @@ final class RemoteHosts {
         /// A login and a check run. The token tells this prepare from a
         /// later one.
         case preparing(UUID, Task<Void, Never>)
-        case ready(SSHConnections.Route, RemoteServers.Link)
+        case ready(RemoteServers.Link)
         /// No server: plain shells.
         case plain(SSHConnections.Route)
     }
@@ -211,7 +211,7 @@ final class RemoteHosts {
     func endSession(_ session: String, destination: String) async {
         forget(session)
         switch hosts[destination] {
-        case let .ready(_, link):
+        case let .ready(link):
             await Self.kill(session, over: link)
             return
         case .plain:
@@ -241,7 +241,7 @@ final class RemoteHosts {
         timeout: Duration
     ) async -> MactermProtocol.CommandRun.Result? {
         switch hosts[destination] {
-        case let .ready(_, link):
+        case let .ready(link):
             return await Self.run(argv, timeout: timeout, over: link)
         case .plain:
             return nil
@@ -268,8 +268,8 @@ final class RemoteHosts {
         let route = try await connections.connect(destination)
         do {
             let link = try await servers.connect(destination)
-            if case let .ready(_, old) = hosts[destination] { old.close() }
-            hosts[destination] = .ready(route, link)
+            if case let .ready(old) = hosts[destination] { old.close() }
+            hosts[destination] = .ready(link)
             configuration.linkReady(destination)
         } catch RemoteServers.Failure.declined {
             decline(destination)
@@ -308,11 +308,11 @@ final class RemoteHosts {
             mark(panes, lost: false)
             return .plain(
                 arguments: connections.ttyArguments(
-                    route, destination, RemoteSpawn.plainShellCommand(directory: target.directory)
+                    route, destination, HostCommands.plainShellCommand(directory: target.directory)
                 ),
                 message: RemotePaneText.plainShell(host: target.host)
             )
-        case let .ready(_, link):
+        case let .ready(link):
             return await decide(session, panes: panes, target: target, link: link)
         }
     }
@@ -329,7 +329,7 @@ final class RemoteHosts {
             // The link broke. Only a failure on the host's current link
             // counts, and drops it: another request may have made a new one
             // meanwhile. Two failures in a row are the host's answer.
-            guard case let .ready(_, current) = hosts[destination], current === link else {
+            guard case let .ready(current) = hosts[destination], current === link else {
                 return await resolve(session, panes: panes, target: target)
             }
             drop(destination)
@@ -351,7 +351,7 @@ final class RemoteHosts {
         }
         // A folder that the host reported must be safe for a command line.
         let known = panes.lazy.compactMap(\.hostSessionDirectory).first
-            .map { RemoteSpawn.isSafeHostFolder($0) ? $0 : target.directory }
+            .map { HostCommands.isSafeHostFolder($0) ? $0 : target.directory }
         let justCreated = created[session].map { Date().timeIntervalSince($0) < configuration.creationGrace } ?? false
         if found?.isRunning == true { created[session] = nil }
         let step = Self.step(
@@ -434,7 +434,7 @@ final class RemoteHosts {
         let route = try await connections.connect(destination)
         do {
             let link = try await servers.connect(destination, install: !declined.contains(destination))
-            return .ready(route, link)
+            return .ready(link)
         } catch let failure as RemoteServers.Failure {
             switch failure {
             case .declined:
@@ -459,7 +459,7 @@ final class RemoteHosts {
         guard case let .preparing(current, _) = hosts[destination], current == token else {
             // Another step replaced this prepare (an install from Settings).
             // Its waiting panes ask again and find that step's state.
-            if case let .success(.ready(_, link)) = result { link.close() }
+            if case let .success(.ready(link)) = result { link.close() }
             for session in sessions {
                 configuration.post(Self.wakeName(for: session))
             }
@@ -487,7 +487,7 @@ final class RemoteHosts {
     /// Forget a host's link: the next pane checks the connection again.
     private func drop(_ destination: String) {
         switch hosts[destination] {
-        case let .ready(_, link):
+        case let .ready(link):
             link.close()
             hosts[destination] = nil
         case .plain:
@@ -535,14 +535,14 @@ final class RemoteHosts {
     /// pane when the folder was not there. nil when the host did not answer.
     func createLaunch(link: RemoteServers.Link, directory: String) async -> (launch: PaneSession.Launch, note: String?)? {
         guard let result = await Self.run(
-            ["/bin/sh", "-c", RemoteSpawn.createProbeScript(directory: directory)],
+            ["/bin/sh", "-c", HostCommands.createProbeScript(directory: directory)],
             timeout: .seconds(10), over: link
         ), result.code == 0
         else { return nil }
         return Self.parseCreateProbe(String(decoding: result.output.bytes, as: UTF8.self), directory: directory)
     }
 
-    /// Pure. The lines of `RemoteSpawn.createProbeScript`'s output.
+    /// Pure. The lines of `HostCommands.createProbeScript`'s output.
     nonisolated static func parseCreateProbe(_ output: String, directory: String) -> (launch: PaneSession.Launch, note: String?)? {
         var lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard lines.count >= 3, lines[1].hasPrefix("/") else { return nil }

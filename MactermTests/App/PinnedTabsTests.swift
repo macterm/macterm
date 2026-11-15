@@ -26,7 +26,7 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: ProjectFileStore(directoryURL: projectsDir)
         )
-        state.zmx = .noop
+        state.sessionClient = .noop
         // Never let the eager pinned launch warm REAL surfaces in the test
         // host (that would spawn actual shells).
         state.incubatePane = { _ in }
@@ -325,10 +325,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var dead = ZmxClient.noop
+        var dead = SessionClient.noop
         dead.isBundled = { true }
         dead.listSessions = { [] }
-        state2.zmx = dead
+        state2.sessionClient = dead
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -378,10 +378,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var alive = ZmxClient.noop
+        var alive = SessionClient.noop
         alive.isBundled = { true }
         alive.listSessions = { [LocalSession(name: sessionName)] }
-        state2.zmx = alive
+        state2.sessionClient = alive
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -405,10 +405,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var unknown = ZmxClient.noop
+        var unknown = SessionClient.noop
         unknown.isBundled = { true }
         unknown.listSessions = { nil } // probe failed → unknown
-        state2.zmx = unknown
+        state2.sessionClient = unknown
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -501,10 +501,10 @@ struct PinnedTabsTests {
         let sessionEntries = [first, second].flatMap { $0.splitRoot.allPanes() }.map {
             LocalSession(name: $0.sessionName)
         }
-        var alive = ZmxClient.noop
+        var alive = SessionClient.noop
         alive.isBundled = { true }
         alive.listSessions = { sessionEntries }
-        state2.zmx = alive
+        state2.sessionClient = alive
         state2.incubatePane = { _ in }
         state2.restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
         await state2.materializeRestoredPinnedTabs()
@@ -712,7 +712,7 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        state2.zmx = .noop
+        state2.sessionClient = .noop
         try state2.pinnedLayoutStore.write(tabs: [])
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
