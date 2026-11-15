@@ -297,8 +297,7 @@ final class SurfaceRegistry {
     /// when the pane has none, so the list is never empty. Makes no view.
     func surfaces(of pane: Pane) -> [PaneSurface] {
         if let existing = entries[pane.id]?.surfaces, !existing.isEmpty { return existing }
-        // A new entry is the moment to drop the entries of panes that are gone.
-        entries = entries.filter { $0.value.pane != nil }
+        pruneReleasedPanes()
         let first = PaneSurface(pane: pane, host: .incubator)
         entries[pane.id] = Entry(pane: pane, surfaces: [first])
         return [first]
@@ -406,6 +405,7 @@ final class SurfaceRegistry {
                 }
             }
         }
+        pruneReleasedPanes()
     }
 
     /// Destroy and drop one surface while another remains. A client that goes
@@ -439,6 +439,20 @@ final class SurfaceRegistry {
         for surface in all {
             surface.destroy()
         }
+        pruneReleasedPanes()
+    }
+
+    /// Drop the entries of panes that are gone, with their surfaces and
+    /// views. A pane that leaves the tree has its surfaces destroyed first;
+    /// this frees what is left, so no view outlives its pane for long. Runs
+    /// when an entry is made, and after each teardown and window release.
+    private func pruneReleasedPanes() {
+        let released = entries.filter { $0.value.pane == nil }
+        guard !released.isEmpty else { return }
+        for entry in released.values {
+            entry.surfaces.forEach { $0.destroy() }
+        }
+        entries = entries.filter { $0.value.pane != nil }
     }
 }
 

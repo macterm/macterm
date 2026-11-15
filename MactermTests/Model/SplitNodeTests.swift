@@ -4,6 +4,57 @@ import Testing
 
 @MainActor
 struct SplitNodeTests {
+    // MARK: - Pure operations
+
+    /// The tree operations build new branches and leave the receiver as it
+    /// was, so only `ModelWriter` can change a tab's tree. A branch that
+    /// changes keeps its id; a subtree that does not change keeps its object.
+    @Test
+    func operations_keep_the_receiver_and_the_branch_ids() throws {
+        let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c")), ratio: 0.3))
+        guard case let .split(outer) = tree, case let .split(inner) = outer.second else {
+            Issue.record("expected H(a, V(b, c))")
+            return
+        }
+        let c = try #require(ids["c"])
+
+        let resized = tree.resizing(paneID: c, direction: .down, delta: 0.1)
+        let removed = try #require(tree.removing(paneID: c))
+        let rebalanced = tree.rebalanced()
+
+        // The receiver is unchanged.
+        #expect(outer.ratio == 0.3)
+        #expect(inner.ratio == 0.5)
+        #expect(tree.allPanes().count == 3)
+
+        // A changed branch keeps its id, and an unchanged subtree its object.
+        guard case let .split(newOuter) = resized, case let .split(newInner) = newOuter.second else {
+            Issue.record("expected H(a, V(b, c)) after resizing")
+            return
+        }
+        #expect(newOuter.id == outer.id)
+        #expect(newOuter !== outer)
+        #expect(newInner.id == inner.id)
+        #expect(abs(newInner.ratio - 0.6) < 0.0001)
+        #expect(newOuter.first.isSame(as: outer.first))
+        #expect(removed.allPanes().count == 2)
+        guard case let .split(balanced) = rebalanced else {
+            Issue.record("expected a split after rebalancing")
+            return
+        }
+        #expect(balanced.id == outer.id)
+        #expect(abs(balanced.ratio - 0.5) < 0.0001)
+    }
+
+    @Test
+    func an_operation_that_changes_nothing_returns_the_same_branches() throws {
+        let (tree, ids) = build(H(pane("a"), pane("b")))
+        // A vertical resize has no vertical branch to change.
+        let after = try tree.resizing(paneID: #require(ids["a"]), direction: .down, delta: 0.1)
+        #expect(after.isSame(as: tree))
+        #expect(tree.rebalanced().isSame(as: tree))
+    }
+
     // MARK: - splitting
 
     @Test

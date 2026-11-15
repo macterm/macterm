@@ -135,7 +135,7 @@ final class QuickTerminalResponder: KeyResponder {
         }
         if HotkeyRegistry.matches(event, action: .zoomPane) {
             guard let paneID = state.focusedPaneID else { return .passThrough }
-            state.tab.toggleZoom(paneID: paneID)
+            ModelWriter.paneZoom(state.tab, toggling: paneID)
             return .handled
         }
         // The pane modes act on the panel's focused pane, as in

@@ -127,7 +127,7 @@ enum SplitAnimation {
 ///   linear animation), and a closing pane's ghost is clipped to the strip
 ///   its sibling has not yet reclaimed.
 /// - **A closing pane is drawn as a ghost, not animated live.**
-///   `Pane.destroySurface` nils the view and detaches it a tick later, so
+///   `PaneSurface.destroy` nils the view and detaches it a tick later, so
 ///   moving the leaf itself would slide an empty host. The model snapshots
 ///   the pane's last frame (`PaneSurface.closingSnapshot`) WITHOUT a background
 ///   fill, so over the window tint it looks exactly as the pane did — an
@@ -401,7 +401,7 @@ struct AnimatedSplitView: View {
             resizedValue: { start, delta in
                 SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: divider.total)
             },
-            onResize: { divider.branch.ratio = $0 }
+            onResize: { ModelWriter.splitRatio(divider.branch, ratio: $0) }
         )
         .frame(width: bandRect.width, height: bandRect.height)
         .position(x: bandRect.midX, y: bandRect.midY)

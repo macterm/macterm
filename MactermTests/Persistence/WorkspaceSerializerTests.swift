@@ -31,7 +31,7 @@ struct WorkspaceSerializerTests {
         // `createTab` makes — it must still come back in the worktree, under
         // the session name it was created with.
         let ws = Workspace(id: UUID(), projectPath: "/tmp/app")
-        let tab = ws.createTab(projectPath: "/tmp/app-feature", sessionSlug: "app")
+        let tab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp/app-feature", sessionSlug: "app")
         let pane = try #require(tab.focusedPane)
 
         let restored = try #require(roundTrip([ws.id: ws]).first)
@@ -55,7 +55,7 @@ struct WorkspaceSerializerTests {
     func round_trip_preserves_nested_topology() {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"), ratio: 0.3), ratio: 0.4))
-        ws.tabs[0].splitRoot = tree
+        ModelWriter.tabSetTree(ws.tabs[0], root: tree, focusedPaneID: ws.tabs[0].focusedPaneID)
 
         let roundTripped = roundTrip([ws.id: ws])
         let restoredRoot = roundTripped[0].tabs[0].splitRoot
@@ -81,7 +81,7 @@ struct WorkspaceSerializerTests {
     @Test
     func round_trip_preserves_custom_title() {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
-        ws.tabs[0].customTitle = "My Custom Title"
+        ModelWriter.tabSet(ws.tabs[0], title: "My Custom Title")
         let roundTripped = roundTrip([ws.id: ws])
         #expect(roundTripped[0].tabs[0].customTitle == "My Custom Title")
     }
@@ -89,8 +89,8 @@ struct WorkspaceSerializerTests {
     @Test
     func round_trip_preserves_active_tab_when_valid() {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
-        let second = ws.createTab(projectPath: "/tmp")
-        ws.selectTab(second.id)
+        let second = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSelect(second.id, in: ws)
         let roundTripped = roundTrip([ws.id: ws])
         #expect(roundTripped[0].activeTabID == second.id)
     }
@@ -135,8 +135,7 @@ struct WorkspaceSerializerTests {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let tab = ws.tabs[0]
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["b"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["b"])
         let snaps = WorkspaceSerializer.snapshot([ws.id: ws])
         #expect(snaps[0].tabs[0].focusedPaneID == ids["b"])
     }
@@ -311,7 +310,7 @@ struct WorkspaceSerializerTests {
 
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let (tree, _) = build(H(pane("a"), pane("b")))
-        ws.tabs[0].splitRoot = tree
+        ModelWriter.tabSetTree(ws.tabs[0], root: tree, focusedPaneID: ws.tabs[0].focusedPaneID)
 
         store.save(WorkspaceSerializer.snapshot([ws.id: ws]))
         let reloaded = store.load().workspaces
@@ -339,7 +338,7 @@ struct WorkspaceSerializerTests {
             projectID: QuickTerminalService.projectID,
             sessionSlug: ZmxSessionName.quickTerminalSlug
         )
-        try quick.split(paneID: #require(quick.focusedPaneID), direction: .horizontal)
+        try ModelWriter.paneSplit(quick, paneID: #require(quick.focusedPaneID), direction: .horizontal)
         let names = Set(quick.splitRoot.allPanes().map(\.sessionName))
         #expect(names.count == 2)
         #expect(names.allSatisfy { $0.hasPrefix("macterm-quick-") })

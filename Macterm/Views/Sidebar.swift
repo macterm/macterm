@@ -443,7 +443,7 @@ struct SidebarContent: View {
                     presentation: presentation,
                     isInteractive: isInteractive,
                     onRename: { newName in
-                        tab.customTitle = newName.isEmpty ? nil : newName
+                        ModelWriter.tabSet(tab, title: newName.isEmpty ? nil : newName)
                         appState.saveWorkspaces()
                     }
                 )
@@ -545,7 +545,7 @@ struct SidebarContent: View {
             isInteractive: isInteractive,
             projectColor: project.color,
             onRename: { newName in
-                tab.customTitle = newName.isEmpty ? nil : newName
+                ModelWriter.tabSet(tab, title: newName.isEmpty ? nil : newName)
                 appState.saveWorkspaces()
             }
         )

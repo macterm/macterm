@@ -120,7 +120,7 @@ struct ScratchTabsTests {
     func selectScratchTabs_selects_the_workspace_and_its_first_tab() throws {
         let state = makeState()
         let id = try #require(state.createScratchTab(focus: false))
-        state.scratchWorkspace?.activeTabID = nil
+        if let ws = state.scratchWorkspace { ModelWriter.tabPeek(nil, in: ws) }
         let p = seedProject(state)
         #expect(state.activeProjectID == p.id)
 

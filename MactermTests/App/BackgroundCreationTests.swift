@@ -96,7 +96,7 @@ struct BackgroundCreationTests {
 
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        tab.toggleZoom(paneID: source.id)
+        ModelWriter.paneZoom(tab, toggling: source.id)
 
         let newID = try #require(state.splitPane(
             source.id, direction: .horizontal, projectID: p.id,

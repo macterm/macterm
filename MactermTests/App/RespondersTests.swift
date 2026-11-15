@@ -56,7 +56,7 @@ struct MainAppResponderTests {
         #expect(try fx.responder.handle(keyDown(for: .splitDown)) == .handled)
         #expect(tab.splitRoot.allPanes().count == 2)
 
-        _ = fx.state.workspaces[project.id]?.createTab(projectPath: "/tmp")
+        _ = fx.state.workspaces[project.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
         let before = fx.state.workspaces[project.id]?.activeTabID
         #expect(try fx.responder.handle(keyDown(for: .nextTabInProject)) == .handled)
         #expect(fx.state.workspaces[project.id]?.activeTabID != before)

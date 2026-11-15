@@ -76,7 +76,7 @@ struct AppStateSessionRestartTests {
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         let old = panes[0], kept = panes[1]
-        tab.focusedPaneID = old.id
+        ModelWriter.paneFocus(tab, paneID: old.id)
         state.outdatedSessions = [old.sessionName]
 
         state.requestRestartSessions(tabID: tab.id, projectID: project.id)

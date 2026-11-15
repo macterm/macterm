@@ -75,6 +75,19 @@ struct SurfaceRegistryTests {
     }
 
     @Test
+    func the_surfaces_of_a_released_pane_go() {
+        weak var released: PaneSurface?
+        do {
+            let pane = makePane()
+            released = registry.surface(for: pane, in: .window(UUID()))
+            #expect(released != nil)
+        }
+        // A teardown of another pane drops the entries of panes that are gone.
+        registry.destroySurfaces(of: makePane())
+        #expect(released == nil)
+    }
+
+    @Test
     func a_view_types_the_command_only_on_its_first_build() {
         let pane = Pane(projectPath: "/tmp", projectID: UUID(), command: "echo hi")
         let first = registry.makeView(for: pane)

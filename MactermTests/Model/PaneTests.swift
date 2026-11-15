@@ -546,7 +546,7 @@ struct PaneTests {
     }
 
     @Test
-    func destroySurface_is_safe_when_nsView_is_nil() {
+    func destroySurfaces_is_safe_without_a_view() {
         let p = Pane(projectPath: "/", projectID: UUID())
         #expect(SurfaceRegistry.shared.view(of: p) == nil)
         SurfaceRegistry.shared.destroySurfaces(of: p) // must not crash

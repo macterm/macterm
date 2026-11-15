@@ -730,7 +730,7 @@ struct ControlHandlerTests {
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: projectStore.projects)
         let sourceFocus = sourceTab.focusedPaneID
         let sourceHistory = sourceTab.paneFocusHistory.items
-        try sourceTab.toggleZoom(paneID: #require(sourceFocus))
+        try ModelWriter.paneZoom(sourceTab, toggling: #require(sourceFocus))
         let selectedTabID = try #require(appState.createTab(projectID: project.id, projectPath: project.path))
         let keyProject = otherProject ? seedProject(appState, projectStore, name: "elsewhere") : project
         let background = WindowState(activeProjectID: project.id)
@@ -845,7 +845,7 @@ struct ControlHandlerTests {
         appState.workspaces[remote.id] = workspace
         let tab = try #require(workspace.activeTab)
         let sourceID = try #require(tab.focusedPaneID)
-        _ = tab.split(paneID: sourceID, direction: .horizontal)
+        _ = ModelWriter.paneSplit(tab, paneID: sourceID, direction: .horizontal)
         #expect(tab.splitRoot.allPanes().allSatisfy { $0.remoteZmxPath == nil })
         var warmed: [UUID] = []
         appState.incubatePane = {
@@ -1017,7 +1017,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore)
         let workspace = try #require(appState.workspaces[project.id])
         let tab = try #require(workspace.tabs.first)
-        tab.customTitle = "Custom Name"
+        ModelWriter.tabSet(tab, title: "Custom Name")
 
         let response = await handler.handle(request("tab.rename", args: ControlArgs(tab: "tab:1", reset: true)))
         #expect(response.ok)

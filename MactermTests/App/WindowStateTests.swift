@@ -294,7 +294,7 @@ struct WindowStateTests {
         state.selectProject(project)
         let ws = try #require(state.workspaces[project.id])
         for _ in 1 ..< count {
-            _ = ws.createTab(projectPath: "/tmp")
+            _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         }
         return (project, ws)
     }
@@ -562,7 +562,7 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.noteKeyWindow(a)
 
-        let created = ws.createTab(projectPath: "/tmp")
+        let created = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         #expect(a.activeTabIDs[project.id] == created.id)
         #expect(state.selectedTab(for: project.id, in: a)?.id == created.id)
@@ -1275,7 +1275,7 @@ struct WindowStateTests {
         #expect(pinned.tabs.count == 2)
         #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == pinned.activeTabID)
 
-        let created = pinned.createTab(projectPath: "/tmp")
+        let created = ModelWriter.tabCreate(in: pinned, projectPath: "/tmp")
         #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == created.id)
     }
 }

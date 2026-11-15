@@ -693,7 +693,7 @@ private struct DesktopWidgetTerminalView: View {
             zoomedPaneID: nil,
             isActiveProject: true,
             projectID: DesktopWidget.projectID,
-            onFocusPane: { tab.focusPane($0) },
+            onFocusPane: { ModelWriter.paneFocus(tab, paneID: $0) },
             onSplit: { _, _, _ in },
             onClosePane: { _ in onShellExit() },
             onCommandFinished: { paneID in
