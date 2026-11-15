@@ -591,25 +591,6 @@ pub fn foregroundApc(buf: []u8, f: m.Foreground) []const u8 {
     return buf[0 .. report.len + 4];
 }
 
-/// The APCs that the app's tests parse with `ZmxForegroundEvents.parse`
-/// (`server/schema/foreground.json`, `__schema foreground`): each case's
-/// message, and the APC that this client writes for it, in hex.
-pub fn writeForegroundFixtures(w: *std.Io.Writer) !void {
-    const cases = [_]struct { name: []const u8, msg: m.Foreground }{
-        .{ .name = "program", .msg = .{ .idle = false, .shell = false, .comm = .{ .bytes = "/usr/bin/hx" }, .args = .{ .bytes = "hx a;b.md" } } },
-        .{ .name = "idle shell", .msg = .{ .idle = true, .shell = true, .comm = .{ .bytes = "-zsh" }, .args = .{ .bytes = "" } } },
-        .{ .name = "no /etc/shells", .msg = .{ .idle = false, .shell = null, .comm = .{ .bytes = "claude" }, .args = .{ .bytes = "claude --resume" } } },
-        .{ .name = "control bytes", .msg = .{ .idle = false, .shell = false, .comm = .{ .bytes = "ev;il\x1b" }, .args = .{ .bytes = "printf '\x1b\\'" } } },
-    };
-    try w.writeAll("[\n");
-    for (cases, 0..) |case, i| {
-        var buf: [apc_max]u8 = undefined;
-        const apc = foregroundApc(&buf, case.msg);
-        try w.print("  {{\"name\": \"{s}\", \"apc\": \"{x}\"}}{s}\n", .{ case.name, apc, if (i + 1 < cases.len) "," else "" });
-    }
-    try w.writeAll("]\n");
-}
-
 fn attachMessage(size: ipc.Resize, foreground_events: bool) m.Attach {
     return .{ .cols = size.cols, .rows = size.rows, .xpixel = size.xpixel, .ypixel = size.ypixel, .foreground = foreground_events };
 }

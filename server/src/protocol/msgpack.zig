@@ -19,11 +19,17 @@
 //! | `Bin`                | bin, any bytes                     |
 //! | `Secret`             | bin, any bytes (see `Secret`)      |
 //! | `Raw`                | one encoded value, copied as it is |
+//! | `f64`                | float 64                           |
 //! | `[]const T`          | array                              |
+//! | `*T`, `*const T`     | the `T` that it points to          |
 //! | struct               | map                                |
+//! | tagged union         | map `{t: tag, a: payload}` (2)     |
 //!
 //! (1) A tag that the enum does not have decodes to `.unknown` if the enum
 //! has that tag, and is `error.UnknownEnumTag` if not.
+//!
+//! (2) The shape of a pane message. A `void` payload has no `a`. A tag that
+//! the union does not have decodes as in (1), with an `unknown: void` case.
 //!
 //! `decode` copies nothing: a string, a `Bin` or a `Raw` points into the
 //! input. It allocates only the arrays. Give it an arena that lives as long
@@ -101,12 +107,35 @@ pub fn encode(w: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
     switch (@typeInfo(T)) {
         .bool => try w.writeByte(if (value) 0xc3 else 0xc2),
         .int, .comptime_int => try writeInt(w, value),
+        .float => {
+            if (T != f64) @compileError("cannot encode " ++ @typeName(T) ++ ": the wire has f64 only");
+            try w.writeByte(0xcb);
+            try w.writeInt(u64, @bitCast(value), .big);
+        },
         .@"enum" => try writeStr(w, @tagName(value)),
         .optional => if (value) |v| try encode(w, v) else try w.writeByte(0xc0),
-        .pointer => |p| {
-            if (p.size != .slice) @compileError("cannot encode " ++ @typeName(T));
-            try writeArrayLen(w, value.len);
-            for (value) |item| try encode(w, item);
+        .pointer => |p| switch (p.size) {
+            .one => try encode(w, value.*),
+            .slice => {
+                try writeArrayLen(w, value.len);
+                for (value) |item| try encode(w, item);
+            },
+            else => @compileError("cannot encode " ++ @typeName(T)),
+        },
+        .@"union" => |u| {
+            if (u.tag_type == null) @compileError("cannot encode " ++ @typeName(T) ++ ": it has no tag");
+            switch (value) {
+                inline else => |payload, tag| {
+                    const has_payload = @TypeOf(payload) != void;
+                    try writeMapLen(w, if (has_payload) 2 else 1);
+                    try writeStr(w, "t");
+                    try writeStr(w, @tagName(tag));
+                    if (has_payload) {
+                        try writeStr(w, "a");
+                        try encode(w, payload);
+                    }
+                },
+            }
         },
         .@"struct" => |s| {
             var count: usize = 0;
@@ -259,6 +288,14 @@ pub const Reader = struct {
                 else => error.WrongType,
             },
             .int => return r.readInt(T),
+            .float => {
+                if (T != f64) @compileError("cannot decode " ++ @typeName(T) ++ ": the wire has f64 only");
+                return switch (try r.byte()) {
+                    0xca => @floatCast(@as(f32, @bitCast(try r.big(u32)))),
+                    0xcb => @bitCast(try r.big(u64)),
+                    else => error.WrongType,
+                };
+            },
             .@"enum" => {
                 const tag = try r.readStr();
                 if (std.meta.stringToEnum(T, tag)) |v| return v;
@@ -272,6 +309,12 @@ pub const Reader = struct {
                 return try r.decode(o.child, arena);
             },
             .pointer => |p| {
+                if (p.size == .one) {
+                    try r.reserve(@sizeOf(p.child));
+                    const item = try arena.create(p.child);
+                    item.* = try r.decode(p.child, arena);
+                    return item;
+                }
                 if (p.size != .slice) @compileError("cannot decode " ++ @typeName(T));
                 const len = try r.readArrayLen();
                 // Each element takes one byte or more, so a length over the
@@ -279,9 +322,7 @@ pub const Reader = struct {
                 if (len > r.bytes.len - r.pos) return error.EndOfInput;
                 try r.enter();
                 defer r.depth -= 1;
-                const size = std.math.mul(usize, len, @sizeOf(p.child)) catch return error.TooLarge;
-                if (size > max_alloc - r.allocated) return error.TooLarge;
-                r.allocated += size;
+                try r.reserve(std.math.mul(usize, len, @sizeOf(p.child)) catch return error.TooLarge);
                 const items = try arena.alloc(p.child, len);
                 for (items) |*item| item.* = try r.decode(p.child, arena);
                 return items;
@@ -316,8 +357,53 @@ pub const Reader = struct {
                 }
                 return result;
             },
+            .@"union" => |u| {
+                if (u.tag_type == null) @compileError("cannot decode " ++ @typeName(T) ++ ": it has no tag");
+                return r.decodeUnion(T, arena);
+            },
             else => @compileError("cannot decode " ++ @typeName(T)),
         }
+    }
+
+    /// A tagged union is `{t: tag, a: payload}`. The keys can come in either
+    /// order, so the payload is kept as bytes until the tag is known.
+    fn decodeUnion(r: *Reader, comptime T: type, arena: std.mem.Allocator) DecodeError!T {
+        const len = try r.readMapLen();
+        try r.enter();
+        defer r.depth -= 1;
+        var tag: ?[]const u8 = null;
+        var payload: ?[]const u8 = null;
+        for (0..len) |_| {
+            const key = try r.readStr();
+            if (std.mem.eql(u8, key, "t")) {
+                if (tag != null) return error.DuplicateField;
+                tag = try r.readStr();
+            } else if (std.mem.eql(u8, key, "a")) {
+                if (payload != null) return error.DuplicateField;
+                const start = r.pos;
+                try r.skip();
+                payload = r.bytes[start..r.pos];
+            } else try r.skip();
+        }
+        const name = tag orelse return error.MissingField;
+        inline for (@typeInfo(T).@"union".field_names, @typeInfo(T).@"union".field_types) |field, P| {
+            if (std.mem.eql(u8, name, field)) {
+                if (P == void) return @unionInit(T, field, {});
+                // The payload's reader shares this one's depth and budget.
+                var sub: Reader = .{ .bytes = payload orelse return error.MissingField, .depth = r.depth, .allocated = r.allocated };
+                const value = try sub.decode(P, arena);
+                r.allocated = sub.allocated;
+                return @unionInit(T, field, value);
+            }
+        }
+        if (@hasField(T, "unknown")) return @unionInit(T, "unknown", {});
+        return error.UnknownEnumTag;
+    }
+
+    /// Counts `size` bytes against `max_alloc`.
+    fn reserve(r: *Reader, size: usize) DecodeError!void {
+        if (size > max_alloc - r.allocated) return error.TooLarge;
+        r.allocated += size;
     }
 
     fn enter(r: *Reader) DecodeError!void {
@@ -596,6 +682,60 @@ test "decode ignores unknown keys, and fills defaults and nulls" {
 
     const Strict = struct { name: []const u8, needed: u32 };
     try testing.expectError(error.MissingField, decodeSlice(Strict, testing.allocator, bytes));
+}
+
+test "f64 keeps its bits, and an f32 on the wire widens" {
+    for ([_]f64{ 0, 0.5, -1.25, 0.15, std.math.floatMax(f64), std.math.inf(f64) }) |v| try roundTrip(f64, v);
+    try expectHead(@as(f64, 0.5), &.{ 0xcb, 0x3f, 0xe0, 0, 0, 0, 0, 0, 0 });
+    try testing.expectEqual(@as(f64, 0.5), try decodeSlice(f64, testing.allocator, &.{ 0xca, 0x3f, 0, 0, 0 }));
+    try testing.expectError(error.WrongType, decodeSlice(f64, testing.allocator, &.{1}));
+}
+
+const Leaf = struct { id: []const u8 };
+const Branch = struct { ratio: f64 = 0.5, first: Tree, second: Tree };
+const Tree = union(enum) { leaf: Leaf, branch: *const Branch, empty };
+
+test "a tagged union is {t, a}, and a pointer is the value it points to" {
+    try expectHead(Tree{ .leaf = .{ .id = "a" } }, &.{ 0x82, 0xa1, 't', 0xa4, 'l', 'e', 'a', 'f', 0xa1, 'a', 0x81 });
+    try expectHead(@as(Tree, .empty), &.{ 0x81, 0xa1, 't', 0xa5, 'e', 'm', 'p', 't', 'y' });
+    const inner: Branch = .{ .first = .{ .leaf = .{ .id = "b" } }, .second = .empty };
+    const outer: Branch = .{ .ratio = 0.3, .first = .{ .leaf = .{ .id = "a" } }, .second = .{ .branch = &inner } };
+    try roundTrip(Tree, .{ .branch = &outer });
+
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // The keys in the other order, and a key that is not known.
+    const swapped = [_]u8{ 0x83, 0xa1, 'a', 0x81, 0xa2, 'i', 'd', 0xa1, 'x', 0xa1, 'z', 0xc0, 0xa1, 't', 0xa4, 'l', 'e', 'a', 'f' };
+    try testing.expectEqualStrings("x", (try decodeSlice(Tree, arena, &swapped)).leaf.id);
+}
+
+test "a union refuses a missing tag, a missing payload and an unknown tag" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const no_tag = [_]u8{ 0x81, 0xa1, 'a', 0x80 };
+    try testing.expectError(error.MissingField, decodeSlice(Tree, arena, &no_tag));
+    const no_payload = [_]u8{ 0x81, 0xa1, 't', 0xa4, 'l', 'e', 'a', 'f' };
+    try testing.expectError(error.MissingField, decodeSlice(Tree, arena, &no_payload));
+    const later = [_]u8{ 0x81, 0xa1, 't', 0xa4, 'r', 'o', 'o', 't' };
+    try testing.expectError(error.UnknownEnumTag, decodeSlice(Tree, arena, &later));
+    const Open = union(enum) { leaf: Leaf, unknown };
+    try testing.expectEqual(Open.unknown, try decodeSlice(Open, arena, &later));
+    const twice = [_]u8{ 0x82, 0xa1, 't', 0xa5, 'e', 'm', 'p', 't', 'y', 0xa1, 't', 0xa5, 'e', 'm', 'p', 't', 'y' };
+    try testing.expectError(error.DuplicateField, decodeSlice(Tree, arena, &twice));
+}
+
+test "a deep tree of unions stops at max_depth" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // {t: branch, a: {first: {t: branch, a: {first: ...}}}}, 40 levels.
+    var out: std.Io.Writer.Allocating = .init(arena);
+    const w = &out.writer;
+    for (0..40) |_| try w.writeAll(&.{ 0x82, 0xa1, 't', 0xa6, 'b', 'r', 'a', 'n', 'c', 'h', 0xa1, 'a', 0x81, 0xa5, 'f', 'i', 'r', 's', 't' });
+    try w.writeAll(&.{ 0x81, 0xa1, 't', 0xa5, 'e', 'm', 'p', 't', 'y' });
+    try testing.expectError(error.TooDeep, decodeSlice(Tree, arena, out.written()));
 }
 
 test "skip reads past floats and ext values" {

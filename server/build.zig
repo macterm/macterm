@@ -120,6 +120,39 @@ pub fn build(b: *std.Build) void {
         fuzz_step.dependOn(&b.addRunArtifact(fuzz_tests).step);
     }
 
+    // The protocol schema's generator (design/003 §3, `scripts/protocol.sh`).
+    // A program of its own, so that the shipped binary has no generator. It
+    // reads the protocol and the model as modules, with no ghostty.
+    {
+        const protocol_mod = b.createModule(.{
+            .root_source_file = b.path("src/protocol/protocol.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const model_mod = b.createModule(.{
+            .root_source_file = b.path("src/model/model.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const schema_mod = b.createModule(.{
+            .root_source_file = b.path("tools/schema.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "protocol", .module = protocol_mod },
+                .{ .name = "model", .module = model_mod },
+            },
+        });
+        const schema_exe = b.addExecutable(.{ .name = "macterm-schema", .root_module = schema_mod });
+        // Out of bin/, so that nothing that bundles the server finds it.
+        const install = b.addInstallArtifact(schema_exe, .{ .dest_dir = .{ .override = .{ .custom = "tools" } } });
+        b.step("schema", "Build the protocol schema's generator into zig-out/tools").dependOn(&install.step);
+
+        const schema_tests = b.addTest(.{ .root_module = schema_mod });
+        // `zig build test` runs them with the server's tests.
+        b.top_level_steps.get("test").?.step.dependOn(&b.addRunArtifact(schema_tests).step);
+    }
+
     // Check for LSP integration
     {
         const check = b.step("check", "Check if zmx compiles");
