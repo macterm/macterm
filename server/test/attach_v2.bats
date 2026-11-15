@@ -148,3 +148,57 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == *'invalid session name'* ]]
 }
+
+# The client restores the terminal and resets it on each way out. A signal
+# that ends it ends it with that signal, so a shell sees why. The session
+# lives on.
+@test "connect: restores the terminal, and keeps a signal as the way it ends" {
+  python3 - "$ZMX" <<'PY'
+import fcntl, os, pty, select, signal, struct, subprocess, sys, termios, time
+from v2client import Client
+
+zmx = sys.argv[1]
+restore = b"\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\"
+for i, sig in enumerate((signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGWINCH, None)):
+    name = "sig%d" % i
+    subprocess.run([zmx, "session", name, "--", "/bin/sh", "-c", "printf '%s\\n' READY; exec cat"],
+                   check=True, timeout=10)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    original = termios.tcgetattr(slave)
+    # The slave stays open here, to read its settings after the client exits.
+    proc = subprocess.Popen([zmx, "connect", name], stdin=slave, stdout=slave, stderr=slave)
+    output = bytearray()
+    try:
+        deadline = time.monotonic() + 10
+        while b"READY" not in output:
+            assert time.monotonic() < deadline, (sig, "no READY", bytes(output))
+            if select.select([master], [], [], 0.05)[0]:
+                output.extend(os.read(master, 65536))
+        raw = termios.tcgetattr(slave)
+        assert not raw[3] & (termios.ECHO | termios.ICANON | termios.ISIG), sig
+        assert not raw[1] & termios.OPOST, sig
+        if sig is not None:
+            os.kill(proc.pid, sig)
+        if sig in (None, signal.SIGWINCH):
+            os.write(master, b"\x1c")
+            expected = 0
+        else:
+            # Python gives a signal's end as the negative signal number.
+            expected = -sig
+        assert proc.wait(timeout=5) == expected, (sig, proc.returncode)
+        assert termios.tcgetattr(slave) == original, sig
+        while select.select([master], [], [], 0)[0]:
+            output.extend(os.read(master, 65536))
+        assert restore in output, (sig, bytes(output[-200:]))
+        c = Client(name)
+        c.wait_msg("state")
+        c.close()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        os.close(master)
+        os.close(slave)
+PY
+}

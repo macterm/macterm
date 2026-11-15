@@ -5,9 +5,6 @@
 //! socket in the runtime directory (`runtime.zig`) and speak frames: `hello`
 //! on channel 0, then the pane on channel 1 (`bytes` in and out, and the
 //! messages in `messages.zig`, "A session's pane channel").
-//!
-//! It runs beside v1's daemon (`loop.zig`): the same binary, another socket,
-//! and no v1 IPC.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -178,7 +175,8 @@ pub fn unlinkSocket(dir: []const u8, name: []const u8) void {
 }
 
 fn serveAndExit(dir: []const u8, opts: Options, listen_fd: i32, pty: daemonize.PtyInfo) noreturn {
-    // After a fork: no allocator or io of the parent (see `Daemon.run`).
+    // After a fork: no allocator or io of the parent. Their locks and threads
+    // stay in the parent, so a child that uses them can hang.
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
     const gpa = std.heap.c_allocator;
@@ -1136,8 +1134,8 @@ fn paneSize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) ?Resize {
     return .{ .cols = @min(cols, max_cells), .rows = @min(rows, max_cells), .xpixel = xpixel, .ypixel = ypixel };
 }
 
-/// Resizes the terminal with the prompt redraw off (see `Daemon.resizeTerm`):
-/// the shell's redraw goes to the pty, not to this terminal.
+/// Resizes the terminal with the prompt redraw off: the shell's redraw goes
+/// to the pty, not to this terminal.
 fn resizeTerm(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal, size: Resize) !void {
     if (size.cols == 0 or size.rows == 0) return;
     const saved = term.flags.shell_redraws_prompt;

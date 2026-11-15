@@ -15,18 +15,19 @@ has changes that are not committed or no prebuilt exists.
 
 ## Commands
 
-`zmx help` lists them: `attach`, `send`, `list`, `get`, `set`, `clear`,
-`kill`, `history` and `version`. Macterm v1 calls `attach`, `list`, `kill`,
-`set` and `version`. The macOS daemon runs `__daemon` after it starts itself
-again (change 0004). `get`, `clear`, `send` and `history` stay for the tests
-and for a user at a shell; v2 replaces them with protocol messages.
+`session`, `server`, `connect`, `proxy`, `version` and `help`. `zmx help`
+lists `connect`, `version` and `help`. The hidden `__session` is the macOS
+session after its re-exec (change 0004), and `__schema` writes the protocol
+files. The server has no v1 code: v1's verbs (`attach`, `list`, `get`,
+`set`, `clear`, `history`, `send`, `kill`) and its daemon (`__daemon`) are
+gone (design/007 §6).
 
 ## The v2 session
 
 `zmx session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`
 starts a v2 session process (`src/session.zig`) and returns when its socket
 accepts connections. It is the shell's parent, and it speaks the v2 frames
-(`src/protocol/`), not the zmx IPC above. The server (below)
+(`src/protocol/`). The server (below)
 runs it; `help` does not list it.
 
 - **Socket.** `<dir>/<name>`, mode 0600. `<dir>` is `MACTERM_RUNTIME_DIR`,
@@ -105,15 +106,12 @@ moves it into place. `test/host_install.bats` runs both over a real sshd.
 
 ## The v2 attach client
 
-`zmx connect <name>` (`src/attach.zig`) joins the terminal on its stdin and
-stdout to a v2 session, as `zmx attach` does for v1. It becomes `macterm
-attach` when v1's `attach` goes (design/007 §6). It never starts a session.
-`help` does not list it.
+`zmx connect <name> [-- command...]` (`src/attach.zig`) joins the terminal
+on its stdin and stdout to a v2 session. With `--`, it asks the server to
+make a missing session that runs the command.
 
 - It sends its size at attach, on SIGWINCH, and when it starts to lead.
-- v1's claim APC (`ESC _ zmx;claim ESC \`) on stdin becomes the `claim`
-  message and never reaches the shell. This is interim, until the GUI feeds
-  the surface itself (design/004 §5).
+- It sends all of stdin to the session as bytes.
 - Ctrl-\ detaches with status 0, unless `ZMX_NO_DETACH_KEY` is set.
 - When the shell exits, it exits with the shell's code, or 128 plus the
   signal. It does not send `take`: the exit status is the server's.

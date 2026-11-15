@@ -383,3 +383,22 @@ PY
   [ "$(cat "$RT/da2")" = TIMEOUT ]
   kill %1 2>/dev/null || true
 }
+
+# A program that draws for itself (a full-screen app) waits for SIGWINCH to
+# draw again after a reattach. TIOCSWINSZ with the same size sends none, so
+# the session sends it.
+@test "session: a reattach at the same size sends SIGWINCH to the foreground" {
+  # Each SIGWINCH prints its number, so a snapshot of an earlier one does
+  # not count.
+  "$ZMX" session s1 -- /bin/sh -c 'n=0; trap "n=\$((n+1)); printf \"GOT_%s_%s\n\" WINCH \$n" WINCH; printf "%s\n" READY; while :; do sleep 0.1; done'
+  python3 - <<'PY'
+from v2client import Client
+first = Client("s1")
+first.attach(80, 24)
+first.wait_output("GOT_WINCH_1")
+first.close()
+second = Client("s1")
+second.attach(80, 24)
+second.wait_output("GOT_WINCH_2")
+PY
+}

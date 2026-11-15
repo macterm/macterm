@@ -1164,11 +1164,18 @@ def load_results(paths):
     return results
 
 
+def gate_base(kind, median):
+    """The statistic that the gate expects: the median of the runs that made
+    the limits, but never worse than no change (a ratio of 1, a difference of
+    0). v2 has no client process, so some of its ratios are well under 1, and
+    a limit of 1 would let v2 get slower without a failure."""
+    return min(median, 1 if kind == "ratio" else 0)
+
+
 def cmd_limits(args):
-    """Each limit is no change (a ratio of 1, a difference of 0) plus the
-    noise: the largest distance of one run's statistic from the median of
-    all runs. The runs are of one commit, or of commits that do not change
-    the session layer."""
+    """Each limit is the base (gate_base) plus the noise: the largest distance
+    of one run's statistic from the median of all runs. The runs are of one
+    commit, or of commits that do not change the session layer."""
     by_system = {}
     for result in load_results(args.results):
         by_system.setdefault(result["runner"]["system"], []).append(result)
@@ -1190,7 +1197,7 @@ def cmd_limits(args):
                 "kind": kind,
                 "median": round(median, 3),
                 "noise": round(noise, 3),
-                "limit": round((1 if kind == "ratio" else 0) + noise, 3),
+                "limit": round(gate_base(kind, median) + noise, 3),
             }
         limits["systems"][system] = entries
         limits["runs"][system] = {
@@ -1205,7 +1212,8 @@ def cmd_limits(args):
 
 
 def cmd_check(args):
-    """Fail when v2 is worse than v1 beyond the noise of the limits."""
+    """Fail when v2 is worse than its base (gate_base) beyond the noise of
+    the limits, and worse than that base by the floor or more."""
     with open(args.limits) as f:
         limits = json.load(f)["systems"]
     failed = False
@@ -1233,9 +1241,11 @@ def cmd_check(args):
                 continue
             v1, v2, kind, floor = values[name]
             stat = gate_statistic(v1, v2, kind)
+            base = gate_base(kind, entry["median"])
+            expected = v1 * base if kind == "ratio" else v1 + base
             if stat <= entry["limit"]:
                 verdict = "Pass"
-            elif v2 - v1 < floor:
+            elif v2 - expected < floor:
                 verdict = f"Pass: under {floor:g} {'MB' if 'emory' in name else 'ms'}"
             else:
                 verdict = "Fail"

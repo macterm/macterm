@@ -16,17 +16,17 @@ stays in that repository, which is archived. It no longer syncs with [upstream z
 
 ## Changes
 
+v1's verbs and daemon are deleted (macterm 0254, design/007 §6). A change
+below that lived only in v1's code says so; its patch in `thdxg/zmx` keeps it.
+
 ### 0003: a client claims leadership without input
 
 zmx gives leadership (the size of the pty) to the client that sends user
 input. A GUI that shows one session in two panes needs to move it on a click,
 without a keystroke reaching the program.
 
-- An IPC tag `Claim` (192), and an APC sequence that the client removes from
-  stdin before it forwards the rest (`util.ClaimFilter`). A claim can share a
-  read with typed keys, and a sequence can be split between reads.
-- Code: `src/ipc.zig`, `src/util.zig`, `src/loop.zig`.
-- Tests: `test/leader.bats`, `test/claim_leader.py`.
+- Deleted with v1. A v2 client sends the `claim` message on its pane
+  channel (`src/session.zig`, `test/session_v2.bats`).
 
 ### 0004: the daemon is its own responsible process on macOS
 
@@ -35,13 +35,13 @@ responsible process, which is fixed at spawn. A session that outlived the app
 that started it belonged to nothing, and its programs got `EHOSTUNREACH` on
 the local network with no prompt (macterm#419).
 
-- The daemon starts itself again as `zmx __daemon` with
+- The session starts itself again as `zmx __session` with
   `POSIX_SPAWN_SETEXEC` and `responsibility_spawnattrs_setdisclaim`: same pid,
   session and fds. Its state rides `ZMX_DAEMON_*` variables, which the child
   that execs the shell removes. Linux is unchanged.
 - No process that keeps running calls `unsetenv`: zig 0.17's `std.Io` caches
   the environment block and panics on a shortened one.
-- Code: `src/daemonize.zig`, `src/main.zig`, `src/loop.zig`.
+- Code: `src/daemonize.zig`, `src/main.zig`, `src/session.zig`.
 - Test: `test/daemon_responsibility.bats` (Darwin only).
 
 ### 0005: attach creates a session quietly
@@ -51,7 +51,7 @@ In a pane one or two rows tall, the line scrolled into scrollback and came
 back when the pane grew (macterm#487). With `run` gone, nothing prints the
 line.
 
-- Code: `src/loop.zig`. Test: `test/attach_create.bats`.
+- Deleted with v1's `attach`. A v2 session prints nothing of its own.
 
 ### 0006: reattach replays the mouse mode set last
 
@@ -84,6 +84,9 @@ A frontend names a tab after the foreground program, warns before it closes a
 busy pane, and shows an agent's logo. Over ssh it had to ask the host every
 few seconds, and the answer was a round trip old (macterm#695).
 
+- v2 sends the report as a `foreground` message on the pane channel, to a
+  client that attached with `foreground: true` (`src/session.zig`). The rest
+  of this section is the v1 form, which `zmx connect` still writes.
 - A client started with `ZMX_FOREGROUND_EVENTS` subscribes. The daemon reads
   the pty's foreground process group before it forwards each chunk of output,
   and every 500 ms, and sends a `Foreground` message (tag 193) when it changes.
@@ -92,10 +95,9 @@ few seconds, and the answer was a round trip old (macterm#695).
 - The report is `zmx;foreground;<idle>;<shell>;<comm>;<args>`. The variable
   and the prefix are a wire contract with Macterm.
 - The daemon removes the variable in the child that execs the shell, so a
-  nested `zmx attach` does not subscribe. A daemon that does not know the tag
-  replies `Unsupported`, and the client ignores it.
-- Code: `src/foreground.zig`, `src/ipc.zig`, `src/client.zig`,
-  `src/daemonize.zig`, `src/loop.zig`, `src/main.zig`.
+  nested `zmx connect` does not subscribe.
+- Code: `src/foreground.zig`, `src/session.zig`, `src/attach.zig`,
+  `src/daemonize.zig`.
 - Tests: `src/foreground.zig`, `src/test.zig`.
 
 ### The daemon frees only what it allocated
@@ -107,7 +109,7 @@ zig 0.17, `main`'s allocator is zig's `SafeAllocator` and the daemon's is
 was not allocated" (macterm#720, Smoke on macOS 26). The caller now frees the
 path.
 
-- Code: `src/loop.zig`, `src/main.zig`. Test: `src/loop.zig`.
+- Deleted with v1's daemon.
 
 ### Removed: the commands Macterm never calls
 
@@ -122,9 +124,13 @@ daemon runs `__daemon`. These went, with their code and tests:
 - The repository parts of zmx: the zmx.sh site, Docker, Nix and Homebrew
   files, its changelog and its workflows.
 
-A daemon replies `Unsupported` to the requests of the removed commands, as it
-does to any tag it does not know. The tags stay in `ipc.Tag`, so no number is
-used again.
+### Removed: v1 (macterm 0254)
+
+The app runs no v1 verb. `attach`, `list`, `get`, `set`, `clear`, `history`,
+`send`, `kill`, `__daemon` and their IPC (`ipc.zig`, `loop.zig`,
+`client.zig`, `label.zig`, `cfg.zig`) are gone. A v1 session daemon that
+still runs is v1.33.2's own build, which the app ends by its argv
+(`V1Sessions`).
 
 ### ENXIO from `/dev/tty` is `NoDevice`
 
@@ -140,17 +146,11 @@ daemon, a CI job) looked for the terminal size. It is `NoDevice` now
 - 0001 (cast `log_mode`) and 0002 (portable signal type): upstream fixed both.
 - 0011 (the Linux guard of 0004): folded into 0004.
 
-## Wire tags
-
-The fork's IPC tags start at 192, far from upstream's sequence: `Claim` is
-192, `Foreground` is 193. The next one is 194.
-
 ## CI
 
 - `.github/workflows/server.yml` (at the repository root) builds the server
   and runs the Zig tests and the bats tests on macOS, Linux x86_64 and Linux
-  aarch64, for each change to `server/`. `leader.bats` runs
-  `claim_leader.py`. A skipped test fails the job. Linux leaves out
-  `daemon_responsibility.bats` (macOS only).
-- The app still bundles the release that `thdxg/zmx`'s `build-zmx.yml`
-  published (`ZMX_TAG` in `scripts/setup.sh`).
+  aarch64, for each change to `server/`. A skipped test fails the job. Linux
+  leaves out `daemon_responsibility.bats` (macOS only).
+- The app bundles the build of this folder at the same commit
+  (`scripts/build-server.sh`).

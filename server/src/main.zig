@@ -156,8 +156,7 @@ fn proxyCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Envi
 
 /// `zmx connect <name> [-- command...]`: the pane's client of a v2 session
 /// (attach.zig). With `--`, a missing session is made through the server
-/// and runs the command. It becomes `macterm attach` when v1's `attach`
-/// goes (design/007 §6).
+/// and runs the command.
 fn connectCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
     const name = args.next() orelse return printError(io, "session name required", .{});
     var create: ?v2attach.Create = null;
@@ -195,7 +194,7 @@ fn connectCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.En
 
 /// The macOS v2 session after its disclaiming re-exec; not a user command.
 /// argv is `__session <name> [-- command...]`, the rest rides in
-/// `daemonize.reexec_env`, as for `__daemon`.
+/// `daemonize.reexec_env`.
 fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
     const name = args.next() orelse return printError(io, "{s}: session name required", .{v2session.reexec_command});
     var command: std.ArrayList([]const u8) = .empty;
