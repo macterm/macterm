@@ -338,6 +338,7 @@ PY
 }
 
 # Sends DA1 and appends to $2 if a reply came in $1 seconds.
+# The probe needs bash: dash (Linux /bin/sh) has no `read -s -t -d`.
 da1_probe() {
   echo "printf '\033[c'; if IFS= read -r -s -t $1 -d c r; then echo ANSWERED >> $2; else echo TIMEOUT >> $2; fi"
 }
@@ -352,7 +353,7 @@ wait_lines() {
 }
 
 @test "session: answers DA1 while no client is attached, also after a client left" {
-  "$ZMX" session da -- /bin/sh -c "$(da1_probe 5 "$RT/da"); read -r _; $(da1_probe 5 "$RT/da"); exec sleep 30"
+  "$ZMX" session da -- bash --norc --noprofile -c "$(da1_probe 5 "$RT/da"); read -r _; $(da1_probe 5 "$RT/da"); exec sleep 30"
   wait_lines "$RT/da" 1
   python3 - <<'PY'
 from v2client import Client
@@ -369,7 +370,7 @@ PY
 }
 
 @test "session: leaves DA1 to the client while one is attached" {
-  "$ZMX" session da2 -- /bin/sh -c "read -r _; $(da1_probe 1 "$RT/da2"); exec sleep 30"
+  "$ZMX" session da2 -- bash --norc --noprofile -c "read -r _; $(da1_probe 1 "$RT/da2"); exec sleep 30"
   python3 - <<'PY' &
 from v2client import Client
 import time
