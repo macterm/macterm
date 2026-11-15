@@ -446,7 +446,10 @@ struct OnDemandPasswordTests {
         let b = PasswordPromptIdentity.entryID(
             prompt: "[sudo] password for ethan:", asker: .remote(scope: "ethan@b.example:22", command: "sudo apt update")
         )
-        let local = PasswordPromptIdentity.entryID(prompt: "[sudo] password for ethan:", asker: program("/usr/bin/sudo apt update"))
+        let local = PasswordPromptIdentity.entryID(
+            prompt: "[sudo] password for ethan:",
+            asker: .program(path: "/usr/bin/sudo", command: "/usr/bin/sudo apt update", isProtected: true)
+        )
         #expect(a != b)
         #expect(a != local)
         #expect(a?.host == "ethan@a.example:22")

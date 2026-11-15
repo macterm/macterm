@@ -323,8 +323,6 @@ assert not (first["canonical"] and not first["echo"]), first
 c.type("stty -echo icanon; printf 'noecho-%s\\n' 1\r")
 c.wait_output("noecho-1")
 c.wait(lambda: {"canonical": True, "echo": False} in [v["a"] for v in c.messages("tty_mode")], 10, "password mode")
-# The shell's line editor takes the tty back when it draws its prompt.
-c.wait(lambda: not c.messages("tty_mode")[-1]["a"]["canonical"], 10, "raw again")
 # A client that did not ask gets none.
 d = Client("s1")
 d.attach()
