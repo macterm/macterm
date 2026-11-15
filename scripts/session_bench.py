@@ -65,6 +65,7 @@ Subcommands:
 import argparse
 import fcntl
 import json
+import math
 import os
 import select
 import shlex
@@ -1197,7 +1198,8 @@ def cmd_limits(args):
                 "kind": kind,
                 "median": round(median, 3),
                 "noise": round(noise, 3),
-                "limit": round(gate_base(kind, median) + noise, 3),
+                # Up, so that the run that set the noise passes its own limit.
+                "limit": math.ceil((gate_base(kind, median) + noise) * 1000) / 1000,
             }
         limits["systems"][system] = entries
         limits["runs"][system] = {
