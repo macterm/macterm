@@ -5,7 +5,8 @@
 //!
 //! An id is text: a UUID, or a short name in a test. A pane id is its
 //! session id (design/004). Panes and splits share one namespace, so the
-//! model compares their text (`nodeIdInUse`).
+//! model compares their text (`nodeIdInUse`). A workspace id must also not
+//! be a tab id or another project's id: those checks compare text too.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -22,15 +23,14 @@ pub fn Map(comptime K: type, comptime V: type) type {
     return std.HashMapUnmanaged(K, V, K.Context, std.hash_map.default_max_load_percentage);
 }
 
-const Kind = enum { project, workspace, tab, pane, split };
+const IdKind = enum { project, workspace, tab, pane, split };
 
 /// A distinct type for each `kind`.
-fn Id(comptime kind: Kind) type {
+fn Id(comptime kind: IdKind) type {
     return struct {
         text: []const u8,
 
         const Self = @This();
-        pub const id_kind = kind;
 
         pub fn of(text: []const u8) Self {
             return .{ .text = text };
@@ -69,10 +69,6 @@ fn Id(comptime kind: Kind) type {
 
         pub fn jsonParse(a: Allocator, source: anytype, options: std.json.ParseOptions) !Self {
             return .{ .text = try std.json.innerParse([]const u8, a, source, options) };
-        }
-
-        pub fn jsonParseFromValue(a: Allocator, source: std.json.Value, options: std.json.ParseOptions) !Self {
-            return .{ .text = try std.json.innerParseFromValue([]const u8, a, source, options) };
         }
     };
 }

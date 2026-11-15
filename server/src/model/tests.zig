@@ -825,11 +825,7 @@ fn written(m: *Model) ![]u8 {
 test "compact frees the memory of old edits and keeps the model" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace(.of("pinned"), .pinned);
-    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
-    try m.renameTab(.of("t1"), "build");
-    try m.selectProject(.of("p"));
+    try addFullModel(&m);
     try m.compact();
     const small = m.arena.queryCapacity();
 
@@ -864,6 +860,52 @@ test "compact frees the memory of old edits and keeps the model" {
     try expectFocus(&m, "t1", "c");
     _ = try m.closeTab(.of("t2"));
     try testing.expectEqualStrings("t1", m.findWorkspace(.of("p")).?.active_tab.?.text);
+}
+
+/// Adds to project `p` a project and a pane with every field set, tab `t1`
+/// (H(a, V(b, c))) and tab `t2` (pane `x`), and selects `p`.
+fn addFullModel(m: *Model) !void {
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "me@box:/q", .color = "blue", .sort_order = 3, .created_at = 1700000000000 });
+    try m.addWorkspace(.of("pinned"), .pinned);
+    try threePaneTab(m, "t1", "a", "b", "c", "s1", "s2");
+    const x: tree.Pane = .{
+        .id = .of("x"),
+        .session = "macterm-x",
+        .host = "me@box",
+        .slug = "q",
+        .origin_path = "/q",
+        .cwd = "/q/src",
+        .host_session_dir = "/q/src",
+        .attention = .failed,
+    };
+    try m.createTab(.of("p"), .of("t2"), null, .{ .pane = x }, null, false);
+    try m.renameTab(.of("t1"), "build");
+    try m.selectProject(.of("p"));
+}
+
+test "compact that runs out of memory leaves the model as it was" {
+    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{});
+    var m = Model.init(failing.allocator());
+    defer m.deinit();
+    try m.addProject(.{ .id = .of("p"), .name = "P", .path = "/p" });
+    try addFullModel(&m);
+    try m.zoom(.of("t1"), .of("b"));
+    const before = try written(&m);
+    defer testing.allocator.free(before);
+    // Fail the first allocation of `compact`, then the second, and so on,
+    // until it succeeds.
+    var n: usize = 0;
+    while (true) : (n += 1) {
+        failing.fail_index = failing.alloc_index + n;
+        const result = m.compact();
+        failing.fail_index = std.math.maxInt(usize);
+        const after = try written(&m);
+        defer testing.allocator.free(after);
+        try testing.expectEqualStrings(before, after);
+        try testing.expectEqualStrings("b", m.zoomedPane(.of("t1")).?.text);
+        if (result) |_| break else |err| try testing.expectEqual(error.OutOfMemory, err);
+    }
+    try testing.expect(n > 0);
 }
 
 test "save compacts the model" {
