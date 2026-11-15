@@ -1820,6 +1820,7 @@ const Server = struct {
     }
 
     fn sweep(s: *Server) void {
+        defer s.links.reap();
         var i: usize = 0;
         while (i < s.peers.items.len) {
             const p = s.peers.items[i];

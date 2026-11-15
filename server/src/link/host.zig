@@ -313,7 +313,9 @@ pub const Host = struct {
         return null;
     }
 
-    fn reap(h: *Host) void {
+    /// Closes the links that ended. The server calls it after it ended some
+    /// (`closeOwner`), so a socket does not wait for the next wake.
+    pub fn reap(h: *Host) void {
         var i: usize = 0;
         while (i < h.links.items.len) {
             if (h.links.items[i].dead) {

@@ -454,14 +454,19 @@ import socket, time
 from v2client import ServerClient
 
 def bound(port):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.bind(("127.0.0.1", port))
-        return False
-    except OSError:
-        return True
-    finally:
-        s.close()
+    # Dual stack or IPv4 only: a bind on either address fails while it is up.
+    for family, addr in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::")):
+        try:
+            s = socket.socket(family, socket.SOCK_DGRAM)
+        except OSError:
+            continue
+        try:
+            s.bind((addr, port))
+        except OSError:
+            return True
+        finally:
+            s.close()
+    return False
 
 def free(port):
     for _ in range(50):
