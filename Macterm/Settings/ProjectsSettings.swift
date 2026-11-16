@@ -239,7 +239,7 @@ private struct ProjectRow: View {
     /// there.
     private var declinedDestination: String? {
         guard case let .remote(user, host, _) = ProjectPath.remote(from: project.path) else { return nil }
-        let destination = RemoteSpawn.destination(user: user, host: host)
+        let destination = HostCommands.destination(user: user, host: host)
         return RemoteHosts.shared.declined.contains(destination) ? destination : nil
     }
 

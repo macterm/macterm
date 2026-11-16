@@ -9,9 +9,6 @@ name: Docs
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "assets/**"
-      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
@@ -21,8 +18,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The `docs` area of .github/path-areas.
+  changes:
+    name: Detect changes
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      docs: ${{ steps.changes.outputs.docs }}
+    steps:
+      - uses: useblacksmith/checkout@v1
+        with:
+          fetch-depth: 2
+      - name: Find Changes
+        id: changes
+        run: scripts/changed-areas.sh
+
   site-build:
     name: Site Build
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Check Out Macterm

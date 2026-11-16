@@ -8,15 +8,15 @@ import Testing
 struct ZmxBypassTests {
     @Test
     func the_unit_test_host_bypasses_on_purpose() {
-        #expect(ZmxClient.bypass(environment: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]) == .unitTestHost)
+        #expect(SessionClient.bypass(environment: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]) == .unitTestHost)
         // This process is that host.
-        #expect(ZmxClient.liveBypass == .unitTestHost)
+        #expect(SessionClient.liveBypass == .unitTestHost)
     }
 
     @Test
     func a_long_socket_dir_bypasses_with_its_reason() {
         let dir = "/" + String(repeating: "d", count: 80)
-        guard case let .socketPathTooLong(reason) = ZmxClient.bypass(environment: ["MACTERM_RUNTIME_DIR": dir]) else {
+        guard case let .socketPathTooLong(reason) = SessionClient.bypass(environment: ["MACTERM_RUNTIME_DIR": dir]) else {
             Issue.record("expected socketPathTooLong")
             return
         }
@@ -25,12 +25,12 @@ struct ZmxBypassTests {
 
     @Test
     func a_short_socket_dir_outside_tests_wraps() {
-        #expect(ZmxClient.bypass(environment: ["MACTERM_RUNTIME_DIR": "/tmp/macterm"]) == nil)
+        #expect(SessionClient.bypass(environment: ["MACTERM_RUNTIME_DIR": "/tmp/macterm"]) == nil)
     }
 
     @Test
     func no_runtime_directory_bypasses() {
-        #expect(ZmxClient.bypass(environment: [:]) != nil)
+        #expect(SessionClient.bypass(environment: [:]) != nil)
     }
 }
 

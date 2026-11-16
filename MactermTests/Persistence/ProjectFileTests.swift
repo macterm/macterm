@@ -17,6 +17,18 @@ struct ProjectFileTests {
         #expect(file.layoutFile == nil)
     }
 
+    /// v1 wrote `zmxPath:` for a remote project. The format only grows: the
+    /// key still reads, does nothing and is not written back.
+    @Test
+    func v1_zmx_path_key_still_reads() throws {
+        let file = try ProjectFile.parse(yaml: """
+        path: devbox:~/dev/api
+        zmxPath: ~/bin/zmx
+        """)
+        #expect(file.path == "devbox:~/dev/api")
+        #expect(try !file.yaml().contains("zmxPath"))
+    }
+
     @Test
     func empty_tabs_bridges_to_no_layout() throws {
         let file = try ProjectFile.parse(yaml: """

@@ -45,7 +45,7 @@ struct AppStateTests {
         let localProject = seedProject(state, path: "/project")
         let localWorkspace = try #require(state.workspaces[localProject.id])
         let activePane = try #require(localWorkspace.activeTab?.focusedPane)
-        activePane.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
         state.createTab(projectID: localProject.id, projects: [localProject])
 
@@ -53,7 +53,7 @@ struct AppStateTests {
         #expect(localWorkspace.activeTab?.focusedPane?.sessionSlug == "project")
 
         let inheritedPane = try #require(localWorkspace.activeTab?.focusedPane)
-        inheritedPane.ensureNSView().currentPwd = "/project/src/deep"
+        SurfaceRegistry.shared.ensureView(of: inheritedPane).currentPwd = "/project/src/deep"
         state.newTabInheritsWorkingDirectory = { false }
 
         state.createTab(projectID: localProject.id, projects: [localProject])
@@ -171,7 +171,7 @@ struct AppStateTests {
     @Test
     func mirrorPane_does_not_carry_the_sources_command_or_shell() throws {
         // `command` is injected as initial_input on first surface build, and
-        // hasBuiltSurface is per-Pane — so a mirror carrying it would re-type a
+        // the record of a built view is per pane — so a mirror carrying it would re-type a
         // declared layout `run:` into a session already running it.
         let state = makeAppState()
         let p = seedProject(state)
@@ -222,7 +222,7 @@ struct AppStateTests {
         // mirror path rather than a hand-built pane.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
@@ -247,11 +247,11 @@ struct AppStateTests {
         #expect(state.isLeader(pane))
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
 
-        pane.surfaces[0].receiveLead(false)
+        SurfaceRegistry.shared.surfaces(of: pane)[0].receiveLead(false)
         #expect(!state.isLeader(pane))
         #expect(state.nonLeaderPaneIDs(in: tab) == [pane.id])
 
-        pane.surfaces[0].receiveLead(true)
+        SurfaceRegistry.shared.surfaces(of: pane)[0].receiveLead(true)
         #expect(state.isLeader(pane))
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
@@ -266,7 +266,7 @@ struct AppStateTests {
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         #expect(state.isMirrored(source))
         #expect(state.isLeader(source))
@@ -284,11 +284,11 @@ struct AppStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.focusPane(mirrorID, projectID: p.id)
 
-        #expect(session.claimed == [mirrored.surfaces[0].id])
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
         #expect(state.isLeader(mirrored))
         #expect(!state.isLeader(source))
         #expect(state.nonLeaderPaneIDs(in: tab) == [source.id])
@@ -308,7 +308,7 @@ struct AppStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         session.deliverable = false
         state.claimSessionLeadership(mirrored)
@@ -331,7 +331,7 @@ struct AppStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.claimSessionLeadership(source)
         #expect(session.claimed.isEmpty)
@@ -339,10 +339,10 @@ struct AppStateTests {
         state.claimSessionLeadership(mirrored)
         state.claimSessionLeadership(mirrored)
         state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [mirrored.surfaces[0].id])
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
 
         state.claimSessionLeadership(source)
-        #expect(session.claimed == [mirrored.surfaces[0].id, source.surfaces[0].id])
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id, SurfaceRegistry.shared.surfaces(of: source)[0].id])
     }
 
     @Test
@@ -356,18 +356,21 @@ struct AppStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
         session.answers = false
 
         state.claimSessionLeadership(mirrored)
         state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [mirrored.surfaces[0].id])
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
 
         // The channel ended before the answer: the claim may be lost, so the
         // next focus sends it again.
-        mirrored.surfaces[0].receiveLead(nil)
+        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(nil)
         state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [mirrored.surfaces[0].id, mirrored.surfaces[0].id])
+        #expect(session.claimed == [
+            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
+            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
+        ])
     }
 
     @Test
@@ -382,11 +385,11 @@ struct AppStateTests {
         #expect(source.isRemote)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.focusPane(mirrorID, projectID: p.id)
 
-        #expect(session.claimed == [mirrored.surfaces[0].id])
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
         #expect(state.isLeader(mirrored))
         #expect(!state.isLeader(source))
     }
@@ -402,13 +405,13 @@ struct AppStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([source.surfaces[0], mirrored.surfaces[0]])
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.closePane(source.id, projectID: p.id)
         #expect(session.claimed.isEmpty)
 
         // The session makes the client that remains lead, and says so.
-        mirrored.surfaces[0].receiveLead(true)
+        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(true)
         #expect(state.isLeader(mirrored))
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
@@ -520,14 +523,14 @@ struct AppStateTests {
         let project = seedProject(state, path: "/project")
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let activePane = try #require(tab.focusedPane)
-        activePane.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
 
         #expect(tab.focusedPane?.projectPath == "/project/src")
 
         let inheritedPane = try #require(tab.focusedPane)
-        inheritedPane.ensureNSView().currentPwd = "/project/src/deep"
+        SurfaceRegistry.shared.ensureView(of: inheritedPane).currentPwd = "/project/src/deep"
         state.newSplitInheritsWorkingDirectory = { false }
 
         state.splitPane(direction: .vertical, projectID: project.id, projects: [project])
@@ -564,7 +567,7 @@ struct AppStateTests {
         let project = seedProject(state, path: "/project")
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        source.ensureNSView().currentPwd = "/project/src"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/src"
 
         let created = state.makeGrid(
             source.id,
@@ -585,7 +588,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
-        tab.focusedPaneID = nil
+        ModelWriter.tabSetTree(tab, root: tab.splitRoot, focusedPaneID: nil)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         #expect(tab.splitRoot.allPanes().count == 1)
     }
@@ -598,17 +601,17 @@ struct AppStateTests {
         let color = CGColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
 
         state.setAdaptiveBackgroundColor(color, paneID: pane.id, projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         let otherProject = seedProject(state, name: "other", path: "/tmp/other")
         state.setAdaptiveBackgroundColor(nil, paneID: pane.id, projectID: otherProject.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         state.setAdaptiveBackgroundColor(nil, paneID: UUID(), projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == color)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         state.setAdaptiveBackgroundColor(nil, paneID: pane.id, projectID: project.id)
-        #expect(pane.adaptiveBackgroundColor == nil)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == nil)
     }
 
     // MARK: - Close pane
@@ -621,11 +624,11 @@ struct AppStateTests {
         let originalTab = try #require(ws.activeTab)
         let onlyPane = try #require(originalTab.focusedPaneID)
         // Add a second tab so closing the original doesn't leave us with zero.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         let otherTab = try #require(ws.activeTabID)
 
         // Focus the original tab, then close its only pane.
-        ws.selectTab(originalTab.id)
+        ModelWriter.tabSelect(originalTab.id, in: ws)
         state.closePane(onlyPane, projectID: p.id)
 
         #expect(ws.tabs.count == 1)
@@ -654,8 +657,7 @@ struct AppStateTests {
 
         // Replace splitRoot with a known HV shape.
         let (tree, ids) = build(H(pane("l1"), V(pane("r1"), pane("r2"))))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["l1"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["l1"])
 
         try state.closePane(#require(ids["l1"]), projectID: p.id)
 
@@ -674,7 +676,7 @@ struct AppStateTests {
         let targetInOriginal = try #require(originalTab.focusedPaneID)
 
         // Switch to a new tab, then close a pane on the (now non-active) original.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         #expect(ws.activeTabID != originalTab.id)
         state.closePane(targetInOriginal, projectID: p.id)
         #expect(originalTab.splitRoot.allPanes().count == 1)
@@ -689,7 +691,7 @@ struct AppStateTests {
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         let ws1 = try #require(state.workspaces[p1.id])
         // Give p1 a second tab so moving one away doesn't empty it.
-        let moving = ws1.createTab(projectPath: "/tmp1")
+        let moving = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let staying = try #require(ws1.tabs.first?.id)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path)
@@ -723,7 +725,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let ws1 = try #require(state.workspaces[p1.id])
-        let tab = ws1.createTab(projectPath: "/tmp1")
+        let tab = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         // A project that's never been opened — no workspace yet.
         let p2 = Project(name: "p2", path: "/tmp2", sortOrder: 1)
         #expect(state.workspaces[p2.id] == nil)
@@ -763,9 +765,9 @@ struct AppStateTests {
         let ws = try #require(state.workspaces[p.id])
         let destTab = try #require(ws.activeTab)
         let destPane = try #require(destTab.splitRoot.allPanes().first?.id)
-        let sourceTab = ws.createTab(projectPath: p.path)
+        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         let sourcePane = try #require(sourceTab.splitRoot.allPanes().first?.id)
-        ws.selectTab(destTab.id)
+        ModelWriter.tabSelect(destTab.id, in: ws)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .pane(destPane, .top), inProject: p.id)
 
@@ -786,8 +788,8 @@ struct AppStateTests {
         let ws = try #require(state.workspaces[p.id])
         let destTab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
-        let sourceTab = ws.createTab(projectPath: p.path)
-        ws.selectTab(destTab.id)
+        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
+        ModelWriter.tabSelect(destTab.id, in: ws)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .rootEdge(.left), inProject: p.id)
 
@@ -856,7 +858,7 @@ struct AppStateTests {
         let original = try #require(tab.focusedPaneID)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let dragged = try #require(tab.focusedPaneID)
-        tab.zoomedPaneID = dragged
+        ModelWriter.paneZoom(tab, toggling: dragged)
 
         state.separatePane(dragged, toProject: p.id, destPath: p.path)
 
@@ -943,11 +945,11 @@ struct AppStateTests {
         let other = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.workspaces[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ws.createTab(projectPath: p.path).id
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         // Seed a tab in the sibling project so a leak across projects would show.
         _ = try #require(state.workspaces[other.id]?.activeTabID)
         state.activeProjectID = p.id
-        ws.selectTab(first)
+        ModelWriter.tabSelect(first, in: ws)
 
         state.selectNextTab(projectID: p.id)
         #expect(ws.activeTabID == second)
@@ -964,9 +966,9 @@ struct AppStateTests {
         _ = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.workspaces[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ws.createTab(projectPath: p.path).id
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         state.activeProjectID = p.id
-        ws.selectTab(first)
+        ModelWriter.tabSelect(first, in: ws)
 
         // At the first tab it wraps to the last rather than crossing over.
         state.selectPreviousTab(projectID: p.id)
@@ -995,8 +997,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.focusPaneInDirection(.right, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -1017,8 +1018,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"))))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
@@ -1031,8 +1031,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["b"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["a"])
     }
@@ -1043,8 +1042,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        tab.splitRoot = tree
-        tab.focusedPaneID = ids["a"]
+        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: false, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -1135,9 +1133,9 @@ struct AppStateTests {
         let ws1 = try #require(state.workspaces[p1.id])
         let ws2 = try #require(state.workspaces[p2.id])
         // Two tabs in each so closing one doesn't empty the workspace.
-        let close1 = ws1.createTab(projectPath: "/tmp1")
+        let close1 = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let keep1 = try #require(ws1.tabs.first?.id)
-        let close2 = ws2.createTab(projectPath: "/tmp2")
+        let close2 = ModelWriter.tabCreate(in: ws2, projectPath: "/tmp2")
         let keep2 = try #require(ws2.tabs.first?.id)
 
         state.closeTabs([
@@ -1835,7 +1833,7 @@ struct AppStateTests {
         // Pre-seed a saved snapshot for the project: a single-pane workspace.
         let storeURL = dir.appendingPathComponent("workspaces.json")
         let store = WorkspaceStore(fileURL: storeURL)
-        let snapshotWS = Workspace(projectID: project.id, projectPath: dir.path)
+        let snapshotWS = Workspace(id: project.id, projectPath: dir.path)
         store.save(WorkspaceSerializer.snapshot([project.id: snapshotWS]))
 
         // And a central file declaring a different (two-pane) split.
@@ -2016,7 +2014,7 @@ struct AppStateTests {
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(a), focusedPaneID: a.id)
         let tabB = TerminalTab(id: UUID(), splitRoot: bTree, focusedPaneID: nil)
         let tabC = TerminalTab(id: UUID(), splitRoot: .pane(c), focusedPaneID: c.id)
-        let ws = Workspace(projectID: pid, tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
+        let ws = Workspace(id: pid, tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
 
         let warm = Set(AppState.panesToWarm(in: ws).map(\.id))
         // Active tab A's pane is NOT warmed (SwiftUI starts it); B's two + C are.
@@ -2030,7 +2028,7 @@ struct AppStateTests {
         let pid = UUID()
         let only = Pane(projectPath: "/p", projectID: pid)
         let tab = TerminalTab(id: UUID(), splitRoot: .pane(only), focusedPaneID: only.id)
-        let ws = Workspace(projectID: pid, tabs: [tab], activeTabID: tab.id)
+        let ws = Workspace(id: pid, tabs: [tab], activeTabID: tab.id)
         #expect(AppState.panesToWarm(in: ws).isEmpty)
     }
 
@@ -2097,17 +2095,17 @@ struct AppStateTests {
 
     // MARK: - zmx session lifecycle on close paths
 
-    /// A ZmxClient that records every killed session name. Remote kills are
+    /// A SessionClient that records every killed session name. Remote kills are
     /// recorded into `remoteKilled` (when given) so a test can assert routing.
-    private func recordingZmx(
+    private func recordingClient(
         into killed: KilledSessions,
         remoteInto remoteKilled: KilledSessions? = nil
-    ) -> ZmxClient {
-        ZmxClient(
-            executableURL: { nil },
+    ) -> SessionClient {
+        SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { name in await killed.append(name) },
-            killRemoteSession: { _, name, _ in await (remoteKilled ?? killed).append(name) },
+            killRemoteSession: { _, name in await (remoteKilled ?? killed).append(name) },
             listSessions: { [] },
             endV1Sessions: { _ in true }
         )
@@ -2117,7 +2115,7 @@ struct AppStateTests {
     func closeTab_kills_every_panes_session() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2125,7 +2123,7 @@ struct AppStateTests {
         #expect(names.count == 2)
 
         // Second tab so the close leaves a valid workspace.
-        _ = state.workspaces[p.id]?.createTab(projectPath: "/tmp")
+        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
         state.closeTab(tab.id, projectID: p.id)
 
         await killed.settle(expecting: names.count)
@@ -2146,14 +2144,14 @@ struct AppStateTests {
         // has to outlive it, or the work still on screen elsewhere dies.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
 
         state.closeTab(mirrorTab.id, projectID: p.id)
 
@@ -2167,17 +2165,17 @@ struct AppStateTests {
         // the daemon has to die or it lingers as a clients==0 orphan.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
         // A third tab so closing both mirror-holding tabs leaves a valid
         // workspace behind.
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         state.closeTab(mirrorTab.id, projectID: p.id)
         state.closeTab(tab.id, projectID: p.id)
@@ -2193,14 +2191,14 @@ struct AppStateTests {
         // leak the session. This is why releaseSessions takes the whole batch.
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
         let shared = try #require(tab.splitRoot.allPanes().first).sessionName
 
-        let mirrorTab = ws.createTab(projectPath: "/tmp")
-        mirrorTab.splitRoot = .pane(mirrorPane(of: shared, projectID: p.id))
+        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
 
         state.removeProject(p.id)
 
@@ -2215,7 +2213,7 @@ struct AppStateTests {
         let killed = KilledSessions()
         let remoteKilled = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed, remoteInto: remoteKilled)
+        state.sessionClient = recordingClient(into: killed, remoteInto: remoteKilled)
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2231,13 +2229,13 @@ struct AppStateTests {
 
     // MARK: - Process-exit routing (#281)
 
-    /// A ZmxClient that records remote kills.
-    private func remoteKillRecordingZmx(_ remoteKilled: KilledSessions) -> ZmxClient {
-        ZmxClient(
-            executableURL: { nil },
+    /// A SessionClient that records remote kills.
+    private func remoteKillRecordingClient(_ remoteKilled: KilledSessions) -> SessionClient {
+        SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { _ in },
-            killRemoteSession: { _, name, _ in await remoteKilled.append(name) },
+            killRemoteSession: { _, name in await remoteKilled.append(name) },
             listSessions: { [] },
             endV1Sessions: { _ in true }
         )
@@ -2247,7 +2245,7 @@ struct AppStateTests {
     func process_exit_closes_a_local_pane() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let tab = try #require(state.workspaces[p.id]?.activeTab)
@@ -2271,10 +2269,10 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         // A second tab so the close leaves a valid workspace shape.
-        _ = state.workspaces[p.id]?.createTab(projectPath: "devbox:~/dev/api")
+        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
-        state.zmx = remoteKillRecordingZmx(remoteKilled)
+        state.sessionClient = remoteKillRecordingClient(remoteKilled)
 
         state.handleProcessExit(pane.id, projectID: p.id)
 
@@ -2287,7 +2285,7 @@ struct AppStateTests {
     func closePane_kills_only_that_panes_session() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -2304,7 +2302,7 @@ struct AppStateTests {
     func moveTab_kills_nothing() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
-        state.zmx = recordingZmx(into: killed)
+        state.sessionClient = recordingClient(into: killed)
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         let moving = try #require(state.workspaces[p1.id]?.tabs.first?.id)
@@ -2347,7 +2345,7 @@ struct AppStateTests {
         // Give p2 two tabs so there's a middle slot to drop into.
         let dest = try #require(state.workspaces[p2.id])
         let d0 = dest.tabs[0].id
-        let d1 = dest.createTab(projectPath: p2.path).id
+        let d1 = ModelWriter.tabCreate(in: dest, projectPath: p2.path).id
         let moving = try #require(state.workspaces[p1.id]?.activeTab)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path, toIndex: 1)
@@ -2368,7 +2366,7 @@ struct AppStateTests {
         let p = seedProject(state, name: "p", path: "/tmp")
         let ws = try #require(state.workspaces[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: p.path).id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
 
         state.reorderTab(t1, inProject: p.id, toIndex: 2)
         #expect(ws.tabs.map(\.id) == [t2, t1])
@@ -2385,9 +2383,9 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: p.path).id
-        let t3 = ws.createTab(projectPath: p.path).id
-        ws.activeTabID = t1
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        ModelWriter.tabPeek(t1, in: ws)
         let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(
             fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("macterm-tests-move-\(UUID().uuidString).json")
@@ -2419,8 +2417,8 @@ struct AppStateTests {
         #expect(AppCommand.movePaneRight.action(in: ctx) == nil)
 
         let first = try #require(tab.focusedPaneID)
-        let second = try #require(tab.split(paneID: first, direction: .horizontal))
-        tab.focusPane(first)
+        let second = try #require(ModelWriter.paneSplit(tab, paneID: first, direction: .horizontal))
+        ModelWriter.paneFocus(tab, paneID: first)
         #expect(AppCommand.movePaneLeft.action(in: ctx) == nil)
         #expect(AppCommand.movePaneUp.action(in: ctx) == nil)
         let moveRight = try #require(AppCommand.movePaneRight.action(in: ctx))
@@ -2437,7 +2435,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         // No live surfaces in a unit test → needsConfirmQuit is unreachable →
         // not busy → closes without staging.
@@ -2464,7 +2462,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.workspaces[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         state.requestCloseTab(tab.id, projectID: p.id)
         #expect(state.pendingDialog?.kind == .closeTab(tabID: tab.id, projectID: p.id))
@@ -2534,8 +2532,8 @@ struct AppStateTests {
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)
-        let firstView = first.ensureNSView()
-        let secondView = second.ensureNSView()
+        let firstView = SurfaceRegistry.shared.ensureView(of: first)
+        let secondView = SurfaceRegistry.shared.ensureView(of: second)
 
         state.cycleRecentTab(projectID: project.id)
 
@@ -2566,8 +2564,8 @@ struct AppStateTests {
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)
-        let firstView = first.ensureNSView()
-        let secondView = second.ensureNSView()
+        let firstView = SurfaceRegistry.shared.ensureView(of: first)
+        let secondView = SurfaceRegistry.shared.ensureView(of: second)
 
         state.cycleRecentTab(projectID: project.id)
 
@@ -2657,7 +2655,7 @@ struct AppStateTests {
 
         let shown = QuickTerminalSplitState()
         let livePane = try #require(shown.tab.focusedPane)
-        _ = livePane.ensureNSView()
+        _ = SurfaceRegistry.shared.ensureView(of: livePane)
         let state = AppState(
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: makeProjectFileStore(),
@@ -2717,8 +2715,8 @@ struct AppStateTests {
         writer.saveWorkspaces()
 
         let ended = KilledSessions()
-        var zmx = ZmxClient.noop
-        zmx.endV1Sessions = { names in
+        var sessionClient = SessionClient.noop
+        sessionClient.endV1Sessions = { names in
             for name in names {
                 await ended.append(name)
             }
@@ -2730,7 +2728,7 @@ struct AppStateTests {
             projectFiles: makeProjectFileStore(),
             quickTerminal: QuickTerminalSplitState()
         )
-        state.zmx = zmx
+        state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
         state.restoreSelection(projects: [])
 
@@ -2749,12 +2747,12 @@ struct AppStateTests {
             quickTerminal: QuickTerminalSplitState()
         )
         let calls = LockedBox(0)
-        var counting = ZmxClient.noop
+        var counting = SessionClient.noop
         counting.endV1Sessions = { _ in
             calls.mutate { $0 += 1 }
             return true
         }
-        again.zmx = counting
+        again.sessionClient = counting
         again.v1SessionsEnded = state.v1SessionsEnded
         again.restoreSelection(projects: [])
         try await Task.sleep(for: .milliseconds(100))
@@ -2770,8 +2768,8 @@ struct AppStateTests {
         writer.saveWorkspaces()
 
         let calls = LockedBox(0)
-        var zmx = ZmxClient.noop
-        zmx.endV1Sessions = { _ in
+        var sessionClient = SessionClient.noop
+        sessionClient.endV1Sessions = { _ in
             calls.mutate { $0 += 1 }
             return false
         }
@@ -2781,7 +2779,7 @@ struct AppStateTests {
             projectFiles: makeProjectFileStore(),
             quickTerminal: QuickTerminalSplitState()
         )
-        state.zmx = zmx
+        state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
         state.restoreSelection(projects: [])
 

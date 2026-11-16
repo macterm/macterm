@@ -121,7 +121,7 @@ enum SSHWrapper {
     /// The script runs under `sh -c '<single-quote-free single-line
     /// script>'`, because sshd gives the remote command to the host's login
     /// shell, and a login shell that is not POSIX (nushell, tcsh) cannot
-    /// parse it. This is the wire rule of `RemoteSpawn.remoteShell`.
+    /// parse it. This is the wire rule of `HostCommands.remoteShell`.
     static func installScript(verbose: Bool) -> String {
         let script = installCommand(verbose: verbose)
         assert(!script.contains("'"), "install script must stay single-quote-free")

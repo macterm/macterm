@@ -18,7 +18,7 @@ enum ProjectMemoryActions {
         // terminals are on the host, so they start where the project does.
         let localDirectory = project.isRemote ? nil : existingDirectory(directory) ?? project.path
         if let pane = appState.focusedPane(for: project.id) {
-            let direction = SplitDirection.auto(for: pane.nsView?.bounds.size ?? .zero)
+            let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero)
             if let localDirectory {
                 appState.splitPane(
                     pane.id,
@@ -44,7 +44,7 @@ enum ProjectMemoryActions {
     /// through the paste path (`sendText`) like `pane run`, so it is in
     /// the shell's language and history.
     static func type(_ line: String, in project: Project, appState: AppState) {
-        guard let pane = appState.focusedPane(for: project.id), let view = pane.nsView else {
+        guard let pane = appState.focusedPane(for: project.id), let view = SurfaceRegistry.shared.view(of: pane) else {
             appState.presentToast(String(localized: "Open a terminal in the project first."))
             return
         }

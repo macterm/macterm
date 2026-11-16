@@ -256,7 +256,7 @@ struct SplitLayoutTests {
             Issue.record("expected a split")
             return
         }
-        branch.ratio = 0.7
+        ModelWriter.splitRatio(branch, ratio: 0.7)
         #expect(SplitLayout.animationKey(of: tree, zoomedPaneID: nil) == before)
     }
 
@@ -275,15 +275,15 @@ struct SplitLayoutTests {
         let (tree, ids) = build(H(pane("l"), pane("r"), ratio: 0.5))
         let tab = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: ids["l"])
         let before = tab.animatedResizeGeneration
-        tab.resize(.right)
+        ModelWriter.splitResize(tab, direction: .right)
         #expect(tab.animatedResizeGeneration == before + 1)
         guard case let .split(branch) = tab.splitRoot else {
             Issue.record("expected a split")
             return
         }
-        branch.ratio = 0.3
+        ModelWriter.splitRatio(branch, ratio: 0.3)
         #expect(tab.animatedResizeGeneration == before + 1)
-        #expect(try tab.setSplitRatio(paneID: #require(ids["l"]), axis: .horizontal, ratio: 0.6))
+        #expect(try ModelWriter.splitRatio(tab, paneID: #require(ids["l"]), axis: .horizontal, ratio: 0.6))
         #expect(tab.animatedResizeGeneration == before + 1)
     }
 

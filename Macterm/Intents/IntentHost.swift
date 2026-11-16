@@ -128,12 +128,12 @@ enum IntentTargets {
         // window (a notification click, the CLI's `pane focus`), which is
         // exactly the shape of an intent arriving from outside.
         ctx.appState.appDelegate?.showWindow()
-        if target.id == PinnedTabs.projectID {
+        if target.id == PinnedTabs.workspaceID {
             // The sentinel must not go through the project path: it has its
             // own selection (`selectPinnedProject`), and `selectProject`
             // would treat it as a project rooted at the home directory.
             ctx.appState.selectPinnedProject()
-        } else if target.id == ScratchTabs.projectID {
+        } else if target.id == ScratchTabs.workspaceID {
             ctx.appState.selectScratchTabs()
         } else {
             ctx.appState.revealProject(target.id)
@@ -202,9 +202,9 @@ enum IntentTargets {
     /// reads the same way.
     static func orderedProjectIDs(in ctx: AppCommandContext) -> [UUID] {
         var ids: [UUID] = []
-        if ctx.appState.workspaces[PinnedTabs.projectID] != nil { ids.append(PinnedTabs.projectID) }
+        if ctx.appState.workspaces[PinnedTabs.workspaceID] != nil { ids.append(PinnedTabs.workspaceID) }
         ids.append(contentsOf: ctx.projectStore.projects.map(\.id))
-        if ctx.appState.hasScratchTabs { ids.append(ScratchTabs.projectID) }
+        if ctx.appState.hasScratchTabs { ids.append(ScratchTabs.workspaceID) }
         return ids
     }
 

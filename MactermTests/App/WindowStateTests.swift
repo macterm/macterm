@@ -294,7 +294,7 @@ struct WindowStateTests {
         state.selectProject(project)
         let ws = try #require(state.workspaces[project.id])
         for _ in 1 ..< count {
-            _ = ws.createTab(projectPath: "/tmp")
+            _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         }
         return (project, ws)
     }
@@ -320,14 +320,14 @@ struct WindowStateTests {
         #expect(state.selectedTab(for: project.id, in: a) === tab)
         #expect(state.selectedTab(for: project.id, in: b) === tab)
         for pane in tab.splitRoot.allPanes() {
-            let forA = pane.surface(for: a.id)
-            let forB = pane.surface(for: b.id)
+            let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+            let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
             #expect(forA !== forB)
             #expect(forA.pane === pane)
             #expect(forB.pane === pane)
-            #expect(pane.surface(for: a.id) === forA, "the same surface for the same window")
-            #expect(pane.surface(for: b.id) === forB)
-            #expect(pane.surfaces.count == 2)
+            #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA, "the same surface for the same window")
+            #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
+            #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
             #expect(forA.isFeed, "the first window to draw the pane has its feed")
             #expect(!forB.isFeed)
         }
@@ -347,15 +347,15 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
 
         state.noteKeyWindow(b)
         state.noteKeyWindow(a)
 
-        #expect(pane.surface(for: a.id) === forA)
-        #expect(pane.surface(for: b.id) === forB)
-        #expect(pane.surfaces.count == 2)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
     }
 
     @Test
@@ -400,7 +400,10 @@ struct WindowStateTests {
         let panes = try #require(state.selectedTab(for: project.id, in: b)).splitRoot.allPanes()
         #expect(panes.map(\.id) == [source.id, added])
         let newPane = try #require(tab.splitRoot.findPane(id: added))
-        #expect(newPane.surface(for: a.id) !== newPane.surface(for: b.id))
+        #expect(SurfaceRegistry.shared.surface(for: newPane, in: .window(a.id)) !== SurfaceRegistry.shared.surface(
+            for: newPane,
+            in: .window(b.id)
+        ))
 
         state.closePane(source.id, projectID: project.id)
         #expect(state.selectedTab(for: project.id, in: b)?.splitRoot.allPanes().map(\.id) == [added])
@@ -422,8 +425,8 @@ struct WindowStateTests {
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         for pane in panes {
-            _ = pane.surface(for: a.id)
-            _ = pane.surface(for: b.id)
+            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         }
         #expect(Set(panes.map(\.sessionName)) == [source.sessionName])
         #expect(state.clients(of: source.sessionName).count == 4)
@@ -442,14 +445,14 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
         let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        let forA = pane.surface(for: a.id)
-        _ = pane.surface(for: b.id)
-        #expect(pane.surfaces.count == 2)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
 
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
 
-        #expect(pane.surfaces.count == 1, "b's client goes with its view of the tab")
-        #expect(pane.surfaces.first === forA)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1, "b's client goes with its view of the tab")
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).first === forA)
     }
 
     @Test
@@ -464,13 +467,13 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
         let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        _ = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         #expect(!forB.isFeed)
 
         state.selectTab(ws.tabs[1].id, projectID: project.id)
 
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
         #expect(forB.isFeed, "the pane keeps a feed while any window draws it")
     }
 
@@ -484,13 +487,13 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        _ = pane.surface(for: a.id)
-        _ = pane.surface(for: b.id)
-        #expect(pane.surfaces.count == 2)
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
 
         state.unregisterWindow(b)
 
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
         #expect(!state.isMirrored(pane), "one client per session again")
     }
 
@@ -517,7 +520,7 @@ struct WindowStateTests {
         }
 
         for pane in tab.splitRoot.allPanes() {
-            #expect(pane.surfaces.count == 1)
+            #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
             #expect(!state.isMirrored(pane), "one client per session")
         }
     }
@@ -537,8 +540,8 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         session.attach([forA, forB])
         #expect(state.isMirrored(pane))
         #expect(forA.isLeader, "a's view leads until b's is used")
@@ -562,7 +565,7 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.noteKeyWindow(a)
 
-        let created = ws.createTab(projectPath: "/tmp")
+        let created = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
         #expect(a.activeTabIDs[project.id] == created.id)
         #expect(state.selectedTab(for: project.id, in: a)?.id == created.id)
@@ -785,13 +788,13 @@ struct WindowStateTests {
 
         let before = try #require(state.selectedTab(for: project.id, in: first))
         let pane = try #require(before.splitRoot.allPanes().first)
-        let surface = pane.surface(for: first.id)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .window(first.id))
 
         state.registerWindow(first)
         let after = try #require(state.selectedTab(for: project.id, in: first))
         #expect(after === before, "registration keeps the panes the window already draws")
-        #expect(pane.surface(for: first.id) === surface)
-        #expect(pane.surfaces.count == 1)
+        #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(first.id)) === surface)
+        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
     }
 
     @Test
@@ -863,7 +866,7 @@ struct WindowStateTests {
         window.activeProjectID = q.id
         #expect(window.expandedProjects == [q.id], "only a change of project opens a section")
 
-        window.activeProjectID = PinnedTabs.projectID
+        window.activeProjectID = PinnedTabs.workspaceID
         #expect(window.expandedProjects == [q.id], "the pinned workspace has no section")
 
         state.removeProject(q.id)
@@ -931,18 +934,21 @@ struct WindowStateTests {
         state.noteKeyWindow(a)
         let panes = tab.splitRoot.allPanes()
         for pane in panes {
-            session.attach([pane.surface(for: a.id), pane.surface(for: b.id)])
+            session.attach([
+                SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)),
+                SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)),
+            ])
         }
         session.claimed = []
 
         state.noteKeyWindow(b)
-        #expect(Set(session.claimed) == Set(panes.map { $0.surface(for: b.id).id }))
+        #expect(Set(session.claimed) == Set(panes.map { $SurfaceRegistry.shared.surface(for: 0, in: .window(b.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id) == Set(panes.map(\.id)))
         #expect(state.nonLeaderPaneIDs(in: tab, window: b.id).isEmpty)
 
         session.claimed = []
         state.noteKeyWindow(a)
-        #expect(Set(session.claimed) == Set(panes.map { $0.surface(for: a.id).id }))
+        #expect(Set(session.claimed) == Set(panes.map { $SurfaceRegistry.shared.surface(for: 0, in: .window(a.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id).isEmpty)
     }
 
@@ -961,7 +967,10 @@ struct WindowStateTests {
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        session.attach([source.surface(for: a.id), mirrored.surface(for: a.id)])
+        session.attach([
+            SurfaceRegistry.shared.surface(for: source, in: .window(a.id)),
+            SurfaceRegistry.shared.surface(for: mirrored, in: .window(a.id)),
+        ])
 
         state.noteKeyWindow(a)
 
@@ -1020,8 +1029,8 @@ struct WindowStateTests {
         state.registerWindow(a)
         state.registerWindow(b)
         state.noteKeyWindow(a)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         session.attach([forB, forA])
         session.claimed = []
 
@@ -1045,8 +1054,8 @@ struct WindowStateTests {
         let b = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.registerWindow(b)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         forB.receiveLead(true)
         state.noteKeyWindow(a)
         session.claimed = []
@@ -1075,8 +1084,8 @@ struct WindowStateTests {
         let b = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.registerWindow(b)
-        let forA = pane.surface(for: a.id)
-        let forB = pane.surface(for: b.id)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
         session.attach([forA, forB])
         state.noteKeyWindow(b)
         #expect(session.claimed.isEmpty)
@@ -1099,7 +1108,7 @@ struct WindowStateTests {
         let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        let surface = pane.surface(for: a.id)
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
         surface.receiveLead(false)
         #expect(!state.isMirrored(pane))
 
@@ -1107,6 +1116,77 @@ struct WindowStateTests {
 
         #expect(session.claimed == [surface.id])
         #expect(state.isLeader(pane))
+    }
+
+    /// The back window of two on one tab hides its tab: the key window leads
+    /// every pane, so the panes here would show at the other window's size.
+    @Test
+    func a_pane_that_another_window_leads_is_led_from_another_window() throws {
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let (project, ws) = try seedProject(state, tabs: 1)
+        let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
+        let a = WindowState(activeProjectID: project.id)
+        let b = WindowState(activeProjectID: project.id)
+        state.registerWindow(a)
+        state.registerWindow(b)
+        state.noteKeyWindow(a)
+        session.attach([
+            SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)),
+            SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)),
+        ])
+
+        state.noteKeyWindow(b)
+
+        #expect(state.isLedFromAnotherWindow(pane, window: a.id))
+        #expect(!state.isLedFromAnotherWindow(pane, window: b.id))
+    }
+
+    /// One pane of a split that another window leads is enough: that pane
+    /// would show at the wrong size.
+    @Test
+    func one_pane_led_from_another_window_is_enough() throws {
+        let state = makeAppState()
+        _ = FakeSessionLeads(state)
+        let (project, ws) = try seedProject(state, tabs: 1)
+        let tab = try #require(ws.activeTab)
+        let source = try #require(tab.splitRoot.allPanes().first)
+        _ = try #require(state.splitPane(
+            source.id, direction: .horizontal, projectID: project.id, projectDirectory: "/tmp"
+        ))
+        let a = WindowState(activeProjectID: project.id)
+        let b = WindowState(activeProjectID: project.id)
+        state.registerWindow(a)
+        state.registerWindow(b)
+        let panes = tab.splitRoot.allPanes()
+        SurfaceRegistry.shared.surface(for: panes[0], in: .window(a.id)).receiveLead(false)
+        SurfaceRegistry.shared.surface(for: panes[0], in: .window(b.id)).receiveLead(true)
+
+        #expect(panes.filter { state.isLedFromAnotherWindow($0, window: a.id) }.map(\.id) == [panes[0].id])
+    }
+
+    /// A client outside Macterm, or a mirror in the same window, is not
+    /// another window: the pane only dims.
+    @Test
+    func a_lead_outside_the_other_windows_is_not_led_from_another_window() throws {
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let (project, ws) = try seedProject(state, tabs: 1)
+        let tab = try #require(ws.activeTab)
+        let source = try #require(tab.splitRoot.allPanes().first)
+        let a = WindowState(activeProjectID: project.id)
+        state.registerWindow(a)
+        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([
+            SurfaceRegistry.shared.surface(for: source, in: .window(a.id)),
+            SurfaceRegistry.shared.surface(for: mirrored, in: .window(a.id)),
+        ])
+        #expect(!state.isLedFromAnotherWindow(mirrored, window: a.id))
+
+        let other = try #require(ws.activeTab?.splitRoot.allPanes().first)
+        SurfaceRegistry.shared.surface(for: other, in: .window(a.id)).receiveLead(false)
+        #expect(!state.isLedFromAnotherWindow(other, window: a.id))
     }
 
     /// A pane that comes up in a window that is NOT key claims nothing on
@@ -1124,7 +1204,7 @@ struct WindowStateTests {
         state.selectTab(ws.tabs[0].id, projectID: project.id)
         state.selectTab(ws.tabs[1].id, projectID: project.id, in: b)
         let background = try #require(ws.tabs[1].splitRoot.allPanes().first)
-        let surface = background.surface(for: b.id)
+        let surface = SurfaceRegistry.shared.surface(for: background, in: .window(b.id))
         surface.receiveLead(false)
         session.claimed = []
 
@@ -1176,23 +1256,23 @@ struct WindowStateTests {
         // `selectedTab` while nothing maintained it — the workspace hook,
         // reconcile and align all skip the pinned workspace.
         let state = makeAppState()
-        state.zmx = .noop
+        state.sessionClient = .noop
         state.incubatePane = { _ in }
         _ = try seedProject(state, tabs: 1)
         state.ensurePinnedWorkspace()
         // Through AppState so the tabs get pinned records (selection is
         // record-aware), as Cmd+T's `createTab` does.
-        let first = try #require(state.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        let window = WindowState(activeProjectID: PinnedTabs.projectID)
+        let first = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        let window = WindowState(activeProjectID: PinnedTabs.workspaceID)
         state.registerWindow(window)
         state.noteKeyWindow(window)
-        window.activeTabIDs[PinnedTabs.projectID] = first
+        window.activeTabIDs[PinnedTabs.workspaceID] = first
 
-        let created = try #require(state.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
+        let created = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
 
-        #expect(state.selectedTab(for: PinnedTabs.projectID, in: window)?.id == created)
-        state.selectTab(first, projectID: PinnedTabs.projectID, in: window)
-        #expect(state.selectedTab(for: PinnedTabs.projectID, in: window)?.id == first)
+        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == created)
+        state.selectTab(first, projectID: PinnedTabs.workspaceID, in: window)
+        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == first)
     }
 
     @Test
@@ -1208,21 +1288,21 @@ struct WindowStateTests {
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
         let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
-        writer.zmx = .noop
+        writer.sessionClient = .noop
         writer.incubatePane = { _ in }
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         writer.ensurePinnedWorkspace()
-        let firstPinned = try #require(writer.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        _ = try #require(writer.createTab(projectID: PinnedTabs.projectID, projectPath: "/tmp"))
-        writer.selectTab(firstPinned, projectID: PinnedTabs.projectID)
-        let w = WindowState(activeProjectID: PinnedTabs.projectID)
+        let firstPinned = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        _ = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        writer.selectTab(firstPinned, projectID: PinnedTabs.workspaceID)
+        let w = WindowState(activeProjectID: PinnedTabs.workspaceID)
         writer.registerWindow(w)
         writer.noteKeyWindow(w)
         writer.saveWorkspaces()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
-        reader.zmx = .noop
+        reader.sessionClient = .noop
         reader.incubatePane = { _ in }
         reader.restoreSelection(projects: [p])
         await reader.materializeRestoredPinnedTabs()
@@ -1231,14 +1311,14 @@ struct WindowStateTests {
         reader.noteKeyWindow(restored)
         reader.restoreWindows(adopting: restored)
 
-        #expect(restored.activeProjectID == PinnedTabs.projectID)
-        #expect(restored.activeTabIDs[PinnedTabs.projectID] == nil)
+        #expect(restored.activeProjectID == PinnedTabs.workspaceID)
+        #expect(restored.activeTabIDs[PinnedTabs.workspaceID] == nil)
         let pinned = try #require(reader.pinnedWorkspace)
         #expect(pinned.tabs.count == 2)
-        #expect(reader.selectedTab(for: PinnedTabs.projectID, in: restored)?.id == pinned.activeTabID)
+        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == pinned.activeTabID)
 
-        let created = pinned.createTab(projectPath: "/tmp")
-        #expect(reader.selectedTab(for: PinnedTabs.projectID, in: restored)?.id == created.id)
+        let created = ModelWriter.tabCreate(in: pinned, projectPath: "/tmp")
+        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == created.id)
     }
 }
 

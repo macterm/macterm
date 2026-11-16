@@ -3,8 +3,6 @@ const util = @import("util.zig");
 const testing = std.testing;
 pub const ghostty_vt = @import("ghostty-vt");
 
-pub const HistoryFormat = util.HistoryFormat;
-
 /// True when a CSI carries a private marker (`?`, `>`, `=`, `<`). Keyboard
 /// encodings never use one, but the replies a terminal sends on its own do:
 /// kitty keyboard flags (`CSI ? flags u`), DA1 (`CSI ? 62;22 c`), DA2
@@ -360,75 +358,6 @@ fn serializeState(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal, with_scr
     };
 }
 
-pub fn serializeTerminal(
-    alloc: std.mem.Allocator,
-    term: *ghostty_vt.Terminal,
-    format: HistoryFormat,
-) ?[]const u8 {
-    return serializeTerminalRange(alloc, term, format, null);
-}
-
-/// Formats the active screen and at most `scrollback_rows` preceding physical
-/// rows. Null preserves whole-history formatting. Alternate screens have no
-/// scrollback, so their selection always stays inside the current grid.
-pub fn serializeTerminalRange(
-    alloc: std.mem.Allocator,
-    term: *ghostty_vt.Terminal,
-    format: HistoryFormat,
-    scrollback_rows: ?u32,
-) ?[]const u8 {
-    var builder: std.Io.Writer.Allocating = .init(alloc);
-    defer builder.deinit();
-
-    const opts: ghostty_vt.formatter.Options = switch (format) {
-        .plain => .plain,
-        .vt => .vt,
-        .html => .html,
-    };
-    var term_formatter = ghostty_vt.formatter.TerminalFormatter.init(term, opts);
-    term_formatter.content = .{ .selection = null };
-    if (scrollback_rows) |rows| {
-        const pages = &term.screens.active.pages;
-        const active_top = pages.getTopLeft(.active);
-        const top = active_top.up(rows) orelse pages.getTopLeft(.screen);
-        const bottom = pages.pin(.{ .active = .{
-            .x = @intCast(pages.cols - 1),
-            .y = @intCast(pages.rows - 1),
-        } }) orelse return null;
-        term_formatter.content = .{
-            .selection = ghostty_vt.Selection.init(top, bottom, false),
-        };
-    }
-    term_formatter.extra = switch (format) {
-        .plain => .none,
-        .vt => .{
-            .palette = false,
-            .modes = true,
-            .scrolling_region = true,
-            .tabstops = false,
-            .pwd = false, // emitted below without the sentinel the formatter includes
-            .keyboard = true,
-            .screen = .all,
-        },
-        .html => .styles,
-    };
-
-    term_formatter.format(&builder.writer) catch |err| {
-        std.log.warn("failed to format terminal err={s}", .{@errorName(err)});
-        return null;
-    };
-
-    if (format == .vt) writePwd(&builder.writer, term);
-
-    const output = builder.writer.buffered();
-    if (output.len == 0) return null;
-
-    return alloc.dupe(u8, output) catch |err| {
-        std.log.warn("failed to allocate terminal output err={s}", .{@errorName(err)});
-        return null;
-    };
-}
-
 test "serializeTerminalState excludes synchronized output replay" {
     const alloc = testing.allocator;
     const io = testing.io;
@@ -545,63 +474,15 @@ test "serializeTerminalState omits the pwd when none is set" {
     try testing.expect(std.mem.indexOf(u8, output, "\x1b]7;") == null);
 }
 
-test "serializeTerminal vt replays the pwd without a NUL sentinel" {
-    const alloc = testing.allocator;
-    const io = testing.io;
-
-    var term = try ghostty_vt.Terminal.init(io, alloc, .{
-        .cols = 80,
-        .rows = 24,
-    });
-    defer term.deinit(alloc);
-
-    var stream = term.vtStream();
-    defer stream.deinit();
-
-    stream.nextSlice("\x1b]7;file://myhost/private/tmp\x1b\\");
-    stream.nextSlice("hello");
-
-    const output = serializeTerminal(alloc, &term, .vt) orelse return error.TestUnexpectedNull;
-    defer alloc.free(output);
-
-    try testing.expect(std.mem.indexOf(u8, output, "\x1b]7;file://myhost/private/tmp\x1b\\") != null);
-    try testing.expectEqual(@as(?usize, null), std.mem.indexOfScalar(u8, output, 0));
-}
-
-test "serializeTerminalRange screen only returns the active screen" {
-    const alloc = testing.allocator;
-    var term = try testCreateTerminal(alloc, testing.io, 80, 3, "1\r\n2\r\n3\r\n4\r\n5");
-    defer term.deinit(alloc);
-
-    const output = serializeTerminalRange(alloc, &term, .plain, 0) orelse return error.TestUnexpectedNull;
-    defer alloc.free(output);
-    try testing.expectEqualStrings("3\n4\n5", output);
-}
-
-test "serializeTerminalRange adds the requested scrollback rows" {
-    const alloc = testing.allocator;
-    var term = try testCreateTerminal(alloc, testing.io, 80, 3, "1\r\n2\r\n3\r\n4\r\n5");
-    defer term.deinit(alloc);
-
-    const output = serializeTerminalRange(alloc, &term, .plain, 1) orelse return error.TestUnexpectedNull;
-    defer alloc.free(output);
-    try testing.expectEqualStrings("2\n3\n4\n5", output);
-
-    const all = serializeTerminalRange(alloc, &term, .plain, 100) orelse return error.TestUnexpectedNull;
-    defer alloc.free(all);
-    const full = serializeTerminal(alloc, &term, .plain) orelse return error.TestUnexpectedNull;
-    defer alloc.free(full);
-    try testing.expectEqualStrings(full, all);
-}
-
-test "serializeTerminalRange alternate screen returns only its grid" {
-    const alloc = testing.allocator;
-    var term = try testCreateTerminal(alloc, testing.io, 80, 3, "1\r\n2\r\n3\r\n4\r\n5\x1b[?1049h\x1b[Halt");
-    defer term.deinit(alloc);
-
-    const output = serializeTerminalRange(alloc, &term, .plain, 100) orelse return error.TestUnexpectedNull;
-    defer alloc.free(output);
-    try testing.expectEqualStrings("alt", output);
+/// The terminal's whole text, scrollback included.
+fn testPlainText(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal) ![]const u8 {
+    var builder: std.Io.Writer.Allocating = .init(alloc);
+    defer builder.deinit();
+    var term_formatter = ghostty_vt.formatter.TerminalFormatter.init(term, .plain);
+    term_formatter.content = .{ .selection = null };
+    term_formatter.extra = .none;
+    try term_formatter.format(&builder.writer);
+    return builder.toOwnedSlice();
 }
 
 fn testCreateTerminal(alloc: std.mem.Allocator, io: std.Io, cols: u16, rows: u16, vt_data: []const u8) !ghostty_vt.Terminal {
@@ -1220,7 +1101,7 @@ test "serializeTerminalState keeps the scrollback rows that are on screen before
     // The last two scrollback rows were still on the client's screen when
     // the snapshot cleared it. They must end up in its scrollback, not
     // erased.
-    const history = serializeTerminal(alloc, &client, .plain) orelse return error.TestUnexpectedNull;
+    const history = try testPlainText(alloc, &client);
     defer alloc.free(history);
     try testing.expect(std.mem.indexOf(u8, history, "SCROLL_7\nSCROLL_8\n") != null);
     try expectScreensMatch(alloc, &term, &client);
@@ -1248,7 +1129,7 @@ test "serializeTerminalState lets a wider client lay a wrapped line out on one r
     var stream = wide.vtStream();
     defer stream.deinit();
     stream.nextSlice(output);
-    const history = serializeTerminal(alloc, &wide, .plain) orelse return error.TestUnexpectedNull;
+    const history = try testPlainText(alloc, &wide);
     defer alloc.free(history);
     try testing.expect(std.mem.indexOf(u8, history, "abcdefghijklmnopqrstuvwxy\n") != null);
 }

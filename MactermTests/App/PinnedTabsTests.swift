@@ -26,7 +26,7 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: ProjectFileStore(directoryURL: projectsDir)
         )
-        state.zmx = .noop
+        state.sessionClient = .noop
         // Never let the eager pinned launch warm REAL surfaces in the test
         // host (that would spawn actual shells).
         state.incubatePane = { _ in }
@@ -39,7 +39,7 @@ struct PinnedTabsTests {
         return p
     }
 
-    private var pinnedID: UUID { PinnedTabs.projectID }
+    private var pinnedID: UUID { PinnedTabs.workspaceID }
 
     // MARK: - Reserved name
 
@@ -50,7 +50,7 @@ struct PinnedTabsTests {
         for name in ["Pinned", "pinned", "PINNED", "pInNeD", " Pinned ", "\tpinned\n"] {
             #expect(PinnedTabs.reservesName(name), "\(name)")
         }
-        for name in ["", "Pinned 2", "Pinned Tabs", "unpinned", "pinned.yaml", "Pin ned", PinnedTabs.projectID.uuidString] {
+        for name in ["", "Pinned 2", "Pinned Tabs", "unpinned", "pinned.yaml", "Pin ned", PinnedTabs.workspaceID.uuidString] {
             #expect(!PinnedTabs.reservesName(name), "\(name)")
         }
     }
@@ -194,7 +194,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let pinnedTab = ws.tabs[0]
-        let normalTab = ws.createTab(projectPath: p.path)
+        let normalTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(pinnedTab.id, fromProject: p.id)
 
         fx.state.closeTabs([
@@ -227,7 +227,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        let newPane = try #require(tab.split(paneID: tab.splitRoot.allPanes()[0].id, direction: .horizontal))
+        let newPane = try #require(ModelWriter.paneSplit(tab, paneID: tab.splitRoot.allPanes()[0].id, direction: .horizontal))
 
         fx.state.closePane(newPane, projectID: pinnedID)
 
@@ -325,10 +325,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var dead = ZmxClient.noop
+        var dead = SessionClient.noop
         dead.isBundled = { true }
         dead.listSessions = { [] }
-        state2.zmx = dead
+        state2.sessionClient = dead
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -378,10 +378,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var alive = ZmxClient.noop
+        var alive = SessionClient.noop
         alive.isBundled = { true }
         alive.listSessions = { [LocalSession(name: sessionName)] }
-        state2.zmx = alive
+        state2.sessionClient = alive
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -405,10 +405,10 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        var unknown = ZmxClient.noop
+        var unknown = SessionClient.noop
         unknown.isBundled = { true }
         unknown.listSessions = { nil } // probe failed → unknown
-        state2.zmx = unknown
+        state2.sessionClient = unknown
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -447,7 +447,7 @@ struct PinnedTabsTests {
         // The declaration was captured at pin time; a later change to the tab
         // (a rename stands in for a started process, which needs a live
         // surface to observe) must reach both the record and pinned.yaml.
-        tab.customTitle = "renamed"
+        ModelWriter.tabSet(tab, title: "renamed")
         fx.state.persistRefreshedPinnedDeclarations()
 
         #expect(fx.state.pinnedRecords.first?.declaration.name == "renamed")
@@ -484,7 +484,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let first = ws.tabs[0]
-        let second = ws.createTab(projectPath: p.path)
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
         fx.state.pinTab(second.id, fromProject: p.id)
         fx.state.selectPinnedTab(second.id)
@@ -501,10 +501,10 @@ struct PinnedTabsTests {
         let sessionEntries = [first, second].flatMap { $0.splitRoot.allPanes() }.map {
             LocalSession(name: $0.sessionName)
         }
-        var alive = ZmxClient.noop
+        var alive = SessionClient.noop
         alive.isBundled = { true }
         alive.listSessions = { sessionEntries }
-        state2.zmx = alive
+        state2.sessionClient = alive
         state2.incubatePane = { _ in }
         state2.restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
         await state2.materializeRestoredPinnedTabs()
@@ -537,7 +537,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let first = ws.tabs[0]
-        let second = ws.createTab(projectPath: p.path)
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
         fx.state.pinTab(second.id, fromProject: p.id)
 
@@ -561,7 +561,7 @@ struct PinnedTabsTests {
             declaration: LayoutTab(name: "idle", layout: .pane(LayoutPane(cwd: "/tmp"))),
             originProjectID: nil
         ))
-        fx.state.pinnedWorkspace?.activeTabID = tab.id
+        if let ws = fx.state.pinnedWorkspace { ModelWriter.tabPeek(tab.id, in: ws) }
 
         #expect(fx.state.activeTabMoveOffset(step: -1, projectID: pinnedID) == nil)
         fx.state.moveActiveTab(step: 1, projectID: pinnedID)
@@ -612,7 +612,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let a = ws.tabs[0]
-        let b = ws.createTab(projectPath: p.path)
+        let b = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(a.id, fromProject: p.id)
         fx.state.pinTab(b.id, fromProject: p.id)
         fx.state.pinnedRecords[0].declaration = LayoutTab(name: "a", layout: .pane(LayoutPane(cwd: "/tmp")))
@@ -653,7 +653,7 @@ struct PinnedTabsTests {
             originProjectID: nil
         )]
         fx.state.ensurePinnedWorkspace()
-        let paneID = try #require(tab.split(paneID: tab.splitRoot.allPanes()[0].id, direction: .horizontal))
+        let paneID = try #require(ModelWriter.paneSplit(tab, paneID: tab.splitRoot.allPanes()[0].id, direction: .horizontal))
 
         fx.state.separatePaneIntoPinned(paneID, atRecordIndex: 1)
 
@@ -712,7 +712,7 @@ struct PinnedTabsTests {
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
             projectFiles: ProjectFileStore(directoryURL: fx.projectsDir)
         )
-        state2.zmx = .noop
+        state2.sessionClient = .noop
         try state2.pinnedLayoutStore.write(tabs: [])
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
 
@@ -764,7 +764,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let first = ws.tabs[0]
-        let second = ws.createTab(projectPath: p.path)
+        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
 
         // Hand-edit while running: append an entry. The existing entry is
@@ -799,13 +799,13 @@ struct PinnedTabsTests {
             originProjectID: nil
         ))
 
-        fx.state.selectNextTab(projectID: PinnedTabs.projectID)
+        fx.state.selectNextTab(projectID: PinnedTabs.workspaceID)
 
         // Landed on the unloaded record and restored it.
         #expect(fx.state.pinnedWorkspace?.activeTabID == unloadedID)
         #expect(fx.state.isPinnedTabLoaded(unloadedID))
 
-        fx.state.selectPreviousTab(projectID: PinnedTabs.projectID)
+        fx.state.selectPreviousTab(projectID: PinnedTabs.workspaceID)
         #expect(fx.state.pinnedWorkspace?.activeTabID == tab.id)
     }
 
@@ -817,7 +817,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let ws = try #require(fx.state.workspaces[p.id])
         let pinnedTab = ws.tabs[0]
-        let projectTab = ws.createTab(projectPath: p.path)
+        let projectTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(pinnedTab.id, fromProject: p.id)
         fx.state.selectPinnedTab(pinnedTab.id)
 

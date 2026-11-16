@@ -122,7 +122,7 @@ def test_session_target_resolves_to_the_leader(app, fresh_tab, live_pane):
 
 
 def test_closing_a_mirror_leaves_the_session_running(app, fresh_tab, live_pane):
-    """The refcount, against a real daemon rather than a stubbed ZmxClient.
+    """The refcount, against a real daemon rather than a stubbed SessionClient.
 
     Closing one view of a session must not kill the shell the other view is
     still showing — proven by the surviving pane continuing to execute after
@@ -161,8 +161,8 @@ def _cols(app, pane_id):
 
 
 def test_focusing_a_mirror_resizes_the_shared_pty_to_it(app, fresh_tab, live_pane):
-    """The whole chain, end to end: focus -> Macterm claim -> zmx ClaimFilter
-    -> Daemon.handleClaim -> setLeader -> size request -> TIOCSWINSZ.
+    """The whole chain, end to end: focus -> Macterm claim -> the `claim`
+    message on the pane's channel -> the session's leader -> TIOCSWINSZ.
 
     zmx sizes the pty from the LEADER's client only, so this asserts what the
     session's shell itself believes its width is and requires it to follow

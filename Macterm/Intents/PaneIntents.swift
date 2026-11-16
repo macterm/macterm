@@ -55,7 +55,7 @@ struct RunCommandInMactermPaneIntent: AppIntent {
             throw MactermIntentError.badInput(String(localized: "The command is empty."))
         }
         let target = try IntentTargets.pane(session: pane.id, in: ctx)
-        guard let view = target.pane.nsView,
+        guard let view = SurfaceRegistry.shared.view(of: target.pane),
               view.sendText(submit ? command + "\n" : command)
         else {
             throw MactermIntentError.noSurface
@@ -112,7 +112,7 @@ struct SendKeyToMactermPaneIntent: AppIntent {
             )
         }
         let target = try IntentTargets.pane(session: pane.id, in: ctx)
-        guard let view = target.pane.nsView,
+        guard let view = SurfaceRegistry.shared.view(of: target.pane),
               view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
         else {
             throw MactermIntentError.noSurface
@@ -156,7 +156,7 @@ struct GetMactermPaneContentsIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let ctx = try await MactermIntentHost.shared.authorizedContext()
         let target = try IntentTargets.pane(session: pane.id, in: ctx)
-        guard let view = target.pane.nsView, let text = view.readText(scrollback: scrollback) else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), let text = view.readText(scrollback: scrollback) else {
             throw MactermIntentError.noSurface
         }
         return .result(value: text)
@@ -224,9 +224,9 @@ struct GetMactermPaneDetailsIntent: AppIntent {
         case .session: pane.sessionName
         // The live pwd (shell integration) with the project's own path as the
         // fallback — the same pair `pane list` reports.
-        case .workingDirectory: pane.nsView?.currentPwd ?? pane.projectPath
+        case .workingDirectory: SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath
         case .foregroundProcess: pane.foregroundProcessName
-        case .size: pane.nsView?.surfaceSize.map { "\($0.columns)x\($0.rows)" }
+        case .size: SurfaceRegistry.shared.view(of: pane)?.surfaceSize.map { "\($0.columns)x\($0.rows)" }
         }
     }
 }

@@ -59,7 +59,7 @@ struct MactermProjectQuery: EntityStringQuery, EnumerableEntityQuery {
         let ctx = try await MactermIntentHost.shared.context()
         // The pinned and the scratch workspaces are offered only once they
         // exist — before that there is nothing to address in them.
-        let pinned = ctx.appState.workspaces[PinnedTabs.projectID] != nil
+        let pinned = ctx.appState.workspaces[PinnedTabs.workspaceID] != nil
             ? [MactermProjectEntity(PinnedTabs.project)]
             : []
         let scratch = ctx.appState.hasScratchTabs ? [MactermProjectEntity(ScratchTabs.project)] : []
@@ -193,7 +193,7 @@ struct MactermPaneEntity: AppEntity {
         id = pane.sessionName
         title = pane.displayTitle
         project = IntentTargets.projectName(projectID, in: ctx)
-        workingDirectory = pane.nsView?.currentPwd ?? pane.projectPath
+        workingDirectory = SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath
         foregroundProcess = pane.foregroundProcessName
     }
 }

@@ -1023,7 +1023,7 @@ struct WorkspaceView: View {
     private var appState
     /// This window's own selection (#345). Never `ws.activeTab`: that is the
     /// KEY window's. Every window that selects a tab draws the same panes,
-    /// each with a surface of its own (`Pane.surface(for:)`).
+    /// each with a surface of its own (`SurfaceRegistry.surface(for:in:)`).
     @Environment(WindowState.self)
     private var windowState
     /// The pane currently dragged by its grab handle, bubbled up via
@@ -1054,17 +1054,16 @@ struct WorkspaceView: View {
     }
 
     /// Whether this window should show the notice instead of the tab: it is
-    /// not the key window, and every pane of its tab is a non-leader that
-    /// another surface of Macterm shows — the tab is being worked in from
-    /// another window. A pane that a client outside Macterm leads only dims. The KEY window always renders
-    /// its panes even while they are non-leaders, because its claim can only
-    /// land once the surfaces exist and have a size; hiding them would leave
-    /// the claim refused and the notice up forever.
+    /// not the key window, and another window leads a pane of the tab. That
+    /// pane's pty has the other window's size, so its content would not fit
+    /// here. A pane that a client outside Macterm leads only dims. The KEY
+    /// window always renders its panes even while they are non-leaders,
+    /// because its claim can only land once the surfaces exist and have a
+    /// size; hiding them would leave the claim refused and the notice up
+    /// forever.
     private func standsAside(_ tab: TerminalTab) -> Bool {
         guard appState.keyWindowID != windowState.id else { return false }
-        let panes = tab.splitRoot.allPanes()
-        return !panes.isEmpty && appState.nonLeaderPaneIDs(in: tab, window: windowState.id).count == panes.count
-            && panes.allSatisfy { appState.isMirrored($0) }
+        return tab.splitRoot.allPanes().contains { appState.isLedFromAnotherWindow($0, window: windowState.id) }
     }
 
     @ViewBuilder
@@ -1097,10 +1096,10 @@ struct WorkspaceView: View {
             onAdaptiveBackgroundChange: { paneID, color in
                 appState.setAdaptiveBackgroundColor(color, paneID: paneID, projectID: project.id, windowID: windowState.id)
             },
-            onToggleZoom: { paneID in tab.toggleZoom(paneID: paneID) },
+            onToggleZoom: { paneID in ModelWriter.paneZoom(tab, toggling: paneID) },
             paneDrop: dropContext(for: tab, renderedNode: renderedNode)
         )
-        .environment(\.paneHostID, windowState.id)
+        .environment(\.paneHost, .window(windowState.id))
         // Pane grab-handle drags and sidebar tab drags are both captured
         // per leaf (see LeafDropDelegate for why there is no whole-area
         // target), sharing one resolution rendered here (#227). Uses
@@ -1144,7 +1143,7 @@ struct WorkspaceView: View {
             draggedPaneID: draggedPaneID,
             renderedTabID: tab.id,
             onMovePane: { paneID, target in
-                if tab.movePane(paneID, to: target) {
+                if ModelWriter.paneMove(tab, paneID: paneID, to: target) {
                     appState.saveWorkspaces()
                 }
             },

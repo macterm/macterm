@@ -11,6 +11,10 @@ private let logger = Logger(subsystem: appBundleID, category: "V1Sessions")
 /// finds each v1 daemon by its argv (`zmx __daemon <name> …`) and signals
 /// it and the programs of its pane. A v2 session is `zmx __session <id>`,
 /// so it never matches.
+///
+/// Migration code, with `ZmxSocketBudget.v1SocketDir`. Remove both one
+/// stable release after the first v2 stable release: by then each user has
+/// run a v2 launch, which ends their v1 sessions.
 enum V1Sessions {
     /// One process of the user, from the kernel's process table.
     struct Process: Equatable {
