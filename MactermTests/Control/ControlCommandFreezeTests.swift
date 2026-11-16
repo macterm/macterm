@@ -12,6 +12,7 @@ struct ControlCommandFreezeTests {
         "project.memory",
         "tab.list", "tab.new", "tab.select", "tab.move", "tab.rename", "tab.close", "tab.merge",
         "window.list", "window.new", "window.close", "window.focus",
+        // Issue 0277 removes `pane.mirror`. Remove it here in the same change.
         "pane.list", "pane.inspect", "pane.dump", "pane.split", "pane.mirror", "pane.focus",
         "pane.close", "pane.run", "pane.key", "pane.zoom", "pane.resize-split", "pane.resize",
         "pane.move", "pane.password", "pane.copy-mode", "pane.read-only", "pane.explain",
@@ -33,13 +34,13 @@ struct ControlCommandFreezeTests {
         #expect(
             added.isEmpty,
             """
-            control.sock is frozen. Do not add \(added) to ControlHandler. Add a new verb to the \
+            control.sock is frozen. Do not add \(added.joined(separator: ", ")) to ControlHandler. Add a new verb to the \
             server protocol as an app action that the server relays to the app (issue 0235).
             """
         )
         #expect(
             removed.isEmpty,
-            "ControlHandler no longer answers \(removed). Remove them from frozenCommands on purpose."
+            "ControlHandler no longer answers \(removed.joined(separator: ", ")). Remove them from frozenCommands in the same change."
         )
     }
 
@@ -54,9 +55,20 @@ struct ControlCommandFreezeTests {
         let start = try #require(text.range(of: "private func dispatch("))
         let end = try #require(text.range(of: "default:", range: start.upperBound ..< text.endIndex))
         let body = text[start.upperBound ..< end.lowerBound]
-        let pattern = try Regex(#"case "([^"]+)":"#)
-        let names = body.matches(of: pattern).compactMap { $0.output[1].substring.map(String.init) }
+        // Each case names one command: `case "noun.verb":`. Any other form of a
+        // case line fails, so that a list or a pattern cannot hide a command.
+        let pattern = try Regex(#"^case "([^"]+)":"#)
+        var names: Set<String> = []
+        for line in body.split(separator: "\n") {
+            let line = line.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("case ") else { continue }
+            let match = try #require(
+                line.firstMatch(of: pattern),
+                "Write each ControlHandler case as one command: \(line)"
+            )
+            try names.insert(String(#require(match.output[1].substring)))
+        }
         #expect(!names.isEmpty)
-        return Set(names)
+        return names
     }
 }

@@ -68,6 +68,7 @@ final class ControlHandler {
 
     private func dispatch(_ request: ControlRequest, peerPID: pid_t?) async throws -> ControlData {
         let args = request.args ?? ControlArgs()
+        // Frozen: `ControlCommandFreezeTests` pins this list (design/011).
         switch request.command {
         case "status": return status()
         case "project.list": return projectList()
