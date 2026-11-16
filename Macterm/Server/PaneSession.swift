@@ -254,8 +254,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 // server that drops each channel does not make a tight loop.
                 if Date().timeIntervalSince(started) < 2 { tries += 1 }
                 if !reconnects {
-                    // A remote pane's session ends here, not below: the
-                    // client is gone, so the surface forgets its lead.
+                    // The session does not connect again (a remote pane), so
+                    // it reports the end of the channel here: no `lead`.
+                    uninstall()
                     host.paneLead(nil)
                     host.paneLinkLost()
                     return

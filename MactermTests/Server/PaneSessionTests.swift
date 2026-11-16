@@ -144,6 +144,7 @@ struct PaneSessionTests {
             connections.current?.close()
             try await host.waitFor { $0.linkLost > 0 }
             #expect(host.snapshot().leads == [true, nil])
+            #expect(host.snapshot().linkLost == 1)
             session.stop()
         }
     }

@@ -1044,6 +1044,7 @@ struct WindowStateTests {
     func a_remote_tabs_back_window_claims_when_it_becomes_key() throws {
         // Two windows on one tab of a remote project. The window that comes
         // to the front claims at once: one click, with no click in a pane.
+        // The rule has no remote exception (before #830 it had one).
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1, path: "me@devbox:~/dev/api")
