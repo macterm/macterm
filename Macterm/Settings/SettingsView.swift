@@ -1206,7 +1206,7 @@ extension View {
 private struct FullDiskAccessBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .top, spacing: 11) {
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
                 SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Full Disk Access is off")
@@ -1238,7 +1238,7 @@ private struct FullDiskAccessBanner: View {
 private struct NotificationPermissionBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .top, spacing: 11) {
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
                 SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Macterm has no notification permission")

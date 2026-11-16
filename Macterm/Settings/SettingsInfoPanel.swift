@@ -14,8 +14,8 @@ struct SettingsInfoPanel: View {
     var body: some View {
         // Sizes measured in the header of the System Settings panes
         // (Notifications, Accessibility): a 26 pt icon, a 11 pt gap to the
-        // text, the icon level with the title.
-        HStack(alignment: .top, spacing: 11) {
+        // text, the glyph on the baseline of the title.
+        HStack(alignment: .firstTextBaseline, spacing: 11) {
             SettingsInfoTile(symbol: symbol)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -42,7 +42,7 @@ struct SettingsInfoPanel: View {
     }
 }
 
-/// The icon of an info block: a glyph in a 26 pt frame, with no background. The banners in
+/// The icon of an info block: a glyph with no frame and no background, so its own edge is the left edge. The banners in
 /// General use it too, so that every block at the top of a pane looks the same.
 struct SettingsInfoTile: View {
     let symbol: String
@@ -52,7 +52,6 @@ struct SettingsInfoTile: View {
         Image(systemName: symbol)
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(tint)
-            .frame(width: 26, height: 26)
             .accessibilityHidden(true)
     }
 }
