@@ -465,7 +465,9 @@ enum WorkspaceSerializer {
     /// restore above and the pinned-tab restore (which materializes tabs
     /// one-by-one after checking whether their sessions survived).
     static func restoreTab(_ t: TabSnapshot, projectID: UUID) -> TerminalTab {
-        let root = restoreNode(t.splitRoot, projectID: projectID)
+        var seen: Set<String> = []
+        // The first pane of a tab is never a duplicate, so the root stays.
+        let root = restoreNode(withoutRepeatedSessions(t.splitRoot, seen: &seen) ?? t.splitRoot, projectID: projectID)
         let focused = t.focusedPaneID.flatMap { root.findPane(id: $0)?.id } ?? root.allPanes().first?.id
         return TerminalTab(id: t.id, splitRoot: root, focusedPaneID: focused, customTitle: t.customTitle)
     }
@@ -536,6 +538,24 @@ enum WorkspaceSerializer {
                 first: snapshotNode(b.first),
                 second: snapshotNode(b.second)
             ))
+        }
+    }
+
+    /// The tree with each pane that names a session already seen left out.
+    /// One pane is one session. Older builds had `pane mirror`, which
+    /// put a second pane on a session in the same tab; such a pane restores
+    /// as the first pane alone, and its sibling takes its space.
+    static func withoutRepeatedSessions(_ node: SplitNodeSnapshot, seen: inout Set<String>) -> SplitNodeSnapshot? {
+        switch node {
+        case let .pane(p):
+            guard let name = p.sessionName else { return node }
+            return seen.insert(name).inserted ? node : nil
+        case let .split(b):
+            let first = withoutRepeatedSessions(b.first, seen: &seen)
+            let second = withoutRepeatedSessions(b.second, seen: &seen)
+            guard let first else { return second }
+            guard let second else { return first }
+            return .split(SplitBranchSnapshot(direction: b.direction, ratio: b.ratio, first: first, second: second))
         }
     }
 

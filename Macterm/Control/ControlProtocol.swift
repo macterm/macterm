@@ -96,7 +96,7 @@ struct ControlArgs: Codable, Equatable {
     /// true; `--no-focus` sends false, preserving selection and focus history.
     var focus: Bool?
     /// Direction, with a per-command vocabulary: `right`/`left`/`down`/`up`/`auto`
-    /// for `pane.split` and `pane.mirror` (`auto` picks the longer on-screen
+    /// for `pane.split` (`auto` picks the longer on-screen
     /// axis), `left`/`down`/`up`/`right` for `pane.focus` (where it makes the
     /// resolved pane the origin and focuses its neighbour).
     var direction: String?

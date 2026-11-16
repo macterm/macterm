@@ -420,7 +420,7 @@ struct WindowStateTests {
         state.registerWindow(b)
         state.noteKeyWindow(a)
         let source = try #require(tab.splitRoot.allPanes().first)
-        _ = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        _ = addPane(sharing: source, projectID: project.id, in: state)
 
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
@@ -948,8 +948,8 @@ struct WindowStateTests {
 
     @Test
     func becoming_key_leaves_a_same_tab_mirror_pairs_leader_alone() throws {
-        // `pane mirror` puts two panes on one session in ONE tab. The whole-tab
-        // claim must not hand the pty to whichever pane comes last in tree
+        // A file from an older build can hold two panes on one session in ONE
+        // tab. The whole-tab claim must not hand the pty to whichever pane comes last in tree
         // order — the source lost leadership to its own mirror on every key
         // change.
         let state = makeAppState()
@@ -960,7 +960,7 @@ struct WindowStateTests {
         let (project, ws) = try seedProject(state, tabs: 1)
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        _ = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        _ = addPane(sharing: source, projectID: project.id, in: state)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         claimed = []

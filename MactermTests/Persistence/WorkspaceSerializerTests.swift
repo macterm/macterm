@@ -577,4 +577,27 @@ struct WorkspaceSerializerSessionIdentityTests {
         #expect(pane.sessionSlug == "oldname")
         #expect(pane.projectPath == "/tmp/renamed-project/src")
     }
+
+    @Test
+    func a_tab_with_two_panes_on_one_session_restores_the_first_pane_alone() throws {
+        // `pane mirror` of older builds put a second pane on a session in
+        // the same tab. One pane is one session, so the second pane goes,
+        // and its sibling takes its space.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let tab = ws.tabs[0]
+        let first = try #require(tab.focusedPane)
+        let repeated = Pane(projectPath: "/tmp", projectID: ws.id, sessionName: first.sessionName)
+        let other = Pane(projectPath: "/tmp", projectID: ws.id)
+        ModelWriter.tabSetTree(tab, root: .split(SplitBranch(
+            direction: .horizontal,
+            first: .pane(first),
+            second: .split(SplitBranch(direction: .vertical, first: .pane(repeated), second: .pane(other)))
+        )), focusedPaneID: repeated.id)
+
+        let restored = try #require(roundTrip([ws.id: ws]).first?.tabs.first)
+
+        let panes = restored.splitRoot.allPanes()
+        #expect(panes.map(\.sessionName) == [first.sessionName, other.sessionName])
+        #expect(restored.focusedPaneID == panes.first?.id)
+    }
 }

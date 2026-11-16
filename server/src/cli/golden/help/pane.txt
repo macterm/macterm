@@ -13,7 +13,6 @@ SUBCOMMANDS:
                           the full scrollback with --scrollback.
   split                   Split a pane. The default is the focused pane, or the
                           pane that you are in.
-  mirror                  Mirror a pane. Show the same session in a second pane.
   focus                   Focus a pane, or its neighbor in a direction. This
                           selects its tab and brings the window forward.
   close                   Close a pane. This kills its zmx session.

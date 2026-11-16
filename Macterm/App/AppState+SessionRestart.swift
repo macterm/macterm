@@ -37,12 +37,11 @@ extension AppState {
         requestRestartSessions(tabID: tab.id, projectID: pane.projectID, paneID: pane.id)
     }
 
-    /// The older panes that a restart covers: all of the tab, or the panes
-    /// that show the session of one pane (a mirror pair restarts together).
+    /// The older panes that a restart covers: all of the tab, or one pane.
     private func panesToRestart(in tab: TerminalTab, paneID: UUID?) -> [Pane] {
         let olds = outdatedPanes(in: tab)
-        guard let paneID, let name = tab.splitRoot.findPane(id: paneID)?.sessionName else { return olds }
-        return olds.filter { $0.sessionName == name }
+        guard let paneID else { return olds }
+        return olds.filter { $0.id == paneID }
     }
 
     /// Restart the older sessions of a tab. A busy pane (a program in front)
@@ -71,22 +70,13 @@ extension AppState {
         guard let tab = workspaces[projectID]?.tabs.first(where: { $0.id == tabID }) else { return }
         let olds = panesToRestart(in: tab, paneID: paneID)
         guard !olds.isEmpty else { return }
-        // Panes that show one session (a `pane mirror` pair) get one new
-        // session, shown by the same number of panes.
         var replacements: [UUID: Pane] = [:]
-        var fresh: [String: Pane] = [:]
         for old in olds {
-            if let owner = fresh[old.sessionName] {
-                replacements[old.id] = Pane(mirroring: owner)
-            } else {
-                let pane = Pane(
-                    projectPath: old.liveLocalWorkingDirectory() ?? old.projectPath,
-                    projectID: old.projectID,
-                    sessionSlug: old.sessionSlug
-                )
-                fresh[old.sessionName] = pane
-                replacements[old.id] = pane
-            }
+            replacements[old.id] = Pane(
+                projectPath: old.liveLocalWorkingDirectory() ?? old.projectPath,
+                projectID: old.projectID,
+                sessionSlug: old.sessionSlug
+            )
         }
         ModelWriter.paneReplace(tab, replacements)
         logger.info("restarting \(olds.count, privacy: .public) older session(s)")

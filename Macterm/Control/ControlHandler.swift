@@ -89,7 +89,6 @@ final class ControlHandler {
         case "pane.inspect": return try paneInspect(args)
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
-        case "pane.mirror": return try paneMirror(args)
         case "pane.focus": return try paneFocus(args)
         case "pane.close": return try paneClose(args)
         case "pane.run": return try paneRun(args)
@@ -829,9 +828,7 @@ final class ControlHandler {
     // MARK: - Pane mutations
 
     /// Resolve a `--direction` argument into the axis and side the new pane
-    /// lands on, measured against the pane it will act on. Shared by
-    /// `pane.split` and `pane.mirror` so the two can't drift on what a
-    /// direction means.
+    /// lands on, measured against the pane it will act on.
     private func splitPlacement(
         _ args: ControlArgs,
         relativeTo pane: Pane
@@ -843,7 +840,7 @@ final class ControlHandler {
         case "up": return (.vertical, .first)
         case "auto":
             // The UI's auto-split picks the longer on-screen axis from the
-            // pane as the key window draws it (a mirror there, #345); a
+            // pane as the key window draws it; a
             // never-shown pane measures zero and falls back to horizontal —
             // same as AppState.autoSplitPane. `auto` has no side to infer, so
             // the new pane trails the target.
@@ -868,22 +865,6 @@ final class ControlHandler {
         ), let newPane = target.tab.splitRoot.findPane(id: newID)
         else {
             throw ControlError(code: .internalError, message: "split failed")
-        }
-        return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
-    }
-
-    private func paneMirror(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
-        let target = try resolvePane(args, in: workspace)
-        let placement = try splitPlacement(args, relativeTo: target.pane)
-        guard let newID = appState.mirrorPane(
-            target.pane.id,
-            direction: placement.direction,
-            position: placement.position,
-            projectID: project.id
-        ), let newPane = target.tab.splitRoot.findPane(id: newID)
-        else {
-            throw ControlError(code: .internalError, message: "mirror failed")
         }
         return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
     }
