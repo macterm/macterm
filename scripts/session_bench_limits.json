@@ -3,10 +3,11 @@
     "Darwin": {
       "count": 20,
       "commits": [
-        "999da683c9facd1d034dc82546ea495c691a32b6"
+        "6fe5737e1ff4512901a3648220e20023a9272992"
       ],
       "images": [
-        "20261104.0514.1"
+        "20261102.0473.1",
+        "20261112.0504.1"
       ]
     },
     "Linux": {
@@ -24,33 +25,33 @@
     "Darwin": {
       "Local echo p50": {
         "kind": "ratio",
-        "median": 1.24,
-        "noise": 0.298,
-        "limit": 1.299
+        "median": 1.198,
+        "noise": 0.307,
+        "limit": 1.308
       },
       "Local echo p95": {
         "kind": "ratio",
-        "median": 1.401,
-        "noise": 0.599,
-        "limit": 1.6
+        "median": 1.355,
+        "noise": 1.324,
+        "limit": 2.325
       },
       "Memory, idle panes: 1": {
         "kind": "ratio",
-        "median": 1.163,
-        "noise": 0.089,
-        "limit": 1.09
+        "median": 1.081,
+        "noise": 0.051,
+        "limit": 1.052
       },
       "Memory, idle panes: 9": {
         "kind": "ratio",
-        "median": 0.744,
-        "noise": 0.018,
-        "limit": 0.762
+        "median": 0.753,
+        "noise": 0.007,
+        "limit": 0.761
       },
       "Reattach p50": {
         "kind": "ratio",
         "median": 0.204,
-        "noise": 0.075,
-        "limit": 0.28
+        "noise": 0.15,
+        "limit": 0.354
       },
       "Wakeups/s per pane, idle panes: 1": {
         "kind": "difference",
