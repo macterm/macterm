@@ -23,7 +23,7 @@
 # A build writes its manifest next to the tarballs: `macterm-<key>-server.json`
 # with the key, the targets and the SHA-256 of each tarball. The other
 # scripts and the workflows read the targets and check a build with
-# `targets` and `verify`, never on their own.
+# `targets` and `verify`, and do not repeat the list or the check.
 #
 # The build needs macOS (lipo makes the universal binary) and Zig
 # $ZIG_VERSION. Zig cannot link with Xcode 26.4 or later (zig#31658), so CI

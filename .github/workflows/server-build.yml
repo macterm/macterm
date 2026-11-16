@@ -111,7 +111,9 @@ jobs:
               --notes "Builds of server/ for scripts/setup.sh, named by build key. CI adds them and removes them after 90 days. They are not a release of Macterm." \
               || gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null
           fi
-          for file in build/server/macterm-"$KEY"-*; do
+          # The manifest goes last: a build in the release is complete once
+          # its manifest is there.
+          for file in build/server/macterm-"$KEY"-*.tar.gz build/server/macterm-"$KEY"-server.json; do
             if ! gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" "$file" 2> upload.err; then
               if grep -qi "already exists" upload.err; then
                 echo "$(basename "$file") is already in the release"

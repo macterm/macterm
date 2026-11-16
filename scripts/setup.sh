@@ -234,8 +234,8 @@ installed_server_key() {
 
 install_server() {
   local dir="$1" key="$2"
-  # The manifest goes first and comes back last, so an install that stops in
-  # the middle is never taken as complete.
+  # The manifest is the last file that setup writes, so an install that stops
+  # in the middle is never taken as complete.
   rm -rf "$SERVER_DIR"
   mkdir -p "$SERVER_DIR"
   tar xzf "$dir/macterm-$key-universal-macos.tar.gz" -C "$SERVER_DIR" zmx
