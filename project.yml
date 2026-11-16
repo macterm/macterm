@@ -300,9 +300,6 @@ targets:
     platform: macOS
     sources:
       - path: MactermTests
-        # CLIContractTests reads these through #filePath.
-        excludes:
-          - CLI/Golden/**
     dependencies:
       - target: Macterm
     settings:

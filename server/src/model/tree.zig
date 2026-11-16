@@ -6,11 +6,14 @@
 //! gives, and the caller passes an arena (`Model` does). A removed split is
 //! not freed one by one; the arena frees it.
 //!
-//! Ids are plain text (a UUID, or a short name in a test). A pane id is its
-//! session id (design/004).
+//! Ids are typed (`ids.zig`). A pane id is its session id (design/004).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ids = @import("ids.zig");
+
+pub const PaneId = ids.PaneId;
+pub const SplitId = ids.SplitId;
 
 pub const Dir = enum { horizontal, vertical };
 
@@ -47,7 +50,7 @@ pub const min_ratio: f64 = 0.15;
 pub const max_ratio: f64 = 0.85;
 
 pub const Pane = struct {
-    id: []const u8,
+    id: PaneId,
     /// The session name, verbatim. It never changes (design/010 §1).
     session: []const u8,
     /// `null` is this Mac; else the ssh destination.
@@ -60,7 +63,7 @@ pub const Pane = struct {
 };
 
 pub const Split = struct {
-    id: []const u8,
+    id: SplitId,
     dir: Dir,
     ratio: f64 = 0.5,
     first: Node,
@@ -76,28 +79,37 @@ pub const Error = error{OutOfMemory};
 
 // ── Reading ─────────────────────────────────────────────────────────────────
 
-pub fn findPane(node: *const Node, id: []const u8) ?*const Pane {
+pub fn findPane(node: *const Node, id: PaneId) ?*const Pane {
     return switch (node.*) {
-        .pane => |*p| if (std.mem.eql(u8, p.id, id)) p else null,
+        .pane => |*p| if (p.id.eql(id)) p else null,
         .split => |s| findPane(&s.first, id) orelse findPane(&s.second, id),
     };
 }
 
-pub fn findPaneMut(node: *Node, id: []const u8) ?*Pane {
+pub fn findPaneMut(node: *Node, id: PaneId) ?*Pane {
     return switch (node.*) {
-        .pane => |*p| if (std.mem.eql(u8, p.id, id)) p else null,
+        .pane => |*p| if (p.id.eql(id)) p else null,
         .split => |s| findPaneMut(&s.first, id) orelse findPaneMut(&s.second, id),
     };
 }
 
-pub fn contains(node: *const Node, id: []const u8) bool {
+pub fn contains(node: *const Node, id: PaneId) bool {
     return findPane(node, id) != null;
 }
 
-pub fn findSplit(node: *const Node, id: []const u8) ?*Split {
+pub fn findSplit(node: *const Node, id: SplitId) ?*Split {
     return switch (node.*) {
         .pane => null,
-        .split => |s| if (std.mem.eql(u8, s.id, id)) s else findSplit(&s.first, id) orelse findSplit(&s.second, id),
+        .split => |s| if (s.id.eql(id)) s else findSplit(&s.first, id) orelse findSplit(&s.second, id),
+    };
+}
+
+/// True when a pane or a split of the tree has the id `text`. Panes and
+/// splits share one namespace (`ids.zig`).
+pub fn hasNodeId(node: *const Node, text: []const u8) bool {
+    return switch (node.*) {
+        .pane => |p| std.mem.eql(u8, p.id.text, text),
+        .split => |s| std.mem.eql(u8, s.id.text, text) or hasNodeId(&s.first, text) or hasNodeId(&s.second, text),
     };
 }
 
@@ -128,23 +140,23 @@ pub fn collectPanes(a: Allocator, node: *const Node, out: *std.ArrayList(*const 
 }
 
 /// The pane ids in tree order.
-pub fn paneIds(a: Allocator, node: *const Node) Error![]const []const u8 {
+pub fn paneIds(a: Allocator, node: *const Node) Error![]const PaneId {
     var list: std.ArrayList(*const Pane) = .empty;
     try collectPanes(a, node, &list);
-    const ids = try a.alloc([]const u8, list.items.len);
-    for (list.items, ids) |p, *id| id.* = p.id;
-    return ids;
+    const out = try a.alloc(PaneId, list.items.len);
+    for (list.items, out) |p, *id| id.* = p.id;
+    return out;
 }
 
 /// The pane after (or, with `backward`, before) `id` in tree order, wrapping
 /// at the ends. Null when `id` is not in the tree. A tree of one pane gives
 /// that pane.
-pub fn nextPane(a: Allocator, node: *const Node, id: []const u8, backward: bool) Error!?[]const u8 {
-    const ids = try paneIds(a, node);
-    for (ids, 0..) |candidate, i| {
-        if (!std.mem.eql(u8, candidate, id)) continue;
-        const n = ids.len;
-        return ids[if (backward) (i + n - 1) % n else (i + 1) % n];
+pub fn nextPane(a: Allocator, node: *const Node, id: PaneId, backward: bool) Error!?PaneId {
+    const order = try paneIds(a, node);
+    for (order, 0..) |candidate, i| {
+        if (!candidate.eql(id)) continue;
+        const n = order.len;
+        return order[if (backward) (i + n - 1) % n else (i + 1) % n];
     }
     return null;
 }
@@ -158,7 +170,7 @@ pub fn clone(a: Allocator, node: Node) Error!Node {
         .split => |s| {
             const copy = try a.create(Split);
             copy.* = .{
-                .id = try a.dupe(u8, s.id),
+                .id = try s.id.dupe(a),
                 .dir = s.dir,
                 .ratio = s.ratio,
                 .first = try clone(a, s.first),
@@ -171,7 +183,7 @@ pub fn clone(a: Allocator, node: Node) Error!Node {
 
 pub fn clonePane(a: Allocator, p: Pane) Error!Pane {
     return .{
-        .id = try a.dupe(u8, p.id),
+        .id = try p.id.dupe(a),
         .session = try a.dupe(u8, p.session),
         .host = if (p.host) |h| try a.dupe(u8, h) else null,
         .slug = try a.dupe(u8, p.slug),
@@ -185,9 +197,9 @@ pub fn clonePane(a: Allocator, p: Pane) Error!Pane {
 // ── Changing ────────────────────────────────────────────────────────────────
 
 /// The leaf that holds pane `id`, or null.
-fn leaf(node: *Node, id: []const u8) ?*Node {
+fn leaf(node: *Node, id: PaneId) ?*Node {
     return switch (node.*) {
-        .pane => |p| if (std.mem.eql(u8, p.id, id)) node else null,
+        .pane => |p| if (p.id.eql(id)) node else null,
         .split => |s| leaf(&s.first, id) orelse leaf(&s.second, id),
     };
 }
@@ -198,9 +210,9 @@ fn leaf(node: *Node, id: []const u8) ?*Node {
 pub fn insertBeside(
     a: Allocator,
     root: *Node,
-    dest: []const u8,
+    dest: PaneId,
     node: Node,
-    split_id: []const u8,
+    split_id: SplitId,
     dir: Dir,
     position: Position,
 ) Error!bool {
@@ -223,7 +235,7 @@ pub fn insertAtRoot(
     a: Allocator,
     root: *Node,
     node: Node,
-    split_id: []const u8,
+    split_id: SplitId,
     dir: Dir,
     position: Position,
 ) Error!void {
@@ -243,23 +255,23 @@ pub const Removal = enum { removed, only_pane, not_found };
 /// Takes pane `id` out of the tree: its sibling takes the place of their
 /// split. A tree with only that pane is left alone (`only_pane`): the caller
 /// closes the tab.
-pub fn remove(root: *Node, id: []const u8) Removal {
+pub fn remove(root: *Node, id: PaneId) Removal {
     switch (root.*) {
-        .pane => |p| return if (std.mem.eql(u8, p.id, id)) .only_pane else .not_found,
+        .pane => |p| return if (p.id.eql(id)) .only_pane else .not_found,
         .split => return if (removeIn(root, id)) .removed else .not_found,
     }
 }
 
-fn removeIn(node: *Node, id: []const u8) bool {
+fn removeIn(node: *Node, id: PaneId) bool {
     const s = switch (node.*) {
         .pane => return false,
         .split => |s| s,
     };
-    if (s.first == .pane and std.mem.eql(u8, s.first.pane.id, id)) {
+    if (s.first == .pane and s.first.pane.id.eql(id)) {
         node.* = s.second;
         return true;
     }
-    if (s.second == .pane and std.mem.eql(u8, s.second.pane.id, id)) {
+    if (s.second == .pane and s.second.pane.id.eql(id)) {
         node.* = s.first;
         return true;
     }
@@ -268,8 +280,8 @@ fn removeIn(node: *Node, id: []const u8) bool {
 
 /// Swaps the places of panes `x` and `y`. The shape and the ratios stay.
 /// False when one is not in the tree or they are the same pane.
-pub fn swap(root: *Node, x: []const u8, y: []const u8) bool {
-    if (std.mem.eql(u8, x, y)) return false;
+pub fn swap(root: *Node, x: PaneId, y: PaneId) bool {
+    if (x.eql(y)) return false;
     const px = findPaneMut(root, x) orelse return false;
     const py = findPaneMut(root, y) orelse return false;
     std.mem.swap(Pane, px, py);
@@ -277,7 +289,7 @@ pub fn swap(root: *Node, x: []const u8, y: []const u8) bool {
 }
 
 /// Sets the ratio of split `id`, clamped to `min_ratio`..`max_ratio`.
-pub fn setRatio(root: *Node, id: []const u8, ratio: f64) bool {
+pub fn setRatio(root: *Node, id: SplitId, ratio: f64) bool {
     const s = findSplit(root, id) orelse return false;
     s.ratio = clampRatio(ratio);
     return true;
@@ -314,23 +326,23 @@ pub fn rebalance(node: *Node) void {
 
 /// Makes a `rows` x `columns` grid out of pane `source`, row by row, the way
 /// v1 does: the source is the top-left cell, the new panes come from `gen`
-/// (`newPane() !Pane` and `newSplitId() ![]const u8`, both in the arena),
+/// (`newPane() !Pane` and `newSplitId() !SplitId`, both in the arena),
 /// and every ratio is even. Returns the new panes' ids in creation order.
 /// Nothing changes, and the result is empty, for fewer than two cells or an
 /// unknown source.
 pub fn makeGrid(
     a: Allocator,
     root: *Node,
-    source: []const u8,
+    source: PaneId,
     rows: usize,
     columns: usize,
     gen: anytype,
-) !std.ArrayList([]const u8) {
-    var created: std.ArrayList([]const u8) = .empty;
+) !std.ArrayList(PaneId) {
+    var created: std.ArrayList(PaneId) = .empty;
     if (rows < 1 or columns < 1 or rows * columns < 2) return created;
     if (!contains(root, source)) return created;
 
-    var heads: std.ArrayList([]const u8) = .empty;
+    var heads: std.ArrayList(PaneId) = .empty;
     try heads.append(a, source);
     var r: usize = 1;
     while (r < rows) : (r += 1) {

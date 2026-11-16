@@ -1,0 +1,4656 @@
+{
+  "commands" : [
+    {
+      "abstract" : "Control a running Macterm: projects, tabs, panes, zmx sessions.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+
+      ],
+      "subcommands" : [
+        "status",
+        "project",
+        "tab",
+        "window",
+        "widget",
+        "palette",
+        "pane",
+        "grid",
+        "session",
+        "layout",
+        "tutor",
+        "ssh",
+        "skills",
+        "askpass",
+        "host",
+        "help"
+      ],
+      "usage" : "macterm <subcommand>"
+    },
+    {
+      "abstract" : "Show whether Macterm is running and which project is active.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "status"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm status [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "List, create, select, rename, and remove projects.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project"
+      ],
+      "subcommands" : [
+        "list",
+        "create",
+        "select",
+        "rename",
+        "remove",
+        "memory"
+      ],
+      "usage" : "macterm project <subcommand>"
+    },
+    {
+      "abstract" : "List all projects.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project list [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Add a project for a local directory or a remote spec. Each run adds a new project.",
+      "arguments" : [
+        {
+          "abstract" : "Project directory (absolute or ~-prefixed), or a remote [user@]host:dir.",
+          "hidden" : false,
+          "name" : "path",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Display name. The default is the name of the directory.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--name"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "name"
+        },
+        {
+          "abstract" : "Select the project too.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--select"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "create"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project create <path> [--name <name>] [--select] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Make a project active.",
+      "arguments" : [
+        {
+          "abstract" : "Project name, UUID, or index.",
+          "hidden" : false,
+          "name" : "project",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Window to select it in (index or id). The default is the focused window.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--window"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "window"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "select"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project select <project> [--window <window>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Rename a project.",
+      "arguments" : [
+        {
+          "abstract" : "Project name, UUID, or index.",
+          "hidden" : false,
+          "name" : "project",
+          "optional" : false,
+          "repeating" : false
+        },
+        {
+          "abstract" : "New name for the project.",
+          "hidden" : false,
+          "name" : "name",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "rename"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project rename <project> <name> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Remove a project. This kills the zmx sessions of its panes.",
+      "arguments" : [
+        {
+          "abstract" : "Project name, UUID, or index.",
+          "hidden" : false,
+          "name" : "project",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Remove even if a pane has a running program.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "remove"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project remove <project> [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Read a project's memory, or change it.",
+      "arguments" : [
+        {
+          "abstract" : "Project name, UUID, or index.",
+          "hidden" : false,
+          "name" : "project",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "on or off (the setting), or forget (delete this project's records).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--set"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "set"
+        },
+        {
+          "abstract" : "show or hide the key window's project memory panel.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--panel"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "panel"
+        },
+        {
+          "abstract" : "write: write the summary now, as the panel's button does.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--summary"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "summary"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "project",
+        "memory"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm project memory <project> [--set <set>] [--panel <panel>] [--summary <summary>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "List, create, select, reorder, and close tabs.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab"
+      ],
+      "subcommands" : [
+        "list",
+        "new",
+        "select",
+        "move",
+        "rename",
+        "close",
+        "merge"
+      ],
+      "usage" : "macterm tab <subcommand>"
+    },
+    {
+      "abstract" : "List tabs. The default is the active project.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project to list (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab list [--project <project>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Open a new tab. It becomes active, unless you use --no-focus.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Command to run in the new tab's shell.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--run"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "run"
+        },
+        {
+          "abstract" : "Start the tab in the background. Do not change the selection.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--no-focus"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "new"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab new [--project <project>] [--run <run>] [--no-focus] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Make a tab active.",
+      "arguments" : [
+        {
+          "abstract" : "Tab title, UUID, or index (tab:3).",
+          "hidden" : false,
+          "name" : "tab",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope. The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Window to select it in (index or id). The default is the focused window.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--window"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "window"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "select"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab select <tab> [--project <project>] [--window <window>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Move a tab to a slot. The slot is the final position of the tab in the `tab list` order, counted from 1.",
+      "arguments" : [
+        {
+          "abstract" : "Tab title, UUID, or index (tab:3).",
+          "hidden" : false,
+          "name" : "tab",
+          "optional" : false,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Destination slot: the position of the tab at the end, counted from 1.",
+          "hidden" : false,
+          "name" : "slot",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope. The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "move"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab move <tab> <slot> [--project <project>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Rename a tab, or use --reset to restore its automatic title.",
+      "arguments" : [
+        {
+          "abstract" : "Tab title, UUID, or index (tab:3).",
+          "hidden" : false,
+          "name" : "tab",
+          "optional" : false,
+          "repeating" : false
+        },
+        {
+          "abstract" : "New title for the tab.",
+          "hidden" : false,
+          "name" : "title",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Restore the automatic title.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--reset"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Project scope. The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "rename"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab rename <tab> [<title>] [--reset] [--project <project>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Close a tab. This kills the zmx sessions of its panes.",
+      "arguments" : [
+        {
+          "abstract" : "Tab title, UUID, or index (tab:3).",
+          "hidden" : false,
+          "name" : "tab",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope. The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Close even if a pane has a running program.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "close"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab close <tab> [--project <project>] [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Merge a tab into the active tab, next to a pane (--dest) or at the edge of the workspace.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Source tab (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Side to land on: left, right, top, or bottom.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--zone"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "zone"
+        },
+        {
+          "abstract" : "Destination pane in the active tab (UUID or index). Leave it out for the edge of the workspace.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--dest"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "dest"
+        },
+        {
+          "abstract" : "Project (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "merge"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab merge --tab <tab> --zone <zone> [--dest <dest>] [--project <project>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "List, open and close terminal windows.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "window"
+      ],
+      "subcommands" : [
+        "list",
+        "new",
+        "focus",
+        "close"
+      ],
+      "usage" : "macterm window <subcommand>"
+    },
+    {
+      "abstract" : "List the open windows and the project that each window shows.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "window",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm window list [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Open another window.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "window",
+        "new"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm window new [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Bring a window to the front. It becomes the key window.",
+      "arguments" : [
+        {
+          "abstract" : "Window to focus (index or id).",
+          "hidden" : false,
+          "name" : "window",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "window",
+        "focus"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm window focus <window> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Close a window. The last visible window hides instead.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Window to close (index or id). The default is the focused window.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--window"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "window"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "window",
+        "close"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm window close [--window <window>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "List, add, edit and remove desktop widgets.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget"
+      ],
+      "subcommands" : [
+        "list",
+        "new",
+        "set",
+        "edit",
+        "done",
+        "remove"
+      ],
+      "usage" : "macterm widget <subcommand>"
+    },
+    {
+      "abstract" : "List desktop widgets.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget list [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Add a locked desktop widget that runs your login shell, in the middle of the desktop.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Size as a grid span, COLUMNSxROWS, for example 3x2. The default is 3x3.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--size"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "size"
+        },
+        {
+          "abstract" : "A name for the widget. Settings and widgets.yaml show it.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--name"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "name"
+        },
+        {
+          "abstract" : "Command to type into the shell of the widget each time that it starts a shell.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--run"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "run"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "new"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget new [--size <size>] [--name <name>] [--run <run>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Resize a desktop widget. It snaps to the desktop grid.",
+      "arguments" : [
+        {
+          "abstract" : "Widget (index, widget:N, or id).",
+          "hidden" : false,
+          "name" : "widget",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Size as a grid span, COLUMNSxROWS, for example 3x2.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--size"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "size"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "set"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget set <widget> [--size <size>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Unlock a widget, so it takes input and you can move it and change its size. You can edit one widget at a time.",
+      "arguments" : [
+        {
+          "abstract" : "Widget (index, widget:N, or id).",
+          "hidden" : false,
+          "name" : "widget",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "edit"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget edit <widget> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Lock the widget being edited.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "done"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget done [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Remove a desktop widget and end its shell and session.",
+      "arguments" : [
+        {
+          "abstract" : "Widget (index, widget:N, or id).",
+          "hidden" : false,
+          "name" : "widget",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Remove even if a program is running in it.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "widget",
+        "remove"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm widget remove <widget> [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "List the palettes of the installed extensions and show if Macterm can read each one.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "palette"
+      ],
+      "subcommands" : [
+        "list",
+        "exec"
+      ],
+      "usage" : "macterm palette <subcommand>"
+    },
+    {
+      "abstract" : "List the palettes of the extensions in ~/.config/macterm/extensions with their name, state and any error.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "palette",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm palette list [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Run the command of a palette action, then the shell of the pane. Macterm uses this command.",
+      "arguments" : [
+        {
+          "abstract" : "",
+          "hidden" : false,
+          "name" : "arguments",
+          "optional" : true,
+          "repeating" : true,
+          "takes" : "all"
+        }
+      ],
+      "debug" : false,
+      "hidden" : true,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "palette",
+        "exec"
+      ],
+      "subcommands" : [
+
+      ]
+    },
+    {
+      "abstract" : "List, inspect, split, focus and close panes, and run commands in them.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane"
+      ],
+      "subcommands" : [
+        "list",
+        "inspect",
+        "dump",
+        "split",
+        "mirror",
+        "focus",
+        "close",
+        "run",
+        "key",
+        "zoom",
+        "resize-split",
+        "resize",
+        "move",
+        "password",
+        "copy-mode",
+        "read-only",
+        "explain"
+      ],
+      "usage" : "macterm pane <subcommand>"
+    },
+    {
+      "abstract" : "List panes. The default is the active project.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project to list (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Limit the list to one tab (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane list [--project <project>] [--tab <tab>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Show the live terminal state of a pane: grid, scrollback and foreground process.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "inspect"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane inspect [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Print the terminal text of a pane: the viewport, or the full scrollback with --scrollback.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Include the full scrollback, not only the visible viewport.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--scrollback"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "dump"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane dump [--scrollback] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Split a pane. The default is the focused pane, or the pane that you are in.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "right, left, down, up, or auto (longer on-screen axis).",
+          "debug" : false,
+          "default" : "auto",
+          "hidden" : false,
+          "names" : [
+            "--direction"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "direction"
+        },
+        {
+          "abstract" : "Command to run in the new pane's shell.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--run"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "run"
+        },
+        {
+          "abstract" : "Start the new pane. Do not change the focus or the zoom.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--no-focus"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "split"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane split [--direction <direction>] [--run <run>] [--no-focus] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Mirror a pane. Show the same session in a second pane.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "right, left, down, up, or auto (longer on-screen axis).",
+          "debug" : false,
+          "default" : "auto",
+          "hidden" : false,
+          "names" : [
+            "--direction"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "direction"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "mirror"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane mirror [--direction <direction>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Focus a pane, or its neighbor in a direction. This selects its tab and brings the window forward.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Focus the nearest pane from the target in this direction instead: left, down, up or right.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--direction"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "direction"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "focus"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane focus [--direction <direction>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Close a pane. This kills its zmx session.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Close even if a program is running.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "close"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane close [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Type a command into the shell of a live pane. Add a newline.",
+      "arguments" : [
+        {
+          "abstract" : "The command line to type, after `--`, exactly as you wrote it.",
+          "hidden" : false,
+          "name" : "command",
+          "optional" : true,
+          "repeating" : true,
+          "takes" : "unrecognized"
+        }
+      ],
+      "debug" : false,
+      "discussion" : "Pastes a command line into an existing pane's shell and submits it.\n\nPut the command line after `--`: everything after it is typed verbatim, dashes included, so `macterm pane run --session X -- ls -la` types `ls -la` into X. Before `--`, this command's flags are parsed wherever they appear and words with no leading dash are typed, so `macterm pane run ls` needs no `--`. Any other dash-prefixed word before `--` is an error and nothing is typed: `macterm pane run ls -la` refuses rather than guess whose flag `-la` is. `--help` or `-h` before `--` shows this help.\n\n`--no-submit` withholds the trailing newline, so the text lands on the prompt unsubmitted — pre-filling a command for a human to inspect, or feeding a TUI that submits on its own terms. Follow it with `macterm pane key return` to execute; that Return registers as a real command submission, exactly as if the text had been typed.\n\nBoth forms ride the terminal's paste path. Reach for `pane key` instead when you need a real key *event* — a control byte (`ctrl+c`) or a named key (`escape`, `up`) — which no text can express.\n\nWith no pane/tab/session selector it targets the current pane via $MACTERM_SESSION.",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Leave the text at the shell prompt. Do not run it. (This leaves out the newline at the end.)",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--no-submit"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "run"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane run [<options>] [--] <command> ..."
+    },
+    {
+      "abstract" : "Send a single key press to a live pane.",
+      "arguments" : [
+        {
+          "abstract" : "The key combination, for example a, space, ctrl+c, escape, up or ctrl+\\.",
+          "hidden" : false,
+          "name" : "chord",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "discussion" : "Delivers one key press through the terminal's key-encoding path — the counterpart to `pane run`, which pastes a whole command line. Use it for control keys, named keys, and single printable keys a TUI reads as keystrokes rather than as pasted text.\n\nThe chord grammar matches keybinds: modifiers ctrl/cmd/shift/opt joined with '+', then one key token. Examples:\n\n  macterm pane key ctrl+c          # interrupt the foreground process\n  macterm pane key escape          # send Esc to a TUI\n  macterm pane key up              # arrow key (mode-aware encoding)\n  macterm pane key j               # a bare printable key (vim-style nav)\n  macterm pane key shift+1         # the shifted character ('!')\n  macterm pane key space           # space bar\n  macterm pane key 'ctrl+\\'        # SIGQUIT char (quote for the shell)\n  macterm pane key enter           # submit (alias of 'return')\n\nOption chords stay on the raw encoding path — their character is a keyboard-layout translation this path can't resolve — so use `pane run` when you need the literal text Option would compose.\n\nWith no pane/tab/session selector it targets the current pane via $MACTERM_SESSION.",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "key"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane key <chord> [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Turn zoom on or off for a pane. While zoomed, the tab shows only that pane.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "zoom"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane zoom [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Set the ratio of the nearest split around a pane, from 0.15 to 0.85.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Split axis to resize: horizontal or vertical.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--axis"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "axis"
+        },
+        {
+          "abstract" : "Exact ratio for the first child of the split, from 0.15 to 0.85.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--ratio"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "ratio"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "resize-split"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane resize-split --axis <axis> --ratio <ratio> [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Change the size of the surface of a pane to COLS×ROWS, with no layout.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Target columns.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--cols"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "cols"
+        },
+        {
+          "abstract" : "Target rows.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--rows"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "rows"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "resize"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane resize --cols <cols> --rows <rows> [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Move a pane, next to another pane (--dest) or to the edge of the workspace.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Side to land on: left, right, top, or bottom.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--zone"
+          ],
+          "optional" : false,
+          "repeating" : false,
+          "value" : "zone"
+        },
+        {
+          "abstract" : "Destination pane (UUID or index, same tab). Leave it out for the edge of the workspace.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--dest"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "dest"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "move"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane move --zone <zone> [--dest <dest>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Read a pane's password-prompt state, or answer its bubble.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Answer the bubble: accept (Save/Update), dismiss, or autofill.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--answer"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "answer"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "password"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane password [--answer <answer>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Read a pane's copy-mode state, or enter or exit the mode.",
+      "arguments" : [
+        {
+          "abstract" : "enter or exit. Omit it to read the state.",
+          "hidden" : false,
+          "name" : "action",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "The keymap for enter: helix or vim. The default is the setting.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--keymap"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "keymap"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "copy-mode"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane copy-mode [<action>] [--keymap <keymap>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Toggle read-only on a pane. Read the state with pane inspect.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "read-only"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane read-only [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Read a pane's Explain Output popover, or start or close it.",
+      "arguments" : [
+        {
+          "abstract" : "start or close. Omit it to read the state.",
+          "hidden" : false,
+          "name" : "action",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "pane",
+        "explain"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm pane explain [<action>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Split a pane into an equal ROWSxCOLS grid.",
+      "arguments" : [
+        {
+          "abstract" : "Grid shape, for example 2x2 or 3x1.",
+          "hidden" : false,
+          "name" : "shape",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Command to run in each NEW pane. The source pane keeps its shell.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--run"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "run"
+        },
+        {
+          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Tab scope (title, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--tab"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "tab"
+        },
+        {
+          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--pane"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "pane"
+        },
+        {
+          "abstract" : "Target pane by zmx session name (restart-stable).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--session"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "session"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "grid"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm grid <shape> [--run <run>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Inspect and kill terminal sessions that zmx runs.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "default" : "list",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "session"
+      ],
+      "subcommands" : [
+        "list",
+        "info",
+        "kill"
+      ],
+      "usage" : "macterm session <subcommand>"
+    },
+    {
+      "abstract" : "List live zmx sessions.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "session",
+        "list"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm session list [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Show one zmx session.",
+      "arguments" : [
+        {
+          "abstract" : "Session name (macterm-<slug>-<hex>).",
+          "hidden" : false,
+          "name" : "name",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "session",
+        "info"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm session info <name> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Kill a zmx session. Its shell ends, and the shell of a connected pane exits.",
+      "arguments" : [
+        {
+          "abstract" : "Session name (macterm-<slug>-<hex>).",
+          "hidden" : false,
+          "name" : "name",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "session",
+        "kill"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm session kill <name> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Apply or save the declarative layout file of a project.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "layout"
+      ],
+      "subcommands" : [
+        "apply",
+        "save"
+      ],
+      "usage" : "macterm layout <subcommand>"
+    },
+    {
+      "abstract" : "Change the workspace to match the layout file of the project.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Apply even when it would close panes.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "layout",
+        "apply"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm layout apply [--project <project>] [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Save the live workspace as the project's layout file.",
+      "arguments" : [
+
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project (name, UUID, or index). The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "layout",
+        "save"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm layout save [--project <project>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Print a short tutorial. It uses your current keybinds.",
+      "arguments" : [
+        {
+          "abstract" : "Tutorial topic: project or pinned.",
+          "default" : "project",
+          "hidden" : false,
+          "name" : "topic",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "discussion" : "Topics: project (projects, tabs, splits and the CLI) and pinned (what the pinned row above the projects is for). The default is project.",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tutor"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tutor [<topic>] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Run ssh with terminfo install and environment forwarding. It works with no running app.",
+      "arguments" : [
+        {
+          "abstract" : "Arguments for ssh, exactly as you wrote them (flags, destination, command).",
+          "hidden" : false,
+          "name" : "ssh-args",
+          "optional" : true,
+          "repeating" : true,
+          "takes" : "all"
+        }
+      ],
+      "debug" : false,
+      "discussion" : "Installs the bundled xterm-ghostty terminfo of Macterm on the destination at the first connection (the result is cached). Sets TERM to a value that the host can resolve. Requests SendEnv forwarding for COLORTERM, TERM_PROGRAM and TERM_PROGRAM_VERSION. Then it replaces itself with the real ssh. The flags and the destination of ssh pass through exactly as you wrote them:\n\n  macterm ssh user@example.com\n  macterm ssh -p 2222 -i ~/.ssh/id_ed25519 user@example.com\n  macterm ssh --terminfo=false user@example.com\n\nThis is the engine behind the ssh wrapper of the shell integration (the ssh-env and ssh-terminfo features). It mirrors `ghostty +ssh`.",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Set TERM and request SendEnv forwarding.",
+          "debug" : false,
+          "default" : "true",
+          "hidden" : false,
+          "names" : [
+            "--forward-env"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "forward-env"
+        },
+        {
+          "abstract" : "Install the bundled xterm-ghostty terminfo at the first connection.",
+          "debug" : false,
+          "default" : "true",
+          "hidden" : false,
+          "names" : [
+            "--terminfo"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "terminfo"
+        },
+        {
+          "abstract" : "Use the terminfo install cache.",
+          "debug" : false,
+          "default" : "true",
+          "hidden" : false,
+          "names" : [
+            "--cache"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "cache"
+        },
+        {
+          "abstract" : "Path to the ssh binary. The default is the first `ssh` in PATH.",
+          "debug" : false,
+          "default" : "ssh",
+          "hidden" : false,
+          "names" : [
+            "--ssh"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "ssh"
+        },
+        {
+          "abstract" : "Print status lines to stderr.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--verbose"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "ssh"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm ssh [--forward-env <forward-env>] [--terminfo <terminfo>] [--cache <cache>] [--ssh <ssh>] [--verbose] [<ssh-args> ...]"
+    },
+    {
+      "abstract" : "Print skills that teach AI coding agents to use Macterm. It works with no running app.",
+      "arguments" : [
+        {
+          "abstract" : "Print only the SKILL.md of this skill, exactly as it is.",
+          "hidden" : false,
+          "name" : "name",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "discussion" : "Prints Agent Skills: SKILL.md files that Claude Code, Codex, OpenCode, Gemini CLI, Cursor and other agents load from a skills directory. They teach an agent to run commands in panes and read their output, to build a workspace that persists, to run sub-agents in panes of their own, and to write extensions that add screens to the command palette. There is no installer. The agent installs them itself. To set one up, give it this prompt:\n\n  Run `macterm skills` and install each skill it prints into your skills\n  directory as <name>/SKILL.md, exactly as printed. Then tell me what you\n  installed and where. (Outside a Macterm pane, `macterm` is\n  /Applications/Macterm.app/Contents/Resources/bin/macterm.)\n\nWith no arguments, it prints every skill after a short header about the install. A line with its path introduces each skill (==> <name>/SKILL.md <==). With a name, it prints only that SKILL.md, exactly as it is, ready to redirect into place.",
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "List the names and descriptions of the skills instead.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--list"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Print JSON: the name, description, path and (without --list) text of each skill.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "skills"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm skills [<name>] [--list] [--json]"
+    },
+    {
+      "abstract" : "Ask Macterm what an ssh login asks. ssh runs it; you do not.",
+      "arguments" : [
+        {
+          "abstract" : "The prompt that ssh gives.",
+          "hidden" : false,
+          "name" : "prompt",
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : true,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "askpass"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm askpass [<prompt>]"
+    },
+    {
+      "abstract" : "[debug] Open or end a host's ssh connection, or reach its server.",
+      "arguments" : [
+
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "host"
+      ],
+      "subcommands" : [
+        "connect",
+        "server",
+        "disconnect"
+      ],
+      "usage" : "macterm host <subcommand>"
+    },
+    {
+      "abstract" : "[debug] Log in to a host, or reuse its connection.",
+      "arguments" : [
+        {
+          "abstract" : "The ssh destination: [user@]host.",
+          "hidden" : false,
+          "name" : "host",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "host",
+        "connect"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm host connect <host> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] Connect to a host's Macterm server. Install it first when it is not there.",
+      "arguments" : [
+        {
+          "abstract" : "The ssh destination: [user@]host.",
+          "hidden" : false,
+          "name" : "host",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "host",
+        "server"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm host server <host> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "[debug] End Macterm's ssh connection to a host.",
+      "arguments" : [
+        {
+          "abstract" : "The ssh destination: [user@]host.",
+          "hidden" : false,
+          "name" : "host",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : true,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "host",
+        "disconnect"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm host disconnect <host> [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Show subcommand help information.",
+      "arguments" : [
+        {
+          "abstract" : "",
+          "hidden" : false,
+          "name" : "subcommands",
+          "optional" : true,
+          "repeating" : true
+        }
+      ],
+      "debug" : false,
+      "hidden" : true,
+      "options" : [
+        {
+          "abstract" : "",
+          "debug" : false,
+          "hidden" : true,
+          "names" : [
+            "-h",
+            "--help",
+            "-help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "help"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm <subcommand>"
+    }
+  ]
+}

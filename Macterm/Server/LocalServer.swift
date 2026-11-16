@@ -118,24 +118,19 @@ struct LocalServer {
         case unknown
     }
 
-    /// True when the server that answers is older than this app's.
-    ///
-    /// - A lower level is older.
-    /// - A higher level is newer: never downgrade it.
-    /// - At the same level, another build is older when it runs from this
-    ///   app's own path, or from a file that an update removed.
-    /// - A build that runs from another app (a Debug build next to a Release
-    ///   build) stays. The order of two builds of one level is not known.
+    /// True when the server that answers is older than this app's
+    /// (`ServerReplacement`). The app owns a server that runs from its own
+    /// path, or from a file that an update removed. A build that runs from
+    /// another app (a Debug build next to a Release build) stays.
     func shouldReplace(_ hello: MactermProtocol.Hello, executable: ServerExecutable) -> Bool {
-        if hello.level != MactermProtocol.level { return hello.level < MactermProtocol.level }
-        guard let buildTag, ZmxVersion.parse(hello.build)?.forkTag != buildTag else { return false }
-        switch executable {
+        let owns = switch executable {
         case let .path(path):
-            return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().path
                 == self.executable.resolvingSymlinksInPath().path
-        case .gone: return true
-        case .unknown: return false
+        case .gone: true
+        case .unknown: false
         }
+        return ServerReplacement(key: buildTag, ownsServer: owns).replaces(hello)
     }
 
     /// Runs `<executable> server`. It returns when the server listens, or at

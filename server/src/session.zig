@@ -5,15 +5,12 @@
 //! socket in the runtime directory (`runtime.zig`) and speak frames: `hello`
 //! on channel 0, then the pane on channel 1 (`bytes` in and out, and the
 //! messages in `messages.zig`, "A session's pane channel").
-//!
-//! It runs beside v1's daemon (`loop.zig`): the same binary, another socket,
-//! and no v1 IPC.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const cross = @import("cross");
-const ipc = @import("ipc.zig");
+const Resize = @import("pty.zig").Resize;
 const log = @import("log.zig");
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
@@ -63,7 +60,7 @@ pub const Options = struct {
     /// The command in place of a login shell.
     command: ?[]const []const u8 = null,
     shell: []const u8 = "/bin/sh",
-    size: ipc.Resize = .{ .cols = 80, .rows = 24 },
+    size: Resize = .{ .cols = 80, .rows = 24 },
     max_scrollback_lines: usize = 10_000,
 };
 
@@ -101,7 +98,7 @@ pub fn start(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, opts: Options)
     const lock_fd = try lockDir(dir);
     defer lib_posix.close(lock_fd);
 
-    if (ipc.connectSession(path)) |fd| {
+    if (socket.connectSession(path)) |fd| {
         lib_posix.close(fd);
         return error.SessionExists;
     } else |err| switch (err) {
@@ -123,7 +120,6 @@ pub fn start(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, opts: Options)
         .session_name = opts.name,
         .shell = opts.shell,
         .command = opts.command,
-        .cwd = "",
         .server_sock_fd = listen_fd,
         .subcommand = reexec_command,
     } else null;
@@ -179,7 +175,8 @@ pub fn unlinkSocket(dir: []const u8, name: []const u8) void {
 }
 
 fn serveAndExit(dir: []const u8, opts: Options, listen_fd: i32, pty: daemonize.PtyInfo) noreturn {
-    // After a fork: no allocator or io of the parent (see `Daemon.run`).
+    // After a fork: no allocator or io of the parent. Their locks and threads
+    // stay in the parent, so a child that uses them can hang.
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
     const gpa = std.heap.c_allocator;
@@ -320,7 +317,7 @@ const Session = struct {
     epoch: u64,
     /// The last output bytes, and their count (design/003 §7).
     output: ring.Ring = .{},
-    size: ipc.Resize,
+    size: Resize,
     /// The terminal, and the events it gives (events.zig).
     watch: events.Watch,
     clients: std.ArrayList(*Client) = .empty,
@@ -514,6 +511,7 @@ const Session = struct {
             .level = m.level,
             .min_level = m.min_level,
             .build = build_options.version,
+            .build_key = build_options.key,
             .role = .session,
             .epoch = s.epoch,
             .caps = &.{},
@@ -684,7 +682,7 @@ const Session = struct {
             // that a peer of a later level does not wait for ever.
             const msg = m.decodeControl(arena, f.body) catch return s.dropClient(c);
             if (msg == .request) s.sendControl(c, m.Response{ .re = msg.request.id, .err = .{
-                .code = "unknown_method",
+                .code = @tagName(m.ErrorCode.unknown_method),
                 .message = "A session has no methods.",
             } });
             return;
@@ -747,7 +745,7 @@ const Session = struct {
         }
     }
 
-    fn attach(s: *Session, c: *Client, size: ipc.Resize, want: ?Resume) void {
+    fn attach(s: *Session, c: *Client, size: Resize, want: ?Resume) void {
         // Output that queued before the attach is not this client's: a client
         // gets output only after its snapshot.
         const was_attached = c.attached;
@@ -800,7 +798,7 @@ const Session = struct {
     }
 
     /// `size` comes from `paneSize`: never 0.
-    fn resize(s: *Session, size: ipc.Resize) void {
+    fn resize(s: *Session, size: Resize) void {
         s.size = size;
         if (!s.pty_closed) {
             var ws = size.winsize();
@@ -1132,14 +1130,14 @@ fn resumeOf(a: m.Attach) ?Resume {
 }
 
 /// A size from a client, cut to `max_cells`. Null for a size of 0.
-fn paneSize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) ?ipc.Resize {
+fn paneSize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) ?Resize {
     if (cols == 0 or rows == 0) return null;
     return .{ .cols = @min(cols, max_cells), .rows = @min(rows, max_cells), .xpixel = xpixel, .ypixel = ypixel };
 }
 
-/// Resizes the terminal with the prompt redraw off (see `Daemon.resizeTerm`):
-/// the shell's redraw goes to the pty, not to this terminal.
-fn resizeTerm(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal, size: ipc.Resize) !void {
+/// Resizes the terminal with the prompt redraw off: the shell's redraw goes
+/// to the pty, not to this terminal.
+fn resizeTerm(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal, size: Resize) !void {
     if (size.cols == 0 or size.rows == 0) return;
     const saved = term.flags.shell_redraws_prompt;
     term.flags.shell_redraws_prompt = .false;

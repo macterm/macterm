@@ -136,7 +136,41 @@ final class RemoteServers {
         /// A roaming link (design/009), not the ssh connection.
         let isRoaming: Bool
 
+        private let watchLock = NSLock()
+        private var watcher: Task<Void, Never>?
+
+        /// Pings the server until the link dies, then closes it, so that
+        /// every pane learns at once. A killed master can leave the ssh
+        /// client alive and silent: no read ends, only a ping shows it.
+        func watch() {
+            watchLock.lock()
+            defer { watchLock.unlock() }
+            guard watcher == nil else { return }
+            let connection = connection
+            watcher = Task { [weak self] in
+                await LinkHeartbeat.run(
+                    ping: {
+                        logger.info("link heartbeat: ping")
+                        do {
+                            _ = try await connection.call(MactermProtocol.Ping.self, .init())
+                            logger.info("link heartbeat: answered")
+                            return true
+                        } catch {
+                            logger.info("link heartbeat: failed: \(String(describing: error), privacy: .public)")
+                            throw error
+                        }
+                    },
+                    isOpen: { connection.isOpen }
+                )
+                logger.info("link heartbeat: link is dead, closing it")
+                self?.close()
+            }
+        }
+
         func close() {
+            watchLock.lock()
+            watcher?.cancel()
+            watchLock.unlock()
             connection.close()
             if let process, process.isRunning { process.terminate() }
         }
@@ -201,6 +235,7 @@ final class RemoteServers {
                     .info(
                         "server: host=\(destination, privacy: .public) build=\(build, privacy: .public) commands=\(count, privacy: .public)"
                     )
+                link.watch()
                 return link
             case let .ended(status, text):
                 guard let check = HostCheck.parse(status: status, stderr: text) else {
@@ -246,8 +281,7 @@ final class RemoteServers {
     /// level, or, right after this connect `installed` this build, another
     /// build of the same level (the type's comment, step 4).
     nonisolated static func shouldReplace(_ hello: MactermProtocol.Hello, key: String, installed: Bool) -> Bool {
-        if hello.level != MactermProtocol.level { return hello.level < MactermProtocol.level }
-        return installed && ZmxVersion.parse(hello.build)?.forkTag != key
+        ServerReplacement(key: key, ownsServer: installed).replaces(hello)
     }
 
     /// The kept answer for a host: its host id and host keys.
@@ -309,6 +343,10 @@ final class RemoteServers {
         switch result {
         case let .success(connection):
             stderr.discard()
+            // When ssh exits (its master died), the panes learn it at once,
+            // not at their next write.
+            process.terminationHandler = { _ in connection.close() }
+            if !process.isRunning { connection.close() }
             return .connected(connection, process)
         case .failure(ServerClientError.noAnswer):
             let status = await Self.exitStatus(of: process, within: .seconds(5))
@@ -563,5 +601,72 @@ actor ServerBuilds {
         process.waitUntilExit()
         guard process.terminationStatus == 0, size > 0 else { return nil }
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// The liveness check of a host link: a ping every `interval`, and the link
+/// is dead when one does not answer within `timeout` or throws.
+enum LinkHeartbeat {
+    static let interval: Duration = .seconds(3)
+    static let timeout: Duration = .seconds(3)
+
+    /// Returns when the link is dead, or the task is cancelled.
+    static func run(
+        interval: Duration = interval, timeout: Duration = timeout,
+        ping: @escaping @Sendable () async throws -> Bool,
+        isOpen: @escaping @Sendable () -> Bool = { true }
+    ) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled || !isOpen() { return }
+            if await !answers(timeout: timeout, ping: ping) { return }
+        }
+    }
+
+    /// A ping that never returns must not hold the check: the answer and the
+    /// timer race, and the first one wins. The ping task ends when the link
+    /// closes.
+    private static func answers(timeout: Duration, ping: @escaping @Sendable () async throws -> Bool) async -> Bool {
+        let once = Once()
+        return await withCheckedContinuation { continuation in
+            once.set(continuation)
+            Task {
+                let ok = await (try? ping()) ?? false
+                once.finish(ok)
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                once.finish(false)
+            }
+        }
+    }
+
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+        private var result: Bool?
+
+        func set(_ continuation: CheckedContinuation<Bool, Never>) {
+            lock.lock()
+            if let result {
+                lock.unlock()
+                continuation.resume(returning: result)
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+
+        func finish(_ value: Bool) {
+            lock.lock()
+            guard result == nil else { lock.unlock()
+                return
+            }
+            result = value
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(returning: value)
+        }
     }
 }
