@@ -1054,15 +1054,16 @@ struct WorkspaceView: View {
     }
 
     /// Whether this window should show the notice instead of the tab: it is
-    /// not the key window and every pane of its tab is a non-leader — the tab
-    /// is being worked in from another window. The KEY window always renders
-    /// its panes even while they are non-leaders, because its claim can only
-    /// land once the surfaces exist and have a size; hiding them would leave
-    /// the claim refused and the notice up forever.
+    /// not the key window, and another window leads a pane of the tab. That
+    /// pane's pty has the other window's size, so its content would not fit
+    /// here. A pane that a client outside Macterm leads only dims. The KEY
+    /// window always renders its panes even while they are non-leaders,
+    /// because its claim can only land once the surfaces exist and have a
+    /// size; hiding them would leave the claim refused and the notice up
+    /// forever.
     private func standsAside(_ tab: TerminalTab) -> Bool {
         guard appState.keyWindowID != windowState.id else { return false }
-        let panes = tab.splitRoot.allPanes()
-        return !panes.isEmpty && appState.nonLeaderPaneIDs(in: tab, window: windowState.id).count == panes.count
+        return tab.splitRoot.allPanes().contains { appState.isLedFromAnotherWindow($0, window: windowState.id) }
     }
 
     @ViewBuilder

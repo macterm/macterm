@@ -186,6 +186,10 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         DispatchQueue.main.async { [weak view] in view?.onRemoteForeground?(report) }
     }
 
+    func paneLead(_ leader: Bool?) {
+        DispatchQueue.main.async { [weak view] in view?.onLead?(leader) }
+    }
+
     func paneExited(code _: UInt8?, signal _: UInt8?) {
         sessionEnded()
     }

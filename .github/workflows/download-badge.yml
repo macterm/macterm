@@ -6,6 +6,10 @@ name: Download Badge
 # job sums every asset of every release, following pagination, and publishes the
 # result in shields' endpoint schema for `img.shields.io/endpoint?url=…`.
 #
+# The count skips the `server-prebuilt` release (server-build.yml). Its assets
+# are the session server builds that setup, CI and remote hosts download. They
+# are not app downloads.
+#
 # The file lives alone on an orphan `badges` branch, force-pushed as a single
 # commit.
 on:
@@ -31,7 +35,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           total=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[].assets[].download_count' | awk '{s += $1} END {print s + 0}')
+            --jq '.[] | select(.tag_name != "server-prebuilt") | .assets[].download_count' | awk '{s += $1} END {print s + 0}')
           echo "Total downloads: $total"
           mkdir badge
           # 950 → "950", 12960 → "12.9k", 1234567 → "1.2M". The count rounds

@@ -49,6 +49,34 @@ final class PaneSurface: Identifiable {
     /// `TerminalSurface.updateNSView` re-attaches on a container SwiftUI
     /// guarantees is alive.
     var reattachTick = 0
+    /// What the session's last `lead` message said about this surface's
+    /// client: true when its size is the pty's. Nil until the session says,
+    /// and again after the channel ended. The session decides leadership
+    /// (design 004 §5); the app only reads it.
+    private(set) var lead: Bool?
+
+    /// Whether this surface's client drives its session's pty size. Only an
+    /// explicit false dims: a client that the session has not answered yet
+    /// counts as the leader, so a new pane never dims before its attach.
+    var isLeader: Bool { lead != false }
+
+    /// A claim went out and the session has not answered since. Stops the
+    /// repeated focus reports of one click from sending a claim each.
+    @ObservationIgnored
+    var claimSent = false
+
+    /// The session's `lead` message for this surface's client, or nil when
+    /// the channel ended. The first answer after an attach, and every true,
+    /// let the key window claim again (`.terminalSessionLead`): a claim that
+    /// went out while the channel was down is lost.
+    func receiveLead(_ leader: Bool?) {
+        let first = lead == nil
+        lead = leader
+        claimSent = false
+        if let leader, leader || first {
+            NotificationCenter.default.post(name: .terminalSessionLead, object: id)
+        }
+    }
 
     func requestReattach() {
         reattachTick &+= 1
@@ -123,6 +151,7 @@ final class PaneSurface: Identifiable {
     /// The callbacks that belong to this view alone: search, copy mode, the
     /// hover link and read-only. Every surface of a pane gets them.
     private func connectUICallbacks(_ view: GhosttyTerminalNSView) {
+        view.onLead = { [weak self] leader in self?.receiveLead(leader) }
         view.copyMode.onLabelChange = { [weak self] label in self?.copyModeLabel = label }
         view.onSearchStart = { [weak self, weak view] needle in
             guard let self else { return }
@@ -211,6 +240,9 @@ final class PaneSurface: Identifiable {
         view.onLinkHover = nil
         view.onReadOnlyChange = nil
         isReadOnly = false
+        view.onLead = nil
+        lead = nil
+        claimSent = false
         view.onMouseShapeChange = nil
         view.onPromptTitle = nil
         view.onSetTabTitle = nil
