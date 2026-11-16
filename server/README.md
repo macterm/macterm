@@ -96,10 +96,12 @@ start it (design/001, A). Nothing calls it yet.
 
 ## The host scripts
 
-`host/attach.sh` and `host/install.sh` run on a host over the app's ssh
-connection (design/005, steps 3 and 4). The app bundles them and sends each
-one as one line, `sh -c '<script>' macterm <arguments>`, so they have no
-single quote and each line ends where a join is valid. `attach.sh` prints
+`host/attach.sh`, `host/install.sh` and `host/plain.sh` run on a host over
+the app's ssh connection (design/005, steps 3 and 4). The app bundles them
+and sends each one as one line, `sh -c '<script>' macterm <arguments>`, so
+they have no single quote and no two backslashes in a row, and each line
+ends where a join is valid. `plain.sh` starts a login shell in a folder on
+a host with no server; it gets the folder hex-encoded. `attach.sh` prints
 `macterm-host proxy` and execs `macterm-<key> proxy`, or exits 3 when that
 build is not there. `install.sh` reads the gzip build on stdin, checks its SHA-256 and
 moves it into place. `test/host_install.bats` runs both over a real sshd.

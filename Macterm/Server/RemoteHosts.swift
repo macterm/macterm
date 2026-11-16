@@ -352,7 +352,7 @@ final class RemoteHosts {
             // The shell exited while no pane showed it.
             await Self.kill(session, over: link)
         }
-        // A folder that the host reported must be safe for a command line.
+        // A folder that the host reported must be a plain path.
         let known = panes.lazy.compactMap(\.hostSessionDirectory).first
             .map { HostCommands.isSafeHostFolder($0) ? $0 : target.directory }
         let justCreated = created[session].map { Date().timeIntervalSince($0) < configuration.creationGrace } ?? false

@@ -136,6 +136,32 @@ struct HostCommandsTests {
         #expect(home.nothingRan)
     }
 
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_plain_shell_starts_in_home_for_a_hostile_folder(_ loginShell: String) throws {
+        // The pane's ssh starts in the home folder, as this process does.
+        let home = try Home()
+        for sent in ["~$(touch pwned)/x", "~`touch pwned`", "~a b/c", "/x;touch pwned"] {
+            let result = try Self.run([loginShell, "-c", plain(sent)], environment: home.environment, in: home.url)
+            #expect(result.output.split(separator: "\n").last.map(String.init) == home.url.path, "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func a_tilde_with_a_user_name_reaches_that_users_home() throws {
+        let home = try Home()
+        let user = NSUserName()
+        let real = try #require(realpath(FileManager.default.homeDirectory(forUser: user)?.path ?? "", nil))
+        defer { free(real) }
+        let expected = String(cString: real)
+        let probe = try Self.run(HostCommands.createProbeArgv(directory: "~\(user)"), environment: home.environment, in: home.url)
+        #expect(probe.output.split(separator: "\n").prefix(2).map(String.init) == ["ok", expected])
+        for loginShell in ["/bin/sh", "/bin/csh"] {
+            let result = try Self.run([loginShell, "-c", plain("~\(user)")], environment: home.environment, in: home.url)
+            #expect(result.output.split(separator: "\n").last.map(String.init) == expected, "\(loginShell)")
+        }
+    }
+
     @Test
     func the_plain_shell_says_when_the_folder_is_missing() throws {
         let home = try Home()

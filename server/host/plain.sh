@@ -8,12 +8,15 @@
 # the start becomes the home folder (the same text as
 # HostCommands.expandTilde). A folder that is not there gives a "macterm:"
 # line, and the shell starts in the home folder.
-h=$1;
+#
+# The text has no two backslashes in a row: fish reads them in single
+# quotes as one (HostCommands.command). printf makes the backslash of each
+# octal escape.
+b=$(printf "\134");
 f=;
-while [ -n "$h" ]; do
-  v=$((0x${h%"${h#??}"}));
-  h=${h#??};
-  f=$f\\$((v / 64))$((v / 8 % 8))$((v % 8));
+for p in $(printf "%s\n" "$1" | fold -w 2); do
+  v=$((0x$p));
+  f=$f$b$((v / 64))$((v / 8 % 8))$((v % 8));
 done;
 d=$(printf "$f.");
 d=${d%.};
@@ -29,5 +32,5 @@ case $d in
     fi;
     ;;
 esac;
-cd "$d" || echo "macterm: cannot cd to $o" >&2;
+cd "$d" || printf "macterm: cannot cd to %s\n" "$o" >&2;
 if [ -n "$SHELL" ]; then exec "$SHELL" -l; else exec /bin/sh; fi;

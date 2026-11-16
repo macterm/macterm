@@ -202,11 +202,12 @@ enum HostCommands {
     esac;
     """)
 
-    /// True for a folder that may go into a host command: a path (absolute,
-    /// or from `~`) with no control character, no backslash and no single
-    /// quote. A folder that the host reported (OSC 7) is the host's text: a
-    /// backslash leaves `"…"` under fish, and a control character is never a
-    /// folder the user typed.
+    /// True for a folder that the host reported (OSC 7) and that a new
+    /// session may start in: a path (absolute, or from `~`) with no control
+    /// character, no backslash and no single quote. A control character is
+    /// never a folder the user typed. The scripts get the folder as an
+    /// argument, so the backslash and the quote rules are older than they need
+    /// to be: issue 0285.
     static func isSafeHostFolder(_ folder: String) -> Bool {
         guard folder.hasPrefix("/") || folder.hasPrefix("~") else { return false }
         return !folder.unicodeScalars.contains {
@@ -262,11 +263,13 @@ enum HostCommands {
             .joined(separator: " ")
     }
 
-    /// nil when the script has a single quote, a newline or a `!` that csh
-    /// reads as history (one that a blank, `=` or `(` does not follow), or an argument
+    /// nil when the script has a single quote, a newline, a `!` that csh
+    /// reads as history (one that a blank, `=` or `(` does not follow), or two
+    /// backslashes in a row, which fish reads in single quotes as one; or an argument
     /// is not one plain word (`isArgument`). Fail closed: nothing goes to the host then.
     static func command(_ script: String, _ arguments: [String]) -> String? {
         guard !script.contains("'"), !script.contains(where: \.isNewline), !hasHistoryMark(script),
+              !script.contains("\\\\"),
               arguments.allSatisfy(isArgument)
         else { return nil }
         return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
