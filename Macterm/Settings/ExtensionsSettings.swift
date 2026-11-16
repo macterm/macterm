@@ -49,6 +49,11 @@ struct ExtensionsSettings: View {
                     ),
                     docs: .extensionsSettings
                 )
+                // The other panes draw the panel as a row of a grouped form. This pane
+                // is a ScrollView, so the same card is made here.
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 HStack(spacing: 10) {
                     SettingsSearchField(text: $query, prompt: "Search extensions")
                     Picker(Self.filterLabel, selection: $filter) {
