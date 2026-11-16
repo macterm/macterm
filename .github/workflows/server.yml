@@ -34,7 +34,7 @@ jobs:
     name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
-      server: ${{ steps.changes.outputs.server }}
+      server: ${{ 'false' }}
     steps:
       # Depth 2: the merge commit of the pull request and its two parents.
       - uses: useblacksmith/checkout@v1
