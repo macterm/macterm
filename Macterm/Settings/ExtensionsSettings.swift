@@ -36,8 +36,10 @@ struct ExtensionsSettings: View {
             query: query,
             filter: filter
         )
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        // A grouped form, as in the other panes, so that the panel is the same row.
+        // The gallery below it is one clear row, so it has no card of its own.
+        Form {
+            Section {
                 SettingsInfoPanel(
                     symbol: "puzzlepiece.extension",
                     title: String(localized: "Extensions", comment: "Settings pane"),
@@ -49,61 +51,63 @@ struct ExtensionsSettings: View {
                     ),
                     docs: .extensionsSettings
                 )
-                // The other panes draw the panel as a row of a grouped form. This pane
-                // is a ScrollView, so the same card is made here.
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                HStack(spacing: 10) {
-                    SettingsSearchField(text: $query, prompt: "Search extensions")
-                    Picker(Self.filterLabel, selection: $filter) {
-                        ForEach(ExtensionGalleryItem.Filter.allCases) { Text(Self.title(of: $0)).tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.large)
-                    .fixedSize()
-                }
-                RegistryStatus(state: registry.state)
-                if let problem {
-                    Label(problem, systemImage: "exclamationmark.triangle.fill")
-                        .settingsSecondaryText()
-                }
-
-                if items.isEmpty {
-                    Text(query.isEmpty && filter == .all ? "No extensions yet." : "No extensions match.")
-                        .settingsSecondaryText()
-                }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                    ForEach(items) { item in
-                        let screenshots = item.screenshots(ref: registry.ref)
-                        ExtensionCard(
-                            item: item,
-                            screenshots: screenshots,
-                            loader: registry.screenshots,
-                            link: folderURL(item, ref: registry.ref),
-                            isInstalling: installingIDs.contains(item.extensionID) || registry.writingIDs.contains(item.extensionID),
-                            install: install,
-                            update: { installed, update in
-                                switch update {
-                                case let .available(entry): self.update(entry)
-                                case let .replacesChanges(entry): confirmingUpdate = (installed, entry)
-                                }
-                            },
-                            uninstall: { uninstalling = $0 },
-                            enlarge: { viewing = .init(title: item.title, screenshots: screenshots, index: $0) }
-                        )
-                    }
-                }
-
-                Toggle("Update extensions automatically", isOn: $autoUpdate)
-                    .onChange(of: autoUpdate) { _, on in
-                        Preferences.shared.autoUpdateExtensions = on
-                        if on { Task { await appState.extensionAutoUpdater.runOnce() } }
-                    }
             }
-            .padding(20)
+            Section {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 10) {
+                        SettingsSearchField(text: $query, prompt: "Search extensions")
+                        Picker(Self.filterLabel, selection: $filter) {
+                            ForEach(ExtensionGalleryItem.Filter.allCases) { Text(Self.title(of: $0)).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.large)
+                        .fixedSize()
+                    }
+                    RegistryStatus(state: registry.state)
+                    if let problem {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .settingsSecondaryText()
+                    }
+
+                    if items.isEmpty {
+                        Text(query.isEmpty && filter == .all ? "No extensions yet." : "No extensions match.")
+                            .settingsSecondaryText()
+                    }
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                        ForEach(items) { item in
+                            let screenshots = item.screenshots(ref: registry.ref)
+                            ExtensionCard(
+                                item: item,
+                                screenshots: screenshots,
+                                loader: registry.screenshots,
+                                link: folderURL(item, ref: registry.ref),
+                                isInstalling: installingIDs.contains(item.extensionID) || registry.writingIDs.contains(item.extensionID),
+                                install: install,
+                                update: { installed, update in
+                                    switch update {
+                                    case let .available(entry): self.update(entry)
+                                    case let .replacesChanges(entry): confirmingUpdate = (installed, entry)
+                                    }
+                                },
+                                uninstall: { uninstalling = $0 },
+                                enlarge: { viewing = .init(title: item.title, screenshots: screenshots, index: $0) }
+                            )
+                        }
+                    }
+
+                    Toggle("Update extensions automatically", isOn: $autoUpdate)
+                        .onChange(of: autoUpdate) { _, on in
+                            Preferences.shared.autoUpdateExtensions = on
+                            if on { Task { await appState.extensionAutoUpdater.runOnce() } }
+                        }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
         }
+        .formStyle(.grouped)
         .onAppear {
             appState.customPalettes.reloadIfChanged()
             registry.refresh()
