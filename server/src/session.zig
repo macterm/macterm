@@ -763,6 +763,9 @@ const Session = struct {
         if (!was_attached) s.announceClients();
         if (s.leader == null) s.setLeader(c);
         const leads = s.leader == c;
+        // A client that does not lead hears it at its first attach, so that
+        // it knows its state before any change of the leader.
+        if (!was_attached and !leads) s.sendPane(c, m.Lead, .{ .leader = false });
         // The snapshot is laid out for the size the leader renders at.
         if (leads) resizeTerm(s.gpa, &s.watch.term, size) catch {};
         // A client that lost its link and has all of its output but the last

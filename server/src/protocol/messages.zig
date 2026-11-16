@@ -603,7 +603,8 @@ pub const Claim = struct {
     pub const senders = from_client;
 };
 
-/// Tells a client that it leads (its size is the pty's) or that it does not.
+/// Tells a client that it leads (its size is the pty's) or that it does not:
+/// at its first attach, and at each change.
 /// When the leader leaves, the client that attached first of those left
 /// leads. A client that starts to lead sends its size.
 pub const Lead = struct {

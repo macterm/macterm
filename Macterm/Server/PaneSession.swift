@@ -23,6 +23,9 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneForeground(_ foreground: MactermProtocol.Foreground)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
+    /// The session says whether this client leads: its size is the pty's.
+    /// Nil when the channel ended: the next attach tells again.
+    func paneLead(_ leader: Bool?)
     /// The shell exited. The session ended.
     func paneExited(code: UInt8?, signal: UInt8?)
     /// The channel ended with no exit. The session tries to connect again,
@@ -45,6 +48,7 @@ protocol PaneInputRoute: AnyObject, Sendable {
 }
 
 extension PaneSessionHost {
+    func paneLead(_: Bool?) {}
     func paneLinkLost() {}
     func paneInputUndelivered(_: Data) {}
 }
@@ -266,6 +270,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             uninstall()
+            host.paneLead(nil)
             tries += 1
             if !reconnects {
                 host.paneLinkLost()
@@ -300,6 +305,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             case let .lead(leader):
                 // A client that starts to lead sends its size.
                 if leader { sendSize(nil) }
+                host.paneLead(leader)
             case let .foreground(foreground):
                 host.paneForeground(foreground)
             case let .ttyMode(mode):

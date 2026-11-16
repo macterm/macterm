@@ -43,7 +43,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
 
       - name: Format
         run: mise run format --check --verbose
@@ -57,7 +57,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
 
       - name: Lint
         run: mise run lint --verbose

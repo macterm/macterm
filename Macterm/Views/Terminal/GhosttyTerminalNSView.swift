@@ -354,14 +354,11 @@ final class GhosttyTerminalNSView: NSView {
 
     var onFocus: (() -> Void)?
     var onInteraction: (() -> Void)?
-    /// The user typed a key that will reach the pty. Narrower than
-    /// `onInteraction` (which also fires for clicks and scrolls): this is the
-    /// event zmx hands session leadership on, so `AppState` records the pane
-    /// as its session's leader from it (#345).
-    var onUserInput: (() -> Void)?
-    /// The surface has a real size for the first time — from here on a zmx
-    /// leadership claim can be delivered (`sendLeadershipClaim` refuses before
-    /// it). Fires at the first size, and again at the first output (the claim waits for it).
+    /// The session's `lead` message: whether this client leads (its size is
+    /// the pty's), or nil when the channel ended. `PaneSurface` keeps it.
+    var onLead: ((Bool?) -> Void)?
+    /// The surface has a real size for the first time: from here on a
+    /// leadership claim can be sent (`sendLeadershipClaim` refuses before it).
     var onSurfaceSized: (() -> Void)?
     private var hasReportedSurfaceSize = false
     /// Bool is best-effort evidence that the submitted prompt contained text.
@@ -1272,11 +1269,6 @@ final class GhosttyTerminalNSView: NSView {
         if copyMode.isActive, copyMode.handle(CopyModeKey(event: event)) { return }
         let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // What zmx will count as user input: a key that reaches the pty. Cmd
-        // chords are either app shortcuts or encode to nothing, so they are
-        // left out; everything else is close enough to the daemon's own
-        // `isUserInput` rule for the leadership record it feeds (#345).
-        if !flags.contains(.command), !isAppShortcut(event) { onUserInput?() }
         if TerminalCommandSubmission.clearsInputEvidence(
             keyCode: event.keyCode,
             hasControl: flags.contains(.control),
@@ -2335,23 +2327,13 @@ extension GhosttyTerminalNSView {
 extension GhosttyTerminalNSView {
     /// The live terminal grid + cell/surface pixel dimensions
     /// (`ghostty_surface_size`), or nil when the surface isn't created yet.
-    /// Ask zmx to make this pane's client the session leader (#345), so the
-    /// pty follows THIS pane's size rather than another mirror's.
+    /// Ask the session to make this surface's client its leader (#345), so
+    /// the pty follows THIS surface's size. A `claim` message on the pane's
+    /// channel; a claim before the first attach waits for it.
     ///
-    /// Refuses before the surface has a real size: `setLeader` answers a claim
-    /// by asking the client for its window size, and a surface that has not
+    /// Refuses before the surface has a real size: a surface that has not
     /// laid out yet (an off-screen tab, the incubator) would resize the shared
-    /// pty to a placeholder for every mirror at once.
-    ///
-    /// Also refuses until the pane printed its first output (see
-    /// `LeadershipClaimReadiness`): before it, the `zmx connect` client has
-    /// not put the pty in raw mode, and the kernel echoes the claim as
-    /// `^[_zmx;claim^[\` on the screen. A refused claim is not recorded, and
-    /// the first output sends the sized report again, so the claim follows.
-    ///
-    /// Idempotent by design — zmx's `handleClaim` returns early when the
-    /// client is already leader, sending no size request — so callers may
-    /// claim freely rather than tracking whether it is needed.
+    /// pty to a placeholder for every client at once.
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }
@@ -2381,8 +2363,7 @@ extension GhosttyTerminalNSView {
         return true
     }
 
-    /// A key event that carries ONLY text — the shape `sendText` and the
-    /// leadership claim ride on.
+    /// A key event that carries ONLY text — the shape `sendText` rides on.
     ///
     /// The keycode is set to a value no physical key has, not left at zero. A
     /// zero-initialised `ghostty_input_key_s` has `keycode == 0`, and on macOS
@@ -2400,8 +2381,7 @@ extension GhosttyTerminalNSView {
     /// produced bytes as typing — it clears the selection
     /// (`selection-clear-on-typing`) and scrolls the viewport to the bottom
     /// (`scroll-to-bottom = keystroke`). That is right for `sendText`, which
-    /// is typing, and is why the leadership claim is sent only when leadership
-    /// actually moves (see `AppState.claimSessionLeadership`).
+    /// is typing.
     private static func textOnlyKeyEvent(_ text: UnsafePointer<CChar>) -> ghostty_input_key_s {
         var ke = ghostty_input_key_s()
         ke.action = GHOSTTY_ACTION_PRESS

@@ -13,15 +13,14 @@ extension Notification.Name {
     /// destination, `RemoteHosts`). The other lost panes of that host can
     /// attach with no login: `AppState.reconnectDroppedRemotePanes`.
     static let remoteHostDidConnect = Notification.Name("MactermRemoteHostDidConnect")
-    /// The user typed into a pane (`object` is the pane's id). Posted for keys
-    /// that reach the pty — what zmx's `isUserInput` will hand leadership on —
-    /// so `AppState` can record the pane as its session's leader (#345).
-    static let terminalUserInput = Notification.Name("MactermTerminalUserInput")
-    /// A pane's surface received its first real size (`object` is the pane's
-    /// id) — the moment a leadership claim can be delivered to it (#345):
-    /// a claim before this is refused, and a mirror that came up in the key
-    /// window would otherwise never take the pty.
+    /// A pane's surface received its first real size (`object` is the
+    /// surface's id). A leadership claim before it is refused, so the key
+    /// window claims again (#345).
     static let terminalSurfaceSized = Notification.Name("MactermTerminalSurfaceSized")
+    /// The session's first `lead` message for a surface after an attach, or
+    /// one that says it leads (`object` is the surface's id). The key window
+    /// claims again (`AppState.claimLeadershipForKeyWindow`).
+    static let terminalSessionLead = Notification.Name("MactermTerminalSessionLead")
     /// A pane's `hasUnacknowledgedBell` flipped (`object` is the pane's id).
     /// Observed by `AppState`, which acknowledges it on the spot when the pane
     /// is already being looked at and re-derives the Dock badge (`BellBadge`).

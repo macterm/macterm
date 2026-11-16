@@ -580,7 +580,6 @@ final class AppState {
                 if shown[windowID]?.contains(pane.id) != true { registry.retire(surface) }
             }
         }
-        pruneSessionLeaders()
     }
 
     /// Whether a window opened before `window` shows the tab that `window`
@@ -656,13 +655,17 @@ final class AppState {
 
     /// Leadership follows the KEY WINDOW's tab, all of it (#345).
     ///
-    /// Two windows on one tab: bringing a window to the front is the user
-    /// saying "this is the view I'm working in", so every pane of the tab it
-    /// shows claims its session — the whole tab becomes leader at once, not
-    /// one pane on the next click. Runs on every key-window and key-tab
-    /// change. A surface that has no size yet refuses the claim; the
-    /// `.terminalSurfaceSized` observer sends it when the surface comes up.
-    private func claimLeadershipForKeyWindow() {
+    /// The session decides who leads and says so in its `lead` message
+    /// (`PaneSurface.lead`). The app keeps one rule: the key window's surfaces
+    /// claim. Bringing a window to the front is the user saying "this is the
+    /// view I'm working in", so every session of the tab it shows is claimed
+    /// at once. Runs on every key-window and key-tab change, when a surface
+    /// gets its first size (a surface with no size refuses the claim), and
+    /// when the session tells a client of ours its first `lead` after an
+    /// attach, or that it leads (`.terminalSessionLead`). A client from
+    /// outside the model that takes leadership by typing keeps it until one
+    /// of these.
+    func claimLeadershipForKeyWindow() {
         guard let key = keyWindow, let projectID = key.activeProjectID,
               let tab = selectedTab(for: projectID, in: key)
         else { return }
@@ -680,52 +683,10 @@ final class AppState {
         for pane in panes where !handled.contains(pane.sessionName) {
             handled.insert(pane.sessionName)
             let siblings = panes.filter { $0.sessionName == pane.sessionName }
-            // Skip only on a RECORDED leader in this tab, never on the inferred
-            // one: `isLeader` falls back to the first client when the record is
-            // stale (a retired surface's id), and that guess is exactly what a
-            // surface that came up elsewhere has just falsified — zmx hands a
-            // fresh client leadership whenever the previous leader detached.
-            if let recorded = sessionLeaders[pane.sessionName],
-               siblings.contains(where: { SurfaceRegistry.shared.surface(for: $0, in: host).id == recorded })
-            {
-                continue
-            }
+            if siblings.contains(where: { SurfaceRegistry.shared.surface(for: $0, in: host).lead == true }) { continue }
             let claimant = siblings.first { $0.id == tab.focusedPaneID } ?? pane
             claimSessionLeadership(SurfaceRegistry.shared.surface(for: claimant, in: host))
         }
-    }
-
-    /// A surface just got its first size. If its pane is on screen in the key
-    /// window's tab its session should already be led from that tab — the
-    /// claim that ran when the window became key was refused for lack of a
-    /// size.
-    ///
-    /// **A surface of the key window claims even when the model counts one
-    /// client.** `isMirrored` counts the clients that Macterm knows of. A
-    /// client that it does not know of — a `zmx attach` from another terminal
-    /// — attaches first and leads, and zmx then drops ⌃D, ⌃C and every other
-    /// control key of the visible pane (`isUserInput`). Gated on the count,
-    /// nobody claimed. The claim is a no-op in zmx for a client that already
-    /// leads, so for the common case of one real client it costs one write
-    /// at the moment the surface comes up, when there is no selection to
-    /// clear and no scroll to lose. Never for a remote pane: see
-    /// `claimSessionLeadership`.
-    func surfaceDidGetSize(surfaceID: UUID) {
-        guard let key = keyWindow, let projectID = key.activeProjectID,
-              let tab = selectedTab(for: projectID, in: key),
-              let sized = allClients().first(where: { $0.id == surfaceID })
-        else { return }
-        if sized.windowID == nil || sized.windowID == key.id, tab.splitRoot.findPane(id: sized.pane.id) != nil {
-            if !isMirrored(sized.pane) { assertSessionLeadership(sized) }
-        } else if isMirrored(sized.pane) {
-            // A surface coming up ELSEWHERE matters too: its zmx client has
-            // just attached, and the daemon makes a new client leader whenever
-            // the session had none — the state a rebuilt surface leaves behind,
-            // its old client having detached as the leader. So the key window
-            // re-asserts: the session's record is dropped and its pane claims.
-            sessionLeaders.removeValue(forKey: sized.pane.sessionName)
-        }
-        claimLeadership(forPanesIn: tab, in: key.id)
     }
 
     /// The workspace hook: its active tab changed by any writer — `createTab`,
@@ -1288,16 +1249,11 @@ final class AppState {
         }
         let tokens: [(NotificationCenter, NSObjectProtocol)] = [
             (center, center.addObserver(forName: .terminalPollEvent, object: nil, queue: .main, using: onEvent)),
-            (center, center.addObserver(forName: .terminalUserInput, object: nil, queue: .main) { [weak self] note in
-                // The surface travels as its id (Sendable); the surface itself
-                // would have to cross into the actor closure and Swift 6
-                // refuses.
-                guard let surfaceID = note.object as? UUID else { return }
-                MainActor.assumeIsolated { self?.noteUserInput(surfaceID: surfaceID) }
+            (center, center.addObserver(forName: .terminalSurfaceSized, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.claimLeadershipForKeyWindow() }
             }),
-            (center, center.addObserver(forName: .terminalSurfaceSized, object: nil, queue: .main) { [weak self] note in
-                guard let surfaceID = note.object as? UUID else { return }
-                MainActor.assumeIsolated { self?.surfaceDidGetSize(surfaceID: surfaceID) }
+            (center, center.addObserver(forName: .terminalSessionLead, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.claimLeadershipForKeyWindow() }
             }),
             (center, center.addObserver(
                 forName: .terminalQuietSettleDeadline,
@@ -1876,12 +1832,9 @@ final class AppState {
     }
 
     /// Every client of a session that Macterm knows of: the surfaces of the
-    /// live panes. The set leadership is judged over — a second window's
-    /// surface is a real client that can lead — but NOT the set that retains
-    /// a session: only a pane keeps one. The first surfaces come first, so an
-    /// unrecorded leader is inferred as a pane's own warm surface. Still a
-    /// count of what the model knows, never of what zmx has: a client from
-    /// outside the model is exactly what `surfaceDidGetSize` claims against.
+    /// live panes. A second window's surface is a real client, but NOT one
+    /// that retains a session: only a pane keeps one. The first surfaces come
+    /// first. A count of what the model knows, never of what the session has.
     private func allClients() -> [PaneSurface] {
         let panes = allLivePanes()
         let all = panes.map { SurfaceRegistry.shared.surfaces(of: $0) }
@@ -1905,64 +1858,32 @@ final class AppState {
         for pane in panes where !retained.contains(pane.sessionName) {
             pane.killPersistentSession(using: sessionClient)
         }
-        handOverLeadership(from: panes, retained: retained)
-        pruneSessionLeaders()
-    }
-
-    /// When a released pane led a session that survives it, make a surviving
-    /// client the leader.
-    ///
-    /// zmx's `closeClient` only clears `leader_client_fd`; nobody is promoted.
-    /// Left alone, the pty keeps the closed pane's size — and because the
-    /// daemon forwards a non-leader's input only when `isUserInput` says so,
-    /// the survivor's arrow keys, Escape and Ctrl chords are silently dropped
-    /// until it types something printable. Our own model would meanwhile call
-    /// the survivor leader (a sole attachment trivially is), so nothing would
-    /// even dim. The heir is the focused pane's surface when it is a survivor,
-    /// else the first.
-    private func handOverLeadership(from released: [Pane], retained: Set<String>) {
-        let releasedIDs = Set(released.map(\.id))
-        var handled: Set<String> = []
-        for pane in released
-            where retained.contains(pane.sessionName) && !handled.contains(pane.sessionName)
-        {
-            handled.insert(pane.sessionName)
-            guard SurfaceRegistry.shared.surfaces(of: pane).contains(where: { isLeader($0) }) else { continue }
-            let survivors = clients(of: pane.sessionName).filter { !releasedIDs.contains($0.pane.id) }
-            let focused = survivors.first { workspaces[$0.pane.projectID]?.activeTab?.focusedPaneID == $0.pane.id }
-            guard let heir = focused ?? survivors.first else { continue }
-            sessionLeaders[pane.sessionName] = heir.id
-            if !heir.pane.isRemote { _ = sendClaim(heir) }
-        }
     }
 
     // MARK: - Mirrored sessions and leadership (#345)
-
-    /// Which client currently drives each mirrored session's pty size, by
-    /// surface id.
-    ///
-    /// zmx allows several clients per session but only one **leader**, whose
-    /// window size it applies to the pty (`handleResize` drops a non-leader's
-    /// size outright). Every client still receives the same broadcast output,
-    /// so a non-leader is live but laid out for someone else's geometry —
-    /// which is what the dim treatment tells the user.
-    ///
-    /// Macterm-authoritative, and only meaningful for a mirrored session.
-    /// Known gap: a foreign `zmx attach` from a real terminal can take
-    /// leadership on its own (any real keystroke does, by zmx's
-    /// `isUserInput` rule) without telling us, leaving this stale. Closing
-    /// that needs a daemon-to-client notification zmx has no tag for.
-    private var sessionLeaders: [String: UUID] = [:]
 
     /// Every client of `sessionName`, first surfaces first.
     func clients(of sessionName: String) -> [PaneSurface] {
         allClients().filter { $0.pane.sessionName == sessionName }
     }
 
-    /// Whether another client shows this pane's session — i.e. whether the
-    /// leader distinction means anything for it at all.
+    /// Whether another client of Macterm shows this pane's session.
     func isMirrored(_ pane: Pane) -> Bool {
         clients(of: pane.sessionName).count > 1
+    }
+
+    /// Whether another window of Macterm leads `pane`'s session while this
+    /// window's surface does not: the pane is in use there, at its size. A
+    /// client outside Macterm, or a mirror in the same window, does not count.
+    /// A pane that this window never drew has no surface here, and a check
+    /// for the notice must not make one.
+    func isLedFromAnotherWindow(_ pane: Pane, window windowID: UUID) -> Bool {
+        if let own = SurfaceRegistry.shared.existingSurface(for: pane, in: .window(windowID)), own.isLeader {
+            return false
+        }
+        return clients(of: pane.sessionName).contains {
+            $0.windowID != nil && $0.windowID != windowID && $0.isLeader
+        }
     }
 
     /// The surface that stands for a pane where one answer is needed (the CLI):
@@ -1979,46 +1900,11 @@ final class AppState {
 
     /// Whether `pane` drives its session's pty size, as its reference surface
     /// does.
-    /// An unmirrored pane is trivially the leader — it is the only client.
     func isLeader(_ pane: Pane) -> Bool {
-        isLeader(referenceSurface(of: pane))
-    }
-
-    /// Whether `surface` is the one driving its session's pty size.
-    func isLeader(_ surface: PaneSurface) -> Bool {
-        isLeader(surface, among: clients(of: surface.pane.sessionName))
-    }
-
-    /// `isLeader` against a precomputed attachment list — see
-    /// `sessionAttachments()`.
-    ///
-    /// With no recorded leader (a restored pair, where both clients attached
-    /// before we tracked anything) this infers the first client. That is
-    /// best-effort rather than authoritative: zmx makes the FIRST client to
-    /// attach the leader, and restore warms panes in tree order, so the two
-    /// agree in practice — and any real keystroke resynchronises them.
-    func isLeader(_ surface: PaneSurface, among attached: [PaneSurface]) -> Bool {
-        guard attached.count > 1 else { return true }
-        if let recorded = sessionLeaders[surface.pane.sessionName],
-           attached.contains(where: { $0.id == recorded })
-        {
-            return recorded == surface.id
-        }
-        return attached.first?.id == surface.id
-    }
-
-    /// `isLeader(_:)` of a pane against a precomputed attachment list.
-    func isLeader(_ pane: Pane, among attached: [PaneSurface]) -> Bool {
-        isLeader(referenceSurface(of: pane), among: attached)
+        referenceSurface(of: pane).isLeader
     }
 
     /// Every client grouped by session name, from ONE traversal.
-    ///
-    /// `isLeader(_:)` alone re-walks every workspace per call. Asked once per
-    /// pane of a tab — which is what the dim computation in a window's `body`
-    /// does, on every body evaluation of every window — that made it quadratic
-    /// in the total pane count. Callers with more than one pane to judge take
-    /// this and use `isLeader(_:among:)`.
     func sessionAttachments() -> [String: [PaneSurface]] {
         var attachments: [String: [PaneSurface]] = [:]
         for surface in allClients() {
@@ -2027,73 +1913,30 @@ final class AppState {
         return attachments
     }
 
-    /// Record `surface` as its session's leader. Called where the daemon would
-    /// have made it leader anyway — input was typed or injected into it — so
-    /// our model tracks zmx's rather than diverging from it.
-    func noteSessionLeader(_ surface: PaneSurface) {
-        guard isMirrored(surface.pane) else { return }
-        sessionLeaders[surface.pane.sessionName] = surface.id
-    }
-
-    /// `noteSessionLeader` for the callers with no window in hand (the CLI,
-    /// intents): the pane's preferred surface.
-    func noteSessionLeader(_ pane: Pane) {
-        noteSessionLeader(SurfaceRegistry.shared.preferredSurface(of: pane))
-    }
-
-    /// The user typed into `surface`. zmx hands leadership to whichever client
-    /// sends real input (`isUserInput`), local or remote, so this is the one
-    /// record point that is true for every pane — and the ONLY one for remote
-    /// panes, which never send claims. Fed by `.terminalUserInput`.
-    func noteUserInput(in surface: PaneSurface) {
-        noteSessionLeader(surface)
-    }
-
-    /// `noteUserInput(in:)` by surface id, for the notification path.
-    func noteUserInput(surfaceID: UUID) {
-        guard let surface = allClients().first(where: { $0.id == surfaceID }) else { return }
-        noteUserInput(in: surface)
-    }
-
-    /// Hand this surface's session leadership over because the user moved to
-    /// it — updating our model AND telling zmx, which otherwise only switches
-    /// leader on real keystrokes and so would leave the pty sized for the view
-    /// the user just left.
+    /// Ask the session to make `surface` its leader, because the user moved
+    /// to it. The session moves leadership by itself only on typed input, so
+    /// it would leave the pty sized for the view the user just left.
     ///
-    /// **Sent only when leadership actually moves.** libghostty treats the
-    /// claim's bytes as typing — it clears the selection and scrolls the
-    /// viewport to the bottom, like any encoded key (see
-    /// `GhosttyTerminalNSView.textOnlyKeyEvent`) — so the earlier
-    /// unconditional send on every focus wiped a double-click selection in a
-    /// second view and yanked a scrolled-up one to the bottom on every click.
-    /// An unrecorded leader (a restored pair, where both attached before we
-    /// tracked anything) counts as a move, which is what re-synchronises the
-    /// model with the daemon on first focus. Repeated focus reports for the
-    /// same surface — `mouseDown` fires it twice per click, `FocusRestoration`
-    /// retries across run-loop ticks — fall out here as non-moves.
+    /// **Sent only while the session has not said that this client leads,**
+    /// and once until the session answers (`PaneSurface.claimSent`). The
+    /// claim is a message on the pane's channel, never input, so it clears
+    /// no selection. A surface that has no size yet (an off-screen tab, the
+    /// incubator) refuses it; its first size claims again
+    /// (`.terminalSurfaceSized`).
     ///
-    /// **Synchronous, not debounced.** zmx drops a non-leader's mouse reports
-    /// and control keys outright (its `handleInput` forwards a non-leader only
-    /// on `isUserInput`, which excludes CSI mouse, bare Escape, plain arrows
-    /// and Ctrl chords), and `mouseDown` reports focus BEFORE it forwards the
-    /// click — so a claim written here reaches the pty ahead of the click it
-    /// should enable.
-    ///
-    /// **Recorded only if delivered.** A surface that has no size yet (an
-    /// off-screen tab, the incubator) refuses the claim; recording it
-    /// anyway would make the next focus read as a non-move and never send.
-    ///
-    /// **Remote panes are excluded** — nothing sent AND nothing recorded.
-    /// Their zmx lives on the host and may predate the Claim tag, in which
-    /// case the client forwards the APC to the shell and the user gets garbage
-    /// on their prompt. The host's daemon moves leadership only on typed
-    /// input, which `noteUserInput` records when it happens; recording on
-    /// focus would un-dim a pane whose pty is still sized for the other one.
-    /// Knowing the host supports claims needs a per-host version probe.
+    /// **Synchronous, not debounced.** The session drops a non-leader's mouse
+    /// reports and control keys (it forwards a non-leader's input only on
+    /// `isUserInput`), and `mouseDown` reports focus BEFORE it forwards the
+    /// click, so the claim reaches the session ahead of the click.
     func claimSessionLeadership(_ surface: PaneSurface) {
-        guard isMirrored(surface.pane), !surface.pane.isRemote else { return }
-        guard sessionLeaders[surface.pane.sessionName] != surface.id else { return }
-        sendAndRecordClaim(surface)
+        guard surface.lead != true, !surface.claimSent else { return }
+        // Set first: an answer that comes before `sendClaim` returns clears it.
+        surface.claimSent = true
+        let delivered = sendClaim(surface)
+        if !delivered { surface.claimSent = false }
+        logger.debug(
+            "claim \(surface.pane.sessionName, privacy: .public) by \(surface.id, privacy: .public) delivered=\(delivered, privacy: .public)"
+        )
     }
 
     /// `claimSessionLeadership` for the callers with no window in hand.
@@ -2101,27 +1944,8 @@ final class AppState {
         claimSessionLeadership(SurfaceRegistry.shared.preferredSurface(of: pane))
     }
 
-    /// Claim for `surface` without a look at the model: not gated on
-    /// `isMirrored`, and not on the record either. The record is Macterm's
-    /// count of clients, and this is the path for the case where that count
-    /// is wrong (`surfaceDidGetSize`). Remote panes are excluded for the
-    /// reasons in `claimSessionLeadership`.
-    private func assertSessionLeadership(_ surface: PaneSurface) {
-        guard !surface.pane.isRemote else { return }
-        sendAndRecordClaim(surface)
-    }
-
-    private func sendAndRecordClaim(_ surface: PaneSurface) {
-        let delivered = sendClaim(surface)
-        logger.debug(
-            "claim \(surface.pane.sessionName, privacy: .public) by \(surface.id, privacy: .public) delivered=\(delivered, privacy: .public)"
-        )
-        if delivered { sessionLeaders[surface.pane.sessionName] = surface.id }
-    }
-
-    /// Writes the zmx leadership claim into the surface's pty, reporting
-    /// whether it could. A seam so tests observe claims without a live
-    /// surface.
+    /// Sends the leadership claim on the surface's channel, reporting whether
+    /// it could. A seam so tests observe claims without a live surface.
     @ObservationIgnored
     var sendClaim: (PaneSurface) -> Bool = { $0.nsView?.sendLeadershipClaim() ?? false }
 
@@ -2132,25 +1956,11 @@ final class AppState {
     }
 
     /// The panes of `tab` whose surface in window `windowID` is not driving
-    /// its session's size — the ones the UI dims in that window. Without a
-    /// window it reads each pane's first surface.
+    /// its session's size, by the session's `lead`: the ones the UI dims in
+    /// that window. Without a window it reads each pane's first surface.
     func nonLeaderPaneIDs(in tab: TerminalTab, window windowID: UUID? = nil) -> Set<UUID> {
-        let attachments = sessionAttachments()
-        var ids: Set<UUID> = []
-        for pane in tab.splitRoot.allPanes() {
-            let surface = SurfaceRegistry.shared.surface(for: pane, in: Self.host(windowID))
-            if !isLeader(surface, among: attachments[pane.sessionName] ?? []) {
-                ids.insert(pane.id)
-            }
-        }
-        return ids
-    }
-
-    /// Drop leadership records for sessions nothing attaches any more, so the
-    /// table can't grow across a long run.
-    func pruneSessionLeaders() {
-        let live = Set(allClients().map(\.id))
-        sessionLeaders = sessionLeaders.filter { live.contains($0.value) }
+        let host = Self.host(windowID)
+        return Set(tab.splitRoot.allPanes().filter { !SurfaceRegistry.shared.surface(for: $0, in: host).isLeader }.map(\.id))
     }
 
     /// The session names still claimed once `releasing` is gone. Shared by

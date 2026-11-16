@@ -287,6 +287,10 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneTtyMode(mode)
         }
 
+        func paneLead(_ leader: Bool?) {
+            surface.paneLead(leader)
+        }
+
         func paneExited(code: UInt8?, signal: UInt8?) {
             surface.paneExited(code: code, signal: signal)
         }

@@ -148,29 +148,37 @@ struct AppStateTests {
     // MARK: - Two panes on one session
 
     @Test
-    func an_unmirrored_pane_is_trivially_its_sessions_leader() throws {
-        // It is the session's only client, so there is nothing to lead.
+    func a_pane_leads_until_its_session_says_it_does_not() throws {
+        // The session decides leadership. Before its first `lead` message a
+        // surface counts as the leader, so a new pane never dims.
         let state = makeAppState()
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
 
-        #expect(!state.isMirrored(pane))
+        #expect(state.isLeader(pane))
+        #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
+
+        SurfaceRegistry.shared.surfaces(of: pane)[0].receiveLead(false)
+        #expect(!state.isLeader(pane))
+        #expect(state.nonLeaderPaneIDs(in: tab) == [pane.id])
+
+        SurfaceRegistry.shared.surfaces(of: pane)[0].receiveLead(true)
         #expect(state.isLeader(pane))
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
 
     @Test
-    func mirroring_leaves_leadership_with_the_source() throws {
-        // zmx's handleInit sets a leader only when there is none, so a second
-        // client attaching leaves the pty size exactly where it was. Our model
-        // has to say the same or the dim would point at the wrong pane.
+    func a_mirror_that_the_session_does_not_make_leader_is_dimmed() throws {
         let state = makeAppState()
+        let session = FakeSessionLeads(state)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         #expect(state.isMirrored(source))
         #expect(state.isLeader(source))
@@ -179,225 +187,145 @@ struct AppStateTests {
     }
 
     @Test
-    func focusing_a_mirror_hands_it_leadership() throws {
-        // Focus is how the user says "drive the size from here" — and any real
-        // keystroke (which needs focus) makes zmx hand leadership over anyway.
+    func focusing_a_mirror_claims_leadership_for_it() throws {
+        // Focus is how the user says "drive the size from here".
         let state = makeAppState()
-        // A claim only counts once it reached the pty; there is no surface
-        // in a test, so stand in for a delivered write.
-        state.sendClaim = { _ in true }
+        let session = FakeSessionLeads(state)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.focusPane(mirrorID, projectID: p.id)
 
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
         #expect(state.isLeader(mirrored))
         #expect(!state.isLeader(source))
         #expect(state.nonLeaderPaneIDs(in: tab) == [source.id])
 
-        // And back again — leadership follows focus, it does not latch.
+        // And back again: leadership follows focus, it does not latch.
         state.focusPane(source.id, projectID: p.id)
         #expect(state.isLeader(source))
         #expect(!state.isLeader(mirrored))
     }
 
     @Test
-    func leadership_falls_back_to_tree_order_when_unrecorded() throws {
-        // A restored pair attached before we tracked anything. zmx makes the
-        // FIRST client to attach the leader and restore warms in tree order,
-        // so tree order is the best-effort match — and exactly one pane must
-        // come out the leader either way.
+    func an_undelivered_claim_leaves_leadership_where_the_session_has_it() throws {
         let state = makeAppState()
-        let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
-        let tab = try #require(ws.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let tree = SplitNode.split(SplitBranch(
-            direction: .horizontal,
-            first: .pane(source),
-            second: .pane(mirrorPane(of: source.sessionName, projectID: p.id))
-        ))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: tab.focusedPaneID)
-
-        let panes = tab.splitRoot.allPanes()
-        #expect(panes.count == 2)
-        #expect(panes.count(where: { state.isLeader($0) }) == 1)
-        #expect(try state.isLeader(#require(panes.first)))
-    }
-
-    @Test
-    func leadership_survives_the_other_mirror_closing() throws {
-        // Once alone, a pane is the only client and so trivially the leader —
-        // it must never stay dimmed after its twin goes away.
-        let state = makeAppState()
-        state.sendClaim = { _ in true }
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        state.focusPane(mirrorID, projectID: p.id)
-        #expect(!state.isLeader(source))
-
-        state.closePane(mirrorID, projectID: p.id)
-
-        #expect(state.isLeader(source))
-        #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
-    }
-
-    @Test
-    func claiming_leadership_is_a_noop_for_an_unmirrored_pane() throws {
-        // Nothing to claim: the pane is its session's only client, so the
-        // whole mechanism must stay off the hot path of an ordinary focus.
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let pane = try #require(tab.splitRoot.allPanes().first)
-
-        state.claimSessionLeadership(pane)
-
-        #expect(state.isLeader(pane))
-        #expect(!state.isMirrored(pane))
-    }
-
-    @Test
-    func claiming_leadership_records_it_only_when_the_claim_was_delivered() throws {
-        // The model follows the wire, synchronously: a delivered claim moves
-        // the dim with the click; an undeliverable one (a surface with no size
-        // yet) records nothing, or the next focus would read as a non-move and
-        // never send.
-        let state = makeAppState()
+        let session = FakeSessionLeads(state)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        #expect(state.isLeader(source))
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
-        state.sendClaim = { _ in false }
+        session.deliverable = false
         state.claimSessionLeadership(mirrored)
-        #expect(state.isLeader(source), "an undelivered claim must not move the model")
+        #expect(state.isLeader(source))
+        #expect(!state.isLeader(mirrored))
 
-        state.sendClaim = { _ in true }
+        session.deliverable = true
         state.claimSessionLeadership(mirrored)
         #expect(state.isLeader(mirrored))
-        #expect(!state.isLeader(source))
     }
 
     @Test
-    func a_claim_is_sent_only_when_leadership_moves() throws {
-        // libghostty treats the claim's bytes as typing (selection cleared,
-        // viewport scrolled to the bottom), so a redundant claim on every
-        // focus report — mouseDown fires two per click — is a visible cost.
+    func a_claim_is_not_sent_for_a_surface_that_leads() throws {
+        // `mouseDown` reports focus twice per click, and `FocusRestoration`
+        // retries across run-loop ticks: a surface that leads sends nothing.
         let state = makeAppState()
-        var sent: [UUID] = []
-        state.sendClaim = { sent.append($0.pane.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-
-        state.claimSessionLeadership(mirrored)
-        state.claimSessionLeadership(mirrored)
-        state.claimSessionLeadership(mirrored)
-        #expect(sent == [mirrorID], "repeated focus of the leader sends nothing more")
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.claimSessionLeadership(source)
-        #expect(sent == [mirrorID, source.id])
+        #expect(session.claimed.isEmpty)
+
+        state.claimSessionLeadership(mirrored)
+        state.claimSessionLeadership(mirrored)
+        state.claimSessionLeadership(mirrored)
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
+
+        state.claimSessionLeadership(source)
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id, SurfaceRegistry.shared.surfaces(of: source)[0].id])
     }
 
     @Test
-    func focusing_a_remote_mirror_records_nothing() throws {
-        // Remote mirrors send no claim (the host's zmx may predate the tag),
-        // and must not RECORD one either: the pty is still sized for the other
-        // pane, so un-dimming the clicked one would lie. Typed input is the
-        // only thing that moves the host's leadership, and that is recorded
-        // from `noteUserInput`.
+    func a_claim_is_sent_once_until_the_session_answers() throws {
+        // The session answers a network trip later. The focus reports in the
+        // meantime send nothing more.
         let state = makeAppState()
-        var sent: [UUID] = []
-        state.sendClaim = { sent.append($0.pane.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
+        let p = seedProject(state)
+        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let source = try #require(tab.splitRoot.allPanes().first)
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
+        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        session.answers = false
+
+        state.claimSessionLeadership(mirrored)
+        state.claimSessionLeadership(mirrored)
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
+
+        // The channel ended before the answer: the claim may be lost, so the
+        // next focus sends it again.
+        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(nil)
+        state.claimSessionLeadership(mirrored)
+        #expect(session.claimed == [
+            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
+            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
+        ])
+    }
+
+    @Test
+    func focusing_a_remote_mirror_claims_as_a_local_one_does() throws {
+        // A remote pane is a session of the host's server, and the claim is a
+        // message on its channel, never input. So it claims as a local pane.
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
         let p = seedProject(state, name: "box", path: "me@box:/srv")
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         #expect(source.isRemote)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
-        state.claimSessionLeadership(mirrored)
-        #expect(sent.isEmpty)
-        #expect(state.isLeader(source))
+        state.focusPane(mirrorID, projectID: p.id)
 
-        state.noteUserInput(in: SurfaceRegistry.shared.preferredSurface(of: mirrored))
+        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
         #expect(state.isLeader(mirrored))
+        #expect(!state.isLeader(source))
     }
 
     @Test
-    func closing_the_leader_hands_leadership_to_the_surviving_mirror() throws {
-        // zmx's closeClient only clears the leader; nobody is promoted, so the
-        // pty would keep the dead pane's size and drop the survivor's arrows
-        // and Ctrl keys until it typed something printable. The release path
-        // claims from the survivor.
+    func closing_a_mirror_sends_no_claim() throws {
+        // When the leader leaves, the session makes the next client lead and
+        // tells it. The app sends nothing on a close.
         let state = makeAppState()
-        var sent: [UUID] = []
-        state.sendClaim = { sent.append($0.pane.id)
-            return true
-        }
+        let session = FakeSessionLeads(state)
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        // The source leads (it attached first); close it.
-        #expect(state.isLeader(source))
-        sent = []
+        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
+        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
 
         state.closePane(source.id, projectID: p.id)
+        #expect(session.claimed.isEmpty)
 
-        #expect(sent == [mirrorID], "the survivor is told to take the pty size")
-        let survivor = try #require(tab.splitRoot.findPane(id: mirrorID))
-        #expect(state.isLeader(survivor))
-    }
-
-    @Test
-    func closing_a_non_leader_mirror_hands_nothing_over() throws {
-        let state = makeAppState()
-        var sent: [UUID] = []
-        state.sendClaim = { sent.append($0.pane.id)
-            return true
-        }
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-
-        state.closePane(mirrorID, projectID: p.id)
-
-        #expect(sent.isEmpty)
-        #expect(state.isLeader(source))
-    }
-
-    @Test
-    func nonLeaderPaneIDs_matches_isLeader_pane_by_pane() throws {
-        // The dim computation uses one traversal; it must agree with the
-        // per-pane answer it replaced.
-        let state = makeAppState()
-        state.sendClaim = { _ in true }
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let a = addPane(sharing: source, projectID: p.id, in: state)
-        _ = addPane(sharing: source, projectID: p.id, in: state)
-        state.focusPane(a, projectID: p.id)
-
-        let expected = Set(tab.splitRoot.allPanes().filter { !state.isLeader($0) }.map(\.id))
-        #expect(state.nonLeaderPaneIDs(in: tab) == expected)
-        #expect(expected.count == 2)
+        // The session makes the client that remains lead, and says so.
+        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(true)
+        #expect(state.isLeader(mirrored))
+        #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
 
     @Test
