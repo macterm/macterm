@@ -600,4 +600,21 @@ struct WorkspaceSerializerSessionIdentityTests {
         #expect(panes.map(\.sessionName) == [first.sessionName, other.sessionName])
         #expect(restored.focusedPaneID == panes.first?.id)
     }
+
+    @Test
+    func a_pane_that_repeats_a_session_of_another_tab_does_not_restore() throws {
+        // A pane of `pane mirror` could move to its own tab. That tab has no
+        // pane left, so it goes.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let firstTab = ws.tabs[0]
+        let first = try #require(firstTab.focusedPane)
+        let moved = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let repeated = Pane(projectPath: "/tmp", projectID: ws.id, sessionName: first.sessionName)
+        ModelWriter.tabSetTree(moved, root: .pane(repeated), focusedPaneID: repeated.id)
+
+        let restored = try #require(roundTrip([ws.id: ws]).first)
+
+        #expect(restored.tabs.map(\.id) == [firstTab.id])
+        #expect(restored.tabs[0].splitRoot.allPanes().map(\.sessionName) == [first.sessionName])
+    }
 }

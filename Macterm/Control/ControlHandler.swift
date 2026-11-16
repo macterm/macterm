@@ -840,8 +840,8 @@ final class ControlHandler {
         case "up": return (.vertical, .first)
         case "auto":
             // The UI's auto-split picks the longer on-screen axis from the
-            // pane as the key window draws it; a
-            // never-shown pane measures zero and falls back to horizontal —
+            // pane as the key window draws it; a never-shown pane measures
+            // zero and falls back to horizontal —
             // same as AppState.autoSplitPane. `auto` has no side to infer, so
             // the new pane trails the target.
             return (SplitDirection.auto(for: appState.displayedSize(of: pane)), .second)
@@ -911,9 +911,7 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
         let target = try resolvePane(args, in: workspace)
-        // Mirror-aware: a pane whose session another pane still attaches kills
-        // nothing when it closes, so it must not raise a warning that says it
-        // does (see AppState.closeNeedsConfirmation).
+        // The app's own guard (AppState.closeNeedsConfirmation).
         if appState.closeNeedsConfirmation([target.pane]), args.force != true {
             throw ControlError(
                 code: .busy,

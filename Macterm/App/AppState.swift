@@ -1889,10 +1889,9 @@ final class AppState {
     }
 
     /// Give up these panes' claims on their sessions, killing a session
-    /// only when no OTHER pane still attaches it. One pane is one session,
-    /// but the check fails closed: a pinned record that waits to load, or a
-    /// file from an older build with two panes on one session, keeps the
-    /// session alive.
+    /// only when no OTHER pane still attaches it, or a pinned record that
+    /// waits to load names it. One pane is one session, so the pane check
+    /// only fails closed (issue 0282 removes it).
     ///
     /// Takes the whole batch at once, because the callers that remove a
     /// project, close a tab, or drop a layout's panes release many panes

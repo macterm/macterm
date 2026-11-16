@@ -2796,10 +2796,8 @@ private actor KilledSessions {
     }
 }
 
-/// A pane attached to `name`. Uses the same persisted-name init the restore
-/// path uses. The app makes no second pane on a session, but a file from an
-/// older build (`pane mirror`) can hold one, and the session code fails
-/// closed for it.
+/// A pane attached to `name`. The app makes no second pane on a session, but
+/// the session code still handles one until issue 0282 removes it.
 @MainActor
 func mirrorPane(of name: String, projectID: UUID, projectPath: String = "/tmp") -> Pane {
     Pane(projectPath: projectPath, projectID: projectID, sessionName: name)

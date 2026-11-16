@@ -948,10 +948,9 @@ struct WindowStateTests {
 
     @Test
     func becoming_key_leaves_a_same_tab_mirror_pairs_leader_alone() throws {
-        // A file from an older build can hold two panes on one session in ONE
-        // tab. The whole-tab claim must not hand the pty to whichever pane comes last in tree
-        // order — the source lost leadership to its own mirror on every key
-        // change.
+        // Two panes on one session in ONE tab (built by hand; issue 0282
+        // removes the case). The whole-tab claim must not hand the pty to
+        // whichever pane comes last in tree order.
         let state = makeAppState()
         var claimed: [UUID] = []
         state.sendClaim = { claimed.append($0.id)
