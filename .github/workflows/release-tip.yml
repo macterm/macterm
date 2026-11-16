@@ -294,13 +294,6 @@ jobs:
       # privacy grants of everyone who follows tip on every single build.
       # build.sh bakes MactermUpdateChannel=tip into the bundle, so this DMG
       # defaults to following tip even if someone downloads it by hand.
-      - name: Download the Server
-        if: steps.published.outputs.published != 'true'
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
-
       - name: Build Universal Tip Artifact
         if: steps.published.outputs.published != 'true'
         uses: ./.github/actions/build-release

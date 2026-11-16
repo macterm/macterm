@@ -601,10 +601,10 @@ private struct GeneralSettings: View {
     /// (`ZmxBypass.unitTestHost`), so it reports nothing: a Settings window
     /// that macOS restores there must not name a cause that is not true.
     private var zmxUnavailableReason: String? {
-        if !ZmxClient.live.isBundled() {
+        if !SessionClient.live.isBundled() {
             return String(localized: "Session persistence is off. The zmx binary is not in the app. Run `mise run setup` and build again.")
         }
-        switch ZmxClient.liveBypass {
+        switch SessionClient.liveBypass {
         case .socketPathTooLong:
             return String(
                 localized: "Session persistence is off. The zmx socket path of this system is too long. Terminals run with no persistence."

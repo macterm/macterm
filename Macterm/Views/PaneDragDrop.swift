@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 //
 // - The workspace, where every other pane is a drop target split into four
 //   triangular edge zones highlighting the half the pane will land in. Handled
-//   by `TerminalTab.movePane`, reshaping the tab's tree.
+//   by `ModelWriter.paneMove`, reshaping the tab's tree.
 // - The sidebar, where a drop separates the pane into its own tab at the slot
 //   it lands on. Handled by `AppState.separatePane` (see `SidebarDropItem` /
 //   `TabSlotDropItem`), moving it between tabs — and projects — instead.
@@ -273,7 +273,7 @@ private struct PaneDragSource: NSViewRepresentable {
         /// A scaled live snapshot of the pane's surface; falls back to a plain
         /// theme-colored card if the view can't render one.
         private func dragPreviewImage(for pane: Pane) -> NSImage {
-            if let view = pane.nsView, !view.bounds.isEmpty,
+            if let view = SurfaceRegistry.shared.view(of: pane), !view.bounds.isEmpty,
                let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             {
                 view.cacheDisplay(in: view.bounds, to: rep)

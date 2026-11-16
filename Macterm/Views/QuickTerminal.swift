@@ -26,7 +26,7 @@ private func orderPanelFront(_ panel: NSPanel) -> Bool {
 final class QuickTerminalService: NSObject {
     static let shared = QuickTerminalService()
     /// The routing id of the quick terminal's panes — the counterpart of
-    /// `PinnedTabs.projectID` for a workspace that is not a project. Fresh
+    /// `PinnedTabs.workspaceID` for a workspace that is not a project. Fresh
     /// per launch on purpose: unlike the pinned sentinel it is never written
     /// to disk (the tab is restored by the caller that knows it is the quick
     /// terminal's), so nothing can key on a stale value.
@@ -84,7 +84,7 @@ final class QuickTerminalService: NSObject {
     @objc
     private func autoTilingDidChange() {
         guard Preferences.shared.autoTilingEnabled else { return }
-        splitState.splitRoot.rebalanced()
+        ModelWriter.splitRebalance(splitState.tab)
     }
 
     @objc
@@ -356,15 +356,9 @@ final class QuickTerminalSplitState {
     @ObservationIgnored
     var onStructureChange: () -> Void = {}
 
-    var splitRoot: SplitNode {
-        get { tab.splitRoot }
-        set { tab.splitRoot = newValue }
-    }
+    var splitRoot: SplitNode { tab.splitRoot }
 
-    var focusedPaneID: UUID? {
-        get { tab.focusedPaneID }
-        set { tab.focusedPaneID = newValue }
-    }
+    var focusedPaneID: UUID? { tab.focusedPaneID }
 
     init() {
         tab = Self.freshTab()
@@ -381,7 +375,7 @@ final class QuickTerminalSplitState {
     /// Whether any pane has built its surface — i.e. the panel has been shown
     /// this run, so the tab's sessions are live and must not be swapped out.
     var hasLiveSurfaces: Bool {
-        tab.splitRoot.allPanes().contains { $0.nsView != nil }
+        tab.splitRoot.allPanes().contains { SurfaceRegistry.shared.view(of: $0) != nil }
     }
 
     /// Adopt the persisted tab from the last run so its panes reattach their
@@ -400,14 +394,14 @@ final class QuickTerminalSplitState {
     }
 
     func focusPane(_ paneID: UUID) {
-        tab.focusPane(paneID)
+        ModelWriter.paneFocus(tab, paneID: paneID)
     }
 
     func setAdaptiveBackgroundColor(_ color: CGColor?, paneID: UUID) {
-        guard let pane = tab.splitRoot.findPane(id: paneID),
-              pane.adaptiveBackgroundColor != color
-        else { return }
-        pane.adaptiveBackgroundColor = color
+        guard let pane = tab.splitRoot.findPane(id: paneID) else { return }
+        let surface = SurfaceRegistry.shared.surface(for: pane, in: .quickTerminal)
+        guard surface.adaptiveBackgroundColor != color else { return }
+        surface.adaptiveBackgroundColor = color
     }
 
     func requestClosePane(_ paneID: UUID) {
@@ -458,30 +452,32 @@ final class QuickTerminalSplitState {
     }
 
     func split(paneID: UUID, direction: SplitDirection, position: SplitPosition = .second) {
-        tab.split(paneID: paneID, direction: direction, position: position)
+        ModelWriter.paneSplit(tab, paneID: paneID, direction: direction, position: position)
         onStructureChange()
     }
 
-    /// `command`/`env` spawn in the new pane, as in `TerminalTab.split` —
+    /// `command`/`env` spawn in the new pane, as in `ModelWriter.paneSplit` —
     /// the text-file editor's path (`AppState.openTextFile`).
     @discardableResult
     func autoSplit(paneID: UUID, command: String? = nil, env: [String: String]? = nil) -> UUID? {
-        let newID = tab.autoSplit(paneID: paneID, command: command, env: env)
+        let size = tab.splitRoot.findPane(id: paneID)
+            .flatMap { SurfaceRegistry.shared.existingSurface(for: $0, in: .quickTerminal)?.nsView }?.bounds.size
+        let newID = ModelWriter.paneAutoSplit(tab, paneID: paneID, drawnSize: size ?? .zero, command: command, env: env)
         onStructureChange()
         return newID
     }
 
     func movePane(_ paneID: UUID, to target: TabDropResolution.Target) {
-        guard tab.movePane(paneID, to: target) else { return }
+        guard ModelWriter.paneMove(tab, paneID: paneID, to: target) else { return }
         onStructureChange()
     }
 
     func resize(_ direction: PaneFocusDirection, delta: CGFloat = 0.03) {
-        tab.resize(direction, delta: delta)
+        ModelWriter.splitResize(tab, direction: direction, delta: delta)
     }
 
     func moveFocusedPane(_ direction: PaneFocusDirection) {
-        guard tab.moveFocusedPane(direction) else { return }
+        guard ModelWriter.paneSwap(tab, direction: direction) else { return }
         onStructureChange()
     }
 
@@ -498,7 +494,7 @@ final class QuickTerminalSplitState {
         // to consult. Nothing can mirror one, so there is never another
         // claimant to refcount against.
         tab.splitRoot.findPane(id: paneID)?.killPersistentSession(using: .live)
-        switch tab.removePane(paneID) {
+        switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:
             // Replace the whole tab with a fresh one — the quick terminal should
             // always have at least one pane, but we fully reset so the prior
@@ -654,7 +650,7 @@ private struct QuickTerminalView: View {
             onAdaptiveBackgroundChange: { paneID, color in
                 state.setAdaptiveBackgroundColor(color, paneID: paneID)
             },
-            onToggleZoom: { state.tab.toggleZoom(paneID: $0) },
+            onToggleZoom: { ModelWriter.paneZoom(state.tab, toggling: $0) },
             paneDrop: PaneDropContext(
                 root: renderedNode,
                 resolution: $dropResolution,
@@ -664,6 +660,7 @@ private struct QuickTerminalView: View {
                 }
             )
         )
+        .environment(\.paneHost, .quickTerminal)
         // Grab-handle drags share the workspace drop grammar (whole-edge,
         // divider, local). The context carries no tab handler: the quick
         // terminal is one tab outside every workspace and adopts no others.

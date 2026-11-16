@@ -242,7 +242,7 @@ enum FilesPaletteActions {
         }
         appState.splitPane(
             pane.id,
-            direction: .auto(for: pane.nsView?.bounds.size ?? .zero),
+            direction: .auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero),
             projectID: project.id,
             command: command,
             env: env,

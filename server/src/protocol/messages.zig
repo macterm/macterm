@@ -21,7 +21,7 @@ const msgpack = @import("msgpack.zig");
 const Raw = msgpack.Raw;
 
 /// The level that this build speaks. It counts additions to the protocol.
-pub const level: u32 = 2;
+pub const level: u32 = 3;
 
 /// The lowest level that this build accepts from a peer.
 pub const min_level: u32 = 1;
@@ -382,8 +382,44 @@ pub const CommandRun = struct {
     };
 };
 
+/// Opens a roaming link (design/009): the server opens a UDP port and
+/// answers with it. Both sides seal every packet with `secret`, which the client
+/// makes and that goes only in this request, over the connection's own
+/// confidentiality (ssh). The client then speaks the same frames over the
+/// link, as a client of its own, and may move to a new network with no login.
+/// A server with the link off, or with no free port, answers with an error
+/// and the client stays on this connection.
+pub const LinkOpen = struct {
+    pub const name = "link.open";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        /// 32 random bytes. The server keeps it in memory only.
+        secret: msgpack.Secret,
+        /// Names the key in each packet. The client makes it, and no other
+        /// link of this server has it.
+        key_id: u32,
+    };
+    pub const Result = struct {
+        /// The UDP port on the host.
+        port: u16,
+    };
+};
+
+/// Ends a link that this connection opened. Its end ends all of its links
+/// too.
+pub const LinkClose = struct {
+    pub const name = "link.close";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { key_id: u32 };
+    pub const Result = struct {};
+};
+
 /// Every request method. A new method goes here.
-pub const methods = .{ ControlResume, ChannelOpen, ChannelClose, ChannelPause, ChannelResume, Ping, SessionCreate, SessionList, SessionInfo, SessionKill, PaneSeen, ServerExit, CommandRun };
+pub const methods = .{ ControlResume, ChannelOpen, ChannelClose, ChannelPause, ChannelResume, Ping, SessionCreate, SessionList, SessionInfo, SessionKill, PaneSeen, ServerExit, CommandRun, LinkOpen, LinkClose };
 
 // ── Events ──────────────────────────────────────────────────────────────────
 

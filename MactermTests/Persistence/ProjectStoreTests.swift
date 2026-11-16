@@ -114,12 +114,11 @@ struct ProjectStoreTests {
 
         let project = store.findOrCreate(
             name: "duplicate",
-            path: "devbox:~/dev/api",
-            zmxPath: "~/bin/zmx"
+            path: "devbox:~/dev/api"
         )
 
         #expect(project.id == existing.id)
-        #expect(project.zmxPath == nil)
+        #expect(project.name == "api")
         #expect(store.projects.count == 1)
     }
 

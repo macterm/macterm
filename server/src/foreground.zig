@@ -21,7 +21,7 @@
 //! subscribes and writes the sequence, so no other terminal ever sees it.
 //! The daemon removes the variable in the child that execs the session's
 //! shell, so a shell in the session does not inherit it: a nested
-//! `zmx attach` would otherwise report its own session's foreground into
+//! `zmx connect` would otherwise report its own session's foreground into
 //! the outer one. No zmx process that goes on running removes it: zig's
 //! `std.Io` caches the environment block at startup, and its next scan of a
 //! block that `unsetenv` shortened panics.

@@ -10,30 +10,6 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# As in server_v2.bats.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-  export ZMX RT
-}
-
-teardown() {
-  local sock pid
-  if [[ -S "$MACTERM_RUNTIME_DIR/.server" ]]; then
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" server-pid 2>/dev/null) && kill -KILL "$pid" 2>/dev/null || true
-  fi
-  for sock in "$MACTERM_RUNTIME_DIR"/*; do
-    [[ -S "$sock" ]] || continue
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  rm -rf "$RT"
-}
-
 @test "connect --: makes the session through a server it starts, with its folder, environment and size" {
   mkdir -p "$RT/work"
   (cd "$RT/work" && CREATE_MARK=from-the-pane python3 - <<'PY'

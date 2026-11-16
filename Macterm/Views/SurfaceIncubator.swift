@@ -40,8 +40,8 @@ final class SurfaceIncubator {
     /// succeed; `TerminalSurface.makeNSView` pulls it back out when the tab is
     /// viewed.
     func warm(_ pane: Pane) {
-        guard pane.nsView?.surface == nil else { return }
-        let scroll = pane.ensureScrollView()
+        guard SurfaceRegistry.shared.view(of: pane)?.surface == nil else { return }
+        let scroll = SurfaceRegistry.shared.ensureScrollView(of: pane)
         guard let content = window.contentView else { return }
         scroll.frame = content.bounds
         content.addSubview(scroll)
@@ -49,7 +49,7 @@ final class SurfaceIncubator {
         // The pane connected the view's callbacks when it made the view
         // (`Pane.connectViewCallbacks`). AppState's shared `warmPane` connects
         // `onProcessExit` after every warm, so never-viewed panes close too.
-        pane.nsView?.createSurface()
+        SurfaceRegistry.shared.view(of: pane)?.createSurface()
     }
 }
 

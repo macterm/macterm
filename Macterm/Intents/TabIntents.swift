@@ -89,9 +89,9 @@ struct FocusMactermTabIntent: AppIntent {
         // Selecting the tab's project first: a tab in a project no window is
         // showing would otherwise be selected into a workspace nobody is
         // looking at.
-        if projectID == PinnedTabs.projectID {
+        if projectID == PinnedTabs.workspaceID {
             ctx.appState.selectPinnedProject()
-        } else if projectID == ScratchTabs.projectID {
+        } else if projectID == ScratchTabs.workspaceID {
             ctx.appState.selectScratchTabs()
         } else {
             ctx.appState.revealProject(projectID)

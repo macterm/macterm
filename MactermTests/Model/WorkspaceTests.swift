@@ -5,7 +5,14 @@ import Testing
 @MainActor
 struct WorkspaceTests {
     private func makeWorkspace() -> Workspace {
-        Workspace(projectID: UUID(), projectPath: "/tmp")
+        Workspace(id: UUID(), projectPath: "/tmp")
+    }
+
+    @Test
+    func the_kind_comes_from_the_workspace_id() {
+        #expect(Workspace(id: PinnedTabs.workspaceID, tabs: [], activeTabID: nil).kind == .pinned)
+        #expect(Workspace(id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil).kind == .scratch)
+        #expect(makeWorkspace().kind == .project)
     }
 
     @Test
@@ -19,7 +26,7 @@ struct WorkspaceTests {
     func createTab_appends_and_selects() {
         let ws = makeWorkspace()
         let original = ws.tabs[0].id
-        let new = ws.createTab(projectPath: "/tmp")
+        let new = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         #expect(ws.tabs.count == 2)
         #expect(ws.activeTabID == new.id)
         #expect(original != new.id)
@@ -28,29 +35,29 @@ struct WorkspaceTests {
     @Test
     func createTab_without_focus_never_visits_or_records_the_new_tab() {
         let ws = makeWorkspace()
-        let previous = ws.createTab(projectPath: "/tmp")
-        let current = ws.createTab(projectPath: "/tmp")
+        let previous = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let current = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         let recency = ws.recencyOrder()
         var selections = 0
         ws.onActiveTabChanged = { selections += 1 }
 
-        let background = ws.createTab(projectPath: "/tmp", focus: false)
+        let background = ModelWriter.tabCreate(in: ws, projectPath: "/tmp", focus: false)
 
         #expect(ws.activeTabID == current.id)
         #expect(selections == 0)
         #expect(ws.recencyOrder() == recency + [background.id])
-        ws.closeTab(current.id)
+        ModelWriter.tabClose(current.id, in: ws)
         #expect(ws.activeTabID == previous.id)
     }
 
     @Test
     func createTab_without_focus_adopts_first_tab_when_workspace_empty() {
         let ws = makeWorkspace()
-        ws.closeTab(ws.tabs[0].id)
+        ModelWriter.tabClose(ws.tabs[0].id, in: ws)
         #expect(ws.tabs.isEmpty)
         #expect(ws.activeTabID == nil)
 
-        let background = ws.createTab(projectPath: "/tmp", focus: false)
+        let background = ModelWriter.tabCreate(in: ws, projectPath: "/tmp", focus: false)
 
         #expect(ws.tabs.count == 1)
         #expect(ws.activeTabID == background.id)
@@ -61,27 +68,13 @@ struct WorkspaceTests {
     @Test
     func createTab_without_focus_publishes_selection_when_adopting_into_empty_workspace() {
         let ws = makeWorkspace()
-        ws.closeTab(ws.tabs[0].id)
+        ModelWriter.tabClose(ws.tabs[0].id, in: ws)
         var selections = 0
         ws.onActiveTabChanged = { selections += 1 }
 
-        _ = ws.createTab(projectPath: "/tmp", focus: false)
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp", focus: false)
 
         #expect(selections == 1)
-    }
-
-    @Test(arguments: [false, true])
-    func createTab_stamps_remote_configuration_before_publishing_selection(focus: Bool) {
-        let ws = Workspace(projectID: UUID(), tabs: [], activeTabID: nil)
-        let zmxPath = "/opt/custom/bin/zmx"
-        var reportedPaths: [String?] = []
-        ws.onActiveTabChanged = { reportedPaths.append(ws.activeTab?.focusedPane?.remoteZmxPath) }
-
-        let tab = ws.createTab(projectPath: "host:~/repo", remoteZmxPath: zmxPath, focus: focus)
-
-        #expect(tab.focusedPane?.remoteZmxPath == zmxPath)
-        #expect(reportedPaths == [zmxPath])
-        ws.onActiveTabChanged = nil
     }
 
     @Test
@@ -89,7 +82,7 @@ struct WorkspaceTests {
         let ws = makeWorkspace()
         let original = ws.tabs[0].id
         let incoming = TerminalTab(projectPath: "/elsewhere", projectID: UUID())
-        ws.adoptTab(incoming)
+        ModelWriter.tabInsert(incoming, into: ws)
         #expect(ws.tabs.count == 2)
         #expect(ws.tabs.last?.id == incoming.id)
         #expect(ws.activeTabID == incoming.id)
@@ -101,9 +94,9 @@ struct WorkspaceTests {
         let ws = makeWorkspace()
         let original = ws.tabs[0].id
         let incoming = TerminalTab(projectPath: "/elsewhere", projectID: UUID())
-        ws.adoptTab(incoming)
+        ModelWriter.tabInsert(incoming, into: ws)
         // Closing the adopted (active) tab should fall back to the prior active.
-        ws.closeTab(incoming.id)
+        ModelWriter.tabClose(incoming.id, in: ws)
         #expect(ws.activeTabID == original)
     }
 
@@ -111,10 +104,10 @@ struct WorkspaceTests {
     func closeTab_active_selects_most_recent_from_history() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        let t3 = ws.createTab(projectPath: "/tmp").id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
         #expect(ws.activeTabID == t3)
-        ws.closeTab(t3)
+        ModelWriter.tabClose(t3, in: ws)
         #expect(ws.activeTabID == t2)
         #expect(!ws.tabs.contains(where: { $0.id == t3 }))
         _ = t1
@@ -123,9 +116,9 @@ struct WorkspaceTests {
     @Test
     func closeTab_nonactive_leaves_active_alone() {
         let ws = makeWorkspace()
-        let t2 = ws.createTab(projectPath: "/tmp").id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
         let before = ws.activeTabID
-        ws.closeTab(ws.tabs[0].id)
+        ModelWriter.tabClose(ws.tabs[0].id, in: ws)
         #expect(ws.activeTabID == before)
         _ = t2
     }
@@ -133,7 +126,7 @@ struct WorkspaceTests {
     @Test
     func closeTab_invalid_id_is_noop() {
         let ws = makeWorkspace()
-        ws.closeTab(UUID())
+        ModelWriter.tabClose(UUID(), in: ws)
         #expect(ws.tabs.count == 1)
     }
 
@@ -141,7 +134,7 @@ struct WorkspaceTests {
     func closeTab_empties_activeTabID_when_no_tabs_left() {
         let ws = makeWorkspace()
         let only = ws.tabs[0].id
-        ws.closeTab(only)
+        ModelWriter.tabClose(only, in: ws)
         #expect(ws.activeTabID == nil)
     }
 
@@ -149,11 +142,11 @@ struct WorkspaceTests {
     func selectNextTab_wraps() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
         #expect(ws.activeTabID == t2)
-        ws.selectNextTab()
+        ModelWriter.tabSelectNext(in: ws)
         #expect(ws.activeTabID == t1)
-        ws.selectNextTab()
+        ModelWriter.tabSelectNext(in: ws)
         #expect(ws.activeTabID == t2)
     }
 
@@ -161,10 +154,10 @@ struct WorkspaceTests {
     func selectPreviousTab_wraps() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        ws.selectPreviousTab()
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabSelectPrevious(in: ws)
         #expect(ws.activeTabID == t1)
-        ws.selectPreviousTab()
+        ModelWriter.tabSelectPrevious(in: ws)
         #expect(ws.activeTabID == t2)
     }
 
@@ -172,7 +165,7 @@ struct WorkspaceTests {
     func selectNextTab_single_tab_is_noop() {
         let ws = makeWorkspace()
         let only = ws.tabs[0].id
-        ws.selectNextTab()
+        ModelWriter.tabSelectNext(in: ws)
         #expect(ws.activeTabID == only)
     }
 
@@ -180,7 +173,7 @@ struct WorkspaceTests {
     func selectTab_ignores_unknown_id() {
         let ws = makeWorkspace()
         let before = ws.activeTabID
-        ws.selectTab(UUID())
+        ModelWriter.tabSelect(UUID(), in: ws)
         #expect(ws.activeTabID == before)
     }
 
@@ -188,11 +181,11 @@ struct WorkspaceTests {
     func selectTab_acknowledges_completion_in_selected_tab_only() {
         let ws = makeWorkspace()
         let selected = ws.tabs[0]
-        let other = ws.createTab(projectPath: "/tmp")
+        let other = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         selected.splitRoot.allPanes().first?.executionState = .done
         other.splitRoot.allPanes().first?.executionState = .done
         let selectedID = selected.id
-        ws.selectTab(selectedID)
+        ModelWriter.tabSelect(selectedID, in: ws)
         #expect(ws.activeTabID == selectedID)
         #expect(selected.executionState == .idle)
         #expect(other.executionState == .done)
@@ -202,9 +195,9 @@ struct WorkspaceTests {
     func recencyOrder_active_first_then_history() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        let t3 = ws.createTab(projectPath: "/tmp").id
-        ws.selectTab(t1)
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabSelect(t1, in: ws)
         let order = ws.recencyOrder()
         #expect(order.first == t1)
         #expect(order.count == 3)
@@ -214,8 +207,8 @@ struct WorkspaceTests {
     @Test
     func recencyOrder_includes_unvisited_tabs_at_tail() {
         let ws = makeWorkspace()
-        _ = ws.createTab(projectPath: "/tmp")
-        _ = ws.createTab(projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         let order = ws.recencyOrder()
         #expect(Set(order) == Set(ws.tabs.map(\.id)))
     }
@@ -224,19 +217,19 @@ struct WorkspaceTests {
     func peekTab_does_not_record_history() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        ws.peekTab(t1)
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabPeek(t1, in: ws)
         #expect(ws.activeTabID == t1)
-        ws.closeTab(t1)
+        ModelWriter.tabClose(t1, in: ws)
         #expect(ws.activeTabID == t2)
     }
 
     @Test
     func selectTabByIndex_selects_tab_at_index() {
         let ws = makeWorkspace()
-        _ = ws.createTab(projectPath: "/tmp")
-        let t3 = ws.createTab(projectPath: "/tmp").id
-        ws.selectTabByIndex(2)
+        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabSelect(index: 2, in: ws)
         #expect(ws.activeTabID == t3)
     }
 
@@ -244,7 +237,7 @@ struct WorkspaceTests {
     func selectTabByIndex_out_of_range_is_noop() {
         let ws = makeWorkspace()
         let before = ws.activeTabID
-        ws.selectTabByIndex(99)
+        ModelWriter.tabSelect(index: 99, in: ws)
         #expect(ws.activeTabID == before)
     }
 
@@ -252,8 +245,8 @@ struct WorkspaceTests {
     func reorderTabs_moves_tabs() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        ws.reorderTabs(fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabReorder(in: ws, fromOffsets: IndexSet(integer: 0), toOffset: 2)
         #expect(ws.tabs.map(\.id) == [t2, t1])
     }
 
@@ -263,9 +256,9 @@ struct WorkspaceTests {
     func adoptTab_inserts_at_index() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
         let incoming = TerminalTab(projectPath: "/elsewhere", projectID: UUID())
-        ws.adoptTab(incoming, at: 1)
+        ModelWriter.tabInsert(incoming, into: ws, at: 1)
         #expect(ws.tabs.map(\.id) == [t1, incoming.id, t2])
         #expect(ws.activeTabID == incoming.id)
     }
@@ -275,7 +268,7 @@ struct WorkspaceTests {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
         let incoming = TerminalTab(projectPath: "/elsewhere", projectID: UUID())
-        ws.adoptTab(incoming, at: 99)
+        ModelWriter.tabInsert(incoming, into: ws, at: 99)
         #expect(ws.tabs.map(\.id) == [t1, incoming.id])
     }
 
@@ -283,13 +276,13 @@ struct WorkspaceTests {
     func moveTab_toIndex_reorders_within_project() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        let t3 = ws.createTab(projectPath: "/tmp").id
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        let t3 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
         // Drop t1 at the end (offset 3, pre-removal coordinates).
-        ws.moveTab(t1, toIndex: 3)
+        ModelWriter.tabReorder(t1, in: ws, toIndex: 3)
         #expect(ws.tabs.map(\.id) == [t2, t3, t1])
         // Drop t1 back to the front.
-        ws.moveTab(t1, toIndex: 0)
+        ModelWriter.tabReorder(t1, in: ws, toIndex: 0)
         #expect(ws.tabs.map(\.id) == [t1, t2, t3])
     }
 
@@ -297,8 +290,8 @@ struct WorkspaceTests {
     func moveTab_toIndex_same_slot_is_noop() {
         let ws = makeWorkspace()
         let t1 = ws.tabs[0].id
-        let t2 = ws.createTab(projectPath: "/tmp").id
-        ws.moveTab(t1, toIndex: 0)
+        let t2 = ModelWriter.tabCreate(in: ws, projectPath: "/tmp").id
+        ModelWriter.tabReorder(t1, in: ws, toIndex: 0)
         #expect(ws.tabs.map(\.id) == [t1, t2])
     }
 
@@ -306,7 +299,7 @@ struct WorkspaceTests {
     func moveTab_toIndex_unknown_tab_is_noop() {
         let ws = makeWorkspace()
         let before = ws.tabs.map(\.id)
-        ws.moveTab(UUID(), toIndex: 0)
+        ModelWriter.tabReorder(UUID(), in: ws, toIndex: 0)
         #expect(ws.tabs.map(\.id) == before)
     }
 }
