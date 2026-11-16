@@ -86,17 +86,13 @@ struct BundledResourcesTests {
 
     /// The build key that the app reads from the names of its server files
     /// (`ServerBuilds.bundledKey`) is the key of the server that setup
-    /// installed (`.server-key`).
+    /// installed (its manifest, `Macterm/Resources/zmx/server.json`).
     @Test
     func the_bundled_server_key_is_the_installed_build() {
         guard let resourcesDir = Self.resourcesDir else { return }
-        let stamp = resourcesDir
-            .deletingLastPathComponent() // Macterm
-            .deletingLastPathComponent() // repo root
-            .appendingPathComponent(".server-key")
-        guard let key = try? String(contentsOf: stamp, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-              !key.isEmpty
-        else { return }
+        struct Manifest: Decodable { let key: String }
+        let manifest = resourcesDir.appendingPathComponent("zmx/server.json")
+        guard let key = try? JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifest)).key else { return }
         #expect(ServerBuilds.bundledKey == key, "the bundle's server files are not build \(key) — run `mise run setup`")
     }
 

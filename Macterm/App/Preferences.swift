@@ -21,7 +21,7 @@ enum NewTerminalWorkingDirectory: Equatable {
     /// caller's own inheritance". Nil is only ever "Active pane" with no
     /// usable LOCAL cwd — every remote pane, and any pane whose surface
     /// isn't up yet — and coercing that case to the project root would be
-    /// wrong: `TerminalTab.split` inherits a remote pane's scp-style
+    /// wrong: `ModelWriter.paneSplit` inherits a remote pane's scp-style
     /// `projectPath` verbatim, so overriding it spawns a LOCAL shell at the
     /// project root instead of a remote sibling (and a pinned pane, whose
     /// own `projectPath` IS its cwd, would land at home). Callers with

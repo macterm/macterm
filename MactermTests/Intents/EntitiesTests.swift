@@ -85,7 +85,7 @@ struct EntitiesTests {
         appState.pinTab(tab.id, fromProject: projectStore.projects[0].id)
 
         let listed = try await MactermProjectQuery().allEntities()
-        #expect(listed.first?.id == PinnedTabs.projectID)
+        #expect(listed.first?.id == PinnedTabs.workspaceID)
     }
 
     // MARK: - Tabs

@@ -1,7 +1,7 @@
 name: Session Benchmark
 
 # The v1/v2 session layer benchmark and its gate (scripts/session_bench.py).
-# AGENTS.md ("Session layer benchmark") says what it measures and when it
+# scripts/AGENTS.md ("Session layer benchmark") says what it measures and when it
 # fails. The workflow starts on every pull request, so that its checks report
 # also where they are required. The measuring jobs skip when the pull request
 # changes no file of the session layer.
@@ -15,9 +15,17 @@ concurrency:
   group: session-bench-${{ github.ref }}
   cancel-in-progress: true
 
+# v1 is a frozen build, checked by SHA-256: the zmx that v1.33.2 bundled on
+# macOS, and the upstream zmx 0.8.1 that a v1 remote host ran on Linux. The
+# server of this commit has no v1 code.
+env:
+  V1_MACOS_URL: https://github.com/thdxg/zmx/releases/download/build-2026-10-14-5f6a1e8/zmx-universal-macos.tar.gz
+  V1_MACOS_SHA256: e312b286ff3a2aa305235709104f0fff09072bfd549614367a88f4c7b394a8b1
+  V1_LINUX_URL: https://github.com/neurosnap/zmx/releases/download/v0.8.1/zmx-0.8.1-linux-x86_64.tar.gz
+  V1_LINUX_SHA256: dfd75720b942466f28870731cc86dbc07afa72fb8f3bd5eeb4ff707e4eecebe8
+
 jobs:
-  # The files that the pull request changes, from the merge commit, as in
-  # server.yml. A run by hand always measures.
+  # The `bench` area of .github/path-areas. A run by hand always measures.
   changes:
     name: Find Session Layer Changes
     runs-on: ubuntu-latest
@@ -35,15 +43,7 @@ jobs:
       - name: Find Session Layer Changes
         id: changes
         shell: bash
-        run: |
-          bench=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            files="$(git diff --no-renames --name-only HEAD^1 HEAD)"
-            if ! grep -qE '^(server/|protocol/|scripts/session_bench(\.py|_limits\.json)$|scripts/build-server\.sh$|\.github/workflows/(session-bench|server-build)\.yml$)' <<<"$files"; then
-              bench=false
-            fi
-          fi
-          echo "bench=$bench" | tee -a "$GITHUB_OUTPUT"
+        run: scripts/changed-areas.sh
 
   # The session server of this commit (server-build.yml).
   server:
@@ -85,15 +85,23 @@ jobs:
         env:
           KEY: ${{ needs.server.outputs.key }}
         run: |
+          scripts/build-server.sh verify build/server "$KEY"
           name="macterm-$KEY-universal-macos.tar.gz"
-          (cd build/server && shasum -a 256 -c "$name.sha256")
           mkdir -p zmx
           tar xzf "build/server/$name" -C zmx zmx
           zmx/zmx version
 
+      - name: Download v1
+        run: |
+          curl -fsSL --retry 3 -o v1.tar.gz "$V1_MACOS_URL"
+          echo "$V1_MACOS_SHA256  v1.tar.gz" | shasum -a 256 -c
+          mkdir -p zmx-v1
+          tar xzf v1.tar.gz -C zmx-v1 zmx
+          zmx-v1/zmx version
+
       - name: Measure
         run: |
-          python3 scripts/session_bench.py run --zmx zmx/zmx --out session-macos.json
+          python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --out session-macos.json
           python3 scripts/session_bench.py report session-macos.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
@@ -139,11 +147,19 @@ jobs:
         env:
           KEY: ${{ needs.server.outputs.key }}
         run: |
+          scripts/build-server.sh verify build/server "$KEY"
           name="macterm-$KEY-x86_64-linux.tar.gz"
-          (cd build/server && sha256sum -c "$name.sha256")
           mkdir -p zmx
           tar xzf "build/server/$name" -C zmx zmx
           zmx/zmx version
+
+      - name: Download v1
+        run: |
+          curl -fsSL --retry 3 -o v1.tar.gz "$V1_LINUX_URL"
+          echo "$V1_LINUX_SHA256  v1.tar.gz" | sha256sum -c
+          mkdir -p zmx-v1
+          tar xzf v1.tar.gz -C zmx-v1 zmx
+          zmx-v1/zmx version
 
       - name: Start sshd on localhost
         run: |
@@ -164,7 +180,7 @@ jobs:
 
       - name: Measure
         run: |
-          python3 scripts/session_bench.py run --zmx zmx/zmx --ssh-host localhost \
+          python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --ssh-host localhost \
             --network "localhost, netem delay 25 ms each way, 100 Mbit/s" --out session-linux.json
           python3 scripts/session_bench.py report session-linux.json >> "$GITHUB_STEP_SUMMARY"
 

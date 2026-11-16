@@ -45,17 +45,13 @@ jobs:
           ref: ${{ inputs.website_ref }}
           path: website
 
-      - uses: jdx/mise-action@v5.2.7
-
-      - name: Select Xcode
-        uses: ./.github/actions/select-xcode
-
-      # setup.sh takes the prebuilt server of main for this tree. A server
-      # change that no prebuilt covers yet needs a Zig build.
-      - name: Setup GhosttyKit
-        run: mise run setup --verbose
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # No server artifact: setup.sh takes the prebuilt server of main for
+      # this tree. A server change that no prebuilt covers yet needs a Zig
+      # build.
+      - name: App Setup
+        uses: ./.github/actions/app-setup
+        with:
+          server-artifact: ""
 
       - name: Test
         run: >-

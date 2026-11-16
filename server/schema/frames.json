@@ -1,7 +1,7 @@
 [
   {
     "name": "hello",
-    "frame": "54000000000000000086a56c6576656c01a96d696e5f6c6576656c01a56275696c64ab322e302e302d7469702e31a4726f6c65a3677569a565706f6368cf123456789abcdef0a46361707392a3746363ac70617373776f72642d747479",
+    "frame": "6f000000000000000087a56c6576656c01a96d696e5f6c6576656c01a56275696c64ab322e302e302d7469702e31a4726f6c65a3677569a565706f6368cf123456789abcdef0a46361707392a3746363ac70617373776f72642d747479a96275696c645f6b6579b030313233343536373839616263646566",
     "reencodes": true
   },
   {
@@ -43,6 +43,75 @@
     "name": "later hello",
     "frame": "5f000000000000000087a56c6576656c09a96d696e5f6c6576656c01a56275696c64a5332e302e30a4726f6c65a572656c6179a565706f636801a46361707392a3746363a874656c65706f7274a6726567696f6e82a46e616d65a26575a36964739201ce00011170",
     "reencodes": false
+  },
+  {
+    "name": "replace: a lower level",
+    "frame": "47000000000000000087a56c6576656c02a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a462626262",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": false,
+      "replaces": true
+    }
+  },
+  {
+    "name": "replace: a higher level",
+    "frame": "47000000000000000087a56c6576656c04a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a462626262",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": true,
+      "replaces": false
+    }
+  },
+  {
+    "name": "replace: another build of the app",
+    "frame": "47000000000000000087a56c6576656c03a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a462626262",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": true,
+      "replaces": true
+    }
+  },
+  {
+    "name": "replace: another build of another app",
+    "frame": "47000000000000000087a56c6576656c03a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a462626262",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": false,
+      "replaces": false
+    }
+  },
+  {
+    "name": "replace: the same build",
+    "frame": "47000000000000000087a56c6576656c03a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a461616161",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": true,
+      "replaces": false
+    }
+  },
+  {
+    "name": "replace: a build with no key",
+    "frame": "38000000000000000086a56c6576656c03a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390",
+    "reencodes": true,
+    "replace": {
+      "key": "aaaa",
+      "owns": true,
+      "replaces": true
+    }
+  },
+  {
+    "name": "replace: an app with no key",
+    "frame": "47000000000000000087a56c6576656c03a96d696e5f6c6576656c01a56275696c64a5312e302e31a4726f6c65a6736572766572a565706f636801a46361707390a96275696c645f6b6579a462626262",
+    "reencodes": true,
+    "replace": {
+      "owns": true,
+      "replaces": false
+    }
   },
   {
     "name": "attach",

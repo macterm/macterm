@@ -63,6 +63,9 @@ targets:
           - "Resources/terminfo"
           - "Resources/zmx"
           - "AppIcon.icon"
+          # The maps of the code for agents, not resources.
+          - "**/AGENTS.md"
+          - "**/CLAUDE.md"
       # Ghostty resources (themes + shell-integration), downloaded by setup.sh.
       # Folder reference (not the default "group") because the contents are
       # extensionless files Xcode would otherwise skip. Lands at
@@ -191,7 +194,7 @@ targets:
     postCompileScripts:
       # Copy the session server (built from server/ or downloaded as its
       # prebuilt by setup.sh) into the app bundle at
-      # Contents/Resources/zmx/zmx — ZmxClient resolves it via Bundle.main.
+      # Contents/Resources/zmx/zmx — LocalServer.bundled resolves it via Bundle.main.
       # Runs after compile so the bundle's Resources dir exists.
       - script: "${SRCROOT}/scripts/embed-zmx.sh"
         name: "Embed zmx"
@@ -245,6 +248,9 @@ targets:
     platform: macOS
     sources:
       - path: CLI
+        excludes:
+          - "AGENTS.md"
+          - "CLAUDE.md"
       - path: Macterm/Control/ControlProtocol.swift
       - path: Macterm/System/SSHWrapper.swift
       - path: Macterm/Palette/Custom/CustomPaletteLaunch.swift
@@ -300,9 +306,9 @@ targets:
     platform: macOS
     sources:
       - path: MactermTests
-        # CLIContractTests reads these through #filePath.
         excludes:
-          - CLI/Golden/**
+          - AGENTS.md
+          - CLAUDE.md
     dependencies:
       - target: Macterm
     settings:

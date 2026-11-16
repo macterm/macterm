@@ -37,11 +37,11 @@ final class ProjectStore {
     /// re-running to be a no-op. Interactive project creation goes through
     /// `create` instead, so the same directory can back several projects.
     @discardableResult
-    func findOrCreate(name: String, path: String, zmxPath: String? = nil) -> Project {
+    func findOrCreate(name: String, path: String) -> Project {
         if let existing = project(matchingPath: path) {
             return existing
         }
-        return create(name: name, path: path, zmxPath: zmxPath)
+        return create(name: name, path: path)
     }
 
     /// Always add a new project, even when one already backs this directory.
@@ -57,8 +57,8 @@ final class ProjectStore {
     /// impossible to add. A caller holding a name someone typed refuses it
     /// before calling this, where it can say why.
     @discardableResult
-    func create(name: String, path: String, zmxPath: String? = nil) -> Project {
-        var project = Project(name: Self.unreservedName(name), path: path, sortOrder: projects.count, zmxPath: zmxPath)
+    func create(name: String, path: String) -> Project {
+        var project = Project(name: Self.unreservedName(name), path: path, sortOrder: projects.count)
         if autoAssignsColors() {
             project.colorName = ProjectColor.leastUsed(among: projects.map(\.color)).rawValue
         }

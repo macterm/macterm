@@ -29,13 +29,11 @@ enum PaneChannelEvent: Equatable {
             guard let message = try? MessagePackReader.decode(MactermProtocol.PaneMessage.self, from: frame.body) else {
                 return nil
             }
-            if let event = Self.decode(message) {
-                self = event
-            } else {
+            do {
+                self = try Self.event(message.decoded(), name: message.t)
+            } catch {
                 // A known type that does not read is as bad as a lost frame.
-                if Self.known.contains(message.t) {
-                    logger.error("pane channel: message \(message.t, privacy: .public) could not be read")
-                }
+                logger.error("pane channel: message \(message.t, privacy: .public) could not be read")
                 self = .other(message.t)
             }
         default:
@@ -43,34 +41,18 @@ enum PaneChannelEvent: Equatable {
         }
     }
 
-    private static let known: Set<String> = [
-        MactermProtocol.State.name, MactermProtocol.Lead.name, MactermProtocol.SnapshotStart.name,
-        MactermProtocol.SnapshotEnd.name, MactermProtocol.Resumed.name, MactermProtocol.Exit.name,
-        MactermProtocol.Title.name, MactermProtocol.Foreground.name, MactermProtocol.TtyMode.name,
-    ]
-
-    private static func decode(_ message: MactermProtocol.PaneMessage) -> PaneChannelEvent? {
-        switch message.t {
-        case MactermProtocol.State.name:
-            (try? message.message(of: MactermProtocol.State.self)).map(PaneChannelEvent.state)
-        case MactermProtocol.Lead.name:
-            (try? message.message(of: MactermProtocol.Lead.self)).map { .lead($0.leader) }
-        case MactermProtocol.SnapshotStart.name:
-            (try? message.message(of: MactermProtocol.SnapshotStart.self)).map(PaneChannelEvent.snapshotStart)
-        case MactermProtocol.SnapshotEnd.name:
-            .snapshotEnd
-        case MactermProtocol.Resumed.name:
-            (try? message.message(of: MactermProtocol.Resumed.self)).map(PaneChannelEvent.resumed)
-        case MactermProtocol.Exit.name:
-            (try? message.message(of: MactermProtocol.Exit.self)).map(PaneChannelEvent.exit)
-        case MactermProtocol.Title.name:
-            (try? message.message(of: MactermProtocol.Title.self)).map { .title($0.title.bytes) }
-        case MactermProtocol.Foreground.name:
-            (try? message.message(of: MactermProtocol.Foreground.self)).map(PaneChannelEvent.foreground)
-        case MactermProtocol.TtyMode.name:
-            (try? message.message(of: MactermProtocol.TtyMode.self)).map(PaneChannelEvent.ttyMode)
-        default:
-            nil
+    private static func event(_ kind: MactermProtocol.PaneMessageKind, name: String) -> PaneChannelEvent {
+        switch kind {
+        case let .state(state): .state(state)
+        case let .lead(lead): .lead(lead.leader)
+        case let .snapshotStart(start): .snapshotStart(start)
+        case .snapshotEnd: .snapshotEnd
+        case let .resumed(resumed): .resumed(resumed)
+        case let .exit(exit): .exit(exit)
+        case let .title(title): .title(title.title.bytes)
+        case let .foreground(foreground): .foreground(foreground)
+        case let .ttyMode(mode): .ttyMode(mode)
+        default: .other(name)
         }
     }
 }

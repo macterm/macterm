@@ -10,27 +10,6 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# As in session_v2.bats.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  export ZMX
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-}
-
-teardown() {
-  local sock pid
-  for sock in "$MACTERM_RUNTIME_DIR"/*; do
-    [[ -S "$sock" ]] || continue
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  rm -rf "$RT"
-}
-
 @test "events: title, cwd, bell, progress and the heartbeat" {
   "$ZMX" session s1 -- /bin/sh
   python3 - <<'PY'

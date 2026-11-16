@@ -39,7 +39,7 @@ private let logger = Logger(subsystem: appBundleID, category: "RemoteServers")
 @MainActor
 final class RemoteServers {
     struct Configuration {
-        var scripts: HostScripts?
+        var scripts: HostCommands.Scripts?
         var builds: ServerBuilds
         /// Asks the user to allow the first install on a host. False: no.
         var askConsent: @MainActor (_ host: String) async -> Bool
@@ -50,7 +50,7 @@ final class RemoteServers {
 
         static var live: Configuration {
             Configuration(
-                scripts: HostScripts.bundled,
+                scripts: HostCommands.Scripts.bundled,
                 builds: .bundled,
                 askConsent: { await RemoteServerConsent.ask($0) },
                 consents: .preferences
@@ -131,7 +131,41 @@ final class RemoteServers {
             self.commands = commands
         }
 
+        private let watchLock = NSLock()
+        private var watcher: Task<Void, Never>?
+
+        /// Pings the server until the link dies, then closes it, so that
+        /// every pane learns at once. A killed master can leave the ssh
+        /// client alive and silent: no read ends, only a ping shows it.
+        func watch() {
+            watchLock.lock()
+            defer { watchLock.unlock() }
+            guard watcher == nil else { return }
+            let connection = connection
+            watcher = Task { [weak self] in
+                await LinkHeartbeat.run(
+                    ping: {
+                        logger.info("link heartbeat: ping")
+                        do {
+                            _ = try await connection.call(MactermProtocol.Ping.self, .init())
+                            logger.info("link heartbeat: answered")
+                            return true
+                        } catch {
+                            logger.info("link heartbeat: failed: \(String(describing: error), privacy: .public)")
+                            throw error
+                        }
+                    },
+                    isOpen: { connection.isOpen }
+                )
+                logger.info("link heartbeat: link is dead, closing it")
+                self?.close()
+            }
+        }
+
         func close() {
+            watchLock.lock()
+            watcher?.cancel()
+            watchLock.unlock()
             connection.close()
             if process.isRunning { process.terminate() }
         }
@@ -196,6 +230,7 @@ final class RemoteServers {
                     .info(
                         "server: host=\(destination, privacy: .public) build=\(build, privacy: .public) commands=\(count, privacy: .public)"
                     )
+                link.watch()
                 return link
             case let .ended(status, text):
                 guard let check = HostCheck.parse(status: status, stderr: text) else {
@@ -241,8 +276,7 @@ final class RemoteServers {
     /// level, or, right after this connect `installed` this build, another
     /// build of the same level (the type's comment, step 4).
     nonisolated static func shouldReplace(_ hello: MactermProtocol.Hello, key: String, installed: Bool) -> Bool {
-        if hello.level != MactermProtocol.level { return hello.level < MactermProtocol.level }
-        return installed && ZmxVersion.parse(hello.build)?.forkTag != key
+        ServerReplacement(key: key, ownsServer: installed).replaces(hello)
     }
 
     /// The kept answer for a host: its host id and host keys.
@@ -304,6 +338,10 @@ final class RemoteServers {
         switch result {
         case let .success(connection):
             stderr.discard()
+            // When ssh exits (its master died), the panes learn it at once,
+            // not at their next write.
+            process.terminationHandler = { _ in connection.close() }
+            if !process.isRunning { connection.close() }
             return .connected(connection, process)
         case .failure(ServerClientError.noAnswer):
             let status = await Self.exitStatus(of: process, within: .seconds(5))
@@ -401,72 +439,6 @@ final class RemoteServers {
     }
 }
 
-/// The scripts that run on a host (`server/host/`, in the bundle at
-/// `Contents/Resources/host`). The app sends each one as
-/// `sh -c '<script>' macterm <arguments>`, as every remote command
-/// (`RemoteSpawn.remoteShell`), so a script has no single quote and each
-/// argument is one word.
-struct HostScripts: Equatable {
-    var attach: String
-    var install: String
-
-    static var bundled: HostScripts? {
-        Bundle.main.resourceURL.flatMap { load(from: $0.appendingPathComponent("host", isDirectory: true)) }
-    }
-
-    /// Each script as the one line that goes to the host (`oneLine`).
-    static func load(from directory: URL) -> HostScripts? {
-        guard let attach = try? String(contentsOf: directory.appendingPathComponent("attach.sh"), encoding: .utf8),
-              let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8)
-        else { return nil }
-        return HostScripts(attach: oneLine(attach), install: oneLine(install))
-    }
-
-    /// The script with no comment lines and no empty lines, its lines joined
-    /// with spaces. sshd gives the command to the user's login shell, and csh
-    /// refuses a newline in single quotes. So each line of a host script is
-    /// valid when it is joined to the next.
-    static func oneLine(_ script: String) -> String {
-        script.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-            .joined(separator: " ")
-    }
-
-    func attachCommand(key: String) -> String? {
-        Self.command(attach, [key])
-    }
-
-    func installCommand(key: String, sha256: String, hostID: String) -> String? {
-        Self.command(install, [key, sha256, hostID])
-    }
-
-    /// nil when the script has a single quote, a newline or a `!` that csh
-    /// reads as history (one that a blank, `=` or `(` does not follow), or an argument
-    /// is not one plain word. Fail closed: nothing goes to the host then.
-    static func command(_ script: String, _ arguments: [String]) -> String? {
-        guard !script.contains("'"), !script.contains(where: \.isNewline), !hasHistoryMark(script),
-              arguments.allSatisfy(isWord)
-        else { return nil }
-        return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
-    }
-
-    static func hasHistoryMark(_ script: String) -> Bool {
-        let characters = Array(script)
-        return characters.indices.contains { index in
-            characters[index] == "!" && index + 1 < characters.count
-                && !(characters[index + 1].isWhitespace || "=(".contains(characters[index + 1]))
-        }
-    }
-
-    /// Letters, digits and `-`, at most 64: a build key, a checksum, a host id.
-    static func isWord(_ text: String) -> Bool {
-        !text.isEmpty && text.count <= 64 && text.unicodeScalars.allSatisfy {
-            ("a" ... "z").contains($0) || ("A" ... "Z").contains($0) || ("0" ... "9").contains($0) || $0 == "-"
-        }
-    }
-}
-
 /// What the check of a host says when it finds no server of this build
 /// (`server/host/attach.sh`, exit 3 or 4). Pure.
 enum HostCheck: Equatable {
@@ -502,8 +474,8 @@ enum HostCheck: Equatable {
     static func parse(status: Int32, stderr: String) -> HostCheck? {
         guard let words = lastLine(in: stderr)?.map(clean) else { return nil }
         switch (status, words.first) {
-        case (3, "missing") where words.count == 5 && HostScripts.isWord(words[4]):
-            let id = words[3] != "-" && HostScripts.isWord(words[3]) ? words[3] : nil
+        case (3, "missing") where words.count == 5 && HostCommands.isWord(words[4]):
+            let id = words[3] != "-" && HostCommands.isWord(words[3]) ? words[3] : nil
             return .missing(Missing(system: words[1], machine: words[2], hostID: id, hostKeys: words[4]))
         case (4, "no-home"):
             return .noHome
@@ -516,7 +488,7 @@ enum HostCheck: Equatable {
 
     /// The host id in the install's `macterm-host installed <id>`.
     static func installedID(in stdout: String) -> String? {
-        guard let words = lastLine(in: stdout), words.count == 2, words[0] == "installed", HostScripts.isWord(words[1]) else {
+        guard let words = lastLine(in: stdout), words.count == 2, words[0] == "installed", HostCommands.isWord(words[1]) else {
             return nil
         }
         return words[1]
@@ -586,7 +558,7 @@ actor ServerBuilds {
         let prefix = "macterm-", suffix = "-\(ZmxHostTarget.macOS.rawValue).gz"
         let keys = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(suffix) }
             .map { String($0.dropFirst(prefix.count).dropLast(suffix.count)) }
-            .filter(HostScripts.isWord)
+            .filter(HostCommands.isWord)
         return keys.count == 1 ? keys[0] : nil
     }
 
@@ -624,5 +596,72 @@ actor ServerBuilds {
         process.waitUntilExit()
         guard process.terminationStatus == 0, size > 0 else { return nil }
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// The liveness check of a host link: a ping every `interval`, and the link
+/// is dead when one does not answer within `timeout` or throws.
+enum LinkHeartbeat {
+    static let interval: Duration = .seconds(3)
+    static let timeout: Duration = .seconds(3)
+
+    /// Returns when the link is dead, or the task is cancelled.
+    static func run(
+        interval: Duration = interval, timeout: Duration = timeout,
+        ping: @escaping @Sendable () async throws -> Bool,
+        isOpen: @escaping @Sendable () -> Bool = { true }
+    ) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled || !isOpen() { return }
+            if await !answers(timeout: timeout, ping: ping) { return }
+        }
+    }
+
+    /// A ping that never returns must not hold the check: the answer and the
+    /// timer race, and the first one wins. The ping task ends when the link
+    /// closes.
+    private static func answers(timeout: Duration, ping: @escaping @Sendable () async throws -> Bool) async -> Bool {
+        let once = Once()
+        return await withCheckedContinuation { continuation in
+            once.set(continuation)
+            Task {
+                let ok = await (try? ping()) ?? false
+                once.finish(ok)
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                once.finish(false)
+            }
+        }
+    }
+
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+        private var result: Bool?
+
+        func set(_ continuation: CheckedContinuation<Bool, Never>) {
+            lock.lock()
+            if let result {
+                lock.unlock()
+                continuation.resume(returning: result)
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+
+        func finish(_ value: Bool) {
+            lock.lock()
+            guard result == nil else { lock.unlock()
+                return
+            }
+            result = value
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(returning: value)
+        }
     }
 }

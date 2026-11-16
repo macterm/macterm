@@ -69,7 +69,7 @@ struct PasswordPromptMonitorStateTests {
             probes.isAppActive = { false }
             monitor = PasswordPromptMonitor(vault: vault, now: { world.now }, probes: probes)
             pane = Pane(projectPath: "/tmp", projectID: UUID())
-            view = pane.ensureNSView()
+            view = SurfaceRegistry.shared.ensureView(of: pane)
         }
 
         var state: ControlPasswordState { monitor.state(for: view) }

@@ -74,7 +74,7 @@ enum LayoutReconciler {
             // resolved `[user@]host:dir` cwd, so keying on it would respawn
             // every matched remote command pane).
             LayoutBuilder.canonicalizeLocal(
-                pane.isRemote ? pane.projectPath : (pane.nsView?.currentPwd ?? pane.projectPath)
+                pane.isRemote ? pane.projectPath : (SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath)
             )
         }
     ) -> Plan {

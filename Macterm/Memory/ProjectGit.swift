@@ -25,7 +25,7 @@ import Foundation
 ///
 /// A remote read is one `command.run` request to the host's server, over
 /// the host's one connection (`RemoteHosts.run`, 0058). It runs the same six
-/// commands on the host (`RemoteSpawn.gitProbeScript`), with the outputs
+/// commands on the host (`HostCommands.gitProbeScript`), with the outputs
 /// separated by `recordSeparator`. It never asks for a login: with no
 /// connection up, nothing is read.
 enum ProjectGit {
@@ -135,8 +135,8 @@ enum ProjectGit {
     static func remoteStatus(_ remote: ProjectPath) async -> RemoteResult {
         guard case let .remote(user, host, directory) = remote else { return .unreachable }
         let result = await RemoteHosts.shared.run(
-            ["/bin/sh", "-c", RemoteSpawn.gitProbeScript(directory: directory)],
-            destination: RemoteSpawn.destination(user: user, host: host),
+            ["/bin/sh", "-c", HostCommands.gitProbeScript(directory: directory)],
+            destination: HostCommands.destination(user: user, host: host),
             timeout: remoteTimeout
         )
         guard let result else { return .unreachable }
@@ -158,7 +158,7 @@ enum ProjectGit {
         }
     }
 
-    /// The six outputs of `RemoteSpawn.gitProbeScript`, split at the record
+    /// The six outputs of `HostCommands.gitProbeScript`, split at the record
     /// separator, through `GitStatusParser`. A reply with fewer parts has
     /// the rest as nil. The diff is last, so a separator inside it stays
     /// part of it.

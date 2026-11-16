@@ -6,8 +6,9 @@ name: Server
 # builds that the app bundles come from server-build.yml.
 #
 # The three Test checks are required on main, and a required check must report
-# on every pull request. So the workflow starts on every pull request, and each
-# job skips its steps when the pull request changes no file in the paths below.
+# on every pull request. So the workflow starts on every pull request and every
+# push to main, and each job skips its steps when the commit changes no file of
+# the `server` area of .github/path-areas.
 # The skip is at step level: a matrix job that a job-level if: skips reports
 # its unexpanded name, which never matches the required name.
 #
@@ -19,14 +20,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-    paths:
-      - "server/**"
-      - "protocol/**"
-      - "Macterm/Protocol/**"
-      - "scripts/build-server.sh"
-      - "scripts/protocol.sh"
-      - "scripts/server-zig.sh"
-      - ".github/workflows/server.yml"
 
 permissions:
   contents: read
@@ -62,23 +55,13 @@ jobs:
         with:
           fetch-depth: 2
 
-      # The files that the pull request changes, from the merge commit. This
-      # needs no API call: dorny/paths-filter failed once when the API call
-      # failed with an empty message (run 42713507061). On a push, the paths
-      # of the trigger already matched.
       - name: Find Server Changes
         id: changes
         working-directory: .
         shell: bash
-        run: |
-          server=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            files="$(git diff --no-renames --name-only HEAD^1 HEAD)"
-            if ! grep -qE '^(server/|protocol/|Macterm/Protocol/|scripts/build-server\.sh$|scripts/protocol\.sh$|scripts/server-zig\.sh$|\.github/workflows/server\.yml$)' <<<"$files"; then
-              server=false
-            fi
-          fi
-          echo "server=$server" | tee -a "$GITHUB_OUTPUT"
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: scripts/changed-areas.sh
 
       - name: Zig Version
         if: steps.changes.outputs.server == 'true'
@@ -151,9 +134,11 @@ jobs:
           key: ${{ steps.zig-cache.outputs.cache-primary-key }}
 
       # The Swift side of the protocol is generated from the Zig schema
-      # (design/003 §3). This step fails in three cases:
+      # (design/003 §3). This step fails in these cases:
       # - a generated file is not current, or someone edited it;
-      # - the schema breaks the add-only rule against the metadata on main;
+      # - the schema breaks the add-only rule against the metadata on main
+      #   or of the latest release, or adds to a released level;
+      # - a message gets or loses a sender (design/006 §2);
       # - a reply or an event holds a secret (design/006 §1).
       - name: Check the Generated Protocol Files
         if: steps.changes.outputs.server == 'true' && runner.os == 'macOS'
@@ -161,6 +146,8 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin main
           PROTOCOL_BASE=FETCH_HEAD scripts/protocol.sh --check
+          git fetch --no-tags --depth=1 --filter=blob:none origin 'refs/tags/v*:refs/tags/v*'
+          scripts/protocol.sh --check --base-release
 
       # A skipped test fails the step, so a missing tool cannot hide a test.
       # daemon_responsibility.bats tests a macOS concept, so Linux leaves it

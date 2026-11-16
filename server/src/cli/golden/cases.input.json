@@ -1,0 +1,2202 @@
+[
+  {
+    "arguments": [
+      "status"
+    ],
+    "method": null,
+    "responses": {
+      "status": {
+        "data": {
+          "status": {
+            "activeProject": "api",
+            "activeProjectID": "P1",
+            "pid": 4242,
+            "version": "1.34.0"
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "status",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "status": {
+        "data": {
+          "status": {
+            "activeProject": "api",
+            "activeProjectID": "P1",
+            "pid": 4242,
+            "version": "1.34.0"
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "status"
+    ],
+    "method": null,
+    "responses": {
+      "status": {
+        "data": {
+          "status": {
+            "pid": 4242,
+            "version": "1.34.0"
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "project.list": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "project.list": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "create",
+      "/tmp/api",
+      "--name",
+      "api",
+      "--select"
+    ],
+    "method": null,
+    "responses": {
+      "project.create": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "create",
+      "/tmp/api"
+    ],
+    "method": null,
+    "responses": {
+      "project.create": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "select",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "project.select": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "select",
+      "api",
+      "--window",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "project.select": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "rename",
+      "api",
+      "backend"
+    ],
+    "method": null,
+    "responses": {
+      "project.rename": {
+        "data": {
+          "projects": [
+            {
+              "active": true,
+              "id": "P1",
+              "index": 1,
+              "loaded": true,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 2
+            },
+            {
+              "active": false,
+              "id": "P2",
+              "index": 2,
+              "loaded": false,
+              "name": "web",
+              "path": "me@box:/srv/web"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "remove",
+      "api",
+      "--force"
+    ],
+    "method": null,
+    "responses": {
+      "project.remove": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "remove",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "project.remove": {
+        "error": {
+          "action": "pass --force",
+          "code": "busy",
+          "message": "a pane in api runs a program"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "tab.list": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "list",
+      "--project",
+      "api",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "tab.list": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "new",
+      "--project",
+      "api",
+      "--run",
+      "npm test"
+    ],
+    "method": null,
+    "responses": {
+      "tab.new": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "new",
+      "--no-focus"
+    ],
+    "method": null,
+    "responses": {
+      "tab.new": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "select",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "tab.select": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "rename",
+      "2",
+      "build"
+    ],
+    "method": null,
+    "responses": {
+      "tab.rename": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "rename",
+      "2",
+      "--reset"
+    ],
+    "method": null,
+    "responses": {
+      "tab.rename": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "move",
+      "2",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "tab.move": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "close",
+      "2",
+      "--force"
+    ],
+    "method": null,
+    "responses": {
+      "tab.close": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "close",
+      "9"
+    ],
+    "method": null,
+    "responses": {
+      "tab.close": {
+        "error": {
+          "code": "not_found",
+          "message": "no tab 9"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "pane.list": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "pane.list": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "inspect"
+    ],
+    "method": null,
+    "responses": {
+      "pane.inspect": {
+        "data": {
+          "inspect": {
+            "altScreen": false,
+            "cellHeightPx": 34,
+            "cellWidthPx": 16,
+            "cols": 120,
+            "contentScale": 2,
+            "foregroundArgv": [
+              "vim",
+              "a.txt"
+            ],
+            "foregroundPID": 901,
+            "heightPx": 1360,
+            "id": "A1",
+            "needsConfirmQuit": true,
+            "processExited": false,
+            "readOnly": false,
+            "rows": 40,
+            "scrollbackLen": 40,
+            "scrollbackOffset": 460,
+            "scrollbackTotal": 500,
+            "session": "macterm-api-8f327ce4a3f8",
+            "widthPx": 1920
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "inspect",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "pane.inspect": {
+        "data": {
+          "inspect": {
+            "altScreen": false,
+            "cellHeightPx": 34,
+            "cellWidthPx": 16,
+            "cols": 120,
+            "contentScale": 2,
+            "foregroundArgv": [
+              "vim",
+              "a.txt"
+            ],
+            "foregroundPID": 901,
+            "heightPx": 1360,
+            "id": "A1",
+            "needsConfirmQuit": true,
+            "processExited": false,
+            "readOnly": false,
+            "rows": 40,
+            "scrollbackLen": 40,
+            "scrollbackOffset": 460,
+            "scrollbackTotal": 500,
+            "session": "macterm-api-8f327ce4a3f8",
+            "widthPx": 1920
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "dump"
+    ],
+    "method": null,
+    "responses": {
+      "pane.dump": {
+        "data": {
+          "dump": {
+            "bytes": 22,
+            "id": "A1",
+            "scrollback": false,
+            "session": "macterm-api-8f327ce4a3f8",
+            "text": "$ ls\nREADME.md  src\n$ "
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "dump",
+      "--scrollback",
+      "--session",
+      "macterm-api-8f327ce4a3f8"
+    ],
+    "method": null,
+    "responses": {
+      "pane.dump": {
+        "data": {
+          "dump": {
+            "bytes": 22,
+            "id": "A1",
+            "scrollback": false,
+            "session": "macterm-api-8f327ce4a3f8",
+            "text": "$ ls\nREADME.md  src\n$ "
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "dump",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "pane.dump": {
+        "data": {
+          "dump": {
+            "bytes": 22,
+            "id": "A1",
+            "scrollback": false,
+            "session": "macterm-api-8f327ce4a3f8",
+            "text": "$ ls\nREADME.md  src\n$ "
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "split",
+      "--direction",
+      "right",
+      "--run",
+      "htop"
+    ],
+    "method": null,
+    "responses": {
+      "pane.split": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "split",
+      "--no-focus"
+    ],
+    "method": null,
+    "responses": {
+      "pane.split": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "focus",
+      "--pane",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "pane.focus": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "focus",
+      "--direction",
+      "left"
+    ],
+    "method": null,
+    "responses": {
+      "pane.focus": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "close",
+      "--pane",
+      "2",
+      "--force"
+    ],
+    "method": null,
+    "responses": {
+      "pane.close": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "run",
+      "ls"
+    ],
+    "method": null,
+    "responses": {
+      "pane.run": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "run",
+      "--no-submit",
+      "--",
+      "git",
+      "commit",
+      "-h"
+    ],
+    "method": null,
+    "responses": {
+      "pane.run": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "run",
+      "ls"
+    ],
+    "method": null,
+    "responses": {
+      "pane.run": {
+        "error": {
+          "code": "read_only",
+          "message": "the pane is read-only"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "key",
+      "ctrl+c"
+    ],
+    "method": null,
+    "responses": {
+      "pane.key": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "key",
+      "escape",
+      "--session",
+      "macterm-api-8f327ce4a3f8"
+    ],
+    "method": null,
+    "responses": {
+      "pane.key": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "zoom"
+    ],
+    "method": null,
+    "responses": {
+      "pane.zoom": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "resize-split",
+      "--axis",
+      "horizontal",
+      "--ratio",
+      "0.3"
+    ],
+    "method": null,
+    "responses": {
+      "pane.resize-split": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "grid",
+      "2x3"
+    ],
+    "method": null,
+    "responses": {
+      "grid": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "session",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "session.list": {
+        "data": {
+          "sessions": [
+            {
+              "clients": 1,
+              "leaderPID": 777,
+              "name": "macterm-api-8f327ce4a3f8",
+              "paneID": "A1"
+            },
+            {
+              "clients": 0,
+              "name": "macterm-old-000000000000"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "session",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "session.list": {
+        "data": {
+          "sessions": [
+            {
+              "clients": 1,
+              "leaderPID": 777,
+              "name": "macterm-api-8f327ce4a3f8",
+              "paneID": "A1"
+            },
+            {
+              "clients": 0,
+              "name": "macterm-old-000000000000"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "session",
+      "info",
+      "macterm-api-8f327ce4a3f8"
+    ],
+    "method": null,
+    "responses": {
+      "session.info": {
+        "data": {
+          "sessions": [
+            {
+              "clients": 1,
+              "leaderPID": 777,
+              "name": "macterm-api-8f327ce4a3f8",
+              "paneID": "A1"
+            },
+            {
+              "clients": 0,
+              "name": "macterm-old-000000000000"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "session",
+      "kill",
+      "macterm-api-8f327ce4a3f8"
+    ],
+    "method": null,
+    "responses": {
+      "session.kill": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "layout",
+      "apply",
+      "--project",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "layout.apply": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "layout",
+      "apply",
+      "--force"
+    ],
+    "method": null,
+    "responses": {
+      "layout.apply": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "layout",
+      "save",
+      "--project",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "layout.save": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "window",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "window.list": {
+        "data": {
+          "windows": [
+            {
+              "focused": true,
+              "id": "W1",
+              "index": 1,
+              "project": "api",
+              "projectID": "P1"
+            },
+            {
+              "focused": false,
+              "id": "W2",
+              "index": 2
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "window",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "window.list": {
+        "data": {
+          "windows": [
+            {
+              "focused": true,
+              "id": "W1",
+              "index": 1,
+              "project": "api",
+              "projectID": "P1"
+            },
+            {
+              "focused": false,
+              "id": "W2",
+              "index": 2
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "window",
+      "new"
+    ],
+    "method": null,
+    "responses": {
+      "window.new": {
+        "data": {
+          "windows": [
+            {
+              "focused": true,
+              "id": "W1",
+              "index": 1,
+              "project": "api",
+              "projectID": "P1"
+            },
+            {
+              "focused": false,
+              "id": "W2",
+              "index": 2
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "window",
+      "focus",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "window.focus": {
+        "data": {
+          "windows": [
+            {
+              "focused": true,
+              "id": "W1",
+              "index": 1,
+              "project": "api",
+              "projectID": "P1"
+            },
+            {
+              "focused": false,
+              "id": "W2",
+              "index": 2
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "window",
+      "close",
+      "--window",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "window.close": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "widget.list": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "widget.list": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "new",
+      "--size",
+      "3x3",
+      "--run",
+      "btop"
+    ],
+    "method": null,
+    "responses": {
+      "widget.new": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "set",
+      "1",
+      "--size",
+      "4x4"
+    ],
+    "method": null,
+    "responses": {
+      "widget.set": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "edit",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "widget.edit": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "done"
+    ],
+    "method": null,
+    "responses": {
+      "widget.done": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "remove",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "widget.remove": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "palette",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "palette.list": {
+        "data": {
+          "palettes": [
+            {
+              "file": "branches.yaml",
+              "id": "git/branches",
+              "keybind": "cmd+shift+b",
+              "name": "Git Branches"
+            },
+            {
+              "error": "line 3: no such key",
+              "file": "broken.yaml",
+              "id": "mine/broken"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "palette",
+      "list",
+      "--json"
+    ],
+    "method": null,
+    "responses": {
+      "palette.list": {
+        "data": {
+          "palettes": [
+            {
+              "file": "branches.yaml",
+              "id": "git/branches",
+              "keybind": "cmd+shift+b",
+              "name": "Git Branches"
+            },
+            {
+              "error": "line 3: no such key",
+              "file": "broken.yaml",
+              "id": "mine/broken"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "palette",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "palette.list": {
+        "data": {
+          "palettes": []
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tutor",
+      "project"
+    ],
+    "method": null,
+    "responses": {
+      "tutor.render": {
+        "data": {
+          "tutorial": {
+            "text": "Welcome to projects.\nPress ⌘N for a tab.",
+            "topic": "project"
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "status"
+    ],
+    "method": null,
+    "responses": {
+      "status": {
+        "error": {
+          "code": "starting",
+          "message": "Macterm is still starting"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "status"
+    ],
+    "method": null,
+    "responses": {
+      "status": {
+        "error": {
+          "action": "see the log",
+          "code": "internal",
+          "message": "something broke"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "list",
+      "--project",
+      "nope"
+    ],
+    "method": null,
+    "responses": {
+      "pane.list": {
+        "error": {
+          "action": "run: macterm project list",
+          "code": "not_found",
+          "message": "no project nope"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "run",
+      "ls",
+      "-la"
+    ],
+    "method": null
+  },
+  {
+    "arguments": [
+      "nosuchverb"
+    ],
+    "method": null
+  },
+  {
+    "arguments": [
+      "tab",
+      "rename"
+    ],
+    "method": null
+  },
+  {
+    "arguments": [
+      "palette",
+      "exec"
+    ],
+    "method": null
+  },
+  {
+    "arguments": [
+      "pane",
+      "inspect",
+      "--project",
+      "api",
+      "--tab",
+      "2",
+      "--pane",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "pane.inspect": {
+        "data": {
+          "inspect": {
+            "altScreen": false,
+            "cellHeightPx": 34,
+            "cellWidthPx": 16,
+            "cols": 120,
+            "contentScale": 2,
+            "foregroundArgv": [
+              "vim",
+              "a.txt"
+            ],
+            "foregroundPID": 901,
+            "heightPx": 1360,
+            "id": "A1",
+            "needsConfirmQuit": true,
+            "processExited": false,
+            "readOnly": false,
+            "rows": 40,
+            "scrollbackLen": 40,
+            "scrollbackOffset": 460,
+            "scrollbackTotal": 500,
+            "session": "macterm-api-8f327ce4a3f8",
+            "widthPx": 1920
+          }
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "split",
+      "--session",
+      "macterm-api-8f327ce4a3f8",
+      "--direction",
+      "auto"
+    ],
+    "method": null,
+    "responses": {
+      "pane.split": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "zoom",
+      "--project",
+      "api",
+      "--tab",
+      "1",
+      "--pane",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "pane.zoom": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "list",
+      "--project",
+      "api",
+      "--tab",
+      "2"
+    ],
+    "method": null,
+    "responses": {
+      "pane.list": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "grid",
+      "2x2",
+      "--run",
+      "htop",
+      "--project",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "grid": {
+        "data": {
+          "panes": [
+            {
+              "cwd": "/tmp/api",
+              "focused": true,
+              "id": "A1",
+              "index": 1,
+              "process": "vim",
+              "session": "macterm-api-8f327ce4a3f8",
+              "state": "running",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            },
+            {
+              "focused": false,
+              "id": "A2",
+              "index": 2,
+              "session": "macterm-api-0a1b2c3d4e5f",
+              "tabID": "T1",
+              "tabIndex": 1,
+              "title": "zsh"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "select",
+      "2",
+      "--project",
+      "api",
+      "--window",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "tab.select": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh"
+            },
+            {
+              "active": false,
+              "id": "T2",
+              "index": 2,
+              "paneCount": 3,
+              "title": "build"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "widget",
+      "new",
+      "--name",
+      "load"
+    ],
+    "method": null,
+    "responses": {
+      "widget.new": {
+        "data": {
+          "widgets": [
+            {
+              "columns": 3,
+              "command": "btop",
+              "editing": false,
+              "id": "G1",
+              "index": 1,
+              "name": "load",
+              "rows": 3,
+              "session": "macterm-widget-1",
+              "size": "3x3",
+              "x": 10,
+              "y": 20
+            },
+            {
+              "columns": 2,
+              "editing": true,
+              "id": "G2",
+              "index": 2,
+              "rows": 2,
+              "session": "macterm-widget-2",
+              "size": "2x2",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "dump"
+    ],
+    "method": null,
+    "responses": {
+      "pane.dump": {
+        "error": {
+          "code": "no_surface",
+          "message": "the pane has no terminal yet"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "pane",
+      "focus",
+      "--pane",
+      "1"
+    ],
+    "method": null,
+    "responses": {
+      "pane.focus": {
+        "error": {
+          "code": "ambiguous",
+          "message": "2 panes match"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "app_version": 1,
+    "arguments": [
+      "tab",
+      "new",
+      "--no-focus"
+    ],
+    "method": null
+  },
+  {
+    "app_version": 1,
+    "arguments": [
+      "pane",
+      "split",
+      "--no-focus"
+    ],
+    "method": null
+  }
+]

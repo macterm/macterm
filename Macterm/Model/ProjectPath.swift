@@ -121,7 +121,7 @@ enum ProjectPath: Equatable {
     }
 
     /// The parsed spec when `raw` is a remote path; nil for local or invalid.
-    /// The typed input for `RemoteSpawn` call sites.
+    /// The typed input for `HostCommands` call sites.
     static func remote(from raw: String) -> ProjectPath? {
         guard let parsed = parse(raw), case .remote = parsed else { return nil }
         return parsed

@@ -68,7 +68,7 @@ final class SurfaceScrollView: NSScrollView {
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
 
     /// The container this view is supposed to live in (set by
-    /// `TerminalSurface.attach`, cleared by `Pane.destroySurface`). During a
+    /// `TerminalSurface.attach`, cleared by `PaneSurface.destroy`). During a
     /// split-tree remount SwiftUI can tear down the OLD hierarchy after the
     /// new one has already adopted this shared view, yanking it out of its
     /// new superview (#227 drag-and-drop reorders — the pane went blank until
@@ -83,7 +83,7 @@ final class SurfaceScrollView: NSScrollView {
     /// to heal into — the weak `reattachHost` died with a discarded SwiftUI
     /// container. Wired to `Pane.requestSurfaceReattach`, which re-renders
     /// the pane's subtree so SwiftUI re-attaches via a container that is
-    /// guaranteed alive. Cleared by `Pane.destroySurface`.
+    /// guaranteed alive. Cleared by `PaneSurface.destroy`.
     var onOrphaned: (() -> Void)?
 
     /// Re-parent into `host` (idempotent; sized to fill it).

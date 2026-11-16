@@ -200,7 +200,7 @@ struct PinnedLayoutStore {
         """
         // A real ProjectFile whose reserved `path:` marks it as the pinned
         // set — one schema for every layout file, modeline included.
-        let body = try ProjectFile(name: nil, path: PinnedTabs.pathMarker, zmxPath: nil, tabs: tabs).yaml()
+        let body = try ProjectFile(name: nil, path: PinnedTabs.pathMarker, tabs: tabs).yaml()
         let text = "\(header)\n\(body)"
         try text.write(to: url, atomically: true, encoding: .utf8)
         logger.info("Wrote \(url.path, privacy: .public) with \(tabs.count, privacy: .public) tabs")

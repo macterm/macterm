@@ -18,31 +18,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The path areas of .github/path-areas that this commit changes.
   changes:
     name: Detect changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
-      swift: ${{ steps.filter.outputs.swift }}
+      style: ${{ steps.changes.outputs.style }}
     steps:
       - uses: useblacksmith/checkout@v1
-      - uses: dorny/paths-filter@v4
-        id: filter
         with:
-          # scripts/** because format.sh/lint.sh/_lib.sh are the job bodies;
-          # mise.toml because it pins the swiftformat/swiftlint versions.
-          filters: |
-            swift:
-              - "**/*.swift"
-              - "mise.toml"
-              - "scripts/**"
-              - ".swiftformat"
-              - ".swiftlint.yml"
-              - ".github/workflows/checks.yml"
+          fetch-depth: 2
+      - name: Find Changes
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: scripts/changed-areas.sh
 
   format:
     name: Format
     needs: changes
-    if: needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.style == 'true'
     runs-on: xcode-27
     steps:
       - name: Checkout
@@ -56,7 +51,7 @@ jobs:
   lint:
     name: Lint
     needs: changes
-    if: needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.style == 'true'
     runs-on: xcode-27
     steps:
       - name: Checkout
@@ -66,3 +61,13 @@ jobs:
 
       - name: Lint
         run: mise run lint --verbose
+
+  # Each symbol and path that an AGENTS.md names exists in the tree. It runs on
+  # every commit, because a change to any file can remove a name.
+  agents:
+    name: Agents Map
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: useblacksmith/checkout@v1
+      - name: Check Agents Map
+        run: python3 scripts/check-agents.py

@@ -88,7 +88,7 @@ struct PinnedLayoutStoreTests {
         try store.write(tabs: [])
         let projectFiles = ProjectFileStore(directoryURL: dir)
         try projectFiles.write(
-            ProjectFile(name: "api", path: "/tmp/api", zmxPath: nil, tabs: nil),
+            ProjectFile(name: "api", path: "/tmp/api", tabs: nil),
             projectName: "api"
         )
 
@@ -105,7 +105,7 @@ struct PinnedLayoutStoreTests {
         let projectFiles = ProjectFileStore(directoryURL: dir)
 
         let target = try projectFiles.write(
-            ProjectFile(name: "Pinned", path: "/tmp/whatever", zmxPath: nil, tabs: nil),
+            ProjectFile(name: "Pinned", path: "/tmp/whatever", tabs: nil),
             projectName: "Pinned"
         )
 
@@ -122,7 +122,7 @@ struct PinnedLayoutStoreTests {
         let projectFiles = ProjectFileStore(directoryURL: dir)
 
         let target = try projectFiles.write(
-            ProjectFile(name: "api", path: "/tmp/api", zmxPath: nil, tabs: nil),
+            ProjectFile(name: "api", path: "/tmp/api", tabs: nil),
             projectName: "api"
         )
 
@@ -207,7 +207,7 @@ struct PinnedLayoutStoreTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = WorkspaceStore(fileURL: tmp)
 
-        let ws = Workspace(projectID: PinnedTabs.projectID, projectPath: "/tmp")
+        let ws = Workspace(id: PinnedTabs.workspaceID, projectPath: "/tmp")
         let liveTab = ws.tabs[0]
         let records = [
             PinnedTabRecord(

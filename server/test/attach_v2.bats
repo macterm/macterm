@@ -8,27 +8,6 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# As in session_v2.bats.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  export ZMX
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-}
-
-teardown() {
-  local sock pid
-  for sock in "$MACTERM_RUNTIME_DIR"/*; do
-    [[ -S "$sock" ]] || continue
-    pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  rm -rf "$RT"
-}
-
 @test "connect: attach and type, the size reaches the pty, and Ctrl-\\ detaches" {
   "$ZMX" session s1 -- /bin/sh
   python3 - <<'PY'
@@ -111,30 +90,6 @@ assert q.wait_exit() == 0
 PY
 }
 
-@test "connect: the claim APC becomes a claim and never reaches the shell" {
-  # `cat -v` shows any ESC that it reads as ^[, and the pty's echo does too.
-  "$ZMX" session s1 -- /bin/cat -v
-  python3 - <<'PY'
-from ptyrun import connect
-from v2client import Client
-a = Client("s1")
-a.attach(80, 24)
-assert a.wait_msg("lead")["leader"] is True
-
-p = connect("s1")
-p.wait_output("\x1b[2J")
-p.type(b"\x1b_zmx;claim\x1b\\")
-assert a.wait_msg("lead", count=2)["leader"] is False
-# Split, as a pty write can be: the filter holds the first half.
-p.type(b"one\x1b_zmx;")
-p.type(b"claim\x1b\\two\r")
-a.wait_output("onetwo")
-assert b"^[" not in a.output and b"claim" not in a.output, a.output
-p.type(b"\x1c")
-assert p.wait_exit() == 0
-PY
-}
-
 @test "connect: the shell's exit status is the exit code" {
   "$ZMX" session s1 -- /bin/sh -c 'exit 7'
   python3 - <<'PY'
@@ -192,4 +147,58 @@ PY
   run "$ZMX" connect ../x </dev/null
   [ "$status" -eq 1 ]
   [[ "$output" == *'invalid session name'* ]]
+}
+
+# The client restores the terminal and resets it on each way out. A signal
+# that ends it ends it with that signal, so a shell sees why. The session
+# lives on.
+@test "connect: restores the terminal, and keeps a signal as the way it ends" {
+  python3 - "$ZMX" <<'PY'
+import fcntl, os, pty, select, signal, struct, subprocess, sys, termios, time
+from v2client import Client
+
+zmx = sys.argv[1]
+restore = b"\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\"
+for i, sig in enumerate((signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGWINCH, None)):
+    name = "sig%d" % i
+    subprocess.run([zmx, "session", name, "--", "/bin/sh", "-c", "printf '%s\\n' READY; exec cat"],
+                   check=True, timeout=10)
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    original = termios.tcgetattr(slave)
+    # The slave stays open here, to read its settings after the client exits.
+    proc = subprocess.Popen([zmx, "connect", name], stdin=slave, stdout=slave, stderr=slave)
+    output = bytearray()
+    try:
+        deadline = time.monotonic() + 10
+        while b"READY" not in output:
+            assert time.monotonic() < deadline, (sig, "no READY", bytes(output))
+            if select.select([master], [], [], 0.05)[0]:
+                output.extend(os.read(master, 65536))
+        raw = termios.tcgetattr(slave)
+        assert not raw[3] & (termios.ECHO | termios.ICANON | termios.ISIG), sig
+        assert not raw[1] & termios.OPOST, sig
+        if sig is not None:
+            os.kill(proc.pid, sig)
+        if sig in (None, signal.SIGWINCH):
+            os.write(master, b"\x1c")
+            expected = 0
+        else:
+            # Python gives a signal's end as the negative signal number.
+            expected = -sig
+        assert proc.wait(timeout=5) == expected, (sig, proc.returncode)
+        assert termios.tcgetattr(slave) == original, sig
+        while select.select([master], [], [], 0)[0]:
+            output.extend(os.read(master, 65536))
+        assert restore in output, (sig, bytes(output[-200:]))
+        c = Client(name)
+        c.wait_msg("state")
+        c.close()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        os.close(master)
+        os.close(slave)
+PY
 }

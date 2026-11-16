@@ -83,14 +83,14 @@ extension AppCommand {
         case .pinTab:
             // Pin the active tab. Only from a real project — the
             // pinned workspace's own tabs are already pinned.
-            guard let projectID, projectID != PinnedTabs.projectID,
+            guard let projectID, projectID != PinnedTabs.workspaceID,
                   let tab = ctx.appState.workspaces[projectID]?.activeTab
             else { return nil }
             return { ctx.appState.pinTab(tab.id, fromProject: projectID) }
         case .unpinTab:
             // Unpin the active pinned tab — back to its origin project.
-            guard projectID == PinnedTabs.projectID,
-                  let tab = ctx.appState.workspaces[PinnedTabs.projectID]?.activeTab
+            guard projectID == PinnedTabs.workspaceID,
+                  let tab = ctx.appState.workspaces[PinnedTabs.workspaceID]?.activeTab
             else { return nil }
             return { ctx.appState.unpinTab(tab.id, projects: ctx.projectStore.projects) }
         case .separateAllPanes:
@@ -203,14 +203,14 @@ extension AppCommand {
             // The mode lives on the pane's view: it reads the keys there and
             // drives the surface's selection. No surface, no mode.
             guard let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView
+                  let view = SurfaceRegistry.shared.view(of: pane)
             else { return nil }
             return { view.copyMode.toggle() }
         case .readOnlyMode:
             // The state lives in libghostty, which enforces it: the command
             // is the same `toggle_readonly` that a ghostty keybind sends.
             guard let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView, view.surface != nil
+                  let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.sendBindingAction("toggle_readonly") }
         case .restartSession:
@@ -225,7 +225,7 @@ extension AppCommand {
             // focused pane. Only where Apple's on-device model can run.
             guard OnDeviceModel.availability == .available,
                   let projectID, let pane = ctx.appState.focusedPane(for: projectID),
-                  let view = pane.nsView, view.surface != nil
+                  let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.explainOutput() }
         case .openProject:
@@ -254,7 +254,7 @@ extension AppCommand {
             // project's identity into a local-looking path.
             guard let current, !current.isRemote,
                   let pane = ctx.appState.focusedPane(for: current.id),
-                  let pwd = pane.nsView?.currentPwd, !pwd.isEmpty,
+                  let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd, !pwd.isEmpty,
                   current.path != pwd
             else { return nil }
             return { ctx.appState.replaceProjectPathWithCurrentDir(projectStore: ctx.projectStore) }

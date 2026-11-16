@@ -59,7 +59,6 @@ sources = [
   "scripts/build-server.sh",
   "scripts/_lib.sh",
   "server/**/*",
-  "protocol/**/*",
 ]
 outputs = { auto = true }
 run = """
@@ -161,20 +160,8 @@ run = """
 [tasks.test]
 description = "Run the test suite"
 usage = 'flag "-v --verbose" help="Stream raw output instead of the spinner"'
-# Tests are hosted inside the debug app, so the app and CLI sources are inputs
-# too, as is project.yml (test.sh regenerates the Xcode project from it).
-# DerivedData is a build dir, not a stable artifact to stat, hence `auto`.
-sources = [
-  "Macterm/**/*.swift",
-  "CLI/**/*.swift",
-  "MactermTests/**/*.swift",
-  "Macterm/Info.plist",
-  "project.yml",
-  "Configs/*.xcconfig",
-  "scripts/test.sh",
-  "scripts/setup.sh",
-]
-outputs = { auto = true }
+# No `sources`: the tests read files of many kinds, and a list that misses
+# one makes the task pass without a run. Every run runs every test.
 run = """
   source scripts/_lib.sh
   if [[ "$usage_verbose" == "true" ]]; then
@@ -212,6 +199,7 @@ description = "Write the Swift side of the protocol from the Zig schema (use --c
 usage = '''
 flag "-v --verbose" help="Stream raw output instead of the spinner"
 flag "--check" help="Fail if a generated file is not current or the schema breaks the add-only rule, and change nothing (CI mode)"
+flag "--base-release" help="With --check: check against the latest release, where an addition needs a higher level"
 '''
 run = """
   source scripts/_lib.sh
@@ -220,6 +208,9 @@ run = """
   if [[ "$usage_check" == "true" ]]; then
     args+=(--check)
     msg="Checking the protocol files..."
+  fi
+  if [[ "$usage_base_release" == "true" ]]; then
+    args+=(--base-release)
   fi
   if [[ "$usage_verbose" == "true" ]]; then
     ./scripts/protocol.sh "${args[@]}"

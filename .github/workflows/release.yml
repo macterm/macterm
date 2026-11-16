@@ -114,12 +114,6 @@ jobs:
       # request: the pinned Xcode, the GhosttyKit cache, the stable signing
       # certificate (TCC grants survive updates) and the Sparkle key. Only
       # this job compiles — `release` and `bump-cask` never invoke xcodebuild.
-      - name: Download the Server
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
-
       - name: Build Universal Release Artifact
         uses: ./.github/actions/build-release
         with:

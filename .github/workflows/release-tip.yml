@@ -150,7 +150,7 @@ jobs:
             # number is pure waste. Mirrors ghostty's paths-filter with
             # `base: tip`, expressed in git so a missing tag is simply "build".
             CHANGED=$(git diff --name-only "$TIP_SHA" "$SHA" \
-              | grep -vE '^(README\.md|AGENTS\.md|CLAUDE\.md|LICENSE|\.github/(ISSUE_TEMPLATE/|.*\.md$))' \
+              | grep -vE '^(README\.md|(.*/)?(AGENTS|CLAUDE)\.md$|LICENSE|\.github/(ISSUE_TEMPLATE/|.*\.md$))' \
               || true)
             if [[ -z "$CHANGED" ]]; then
               skip "only docs changed since $TIP_SHA"
@@ -294,13 +294,6 @@ jobs:
       # privacy grants of everyone who follows tip on every single build.
       # build.sh bakes MactermUpdateChannel=tip into the bundle, so this DMG
       # defaults to following tip even if someone downloads it by hand.
-      - name: Download the Server
-        if: steps.published.outputs.published != 'true'
-        uses: actions/download-artifact@v8
-        with:
-          name: server
-          path: build/server
-
       - name: Build Universal Tip Artifact
         if: steps.published.outputs.published != 'true'
         uses: ./.github/actions/build-release

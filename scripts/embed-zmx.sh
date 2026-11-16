@@ -2,7 +2,7 @@
 # Embed the built zmx binary into the app bundle at Contents/Resources/zmx/zmx,
 # and the gzip server builds for every host target at Contents/Resources/server.
 #
-# Runs as a project.yml post-compile build phase. ZmxClient resolves the binary
+# Runs as a project.yml post-compile build phase. LocalServer.bundled resolves the binary
 # via Bundle.main.url(forResource:"zmx", withExtension:nil, subdirectory:"zmx"),
 # matching this `zmx/zmx` layout. Kept in its own `zmx/` subdir (not loose in
 # Resources/) so the lookup is unambiguous and mirrors Supacode's bundle layout.
@@ -44,7 +44,7 @@ cp -p "${license_source}" "${destination_dir}/LICENSE"
 # Debug build that has one, the stable release certificate in CI) and, more
 # importantly, the app's own bundle identifier. Each zmx session daemon
 # disclaims the app at spawn and becomes the *responsible process* for every
-# program in its session (see the fork's daemonize.zig and AGENTS.md), and
+# program in its session (see the fork's daemonize.zig and server/AGENTS.md), and
 # macOS identifies a responsible process by its code signature's identifier:
 # with Macterm's, the daemon resolves to Macterm's name, usage descriptions
 # and existing Local Network / TCC grants, so pane programs are covered by the
@@ -61,19 +61,19 @@ echo "✓ embedded zmx → ${destination_dir}/zmx (signed as ${PRODUCT_BUNDLE_ID
 # for each target, named for the build key: macOS universal from the signed
 # copy above, the Linux builds as setup.sh made them. The app's own signature
 # seals them, as every file in Contents/Resources.
-# The key is the one setup installed (`.server-key`). The app reads it back
-# from these names (`ServerBuilds.bundledKey`).
-stamp_file="${srcroot}/.server-key"
-if [[ ! -s "${stamp_file}" ]]; then
-  echo "error: ${stamp_file} is not there. Run 'mise run setup' to get it." >&2
+# The key is the one of the build that setup installed (its manifest). The app
+# reads it back from these names (`ServerBuilds.bundledKey`).
+manifest="${srcroot}/Macterm/Resources/zmx/server.json"
+if ! key="$(plutil -extract key raw -o - "${manifest}" 2>/dev/null)" || [[ -z "${key}" ]]; then
+  echo "error: ${manifest} is not there. Run 'mise run setup' to get it." >&2
   exit 1
 fi
-key="$(head -n 1 "${stamp_file}")"
 server_dir="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/server"
 rm -rf "${server_dir}"
 mkdir -p "${server_dir}"
 gzip -n -9 -c "${destination_dir}/zmx" > "${server_dir}/macterm-${key}-universal-macos.gz"
-for target in x86_64-linux aarch64-linux; do
+for target in $("${srcroot}/scripts/build-server.sh" targets); do
+  [[ "${target}" == universal-macos ]] && continue
   linux_build="${srcroot}/Macterm/Resources/zmx/macterm-${key}-${target}.gz"
   if [[ ! -f "${linux_build}" ]]; then
     echo "error: ${linux_build} is not there. Run 'mise run setup' to get it." >&2

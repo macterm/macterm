@@ -41,18 +41,15 @@ enum ProcessInspector {
         if let resolved = ZmxForegroundResolver.foregroundPID(sessionName: pane.sessionName) {
             return resolved
         }
-        // For a WRAPPED pane, libghostty's `foregroundPID` is the local
-        // `zmx connect` CLIENT — never the real shell (that runs in the
-        // session, reachable only by session name via the resolver above). If
-        // the resolver hasn't populated the cache yet (the async-registration
-        // race right after spawn/restore), returning the client pid would make
-        // the tab read `zmx` and Save Layout capture the wrapper argv as a
-        // `run:` command. Return nil instead: the pane reads as resolving
-        // (falls back to the shell name, saves no run) until the cache catches
-        // up. The client-pid fallback is only correct for UNWRAPPED panes
-        // (zmx unbundled / over the socket-path budget).
-        if pane.nsView?.isZmxWrapped == true { return nil }
-        return pane.nsView?.foregroundPID
+        // A pane that runs in a local session has no process on its surface:
+        // the shell runs in the session, reachable only by session name via
+        // the resolver above. Until the resolver's cache has the session (the
+        // async-registration race right after spawn/restore), the pane reads
+        // as resolving (falls back to the shell name, saves no run). The
+        // surface's own pid is only correct for a plain shell (no bundled
+        // server, or a bypass), also when a palette command wraps it.
+        if SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true { return nil }
+        return SurfaceRegistry.shared.view(of: pane)?.foregroundPID
     }
 
     /// The command running in the pane's foreground, or nil if the pane is idle
@@ -348,20 +345,17 @@ enum ProcessInspector {
     /// perpetual work without app-specific process-name exclusions.
     @MainActor
     static func terminalInputIsRaw(forPane pane: Pane) -> Bool {
-        // For a wrapped pane, probe the SESSION's pty: the `zmx connect`
-        // client keeps the client-side pty raw permanently (it forwards
-        // keystrokes), which would misread every wrapped pane as a raw-mode
-        // TUI and break the status indicator's canonical-command detection.
+        // For a pane that runs in a local session, probe the SESSION's pty:
+        // its surface has no pty of its own.
         let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, pane.nsView?.isZmxWrapped == true {
-            // A wrapped pane whose session tty isn't cached yet must NOT fall
-            // back to the client-side tty: the zmx connect client keeps that
-            // pty permanently raw, so the answer would flap raw/canonical
-            // across cache refreshes — each flip republishes execution state
-            // and re-renders, which is one edge of the frozen-render loop.
+        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true {
+            // A session pane whose tty isn't cached yet has no other tty to
+            // read: answer canonical, so the state does not flap across cache
+            // refreshes (each flip republishes execution state and
+            // re-renders).
             return false
         }
-        return terminalInputIsRaw(ttyPath: daemonTTY ?? pane.nsView?.ttyName)
+        return terminalInputIsRaw(ttyPath: daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName)
     }
 
     static func terminalInputIsRaw(ttyPath: String?) -> Bool {
@@ -426,13 +420,13 @@ enum ProcessInspector {
     }
 
     /// The tty whose line discipline the pane's programs read through: the
-    /// zmx daemon's pty for a wrapped pane (nil until it is cached, never the
-    /// attach client's permanently raw one), the surface's own otherwise.
+    /// session's pty for a pane that runs in a local session (nil until it is
+    /// cached), the surface's own otherwise.
     @MainActor
     private static func lineDisciplineTTYPath(forPane pane: Pane) -> String? {
         let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, pane.nsView?.isZmxWrapped == true { return nil }
-        return daemonTTY ?? pane.nsView?.ttyName
+        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true { return nil }
+        return daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName
     }
 
     /// The current working directory of the pane's foreground process, read
