@@ -105,6 +105,9 @@ extension Pane {
         view.onRemoteForeground = { [weak self] foreground in
             self?.applyRemoteForeground(foreground)
         }
+        view.onRemoteTtyMode = { [weak self] mode in
+            self?.remoteLineMode = mode
+        }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
             guard let self else { return }
             // A command boundary is exactly when the pane's identity changes —

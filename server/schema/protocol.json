@@ -394,6 +394,14 @@
       "senders": [
         "session"
       ]
+    },
+    {
+      "name": "tty_mode",
+      "type": "TtyMode",
+      "since": 3,
+      "senders": [
+        "session"
+      ]
     }
   ],
   "types": [
@@ -1302,6 +1310,13 @@
           "since": 1
         },
         {
+          "name": "tty",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        },
+        {
           "name": "resume_epoch",
           "type": "u64",
           "optional": true,
@@ -1756,6 +1771,26 @@
           "type": "u64",
           "optional": false,
           "since": 2
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TtyMode",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "canonical",
+          "type": "bool",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "echo",
+          "type": "bool",
+          "optional": false,
+          "since": 3
         }
       ],
       "cases": [],

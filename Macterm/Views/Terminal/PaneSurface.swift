@@ -236,6 +236,7 @@ final class PaneSurface: Identifiable {
         view.onOutputActivity = nil
         view.onSnapshotMark = nil
         view.onRemoteForeground = nil
+        view.onRemoteTtyMode = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil
         view.onReadOnlyChange = nil

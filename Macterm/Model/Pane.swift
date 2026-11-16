@@ -55,7 +55,10 @@ final class Pane: Identifiable {
     /// key (`RemoteHosts`). Its frozen screen is blurred and dimmed, as a
     /// mirror that does not lead is, so that it does not look live. Never
     /// persisted.
-    var isRemoteLinkLost = false
+    var isRemoteLinkLost = false {
+        didSet { if isRemoteLinkLost { remoteLineMode = nil } }
+    }
+
     /// A lost pane that shows a line of Macterm's (why the connect failed,
     /// "Press a key to try again."): the leaf only dims, so that the line
     /// stays legible. Set by `RemoteHosts` with the line, cleared when the
@@ -688,10 +691,18 @@ final class Pane: Identifiable {
         if icon != agentIcon { agentIcon = icon }
     }
 
+    /// How the host's pty reads input, from the session's `tty_mode`. nil
+    /// until the first report, and for a pane with no host session.
+    @ObservationIgnored
+    var remoteLineMode: TerminalLineMode?
+
     /// The latest report's shell verdict on the foreground (see
     /// `applyRemoteForeground`).
     @ObservationIgnored
-    private var remoteForegroundIsShell = false
+    private(set) var remoteForegroundIsShell = false
+
+    /// The latest report, for the password asker.
+    var remoteForegroundReport: RemoteForeground? { lastAppliedRemoteForeground }
 
     /// The report the agent logo was last matched against.
     @ObservationIgnored
@@ -789,6 +800,7 @@ final class Pane: Identifiable {
         cancelHeldTitle()
         guard hadView else { return }
         isReceivingRemoteSnapshot = false
+        remoteLineMode = nil
         // A remote pane's report described the connection that goes now.
         // The next connection's session reports again; until then nothing
         // is known, so the close falls back to the surface's reading.

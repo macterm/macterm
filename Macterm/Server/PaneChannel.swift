@@ -18,6 +18,7 @@ enum PaneChannelEvent: Equatable {
     case exit(MactermProtocol.Exit)
     case title(Data)
     case foreground(MactermProtocol.Foreground)
+    case ttyMode(MactermProtocol.TtyMode)
     case other(String)
 
     init?(_ frame: ProtocolFrame) {
@@ -50,6 +51,7 @@ enum PaneChannelEvent: Equatable {
         case let .exit(exit): .exit(exit)
         case let .title(title): .title(title.title.bytes)
         case let .foreground(foreground): .foreground(foreground)
+        case let .ttyMode(mode): .ttyMode(mode)
         default: .other(name)
         }
     }

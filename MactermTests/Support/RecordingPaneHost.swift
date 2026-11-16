@@ -56,6 +56,7 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneSnapshot(started _: Bool) {}
+    func paneTtyMode(_: MactermProtocol.TtyMode) {}
     func paneLead(_ leader: Bool?) {
         lock.lock()
         state.leads.append(leader)

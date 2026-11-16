@@ -569,6 +569,9 @@ pub const Attach = struct {
     /// The client wants `foreground` messages. The session reads the pty's
     /// foreground only while a client that asked for them is connected.
     foreground: bool = false,
+    /// The client wants `tty_mode` messages. The session reads the pty's line
+    /// modes only while a client that asked for them is connected.
+    tty: bool = false,
     /// A client that lost its link asks to resume (design/003 §7): the
     /// `epoch` of the session's `hello` and the offset after the last output
     /// byte that it got. If the session still holds the output after that
@@ -577,7 +580,7 @@ pub const Attach = struct {
     resume_epoch: ?u64 = null,
     resume_offset: ?u64 = null,
 
-    pub const field_since = .{ .resume_epoch = 2, .resume_offset = 2 };
+    pub const field_since = .{ .resume_epoch = 2, .resume_offset = 2, .tty = 3 };
 };
 
 /// The client's new size. Only the leader's size reaches the pty.
@@ -745,6 +748,18 @@ pub const Foreground = struct {
     comm: msgpack.Bin,
     /// The command line, its arguments joined by spaces.
     args: msgpack.Bin,
+};
+
+/// How the pty reads input (`termios` `ICANON` and `ECHO`). A password read
+/// is canonical with echo off. Sent when a mode changes, and to a client
+/// that connects or catches up, if its `attach` asked for it.
+pub const TtyMode = struct {
+    pub const name = "tty_mode";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    canonical: bool,
+    echo: bool,
 };
 
 pub const MarkKind = enum {
@@ -931,7 +946,7 @@ pub const max_program_records = 64;
 pub const pane_messages = .{
     State, Attach, Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End, Refresh,
     Title, Cwd,    Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed,
+    Resumed, TtyMode,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

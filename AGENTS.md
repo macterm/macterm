@@ -218,4 +218,4 @@ Macterm-side settings go through `Preferences`. Settings that have the shape of 
 - **`macos-hidden = always` costs the menu bar**. Settings, Quit, About and Check for Updates have no route while it is on. Set the own preferences of Macterm before you switch it on.
 - **Pane IDs are not stable across restarts.**
 - **Desktop widgets are not in the widget gallery of the system**. See `Macterm/App/AGENTS.md`. They also do not take the monochrome look of the system while an app is in front.
-- **Macterm detects password prompts only where it can read the tty that prompts**. This means local panes. It does not see `sudo` on a remote host, or anything behind an `ssh` that you typed by hand. It does not see prompts in raw mode that draw their own `*` mask either.
+- **Macterm detects password prompts only where it can read the tty that prompts**. This means local panes, and remote panes whose host session reports its tty (`tty_mode`, protocol level 3). It does not see anything behind an `ssh` that you typed by hand. It does not see prompts in raw mode that draw their own `*` mask either.
