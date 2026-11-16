@@ -7,8 +7,8 @@
 # (server), session-bench.yml (bench), docs.yml (docs).
 
 # The app, its tests and everything that they build or read: the bundle, the
-# build recipes and the Xcode pin, the schemas, the golden files, and the
-# release workflows that UpdaterChannelTests reads.
+# build recipes and the Xcode pin, the schemas, and the release workflows that
+# UpdaterChannelTests reads. The CLI golden files are in server/src/cli/golden.
 app,style          *.swift
 app,style          mise.toml
 app,style          scripts/*

@@ -7,7 +7,7 @@ import Testing
 /// files (`server/src/cli/contract.zig`).
 ///
 /// - `golden/contract.json`: each command (its path, abstract, usage line,
-///   subcommands, options and positional arguments), in a form of our own. The
+///   subcommands, options and positional arguments), in a neutral form. The
 ///   test compares it with the command tree of the CLI, and compares the
 ///   `--help` of each command with it by structure: the overview, the usage
 ///   line, the set of options, arguments and subcommands, and each abstract.
@@ -27,6 +27,10 @@ import Testing
 /// `MACTERM_UPDATE_GOLDEN=1 mise run test` (`scripts/test.sh` passes the
 /// variable to the test host) and review the diff. A missing file is written
 /// and fails.
+///
+/// The suite is serialized: in update mode, one test writes `contract.json`
+/// and the next reads it.
+@Suite(.serialized)
 struct CLIContractTests {
     private static let goldenDirectory = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent() // CLI
@@ -120,6 +124,11 @@ struct CLIContractTests {
     private static func cases() throws -> [Case] {
         let data = try Data(contentsOf: goldenDirectory.appendingPathComponent("cases.input.json"))
         let entries = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let known: Set = ["arguments", "method", "responses", "app_version"]
+        for entry in entries {
+            #expect(Set(entry.keys).isSubset(of: known), "cases.input.json: unknown key in \(entry["arguments"] ?? "?")")
+            #expect(entry["app_version"] == nil || entry["app_version"] is Int, "cases.input.json: app_version is not a number")
+        }
         return try entries.map { entry in
             let responses = try (entry["responses"] as? [String: Any] ?? [:]).mapValues { value in
                 try String(decoding: JSONSerialization.data(withJSONObject: value), as: UTF8.self)

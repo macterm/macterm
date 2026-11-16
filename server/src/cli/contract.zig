@@ -166,3 +166,8 @@ test "every case names a server method or none" {
     const run = contract.resolve(&.{ "pane", "run", "--no-submit", "--", "ls" });
     try testing.expectEqualSlices(u8, "run", run.path[run.path.len - 1]);
 }
+
+test "a method name is checked against the protocol" {
+    try testing.expect(isMethod("session.list"));
+    try testing.expect(!isMethod("pane.nope"));
+}
