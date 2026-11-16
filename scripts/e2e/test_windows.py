@@ -282,7 +282,10 @@ def test_leadership_follows_window_focus_for_the_whole_tab(app):
     key (which rebuilds the mirror, detaching its old zmx clients — the state
     in which zmx makes the next attaching client leader) must not strand
     leadership. Asserted on the real panes' `leader` flags: false while the
-    mirror window is key, true once the owning window is."""
+    mirror window is key, true once the owning window is. The owning window
+    shows the notice while the other window leads, so it does not draw the
+    pane that the split adds: that pane has no client there until the owning
+    window is key."""
     before = len(_windows(app))
     first = _windows(app)[0]
     project = first.get("projectID")
@@ -311,9 +314,14 @@ def test_leadership_follows_window_focus_for_the_whole_tab(app):
         wait_for(lambda: all_are(False), timeout=30, message="the mirror window to lead every pane")
 
         # Rebuild the mirror under the mirror window's feet.
+        old = set(leaders())
         app.cli("pane", "split", "--direction", "right", "--pane", source)
         wait_for(lambda: len(leaders()) == 3, timeout=30, message="the third pane")
-        wait_for(lambda: all_are(False), timeout=30, message="the rebuilt mirror to lead again")
+        wait_for(
+            lambda: all(not v for k, v in leaders().items() if k in old),
+            timeout=30,
+            message="the rebuilt mirror to lead again",
+        )
 
         app.cli("window", "focus", "1")
         wait_for(lambda: all_are(True), timeout=30, message="the owning window to lead every pane")

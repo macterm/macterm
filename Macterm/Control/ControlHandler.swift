@@ -964,10 +964,6 @@ final class ControlHandler {
                 action: "select its tab one time to start its terminal, then try again"
             )
         }
-        // Injected input makes zmx hand this client leadership (its
-        // `isUserInput` rule), with no focus change to notice it by — so
-        // record it, or our dim would point at the wrong mirror.
-        appState.noteSessionLeader(target.pane)
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1020,8 +1016,6 @@ final class ControlHandler {
                 action: "select its tab one time to start its terminal, then try again"
             )
         }
-        // As in paneSendText: a keypress is what zmx switches leader on.
-        appState.noteSessionLeader(target.pane)
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1727,13 +1721,11 @@ final class ControlHandler {
     /// iteration order, so `session list` reported an arbitrary one of the
     /// panes and dropped the rest (#345).
     private func paneIDsBySessionName() -> [String: [String]] {
-        // One traversal for the whole table: `isLeader(_:)` alone re-walks
-        // every workspace per call, which made this quadratic in pane count.
         // A stable partition, not `sorted`: "leader first" is not a strict
         // weak ordering, and Swift's sort is undefined for one.
         var table = appState.sessionAttachments().mapValues { clients in
-            let leading = clients.filter { appState.isLeader($0, among: clients) }
-            let following = clients.filter { !appState.isLeader($0, among: clients) }
+            let leading = clients.filter(\.isLeader)
+            let following = clients.filter { !$0.isLeader }
             // A pane shown in two windows has two clients and one id.
             var seen: Set<UUID> = []
             return (leading + following).map(\.pane.id).filter { seen.insert($0).inserted }.map(\.uuidString)

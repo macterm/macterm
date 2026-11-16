@@ -98,17 +98,18 @@ a.attach(80, 24)
 assert a.wait_msg("lead")["leader"] is True
 b = Client("s1")
 b.attach(50, 10)
-b.wait_msg("state")
+# A client that does not lead hears it at its attach.
+assert b.wait_msg("lead")["leader"] is False
 # B does not lead, so its size does not reach the pty.
 b.pane("resize", cols=50, rows=10)
 a.type("stty size; printf 'ok-%s\\n' 1\r")
 a.wait_output("ok-1")
 b.wait_output("ok-1")
 assert b"24 80" in a.output, a.output
-assert not b.messages("lead"), b.messages("lead")
+assert len(b.messages("lead")) == 1, b.messages("lead")
 
 b.pane("claim")
-assert b.wait_msg("lead")["leader"] is True
+assert b.wait_msg("lead", count=2)["leader"] is True
 assert a.wait_msg("lead", count=2)["leader"] is False
 b.pane("resize", cols=60, rows=20)
 b.type("stty size; printf 'ok-%s\\n' 2\r")
@@ -172,14 +173,14 @@ a.attach(80, 24)
 assert a.wait_msg("lead")["leader"] is True
 b = Client("s1")
 b.attach(60, 20)
-b.wait_msg("state")
+assert b.wait_msg("lead")["leader"] is False
 # A client that does not show the pane cannot take the lead.
 s = Client("s1")
 s.wait_msg("state")
 s.pane("claim")
 s.pane("resize", cols=30, rows=5)
 a.close()
-assert b.wait_msg("lead")["leader"] is True
+assert b.wait_msg("lead", count=2)["leader"] is True
 b.pane("resize", cols=60, rows=20)
 b.type("stty size; printf 'ok-%s\\n' 1\r")
 b.wait_output("ok-1")
