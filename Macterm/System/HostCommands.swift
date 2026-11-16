@@ -186,15 +186,16 @@ enum HostCommands {
     /// Makes `$d` a folder that `cd` takes: a `~` or `~name` at the start
     /// becomes that home folder, as a shell expands it. A name with any
     /// character other than `[A-Za-z0-9._-]` stays as it is, because only a
-    /// checked name goes into `eval`. The same text is in
-    /// `server/host/plain.sh`.
+    /// checked name goes into `eval`; a `tr` that fails checks nothing, and
+    /// the name stays. With no `HOME`, a `~` stays, and the `cd` fails. The
+    /// same text is in `server/host/plain.sh`.
     static let expandTilde = oneLine("""
     case $d in
-      "~" | "~/"*) d=$HOME${d#"~"} ;;
+      "~" | "~/"*) if [ -n "$HOME" ]; then d=$HOME${d#"~"}; fi ;;
       "~"*)
         n=${d%%/*};
         n=${n#"~"};
-        if [ -z "$(printf "%s" "$n" | tr -d A-Za-z0-9._-)" ]; then
+        if t=$(printf "%s" "$n" | tr -d A-Za-z0-9._-) && [ -z "$t" ]; then
           eval "u=~$n";
           d=$u${d#"~$n"};
         fi;
@@ -265,11 +266,12 @@ enum HostCommands {
 
     /// nil when the script has a single quote, a newline, a `!` that csh
     /// reads as history (one that a blank, `=` or `(` does not follow), or two
-    /// backslashes in a row, which fish reads in single quotes as one; or an argument
+    /// backslashes in a row or a backslash at the end, which fish reads in single
+    /// quotes as one backslash or as a quote; or an argument
     /// is not one plain word (`isArgument`). Fail closed: nothing goes to the host then.
     static func command(_ script: String, _ arguments: [String]) -> String? {
         guard !script.contains("'"), !script.contains(where: \.isNewline), !hasHistoryMark(script),
-              !script.contains("\\\\"),
+              !script.contains("\\\\"), !script.hasSuffix("\\"),
               arguments.allSatisfy(isArgument)
         else { return nil }
         return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")

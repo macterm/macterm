@@ -22,11 +22,11 @@ d=$(printf "$f.");
 d=${d%.};
 o=$d;
 case $d in
-  "~" | "~/"*) d=$HOME${d#"~"} ;;
+  "~" | "~/"*) if [ -n "$HOME" ]; then d=$HOME${d#"~"}; fi ;;
   "~"*)
     n=${d%%/*};
     n=${n#"~"};
-    if [ -z "$(printf "%s" "$n" | tr -d A-Za-z0-9._-)" ]; then
+    if t=$(printf "%s" "$n" | tr -d A-Za-z0-9._-) && [ -z "$t" ]; then
       eval "u=~$n";
       d=$u${d#"~$n"};
     fi;

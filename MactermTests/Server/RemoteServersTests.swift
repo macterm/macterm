@@ -60,6 +60,7 @@ struct RemoteServersTests {
         #expect(HostCommands.command("[ ! -e f ] && [ a != b ]", ["abc"]) != nil)
         // fish reads two backslashes in single quotes as one.
         #expect(HostCommands.command("echo a\\\\b", ["abc"]) == nil)
+        #expect(HostCommands.command("echo a\\", ["abc"]) == nil)
         #expect(HostCommands.command("printf \"\\134\"", ["abc"]) != nil)
     }
 

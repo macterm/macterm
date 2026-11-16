@@ -111,6 +111,16 @@ struct HostCommandsTests {
     }
 
     @Test
+    func a_tilde_name_is_never_evaluated_when_tr_cannot_run() throws {
+        // The name check runs `tr`: when it fails, the name stays as it is.
+        let home = try Home()
+        var environment = home.environment
+        environment["PATH"] = "/nonexistent"
+        _ = try Self.run(HostCommands.createProbeArgv(directory: "~$(touch pwned)"), environment: environment, in: home.url)
+        #expect(home.nothingRan)
+    }
+
+    @Test
     func the_git_probe_reaches_the_folder_or_exits_2() throws {
         let home = try Home()
         for (sent, _) in Self.folders {
