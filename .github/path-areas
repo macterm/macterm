@@ -40,6 +40,7 @@ server             Macterm/Protocol/*
 server             scripts/protocol.sh
 server             scripts/server-zig.sh
 server             .github/workflows/server.yml
+server             .github/actions/select-xcode/*
 bench              Macterm/Server/*
 bench              scripts/session_bench.py
 bench              scripts/session_bench_limits.json

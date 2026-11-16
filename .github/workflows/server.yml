@@ -8,7 +8,7 @@ name: Server
 # The three Test checks are required on main, and a required check must report
 # on every pull request. So the workflow starts on every pull request and every
 # push to main, and each Test job skips its steps when the commit changes no
-# file of the `server` area of .github/path-areas (the job Changes).
+# file of the `server` area of .github/path-areas (the job Detect Changes).
 # The skip is at step level: a matrix job that a job-level if: skips reports
 # its unexpanded name, which never matches the required name. A Test job that
 # skips its steps runs on a 2 vCPU Linux runner, so it takes no macOS runner.
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   changes:
-    name: Changes
+    name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       server: ${{ steps.changes.outputs.server }}
@@ -105,9 +105,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .zig-cache
-          key: server-zig-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-${{ hashFiles('server/build.zig.zon') }}
+          key: server-zig-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-${{ hashFiles('server/build.zig.zon') }}
           restore-keys: |
-            server-zig-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-
+            server-zig-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-
 
       - name: Fetch the Zig Packages
         if: env.SERVER == 'true'

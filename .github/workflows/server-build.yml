@@ -9,11 +9,11 @@ name: Server Build
 # The build key is the hash of the server's sources (build-server.sh). Each
 # build has a manifest, `macterm-<key>-server.json`, with the SHA-256 of each
 # tarball; `build-server.sh verify` checks a build against it.
-# With `prebuilt`, the job Prebuilt takes the build for the key from the
-# `server-prebuilt` release when it is there, on a Linux runner, and the job
-# Build does not run. So a commit that changes no server source takes no macOS
-# runner. Without `prebuilt` (the release workflows), Build always builds from
-# the commit.
+# With the input `prebuilt`, the Linux job Find Prebuilt downloads the build
+# of the key from the `server-prebuilt` release. When it finds the build, the
+# macOS job Build does not run. Thus a commit that changes no server source
+# takes no macOS runner. Without the input (the release workflows), Build
+# always builds from the commit.
 #
 # A build that this job made goes to the `server-prebuilt` release, so that
 # setup on a Mac without Zig can download it. An asset is never replaced. A
@@ -41,7 +41,7 @@ on:
 
 jobs:
   prebuilt:
-    name: Prebuilt
+    name: Find Prebuilt
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -110,7 +110,8 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: ./.github/actions/select-xcode
+      - name: Select Xcode
+        uses: ./.github/actions/select-xcode
         with:
           version: "26.3"
 
@@ -119,11 +120,12 @@ jobs:
         with:
           version: ${{ needs.prebuilt.outputs.zig }}
 
-      # The build computes the key again from its own checkout. The upload
-      # below takes the files of the key of Prebuilt, so a different key
-      # fails there.
+      # The key of this checkout must be the key of Find Prebuilt, because
+      # the steps below use that key.
       - name: Build
-        run: scripts/build-server.sh build build/server
+        run: |
+          test "$(scripts/build-server.sh key)" = "$KEY"
+          scripts/build-server.sh build build/server
 
       # Never replaces an asset: an app that is out carries the checksums of
       # what the release serves. Two runs of one key can both build it;
