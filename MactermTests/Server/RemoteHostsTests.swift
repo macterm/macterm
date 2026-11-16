@@ -121,6 +121,41 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_pane_dims_when_its_ssh_connection_is_killed_with_nothing_typed() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host)
+            let pane = fixture.pane()
+            fixture.hosts.panes = { _ in [pane] }
+            let surface = RecordingPaneHost()
+            let driver = RemotePaneDriver(name: pane.sessionName, surface: surface, hosts: fixture.hosts)
+            defer { driver.stop() }
+            driver.start()
+            try await Task.sleep(for: .seconds(1))
+            driver.sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
+            try await surface.waitFor { $0.screen.contains("before-kill") }
+            #expect(!pane.isRemoteLinkLost)
+
+            // The user's pkill: the master of this host, on the Mac's side.
+            let pkill = Process()
+            pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            pkill.arguments = ["-TERM", "-f", "ssh.*-M.*\(host.sshd.directory.path)"]
+            try pkill.run()
+            pkill.waitUntilExit()
+            #expect(pkill.terminationStatus == 0, "no master to kill")
+
+            // Nothing is typed: the pane dims on its own.
+            let deadline = Date().addingTimeInterval(20)
+            while !pane.isRemoteLinkLost, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(pane.isRemoteLinkLost)
+            #expect(pane.isDisconnected)
+            // The leaf blurs and dims it, as a mirror that does not lead.
+            #expect(SplitLeafView.obscures(pane, isNonLeaderMirror: false))
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_key_in_one_lost_pane_brings_back_every_lost_pane_of_the_host() async throws {
         try await withSSHDHost { host in
             let fixture = Fixture(host)
@@ -186,7 +221,7 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_mirror_that_asks_before_the_new_session_starts_makes_it_too() async throws {
+    func a_second_view_that_asks_before_the_new_session_starts_makes_it_too() async throws {
         try await withSSHDHost { host in
             let fixture = Fixture(host)
             let pane = fixture.pane()
@@ -194,8 +229,7 @@ struct RemoteHostsTests {
             #expect(pane.hostSessionDirectory == fixture.directory)
             // The first pane has not made its session yet: the host has no
             // session. A second window's view of the pane asks now.
-            let mirror = Pane(mirroring: pane)
-            let (_, create) = try await fixture.attach(mirror)
+            let (_, create) = try await fixture.attach(pane)
             #expect(create == fixture.directory)
         }
     }

@@ -140,7 +140,7 @@ fi
 # for each target, named for this build. The macOS one must be the bundled zmx
 # itself, so it carries the same signature that the checks above require.
 SERVER_BUILDS="$APP_BUNDLE/Contents/Resources/server"
-for target in universal-macos x86_64-linux aarch64-linux; do
+for target in $(scripts/build-server.sh targets); do
   if ! gzip -t "$SERVER_BUILDS/macterm-$ZMX_KEY-$target.gz" 2>/dev/null; then
     echo "ERROR: $SERVER_BUILDS/macterm-$ZMX_KEY-$target.gz is missing or is not gzip. Run scripts/setup.sh" >&2
     exit 1

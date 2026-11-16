@@ -97,6 +97,16 @@ struct MessagePackTests {
     }
 
     @Test
+    func a_double_keeps_its_bits_and_a_float32_on_the_wire_widens() throws {
+        for value in [0, 0.5, -1.25, 0.15, Double.greatestFiniteMagnitude, Double.infinity] {
+            #expect(try Self.decode(Double.self, Self.encode(value)) == value)
+        }
+        #expect(Self.encode(0.5) == [0xCB, 0x3F, 0xE0, 0, 0, 0, 0, 0, 0])
+        #expect(try Self.decode(Double.self, [0xCA, 0x3F, 0, 0, 0]) == 0.5)
+        #expect(throws: MessagePackError.wrongType) { try Self.decode(Double.self, [1]) }
+    }
+
+    @Test
     func strings_bin_and_secrets_keep_every_length_form() throws {
         for count in [0, 31, 32, 255, 256, 65535, 65536] {
             let text = String(repeating: "x", count: count)

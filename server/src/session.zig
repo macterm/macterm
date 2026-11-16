@@ -511,6 +511,7 @@ const Session = struct {
             .level = m.level,
             .min_level = m.min_level,
             .build = build_options.version,
+            .build_key = build_options.key,
             .role = .session,
             .epoch = s.epoch,
             .caps = &.{},
@@ -681,7 +682,7 @@ const Session = struct {
             // that a peer of a later level does not wait for ever.
             const msg = m.decodeControl(arena, f.body) catch return s.dropClient(c);
             if (msg == .request) s.sendControl(c, m.Response{ .re = msg.request.id, .err = .{
-                .code = "unknown_method",
+                .code = @tagName(m.ErrorCode.unknown_method),
                 .message = "A session has no methods.",
             } });
             return;

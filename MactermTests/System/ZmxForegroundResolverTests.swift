@@ -28,10 +28,10 @@ struct ZmxForegroundResolverEntriesTests {
     @Test
     func a_server_session_becomes_a_local_session() {
         let session = MactermProtocol.Session(
-            id: "macterm-x", state: .running, build: "b", level: 1,
+            id: "macterm-x", state: .running, build: "b", level: 1, buildKey: "k",
             pid: 10, shellPid: 11, pty: ProtocolBin(Data("/dev/ttys004".utf8)), cols: 80, rows: 24, clients: 2
         )
-        #expect(LocalSession(session) == LocalSession(name: "macterm-x", shellPID: 11, ttyPath: "/dev/ttys004", clients: 2, build: "b"))
+        #expect(LocalSession(session) == LocalSession(name: "macterm-x", shellPID: 11, ttyPath: "/dev/ttys004", clients: 2, buildKey: "k"))
         var exited = session
         exited.state = .exited
         #expect(!LocalSession(exited).isRunning)

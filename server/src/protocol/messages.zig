@@ -52,12 +52,14 @@ const everyone: []const Trust = &.{ .local, .session, .remote };
 
 // ── Handshake ───────────────────────────────────────────────────────────────
 
-/// The first message in each direction. Its layout is frozen for ever, so
-/// that any two builds can at least refuse each other clearly.
+/// The first message in each direction. Its fields of level 1 are frozen for
+/// ever, so that any two builds can at least refuse each other clearly. A
+/// later field is optional.
 pub const Hello = struct {
     pub const name = "hello";
     pub const since = 1;
     pub const senders = everyone;
+    pub const field_since = .{ .build_key = 3 };
 
     level: u32,
     min_level: u32,
@@ -69,6 +71,10 @@ pub const Hello = struct {
     /// What the build or its platform can do apart from its level (`tcc`,
     /// `password-tty`). A peer ignores a cap it does not know.
     caps: []const []const u8,
+    /// The build key (`scripts/build-server.sh`): lowercase hex. Null for a
+    /// build with no key (a development build). `build` is text for people;
+    /// two builds are the same build only when their keys are equal.
+    build_key: ?[]const u8 = null,
 };
 
 /// Sent in place of any other message when the peer speaks too low a level.
@@ -130,12 +136,29 @@ pub const Response = struct {
 };
 
 pub const ErrorInfo = struct {
-    /// snake_case, as in v1: `not_found`, `busy`, `unknown_method`.
+    /// An `ErrorCode` tag. A receiver reads a code that it does not know as
+    /// an error with no special handling.
     code: []const u8,
     message: []const u8,
     /// The level that the request needs, when the error is that the peer
     /// speaks a lower one.
     level: ?u32 = null,
+};
+
+/// The codes of `ErrorInfo.code`. The add-only rule holds: never remove or
+/// rename a code.
+pub const ErrorCode = enum {
+    busy,
+    exited,
+    forbidden,
+    invalid_args,
+    not_found,
+    refused,
+    start_failed,
+    starting,
+    timeout,
+    unavailable,
+    unknown_method,
 };
 
 pub const Event = struct {
@@ -222,6 +245,8 @@ pub const Ping = struct {
 /// What the server knows of one session (design/001). The session process
 /// holds all of it, so a new server reads it again from each session.
 pub const Session = struct {
+    pub const field_since = .{ .build_key = 3 };
+
     /// The session's name: the file name of its socket. The client that
     /// asked for the session made it.
     id: []const u8,
@@ -229,6 +254,9 @@ pub const Session = struct {
     /// The session's build and level, from its `hello`.
     build: []const u8,
     level: u32,
+    /// The session's build key, from its `hello`. Null when the session did
+    /// not say (a build with no key).
+    build_key: ?[]const u8 = null,
     /// The session process. Null when `state` is `refused`.
     pid: ?i64 = null,
     /// The shell (or the command) of the session.

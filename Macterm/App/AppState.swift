@@ -672,11 +672,8 @@ final class AppState {
         claimLeadership(forPanesIn: tab, in: key.id)
     }
 
-    /// Claim for a tab's surfaces in window `windowID`, one per session. A tab
-    /// can hold two panes on ONE session (`pane mirror`), and claiming for both
-    /// would hand the pty to whichever came last in tree order: the source
-    /// lost leadership to its own mirror every time the window became key. A
-    /// session that a surface of this tab already leads is left as it is;
+    /// Claim for a tab's surfaces in window `windowID`, one per session. A
+    /// session already led by a surface of this tab is left as it is;
     /// otherwise the tab's focused pane on that session claims, else the
     /// first.
     private func claimLeadership(forPanesIn tab: TerminalTab, in windowID: UUID?) {
@@ -1844,12 +1841,10 @@ final class AppState {
         return all.map { $0[0] } + all.flatMap { $0.dropFirst() }
     }
 
-    /// Give up these panes' claims on their zmx sessions, killing a session
-    /// only when no OTHER pane still attaches it. Several panes may share one
-    /// session (`pane mirror`), so a pane going away is a *release*, not a
-    /// kill: the daemon has to outlive it for the panes that remain, or
-    /// closing one view of a session would destroy the work still on screen
-    /// in another.
+    /// Give up these panes' claims on their sessions, killing a session
+    /// only when no OTHER pane still attaches it, or a pinned record that
+    /// waits to load names it. One pane is one session, so the pane check
+    /// only fails closed (issue 0282 removes it).
     ///
     /// Takes the whole batch at once, because the callers that remove a
     /// project, close a tab, or drop a layout's panes release many panes
@@ -1880,8 +1875,12 @@ final class AppState {
     /// Whether another window of Macterm leads `pane`'s session while this
     /// window's surface does not: the pane is in use there, at its size. A
     /// client outside Macterm, or a mirror in the same window, does not count.
+    /// A pane that this window never drew has no surface here, and a check
+    /// for the notice must not make one.
     func isLedFromAnotherWindow(_ pane: Pane, window windowID: UUID) -> Bool {
-        guard !SurfaceRegistry.shared.surface(for: pane, in: .window(windowID)).isLeader else { return false }
+        if let own = SurfaceRegistry.shared.existingSurface(for: pane, in: .window(windowID)), own.isLeader {
+            return false
+        }
         return clients(of: pane.sessionName).contains {
             $0.windowID != nil && $0.windowID != windowID && $0.isLeader
         }
@@ -1992,8 +1991,8 @@ final class AppState {
     /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
     /// of the overloads below rather than spelling
     /// `allPanes().contains(where: \.needsConfirmClose)` itself: that raw
-    /// form ignores retention, so a tab holding only a `pane mirror` view
-    /// would warn about killing a session it does not kill.
+    /// form ignores retention, so it would warn about killing a session that
+    /// the close does not kill.
     func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
         let retained = retainedSessionNames(excluding: closing)
         return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
@@ -2857,32 +2856,6 @@ final class AppState {
         return newID
     }
 
-    /// Mirror a pane — add a second pane attached to the same zmx session
-    /// (#345). Both render the same live shell; zmx broadcasts its output to
-    /// every attached client.
-    ///
-    /// The mirror does not take focus (see `ModelWriter.paneMirror`), and it
-    /// carries no `command`/`shell` (see `Pane.init(mirroring:)`), so it
-    /// attaches to the running session instead of respawning or re-running it.
-    @discardableResult
-    func mirrorPane(
-        _ paneID: UUID,
-        direction: SplitDirection,
-        position: SplitPosition = .second,
-        projectID: UUID
-    ) -> UUID? {
-        guard let ws = workspaces[projectID],
-              let tab = ws.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil })
-        else { return nil }
-        // The source stays leader: the session sets a leader on attach only
-        // when there is none, so a second client leaves the pty size where it
-        // was.
-        guard let newID = ModelWriter.paneMirror(tab, paneID: paneID, direction: direction, position: position)
-        else { return nil }
-        saveWorkspaces()
-        return newID
-    }
-
     /// Split a pane into an equal `rows`×`columns` grid (see
     /// `ModelWriter.paneGrid`), spawning `command` in each new pane. Every
     /// cell honors the new split directory preference, so a grid and a
@@ -2969,8 +2942,8 @@ final class AppState {
             return
         }
         logger.debug("closePane: \(paneID, privacy: .public) project=\(projectID, privacy: .public)")
-        // Pane closed for good → its zmx session dies with it, unless another
-        // pane mirrors that session. (The onlyPaneLeft path below re-releases
+        // Pane closed for good → its session dies with it, unless something
+        // else retains it. (The onlyPaneLeft path below re-releases
         // via closeTab; killSession is a no-op on a missing session, so the
         // overlap is harmless.) The pane is still in the tree here, which is
         // why releaseSessions excludes the batch it is given.

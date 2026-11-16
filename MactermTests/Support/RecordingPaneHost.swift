@@ -8,6 +8,7 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         var screen = ""
         var exit: (code: UInt8?, signal: UInt8?)?
         var linkLost = 0
+        var undelivered = Data()
         var resets = 0
         var foreground: MactermProtocol.Foreground?
         /// Each `lead` message, in order. A nil is an end of the channel.
@@ -76,6 +77,12 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     func paneLinkLost() {
         lock.lock()
         state.linkLost += 1
+        lock.unlock()
+    }
+
+    func paneInputUndelivered(_ data: Data) {
+        lock.lock()
+        state.undelivered.append(data)
         lock.unlock()
     }
 

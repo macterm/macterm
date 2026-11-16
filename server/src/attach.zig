@@ -211,7 +211,7 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
                 switch (request_id) {
                     1 => {
                         const err = res.err orelse return null;
-                        if (!std.mem.eql(u8, err.code, "exited"))
+                        if (!std.mem.eql(u8, err.code, @tagName(m.ErrorCode.exited)))
                             return .{ .not_created = try gpa.dupe(u8, err.message) };
                         // The shell of a session of this name exited (while
                         // no app was there to end it): end it, and make a
@@ -245,6 +245,7 @@ fn helloMessage() m.Hello {
         .level = m.level,
         .min_level = m.min_level,
         .build = build_options.version,
+        .build_key = build_options.key,
         // The pane's client acts for the GUI. Not `cli`: a session of an
         // older build must still attach.
         .role = .gui,
@@ -583,25 +584,6 @@ pub fn foregroundApc(buf: []u8, f: m.Foreground) []const u8 {
     });
     buf[2 + report.len ..][0..2].* = "\x1b\\".*;
     return buf[0 .. report.len + 4];
-}
-
-/// The APCs that the app's tests parse with `ZmxForegroundEvents.parse`
-/// (`server/schema/foreground.json`, `__schema foreground`): each case's
-/// message, and the APC that this client writes for it, in hex.
-pub fn writeForegroundFixtures(w: *std.Io.Writer) !void {
-    const cases = [_]struct { name: []const u8, msg: m.Foreground }{
-        .{ .name = "program", .msg = .{ .idle = false, .shell = false, .comm = .{ .bytes = "/usr/bin/hx" }, .args = .{ .bytes = "hx a;b.md" } } },
-        .{ .name = "idle shell", .msg = .{ .idle = true, .shell = true, .comm = .{ .bytes = "-zsh" }, .args = .{ .bytes = "" } } },
-        .{ .name = "no /etc/shells", .msg = .{ .idle = false, .shell = null, .comm = .{ .bytes = "claude" }, .args = .{ .bytes = "claude --resume" } } },
-        .{ .name = "control bytes", .msg = .{ .idle = false, .shell = false, .comm = .{ .bytes = "ev;il\x1b" }, .args = .{ .bytes = "printf '\x1b\\'" } } },
-    };
-    try w.writeAll("[\n");
-    for (cases, 0..) |case, i| {
-        var buf: [apc_max]u8 = undefined;
-        const apc = foregroundApc(&buf, case.msg);
-        try w.print("  {{\"name\": \"{s}\", \"apc\": \"{x}\"}}{s}\n", .{ case.name, apc, if (i + 1 < cases.len) "," else "" });
-    }
-    try w.writeAll("]\n");
 }
 
 fn attachMessage(size: Resize, foreground_events: bool) m.Attach {

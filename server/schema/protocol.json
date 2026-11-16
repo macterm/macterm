@@ -436,9 +436,16 @@
           "type": "[str]",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "build_key",
+          "type": "str",
+          "optional": true,
+          "since": 3
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Role",
@@ -450,7 +457,8 @@
         "server",
         "session",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "Refuse",
@@ -469,7 +477,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Request",
@@ -494,7 +503,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Response",
@@ -519,7 +529,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ErrorInfo",
@@ -544,7 +555,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "EventBatch",
@@ -563,7 +575,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Event",
@@ -582,7 +595,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "PaneMessage",
@@ -601,7 +615,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ControlResume.Args",
@@ -620,7 +635,8 @@
           "since": 2
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ControlResume.Result",
@@ -639,7 +655,8 @@
           "since": 2
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelOpen.Args",
@@ -652,7 +669,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelOpen.Result",
@@ -665,7 +683,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelClose.Args",
@@ -678,13 +697,15 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelClose.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelPause.Args",
@@ -697,13 +718,15 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelPause.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelResume.Args",
@@ -716,25 +739,29 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ChannelResume.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Ping.Args",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Ping.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionCreate.Args",
@@ -779,7 +806,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionCreate.Result",
@@ -792,7 +820,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Session",
@@ -821,6 +850,12 @@
           "type": "u32",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "build_key",
+          "type": "str",
+          "optional": true,
+          "since": 3
         },
         {
           "name": "pid",
@@ -892,7 +927,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionState",
@@ -903,13 +939,15 @@
         "exited",
         "refused",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "SessionList.Args",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionList.Result",
@@ -922,7 +960,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionInfo.Args",
@@ -935,7 +974,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionInfo.Result",
@@ -948,7 +988,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionKill.Args",
@@ -961,13 +1002,15 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionKill.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "PaneSeen.Args",
@@ -980,25 +1023,29 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "PaneSeen.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ServerExit.Args",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ServerExit.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "CommandRun.Args",
@@ -1024,7 +1071,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "CommandRun.Result",
@@ -1056,7 +1104,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "LinkOpen.Args",
@@ -1075,7 +1124,8 @@
           "since": 3
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "LinkOpen.Result",
@@ -1088,7 +1138,8 @@
           "since": 3
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "LinkClose.Args",
@@ -1101,13 +1152,15 @@
           "since": 3
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "LinkClose.Result",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SessionExit",
@@ -1132,7 +1185,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "PaneAttention",
@@ -1163,7 +1217,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "State",
@@ -1206,7 +1261,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Attach",
@@ -1258,7 +1314,8 @@
           "since": 2
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Resize",
@@ -1291,13 +1348,15 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Claim",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Lead",
@@ -1310,7 +1369,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SnapshotStart",
@@ -1329,13 +1389,15 @@
           "since": 2
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "SnapshotEnd",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Exit",
@@ -1354,25 +1416,29 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Take",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "End",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Refresh",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Title",
@@ -1385,7 +1451,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Cwd",
@@ -1398,7 +1465,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Foreground",
@@ -1429,7 +1497,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Mark",
@@ -1454,7 +1523,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "MarkKind",
@@ -1466,7 +1536,8 @@
         "output",
         "end",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "Progress",
@@ -1485,7 +1556,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ProgressState",
@@ -1498,19 +1570,22 @@
         "indeterminate",
         "pause",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "Bell",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Activity",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Status",
@@ -1530,7 +1605,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "RunState",
@@ -1541,7 +1617,8 @@
         "running",
         "done",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "ProgramStatus",
@@ -1554,7 +1631,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ProgramRecord",
@@ -1604,7 +1682,8 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "ProgramState",
@@ -1617,7 +1696,8 @@
         "blocked",
         "error",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "ProgramNeed",
@@ -1628,7 +1708,8 @@
         "question",
         "auth",
         "unknown"
-      ]
+      ],
+      "variants": []
     },
     {
       "name": "Attention",
@@ -1656,13 +1737,15 @@
           "since": 1
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Seen",
       "kind": "struct",
       "fields": [],
-      "cases": []
+      "cases": [],
+      "variants": []
     },
     {
       "name": "Resumed",
@@ -1675,7 +1758,21 @@
           "since": 2
         }
       ],
-      "cases": []
+      "cases": [],
+      "variants": []
     }
+  ],
+  "error_codes": [
+    "busy",
+    "exited",
+    "forbidden",
+    "invalid_args",
+    "not_found",
+    "refused",
+    "start_failed",
+    "starting",
+    "timeout",
+    "unavailable",
+    "unknown_method"
   ]
 }

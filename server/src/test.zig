@@ -21,4 +21,5 @@ comptime {
     _ = @import("link/stream.zig");
     _ = @import("link/host.zig");
     _ = @import("model/tests.zig");
+    _ = @import("cli/contract.zig");
 }

@@ -2,17 +2,28 @@
 # Builds the session server in server/ for every target that Macterm carries,
 # or prints the key that names such a build.
 #
-#   scripts/build-server.sh key          print the key of the working tree
-#   scripts/build-server.sh key-of <rev> print the key of a commit
-#   scripts/build-server.sh dirty        exit 0 when server/ or protocol/ has
-#                                        changes that are not committed
-#   scripts/build-server.sh build <dir>  build into <dir>
+#   scripts/build-server.sh key            print the key of the working tree
+#   scripts/build-server.sh key-of <rev>   print the key of a commit
+#   scripts/build-server.sh dirty          exit 0 when a source has changes
+#                                          that are not committed
+#   scripts/build-server.sh targets        print the targets, one a line
+#   scripts/build-server.sh build <dir>    build into <dir>
+#   scripts/build-server.sh verify <dir> [key]
+#                                          exit 0 when <dir> holds the build
+#                                          of its manifest, of key <key>
 #
-# The key is the git tree hash of server/ and protocol/ and the blob hash of
-# this script, from the working tree (committed or not), hashed together. This
-# script holds the Zig version and every build flag, so a change to either is
-# a new key. A prebuilt named for a key is therefore the build of exactly that
-# source (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
+# The key is the git object hashes of the sources (SOURCES below) from the
+# working tree (committed or not), hashed together: the server's code and
+# build files, and this script. This script holds the Zig version and every
+# build flag, so a change to either is a new key. Tests, schema files and
+# host scripts are not sources: a change to them is not a new build. A
+# prebuilt named for a key is therefore the build of exactly that source
+# (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
+#
+# A build writes its manifest next to the tarballs: `macterm-<key>-server.json`
+# with the key, the targets and the SHA-256 of each tarball. The other
+# scripts and the workflows read the targets and check a build with
+# `targets` and `verify`, and do not repeat the list or the check.
 #
 # The build needs macOS (lipo makes the universal binary) and Zig
 # $ZIG_VERSION. Zig cannot link with Xcode 26.4 or later (zig#31658), so CI
@@ -27,7 +38,7 @@ ZIG_VERSION="0.17.1"
 TARGETS=(universal-macos x86_64-linux aarch64-linux)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCES=(server protocol scripts/build-server.sh)
+SOURCES=(server/src server/build.zig server/build.zig.zon scripts/build-server.sh)
 
 existing_sources() {
   local path
@@ -36,16 +47,14 @@ existing_sources() {
   done
 }
 
-# The key from the trees of server/, protocol/ and this script.
+# The key from the objects of the sources in a tree.
 key_from_tree() {
-  local tree="$1" server protocol script
-  # A commit from before this script has no build key of its own; "none"
-  # gives it one that matches no prebuilt.
-  server="$(git -C "$ROOT" rev-parse -q --verify "$tree:server" || echo none)"
-  protocol="$(git -C "$ROOT" rev-parse -q --verify "$tree:protocol" || echo none)"
-  script="$(git -C "$ROOT" rev-parse -q --verify "$tree:scripts/build-server.sh" || echo none)"
-  printf 'server %s\nprotocol %s\nbuild %s\n' "$server" "$protocol" "$script" |
-    shasum -a 256 | cut -c1-16
+  local tree="$1" path id
+  for path in "${SOURCES[@]}"; do
+    # A source that the tree does not have hashes as "none".
+    id="$(git -C "$ROOT" rev-parse -q --verify "$tree:$path" || echo none)"
+    printf '%s %s\n' "$path" "$id"
+  done | shasum -a 256 | cut -c1-16
 }
 
 # The key of the working tree. For a clean tree it is the key of HEAD.
@@ -77,7 +86,52 @@ package() {
   local dir="$1" out="$2"
   touch -t 200001010000 "$dir/zmx"
   tar -c -f - --uid 0 --gid 0 --uname root --gname root -C "$dir" zmx | gzip -n -9 > "$out"
-  (cd "$(dirname "$out")" && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256")
+}
+
+# The manifest of the build `key` in `dir`, from its tarballs.
+write_manifest() {
+  local dir="$1" key="$2"
+  python3 -I - "$dir" "$key" "${TARGETS[@]}" <<'PY'
+import hashlib, json, os, sys
+folder, key, targets = sys.argv[1], sys.argv[2], sys.argv[3:]
+files = {}
+for target in targets:
+    name = f"macterm-{key}-{target}.tar.gz"
+    with open(os.path.join(folder, name), "rb") as f:
+        files[target] = {"file": name, "sha256": hashlib.sha256(f.read()).hexdigest()}
+manifest = {"key": key, "targets": targets, "files": files}
+with open(os.path.join(folder, f"macterm-{key}-server.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+PY
+}
+
+# Exit 0 when `dir` holds one manifest (of `key`, when given) whose targets
+# are this script's and whose tarballs match their SHA-256. Prints the key.
+verify() {
+  local dir="$1" key="${2:-}"
+  python3 -I - "$dir" "$key" "${TARGETS[@]}" <<'PY'
+import glob, hashlib, json, os, sys
+folder, key, targets = sys.argv[1], sys.argv[2], sys.argv[3:]
+found = glob.glob(os.path.join(folder, f"macterm-{key or '*'}-server.json"))
+if len(found) != 1:
+    sys.exit(f"error: {folder} has {len(found)} server manifests, not 1")
+with open(found[0]) as f:
+    manifest = json.load(f)
+if key and manifest.get("key") != key:
+    sys.exit(f"error: {found[0]} is not the build {key}")
+if manifest.get("targets") != targets:
+    sys.exit(f"error: {found[0]} has other targets than {' '.join(targets)}")
+for target in targets:
+    entry = manifest["files"][target]
+    path = os.path.join(folder, entry["file"])
+    if not os.path.isfile(path):
+        sys.exit(f"error: {path} is missing")
+    with open(path, "rb") as f:
+        if hashlib.sha256(f.read()).hexdigest() != entry["sha256"]:
+            sys.exit(f"error: {path} does not match its SHA-256")
+print(manifest["key"])
+PY
 }
 
 # Global, not local: the EXIT trap runs after build() returns, and under
@@ -98,8 +152,8 @@ build() {
   key="$(server_key)"
   upstream="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' "$ROOT/server/build.zig.zon")"
   [[ -n "$upstream" ]] || { echo "error: no version in server/build.zig.zon" >&2; exit 1; }
-  # `zmx version` names the build. The app compares the part after the marker
-  # with the key of its own server (ZmxVersion.forkTag).
+  # `zmx version` names the build for people. The key goes in its own option,
+  # which `hello.build_key` carries.
   version="${upstream}+thdxg.${key}"
 
   mkdir -p "$out"
@@ -116,13 +170,18 @@ build() {
     [[ "$zig_target" == *-linux-musl ]] && strip=true
     echo "Building the server for $zig_target ($version)"
     (cd "$ROOT/server" && zig build -Doptimize=ReleaseSafe -Dtarget="$zig_target" \
-      -Dversion="$version" -Dstrip="$strip" --prefix "$work/$zig_target")
+      -Dversion="$version" -Dkey="$key" -Dstrip="$strip" --prefix "$work/$zig_target")
   done
 
   mkdir -p "$work/universal-macos" "$work/x86_64-linux" "$work/aarch64-linux"
   lipo -create -output "$work/universal-macos/zmx" \
     "$work/aarch64-macos/bin/zmx" "$work/x86_64-macos/bin/zmx"
-  lipo "$work/universal-macos/zmx" -verify_arch arm64 x86_64
+  # `lipo -archs`, not `-verify_arch`: the lipo of Xcode 27 takes the second
+  # only before the file, and older ones only after it.
+  local archs
+  archs=" $(lipo -archs "$work/universal-macos/zmx") "
+  [[ "$archs" == *" arm64 "* && "$archs" == *" x86_64 "* ]] ||
+    { echo "error: the macOS build is not universal:$archs" >&2; exit 1; }
   cp "$work/x86_64-linux-musl/bin/zmx" "$work/x86_64-linux/zmx"
   cp "$work/aarch64-linux-musl/bin/zmx" "$work/aarch64-linux/zmx"
   "$work/universal-macos/zmx" version | grep -qF "$version"
@@ -131,6 +190,7 @@ build() {
   for target in "${TARGETS[@]}"; do
     package "$work/$target" "$out/macterm-$key-$target.tar.gz"
   done
+  write_manifest "$out" "$key"
   echo "Built the server $key into $out"
 }
 
@@ -141,13 +201,18 @@ case "${1:-}" in
     key_from_tree "$2^{tree}"
     ;;
   dirty) is_dirty ;;
+  targets) printf '%s\n' "${TARGETS[@]}" ;;
+  verify)
+    [[ -n "${2:-}" ]] || { echo "usage: $0 verify <dir> [key]" >&2; exit 2; }
+    verify "$2" "${3:-}"
+    ;;
   build)
     [[ -n "${2:-}" ]] || { echo "usage: $0 build <dir>" >&2; exit 2; }
     build "$2"
     ;;
   zig-version) echo "$ZIG_VERSION" ;;
   *)
-    echo "usage: $0 key | key-of <commit> | dirty | build <dir> | zig-version" >&2
+    echo "usage: $0 key | key-of <commit> | dirty | targets | build <dir> | verify <dir> [key] | zig-version" >&2
     exit 2
     ;;
 esac

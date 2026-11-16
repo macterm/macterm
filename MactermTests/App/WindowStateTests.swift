@@ -420,7 +420,7 @@ struct WindowStateTests {
         state.registerWindow(b)
         state.noteKeyWindow(a)
         let source = try #require(tab.splitRoot.allPanes().first)
-        _ = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        _ = addPane(sharing: source, projectID: project.id, in: state)
 
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
@@ -954,16 +954,15 @@ struct WindowStateTests {
 
     @Test
     func becoming_key_leaves_a_same_tab_mirror_pairs_leader_alone() throws {
-        // `pane mirror` puts two panes on one session in ONE tab. The whole-tab
-        // claim must not hand the pty to whichever pane comes last in tree
-        // order: the source lost leadership to its own mirror on every key
-        // change.
+        // Two panes on one session in ONE tab (built by hand; issue 0282
+        // removes the case). The whole-tab claim must not hand the pty to
+        // whichever pane comes last in tree order.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        let mirrorID = addPane(sharing: source, projectID: project.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
@@ -1176,7 +1175,7 @@ struct WindowStateTests {
         let source = try #require(tab.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: project.id))
+        let mirrorID = addPane(sharing: source, projectID: project.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
         session.attach([
             SurfaceRegistry.shared.surface(for: source, in: .window(a.id)),
