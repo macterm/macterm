@@ -24,11 +24,11 @@ struct AppStateSessionRestartTests {
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true))
         let state = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         if let killed {
-            state.zmx = ZmxClient(
-                executableURL: { nil },
+            state.sessionClient = SessionClient(
+                runsSessions: { false },
                 isBundled: { true },
                 killSession: { await killed.append($0) },
-                killRemoteSession: { _, _, _ in },
+                killRemoteSession: { _, _ in },
                 listSessions: { [] },
                 endV1Sessions: { _ in true }
             )
@@ -76,7 +76,7 @@ struct AppStateSessionRestartTests {
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         let old = panes[0], kept = panes[1]
-        tab.focusedPaneID = old.id
+        ModelWriter.paneFocus(tab, paneID: old.id)
         state.outdatedSessions = [old.sessionName]
 
         state.requestRestartSessions(tabID: tab.id, projectID: project.id)

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Frames that the Zig side encoded (`server/schema/frames.json`, written by
-/// `schema.fixtures` in `server/src/protocol/schema.zig`). The Swift side
+/// `writeFixtures` in `server/tools/schema.zig`). The Swift side
 /// must decode each one to the values that the Zig code put in, and encode
 /// it again to the same bytes.
 struct ProtocolFixtureTests {

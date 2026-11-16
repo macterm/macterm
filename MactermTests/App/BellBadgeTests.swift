@@ -8,8 +8,8 @@ import Testing
 struct BellBadgeTests {
     /// A two-pane tab with the first `ringing` panes ringing.
     private func tab(ringing: Int = 0) -> TerminalTab {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        tab.splitRoot = build(H(pane("a"), pane("b"))).tree
+        let tree = build(H(pane("a"), pane("b"))).tree
+        let tab = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: tree.allPanes().first?.id)
         for p in tab.splitRoot.allPanes().prefix(ringing) {
             p.ringBell()
         }
@@ -85,7 +85,7 @@ struct BellBadgeTests {
     func tearing_down_a_pane_takes_its_bell_out_of_the_count() {
         let ringing = tab(ringing: 1)
         for pane in ringing.splitRoot.allPanes() {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
         #expect(!ringing.hasUnacknowledgedBell)
     }

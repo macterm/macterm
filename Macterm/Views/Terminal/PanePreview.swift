@@ -103,7 +103,7 @@ enum PanePreviewCapture {
         longEdge: CGFloat? = thumbnailLongEdge,
         fillsBackground: Bool = true
     ) -> PanePreview {
-        capture(pane.preferredSurface, reusing: previous, longEdge: longEdge, fillsBackground: fillsBackground)
+        capture(SurfaceRegistry.shared.preferredSurface(of: pane), reusing: previous, longEdge: longEdge, fillsBackground: fillsBackground)
     }
 
     /// The frame of one window's view of a pane.
@@ -153,7 +153,7 @@ enum PanePreviewCapture {
     @MainActor
     static func containerAspect(of tab: TerminalTab) -> CGFloat? {
         let frames = tab.splitRoot.allPanes()
-            .compactMap(\.nsView)
+            .compactMap { SurfaceRegistry.shared.view(of: $0) }
             .filter { $0.window != nil }
             .map { $0.convert($0.bounds, to: nil) }
         guard let first = frames.first else { return nil }

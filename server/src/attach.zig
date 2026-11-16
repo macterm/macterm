@@ -3,21 +3,18 @@
 //! session socket in the runtime directory (`runtime.zig`): keys go in as
 //! `bytes` on the pane channel, output comes back the same way.
 //!
-//! A libghostty surface runs it as its command, as it runs `zmx attach` for
-//! v1. Until the GUI feeds a surface from a channel itself (m3), v1's claim
-//! APC on stdin becomes the `claim` message (design/004 §5), and with
-//! `ZMX_FOREGROUND_EVENTS` in its environment the session's `foreground`
-//! message becomes v1's foreground APC on stdout (`foregroundApc`), so the
-//! app's `ZmxForegroundEvents` reads it as before. Ctrl-\ detaches, as in
-//! v1. When no session has the name and a command is given, it asks the
-//! server to make one (starting the server when nothing answers), with this
-//! process's folder, environment and terminal size, as `zmx attach` makes a
-//! missing session in v1.
+//! With `ZMX_FOREGROUND_EVENTS` in its environment, the session's
+//! `foreground` message becomes the foreground APC on stdout
+//! (`foregroundApc`). Ctrl-\ detaches. When no session has the name and a
+//! command is given, it asks the server to make one (starting the server
+//! when nothing answers), with this process's folder, environment and
+//! terminal size.
 
 const std = @import("std");
 const cross = @import("cross");
 const build_options = @import("build_options");
-const ipc = @import("ipc.zig");
+const Resize = @import("pty.zig").Resize;
+const getTerminalSize = @import("pty.zig").getTerminalSize;
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
@@ -116,7 +113,7 @@ pub fn run(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, create: ?C
     if (create) |spec| {
         if (try createSession(gpa, dir, name, spec)) |outcome| return outcome;
     } else if (!have_dir) return error.NoSession;
-    const fd = ipc.connectSession(path) catch return error.NoSession;
+    const fd = socket.connectSession(path) catch return error.NoSession;
     var c: Client = .{ .gpa = gpa, .fd = fd, .path = path, .foreground_events = lib_posix.getenv(foreground.env_var) != null };
     // `reconnect` changes the fd.
     defer lib_posix.close(c.fd);
@@ -145,13 +142,13 @@ fn createSession(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec
 fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: Create) (Error || error{OutOfMemory})!?Outcome {
     const server_path = socket.getSocketPath(gpa, dir, server.socket_name) catch return error.RuntimeDir;
     defer gpa.free(server_path);
-    const fd = ipc.connectSession(server_path) catch fd: {
+    const fd = socket.connectSession(server_path) catch fd: {
         server.start(gpa, dir) catch |err| switch (err) {
             error.AlreadyRunning => {},
             error.RuntimeDir => return error.RuntimeDir,
             else => return .{ .not_created = "the server did not start" },
         };
-        break :fd ipc.connectSession(server_path) catch return error.NoAnswer;
+        break :fd socket.connectSession(server_path) catch return error.NoAnswer;
     };
     defer lib_posix.close(fd);
     if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return error.WrongPeer;
@@ -176,7 +173,7 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
     }
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd: ?msgpack.Bin = if (std.c.getcwd(&cwd_buf, cwd_buf.len)) |p| .{ .bytes = std.mem.sliceTo(@as([*:0]u8, @ptrCast(p)), 0) } else null;
-    const size = ipc.getTerminalSize(lib_posix.STDOUT_FILENO);
+    const size = getTerminalSize(lib_posix.STDOUT_FILENO);
     const args: m.SessionCreate.Args = .{
         .id = name,
         .cwd = cwd,
@@ -352,7 +349,6 @@ const Client = struct {
         try c.sendAttach(stdout);
 
         const detach_disabled = util.isDetachKeyDisabled();
-        var claims: util.ClaimFilter = .{};
         // The handshake may have read more than it used: an exit, at least.
         if (try c.drain(stdout)) |outcome| return outcome;
 
@@ -369,7 +365,7 @@ const Client = struct {
             // dropped, as a terminal drops keys while its link is down.
             if (fds[2].revents & lib_posix.POLL.IN != 0) {
                 try signal.drainSignalPipe();
-                c.sendPane(m.Resize, resizeOf(ipc.getTerminalSize(stdout))) catch |err| if (err != error.Protocol) return err;
+                c.sendPane(m.Resize, resizeOf(getTerminalSize(stdout))) catch |err| if (err != error.Protocol) return err;
             }
 
             if (fds[0].revents & (lib_posix.POLL.IN | lib_posix.POLL.HUP | lib_posix.POLL.ERR) != 0) {
@@ -381,9 +377,7 @@ const Client = struct {
                 if (n == 0) return .detached;
                 const data = buf[0..n];
                 if (!detach_disabled and util.isCtrlBackslash(data)) return .detached;
-                const filtered = claims.feed(data);
-                for (0..filtered.claims) |_| c.sendPane(m.Claim, .{}) catch |err| if (err != error.Protocol) return err;
-                if (filtered.forward.len > 0) c.sendFrame(m.pane_channel, .bytes, filtered.forward) catch |err| if (err != error.Protocol) return err;
+                c.sendFrame(m.pane_channel, .bytes, data) catch |err| if (err != error.Protocol) return err;
             }
 
             if (fds[1].revents & (lib_posix.POLL.IN | lib_posix.POLL.HUP | lib_posix.POLL.ERR) != 0) {
@@ -418,7 +412,7 @@ const Client = struct {
                     if (std.mem.eql(u8, msg.t, m.Lead.name)) {
                         const lead = m.decodePane(m.Lead, arena, msg) catch return error.Protocol;
                         // A client that starts to lead sends its size.
-                        if (lead.leader) c.sendPane(m.Resize, resizeOf(ipc.getTerminalSize(stdout))) catch |err| if (err != error.Protocol) return err;
+                        if (lead.leader) c.sendPane(m.Resize, resizeOf(getTerminalSize(stdout))) catch |err| if (err != error.Protocol) return err;
                     } else if (c.foreground_events and std.mem.eql(u8, msg.t, m.Foreground.name)) {
                         const fg = m.decodePane(m.Foreground, arena, msg) catch return error.Protocol;
                         var buf: [apc_max]u8 = undefined;
@@ -463,7 +457,7 @@ const Client = struct {
     /// Sends `attach`: with the offset that the terminal has, when the
     /// session may still hold the bytes after it.
     fn sendAttach(c: *Client, stdout: i32) (Error || error{OutOfMemory})!void {
-        var a = attachMessage(ipc.getTerminalSize(stdout), c.foreground_events);
+        var a = attachMessage(getTerminalSize(stdout), c.foreground_events);
         if (c.reconnected) if (c.offset) |o| {
             a.resume_epoch = c.epoch;
             a.resume_offset = o;
@@ -478,7 +472,7 @@ const Client = struct {
     fn reconnect(c: *Client, stdout: i32) (Error || error{OutOfMemory})!bool {
         var tries: u32 = 0;
         const fd = while (true) : (tries += 1) {
-            if (ipc.connectSession(c.path)) |fd| break fd else |_| {}
+            if (socket.connectSession(c.path)) |fd| break fd else |_| {}
             if (tries >= reconnect_tries) return false;
             var ts: std.c.timespec = .{ .sec = 0, .nsec = reconnect_wait_ms * std.time.ns_per_ms };
             _ = std.c.nanosleep(&ts, null);
@@ -591,11 +585,11 @@ pub fn foregroundApc(buf: []u8, f: m.Foreground) []const u8 {
     return buf[0 .. report.len + 4];
 }
 
-fn attachMessage(size: ipc.Resize, foreground_events: bool) m.Attach {
+fn attachMessage(size: Resize, foreground_events: bool) m.Attach {
     return .{ .cols = size.cols, .rows = size.rows, .xpixel = size.xpixel, .ypixel = size.ypixel, .foreground = foreground_events };
 }
 
-fn resizeOf(size: ipc.Resize) m.Resize {
+fn resizeOf(size: Resize) m.Resize {
     return .{ .cols = size.cols, .rows = size.rows, .xpixel = size.xpixel, .ypixel = size.ypixel };
 }
 

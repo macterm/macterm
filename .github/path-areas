@@ -1,0 +1,49 @@
+# The one table that the workflows read to decide what a commit changed
+# (scripts/changed-areas.sh). Each line: the areas, separated by commas, then a
+# bash pattern for a path from the repository root. In a bash pattern `*` also
+# matches `/`: `server/*` is every file under server/.
+#
+# Readers: test.yml (app, extensions), checks.yml (style), server.yml
+# (server), session-bench.yml (bench), docs.yml (docs).
+
+# The app, its tests and everything that they build or read: the bundle, the
+# build recipes and the Xcode pin, the schemas, the golden files, and the
+# release workflows that UpdaterChannelTests reads.
+app,style          *.swift
+app,style          mise.toml
+app,style          scripts/*
+app                project.yml
+app                Configs/*
+app                Macterm/*
+app                MactermTests/*
+app                IconRenderer/*
+app                .github/actions/*
+app                .github/workflows/test.yml
+app                .github/workflows/release.yml
+app                .github/workflows/release-tip.yml
+app,bench          .github/workflows/server-build.yml
+app,docs           assets/*
+
+# The extensions: the unit tests read each through the validator.
+extensions         extensions/*
+
+# Format and lint.
+style              .swiftformat
+style              .swiftlint.yml
+style              .github/workflows/checks.yml
+
+# The session server and the protocol, and the session layer benchmark.
+app,server,bench   server/*
+app,server,bench   protocol/*
+server,bench       scripts/build-server.sh
+server             Macterm/Protocol/*
+server             scripts/protocol.sh
+server             scripts/server-zig.sh
+server             .github/workflows/server.yml
+bench              Macterm/Server/*
+bench              scripts/session_bench.py
+bench              scripts/session_bench_limits.json
+bench              .github/workflows/session-bench.yml
+
+# The site build.
+docs               .github/workflows/docs.yml

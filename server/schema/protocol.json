@@ -1,5 +1,5 @@
 {
-  "level": 2,
+  "level": 3,
   "min_level": 1,
   "trust": [
     "local",
@@ -166,6 +166,26 @@
       ],
       "args": "CommandRun.Args",
       "result": "CommandRun.Result"
+    },
+    {
+      "name": "link.open",
+      "type": "LinkOpen",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "LinkOpen.Args",
+      "result": "LinkOpen.Result"
+    },
+    {
+      "name": "link.close",
+      "type": "LinkClose",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "LinkClose.Args",
+      "result": "LinkClose.Result"
     }
   ],
   "events": [
@@ -1072,6 +1092,61 @@
           "since": 1
         }
       ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "LinkOpen.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "secret",
+          "type": "secret",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "key_id",
+          "type": "u32",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "LinkOpen.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "port",
+          "type": "u16",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "LinkClose.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "key_id",
+          "type": "u32",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "LinkClose.Result",
+      "kind": "struct",
+      "fields": [],
       "cases": [],
       "variants": []
     },

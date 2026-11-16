@@ -555,7 +555,7 @@ final class PasswordPromptMonitor {
     /// authorization; Return follows only at a verified password read
     /// (`OnDemandPasswordFill`).
     func fillOnDemand(_ id: PasswordEntryID, in pane: Pane) {
-        guard probes.isEnabled(), let view = pane.nsView else {
+        guard probes.isEnabled(), let view = SurfaceRegistry.shared.view(of: pane) else {
             NSSound.beep()
             return
         }

@@ -4,7 +4,7 @@ import Foundation
 /// Do not edit. Run `mise run protocol` after a change to the Zig schema.
 enum MactermProtocol {
     /// The level that this build speaks. It counts additions to the protocol.
-    static let level: UInt32 = 2
+    static let level: UInt32 = 3
     /// The lowest level that this build accepts from a peer.
     static let minLevel: UInt32 = 1
 
@@ -116,6 +116,22 @@ extension MactermProtocol {
     enum CommandRun: ProtocolMethod {
         static let name = "command.run"
         static let since: UInt32 = 1
+        static let senders: [MactermProtocol.Trust] = [.local]
+    }
+}
+
+extension MactermProtocol {
+    enum LinkOpen: ProtocolMethod {
+        static let name = "link.open"
+        static let since: UInt32 = 3
+        static let senders: [MactermProtocol.Trust] = [.local]
+    }
+}
+
+extension MactermProtocol {
+    enum LinkClose: ProtocolMethod {
+        static let name = "link.close"
+        static let since: UInt32 = 3
         static let senders: [MactermProtocol.Trust] = [.local]
     }
 }
@@ -1263,6 +1279,104 @@ extension MactermProtocol.CommandRun.Result: ProtocolValue {
             writer.writeString("signal")
             signal.encode(to: &writer)
         }
+    }
+}
+
+extension MactermProtocol.LinkOpen {
+    struct Args: Equatable {
+        var secret: ProtocolSecret
+        var keyId: UInt32
+    }
+}
+
+extension MactermProtocol.LinkOpen.Args: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var secret: ProtocolSecret?
+        var keyId: UInt32?
+        try reader.readMap { key, reader in
+            switch key {
+            case "secret": secret = try ProtocolSecret(from: &reader)
+            case "key_id": keyId = try UInt32(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.secret = try MessagePackReader.required(secret, "secret")
+        self.keyId = try MessagePackReader.required(keyId, "key_id")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(2)
+        writer.writeString("secret")
+        secret.encode(to: &writer)
+        writer.writeString("key_id")
+        keyId.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.LinkOpen {
+    struct Result: Equatable {
+        var port: UInt16
+    }
+}
+
+extension MactermProtocol.LinkOpen.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var port: UInt16?
+        try reader.readMap { key, reader in
+            switch key {
+            case "port": port = try UInt16(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.port = try MessagePackReader.required(port, "port")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("port")
+        port.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.LinkClose {
+    struct Args: Equatable {
+        var keyId: UInt32
+    }
+}
+
+extension MactermProtocol.LinkClose.Args: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var keyId: UInt32?
+        try reader.readMap { key, reader in
+            switch key {
+            case "key_id": keyId = try UInt32(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.keyId = try MessagePackReader.required(keyId, "key_id")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("key_id")
+        keyId.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.LinkClose {
+    struct Result: Equatable {}
+}
+
+extension MactermProtocol.LinkClose.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
     }
 }
 

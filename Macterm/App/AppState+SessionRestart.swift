@@ -88,16 +88,14 @@ extension AppState {
                 replacements[old.id] = pane
             }
         }
-        tab.splitRoot = tab.splitRoot.replacing(replacements)
-        if let focused = tab.focusedPaneID, let new = replacements[focused] { tab.focusedPaneID = new.id }
-        if let zoomed = tab.zoomedPaneID, let new = replacements[zoomed] { tab.zoomedPaneID = new.id }
+        ModelWriter.paneReplace(tab, replacements)
         logger.info("restarting \(olds.count, privacy: .public) older session(s)")
         for old in olds {
-            old.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: old)
             outdatedSessions.remove(old.sessionName)
         }
         for name in Set(olds.map(\.sessionName)) {
-            olds.first { $0.sessionName == name }?.killPersistentSession(using: zmx)
+            olds.first { $0.sessionName == name }?.killPersistentSession(using: sessionClient)
         }
         pruneSessionLeaders()
         for pane in replacements.values {

@@ -17,7 +17,7 @@ struct RemoteTerminfoTests {
         // or the extended caps (Tc/RGB — the entire point) are dropped in
         // transit. The infocmp after it checks the entry resolves, and
         // stderr goes into the output for the log.
-        #expect(argv[2] == RemoteSpawn.remoteEnvPreamble
+        #expect(argv[2] == HostCommands.remoteEnvPreamble
             + "printf \"%s\" \"$1\" | { tic -x -o ~/.terminfo - && infocmp -x xterm-ghostty >/dev/null; } 2>&1")
         #expect(RemoteTerminfo.sourceArgv() == ["-x", RemoteTerminfo.entryName])
     }
@@ -27,8 +27,8 @@ struct RemoteTerminfoTests {
         // If these two ever drift, the installer would ship an entry the
         // preamble never checks for and every host would silently stay on
         // xterm-256color.
-        #expect(RemoteSpawn.remoteTermPreamble.contains("infocmp \(RemoteTerminfo.entryName) "))
-        #expect(RemoteSpawn.remoteTermPreamble.contains("TERM=\(RemoteTerminfo.entryName);"))
+        #expect(HostCommands.remoteTermPreamble.contains("infocmp \(RemoteTerminfo.entryName) "))
+        #expect(HostCommands.remoteTermPreamble.contains("TERM=\(RemoteTerminfo.entryName);"))
     }
 
     @Test

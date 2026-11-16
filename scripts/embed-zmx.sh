@@ -2,7 +2,7 @@
 # Embed the built zmx binary into the app bundle at Contents/Resources/zmx/zmx,
 # and the gzip server builds for every host target at Contents/Resources/server.
 #
-# Runs as a project.yml post-compile build phase. ZmxClient resolves the binary
+# Runs as a project.yml post-compile build phase. LocalServer.bundled resolves the binary
 # via Bundle.main.url(forResource:"zmx", withExtension:nil, subdirectory:"zmx"),
 # matching this `zmx/zmx` layout. Kept in its own `zmx/` subdir (not loose in
 # Resources/) so the lookup is unambiguous and mirrors Supacode's bundle layout.
