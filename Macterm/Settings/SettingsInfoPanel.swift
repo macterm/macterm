@@ -12,10 +12,15 @@ struct SettingsInfoPanel: View {
     let docs: DocsSection
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        // Sizes measured in the header of the System Settings panes
+        // (Notifications, Accessibility): a 26 pt tile, a 11 pt gap to the
+        // text, the tile level with the title.
+        HStack(alignment: .top, spacing: 11) {
             Image(systemName: symbol)
-                .font(.system(size: 26))
-                .frame(width: 32, height: 32)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
