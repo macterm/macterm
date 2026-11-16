@@ -674,6 +674,8 @@ On macOS 26 and later, the Dock icon and the app-switcher icon are `AppIcon.icon
 
 A bundled CLI controls the app over `<App Support>/control.sock` (target `MactermCLI`, and `PRODUCT_MODULE_NAME` must stay `MactermCLI`). Xcode copies it to `Contents/Resources/bin/macterm`. Every pane gets it in `PATH`, together with `MACTERM_SOCKET` and `MACTERM_SESSION`. The full grammar is in `docs/80-cli.md`.
 
+**`control.sock` is frozen** (design/011): it gets no new command. A new verb goes into the server protocol as an app action that the server relays to the app. `ControlCommandFreezeTests` pins the list of commands.
+
 The verbs:
 
 - `status`
