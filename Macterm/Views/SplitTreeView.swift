@@ -134,8 +134,8 @@ struct SplitLeafView: View {
     let onZoomRequest: () -> Void
     let paneDrop: PaneDropContext?
 
-    @Environment(\.paneHostID)
-    private var hostID
+    @Environment(\.paneHost)
+    private var host
 
     /// Whether the dim applies: an unfocused split, or a remote pane whose
     /// connection stopped (`Pane.isRemoteLinkLost`, 0057). A zoomed or
@@ -143,7 +143,7 @@ struct SplitLeafView: View {
     /// background is left color-accurate.
     private var isSplitDimmed: Bool {
         pane.isRemoteLinkLost
-            || (!isFocused && isSplit && pane.surface(for: hostID).adaptiveBackgroundColor == nil)
+            || (!isFocused && isSplit && SurfaceRegistry.shared.surface(for: pane, in: host).adaptiveBackgroundColor == nil)
     }
 
     /// Whether the pane is blurred and dimmed: a non-leader mirror, or a
@@ -151,6 +151,10 @@ struct SplitLeafView: View {
     /// frozen program must not look live. A lost pane that shows a line of
     /// Macterm's only dims, so that the line stays legible.
     private var isObscured: Bool {
+        Self.obscures(pane, isNonLeaderMirror: isNonLeaderMirror)
+    }
+
+    static func obscures(_ pane: Pane, isNonLeaderMirror: Bool) -> Bool {
         isNonLeaderMirror || (pane.isRemoteLinkLost && !pane.showsRemoteLinkMessage)
     }
 

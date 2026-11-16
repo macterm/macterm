@@ -6,7 +6,6 @@ const std = @import("std");
 pub const frame = @import("frame.zig");
 pub const msgpack = @import("msgpack.zig");
 pub const messages = @import("messages.zig");
-pub const schema = @import("schema.zig");
 
 const Bin = msgpack.Bin;
 const Secret = msgpack.Secret;
@@ -27,13 +26,24 @@ pub fn writeMessage(
 /// True if `T` holds a `Secret` anywhere. No reply and no event may: a
 /// saved secret never leaves the GUI through the protocol (design/006 §1).
 pub fn holdsSecret(comptime T: type) bool {
+    return comptime holdsSecretIn(T, &.{});
+}
+
+/// `seen` holds the types on the path from the top, so that a type that
+/// holds itself (a split of two nodes) ends the walk.
+fn holdsSecretIn(comptime T: type, comptime seen: []const type) bool {
     if (T == Secret) return true;
     if (T == Bin or T == Raw or T == []const u8) return false;
+    for (seen) |S| if (S == T) return false;
+    const path = seen ++ &[_]type{T};
     return switch (@typeInfo(T)) {
-        .optional => |o| holdsSecret(o.child),
-        .pointer => |p| holdsSecret(p.child),
-        .@"struct" => |s| inline for (s.field_types) |F| {
-            if (holdsSecret(F)) break true;
+        .optional => |o| holdsSecretIn(o.child, path),
+        .pointer => |p| holdsSecretIn(p.child, path),
+        .@"struct" => |s| for (s.field_types) |F| {
+            if (holdsSecretIn(F, path)) break true;
+        } else false,
+        .@"union" => |u| for (u.field_types) |F| {
+            if (holdsSecretIn(F, path)) break true;
         } else false,
         else => false,
     };
@@ -250,6 +260,9 @@ test "the schema keeps its own rules" {
     // Responses and events carry `Raw`: the checks are on each method's
     // `Result` and on each event type above.
     try testing.expect(holdsSecret(struct { a: ?[]const struct { s: Secret } }));
+    try testing.expect(holdsSecret(union(enum) { a: u8, b: *const struct { s: Secret } }));
+    const Loop = struct { next: ?*const @This(), s: ?Secret = null };
+    try testing.expect(holdsSecret(Loop));
 }
 
 test "only the local trust may open and close channels" {
@@ -265,5 +278,4 @@ test {
     _ = frame;
     _ = msgpack;
     _ = messages;
-    _ = schema;
 }

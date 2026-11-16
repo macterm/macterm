@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 # macOS attributes privacy-gated operations (Local Network, TCC) to a process's
 # *responsible process*, a value fixed at spawn and inherited from the parent.
-# The daemon re-execs itself disclaimed (daemonize.reexecDisclaimed) so that it,
-# and not the terminal that ran `zmx attach`, is the responsible process for
-# everything in the session -- and stays so after that terminal exits. These
+# The session re-execs itself disclaimed (daemonize.reexecDisclaimed) so that it,
+# and not the process that ran `zmx session`, is the responsible process for
+# everything in the session -- and stays so after that process exits. These
 # tests pin that contract. The semantics are Darwin-only, so they skip elsewhere.
 
 load test_helper
@@ -32,36 +32,40 @@ responsible_for() {
   "$BATS_TEST_TMPDIR/rpid" "$1" | awk '{print $2}'
 }
 
-@test "macos: the daemon is its own responsible process and the session's programs inherit it" {
+@test "macos: the session is its own responsible process and the session's programs inherit it" {
   [[ "$(uname)" == "Darwin" ]] || skip "responsibility is a macOS concept"
   command -v cc >/dev/null || skip "needs a C compiler for the responsibility probe"
   build_probe
 
-  # A session with no command runs $SHELL, so the daemon's argv ends at the
+  # A session with no command runs $SHELL, so the session's argv ends at the
   # session name.
-  start_session resp-test
-  local daemon shell
-  daemon=$(pgrep -f "__daemon resp-test$")
-  [[ -n "$daemon" ]]
-  shell=$(pgrep -P "$daemon")
-  [[ -n "$shell" ]]
+  "$ZMX" session resp-test
+  local session shell i=0
+  session=$(pgrep -f "__session resp-test$")
+  [[ -n "$session" ]]
+  until shell=$(pgrep -P "$session"); do
+    (( i++ < 50 )) || { echo "no shell under the session"; return 1; }
+    sleep 0.1
+  done
 
-  # The daemon disclaimed the terminal that created it...
-  [ "$(responsible_for "$daemon")" -eq "$daemon" ]
-  # ...so the session's shell is attributed to the daemon, not to this test's own root.
-  [ "$(responsible_for "$shell")" -eq "$daemon" ]
-  [ "$(responsible_for $$)" -ne "$daemon" ]
+  # The session disclaimed the process that created it...
+  [ "$(responsible_for "$session")" -eq "$session" ]
+  # ...so the session's shell is attributed to the session, not to this test's own root.
+  [ "$(responsible_for "$shell")" -eq "$session" ]
+  [ "$(responsible_for $$)" -ne "$session" ]
 }
 
 @test "macos: the re-exec's state never reaches the session" {
   [[ "$(uname)" == "Darwin" ]] || skip "the re-exec only happens on macOS"
 
-  start_session leak-test sh -c 'env | grep ZMX_DAEMON_ || echo no-daemon-vars; exec sleep 30'
+  "$ZMX" session leak-test -- sh -c "env > '$RT/env'; exec sleep 30"
   local i=0
-  until "$ZMX" history leak-test 2>/dev/null | grep -q "no-daemon-vars"; do
+  until [[ -s "$RT/env" ]]; do
+    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
     sleep 0.1
-    (( i++ < 50 )) || { echo "timed out waiting for the command"; "$ZMX" history leak-test; return 1; }
   done
-  run "$ZMX" history leak-test
-  [[ "$output" != *"ZMX_DAEMON_"* ]]
+  run grep ZMX_DAEMON_ "$RT/env"
+  [ "$status" -ne 0 ]
+  # The re-exec happened: the variables are a test of nothing otherwise.
+  pgrep -f "__session leak-test" >/dev/null
 }

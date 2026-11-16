@@ -277,32 +277,6 @@ final class TerminalTab: Identifiable {
         return newID
     }
 
-    /// Insert a mirror of `paneID` beside it — a second pane attached to the
-    /// same zmx session (#345). Returns the new pane's ID, or nil when the
-    /// pane isn't in this tab.
-    ///
-    /// Deliberately does NOT focus the new pane, unlike `split`. A mirror is a
-    /// second view of work the user is already looking at, so stealing focus
-    /// would move it away from the pane they are actually using — and, once
-    /// leadership follows focus, would hand the pty size to the new view for
-    /// no reason.
-    fileprivate func mirror(paneID: UUID, direction: SplitDirection, position: SplitPosition) -> UUID? {
-        guard let source = splitRoot.findPane(id: paneID) else { return nil }
-        let mirrored = Pane(mirroring: source)
-        let (newRoot, inserted) = splitRoot.inserting(
-            pane: mirrored,
-            at: paneID,
-            direction: direction,
-            position: position
-        )
-        guard inserted else { return nil }
-        splitRoot = newRoot
-        // Inserting reveals a new pane — exit zoom so it's visible.
-        zoomedPaneID = nil
-        if Preferences.shared.autoTilingEnabled { splitRoot = splitRoot.rebalanced() }
-        return mirrored.id
-    }
-
     /// Split a pane into a `rows`×`columns` grid of equal cells (row-major),
     /// optionally spawning `command` in every NEW pane. The source pane
     /// becomes the top-left cell and keeps its running shell — a command
@@ -361,18 +335,20 @@ final class TerminalTab: Identifiable {
     /// Split the focused pane along its longer on-screen axis (Ghostty's
     /// `new_split` / BSP behavior): a wide pane splits left/right, a tall pane
     /// splits top/bottom. Falls back to a horizontal split when the focused
-    /// pane's NSView isn't attached yet and has no measurable bounds.
+    /// pane's NSView isn't attached yet and has no measurable bounds. The
+    /// caller passes the size the pane is drawn at, because the model holds
+    /// no view.
     @discardableResult
     fileprivate func autoSplit(
         paneID: UUID,
+        drawnSize: CGSize = .zero,
         command: String? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> UUID? {
-        let bounds = splitRoot.findPane(id: paneID)?.nsView?.bounds.size ?? .zero
-        return split(
+        split(
             paneID: paneID,
-            direction: SplitDirection.auto(for: bounds),
+            direction: SplitDirection.auto(for: drawnSize),
             command: command,
             env: env,
             newPaneWorkingDirectory: newPaneWorkingDirectory
@@ -497,11 +473,11 @@ final class TerminalTab: Identifiable {
         // `.notFound` with a dead surface).
         let panes = splitRoot.allPanes()
         if panes.count <= 1 {
-            pane.destroySurface()
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
             return .onlyPaneLeft
         }
         guard let newRoot = splitRoot.removing(paneID: paneID) else { return .notFound }
-        pane.destroySurface()
+        SurfaceRegistry.shared.destroySurfaces(of: pane)
         splitRoot = newRoot
         if zoomedPaneID == paneID { zoomedPaneID = nil }
         paneFocusHistory.remove(paneID)
@@ -519,10 +495,42 @@ enum PaneRemovalResult {
     case notFound
 }
 
-/// All tabs for one project.
+/// The id of a workspace. A project's workspace has the project's id; the
+/// other kinds have their own ids (`PinnedTabs.workspaceID`,
+/// `ScratchTabs.workspaceID`). It is a UUID, as in design 010 §1, so the
+/// model's ids can replace it one for one.
+typealias WorkspaceID = UUID
+
+/// What a workspace holds tabs for (design 010 §1).
+enum WorkspaceKind: String, Hashable {
+    /// The tabs of one project. The only kind in the project list.
+    case project
+    /// The pinned tabs (`PinnedTabs`).
+    case pinned
+    /// The tabs of no project (`ScratchTabs`).
+    case scratch
+    /// The quick terminal's tab.
+    case quick
+    /// One desktop widget's tab.
+    case widget
+
+    /// The kind of a workspace with id `id`: a sentinel's kind, else a
+    /// project. The quick terminal's and the widgets' tabs are not in
+    /// `AppState.workspaces` yet, so no id names them.
+    init(id: WorkspaceID) {
+        switch id {
+        case PinnedTabs.workspaceID: self = .pinned
+        case ScratchTabs.workspaceID: self = .scratch
+        default: self = .project
+        }
+    }
+}
+
+/// All tabs of one workspace: a project, the pinned tabs or the scratch tabs.
 @MainActor @Observable
 final class Workspace: Identifiable {
-    let projectID: UUID
+    let id: WorkspaceID
+    let kind: WorkspaceKind
     fileprivate(set) var tabs: [TerminalTab] = []
     fileprivate(set) var activeTabID: UUID? {
         didSet {
@@ -551,15 +559,17 @@ final class Workspace: Identifiable {
         return tabs.first { $0.id == activeTabID }
     }
 
-    init(projectID: UUID, projectPath: String) {
-        self.projectID = projectID
-        let tab = TerminalTab(projectPath: projectPath, projectID: projectID)
+    init(id: WorkspaceID, projectPath: String) {
+        self.id = id
+        kind = WorkspaceKind(id: id)
+        let tab = TerminalTab(projectPath: projectPath, projectID: id)
         tabs.append(tab)
         activeTabID = tab.id
     }
 
-    init(projectID: UUID, tabs: [TerminalTab], activeTabID: UUID?) {
-        self.projectID = projectID
+    init(id: WorkspaceID, tabs: [TerminalTab], activeTabID: UUID?) {
+        self.id = id
+        kind = WorkspaceKind(id: id)
         self.tabs = tabs
         // Validate the supplied activeTabID against the tabs list. A stale id
         // (e.g. from a corrupt persistence snapshot) falls back to the first
@@ -579,23 +589,17 @@ final class Workspace: Identifiable {
     fileprivate func createTab(
         projectPath: String,
         sessionSlug: String? = nil,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> TerminalTab {
         let tab = TerminalTab(
             projectPath: projectPath,
-            projectID: projectID,
+            projectID: id,
             sessionSlug: sessionSlug,
             command: command,
             env: env
         )
-        // Selection hooks may create window mirrors synchronously. Give them
-        // the host configuration too, before publishing the new tab.
-        for pane in tab.splitRoot.allPanes() {
-            pane.remoteZmxPath = remoteZmxPath
-        }
         tabs.append(tab)
         if focus {
             if let current = activeTabID { tabHistory.push(current) }
@@ -745,7 +749,6 @@ enum ModelWriter {
         in workspace: Workspace,
         projectPath: String,
         sessionSlug: String? = nil,
-        remoteZmxPath: String? = nil,
         command: String? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
@@ -753,7 +756,6 @@ enum ModelWriter {
         workspace.createTab(
             projectPath: projectPath,
             sessionSlug: sessionSlug,
-            remoteZmxPath: remoteZmxPath,
             command: command,
             env: env,
             focus: focus
@@ -872,16 +874,18 @@ enum ModelWriter {
     static func paneAutoSplit(
         _ tab: TerminalTab,
         paneID: UUID,
+        drawnSize: CGSize = .zero,
         command: String? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> UUID? {
-        tab.autoSplit(paneID: paneID, command: command, env: env, newPaneWorkingDirectory: newPaneWorkingDirectory)
-    }
-
-    /// A second pane on the session of `paneID` (`pane mirror`).
-    static func paneMirror(_ tab: TerminalTab, paneID: UUID, direction: SplitDirection, position: SplitPosition) -> UUID? {
-        tab.mirror(paneID: paneID, direction: direction, position: position)
+        tab.autoSplit(
+            paneID: paneID,
+            drawnSize: drawnSize,
+            command: command,
+            env: env,
+            newPaneWorkingDirectory: newPaneWorkingDirectory
+        )
     }
 
     /// `grid RxC`: split a pane into equal cells. Returns the new pane ids.

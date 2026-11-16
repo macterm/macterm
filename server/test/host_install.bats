@@ -19,7 +19,7 @@ setup_file() {
   [[ -x /usr/sbin/sshd ]]
   local key
   for key in $A $B; do
-    (cd "$REPO_DIR" && zig build -Dversion="1.0.1+thdxg.$key" -p "$BATS_FILE_TMPDIR/$key")
+    (cd "$REPO_DIR" && zig build -Dversion="1.0.1+thdxg.$key" -Dkey="$key" -p "$BATS_FILE_TMPDIR/$key")
     gzip -n -c "$BATS_FILE_TMPDIR/$key/bin/zmx" >"$BATS_FILE_TMPDIR/$key.gz"
   done
 }

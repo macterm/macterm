@@ -37,13 +37,13 @@ struct FocusRestorationTests {
     @Test
     func restoring_when_attached_waits_for_the_view_to_reach_a_window() async {
         let pane = makePane()
-        let view = pane.ensureNSView()
+        let view = SurfaceRegistry.shared.ensureView(of: pane)
         let window = makeWindow()
 
         // Asked for while the view is in no window at all, exactly as the
         // representable asks for it.
         #expect(view.window == nil)
-        FocusRestoration.restoreFocusWhenAttached(pane.surfaces[0])
+        FocusRestoration.restoreFocusWhenAttached(SurfaceRegistry.shared.surfaces(of: pane)[0])
 
         window.contentView?.addSubview(view)
         await settle { window.firstResponder === view }
@@ -56,7 +56,7 @@ struct FocusRestorationTests {
     @Test
     func restoring_into_a_named_window_does_not_retry_when_there_is_none() async {
         let pane = makePane()
-        let view = pane.ensureNSView()
+        let view = SurfaceRegistry.shared.ensureView(of: pane)
         let window = makeWindow()
 
         FocusRestoration.restoreFocus(to: pane.id, finder: { pane }, in: nil)

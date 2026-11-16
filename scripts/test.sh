@@ -9,6 +9,10 @@ PROJECT_ROOT="$PWD"
 if [[ -n "${MACTERM_WEBSITE_DIR:-}" ]]; then
   export TEST_RUNNER_MACTERM_WEBSITE_DIR="$MACTERM_WEBSITE_DIR"
 fi
+# CLIContractTests writes its golden files again when this is 1.
+if [[ -n "${MACTERM_UPDATE_GOLDEN:-}" ]]; then
+  export TEST_RUNNER_MACTERM_UPDATE_GOLDEN="$MACTERM_UPDATE_GOLDEN"
+fi
 DERIVED_DATA="$PROJECT_ROOT/build/DerivedData"
 
 # Ensure GhosttyKit + bundled resources (themes, shell-integration) are present

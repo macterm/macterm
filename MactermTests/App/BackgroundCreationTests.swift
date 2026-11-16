@@ -20,7 +20,7 @@ struct BackgroundCreationTests {
             workspaceStore: WorkspaceStore(fileURL: storeURL),
             projectFiles: ProjectFileStore(directoryURL: projectsDir)
         )
-        state.zmx = .noop
+        state.sessionClient = .noop
         return state
     }
 
@@ -158,7 +158,7 @@ struct BackgroundCreationTests {
         let state = makeAppState()
         // Build the NSView but never a real surface (no shell spawns in the
         // test host); the exit closure still attaches to the warmed view.
-        state.incubatePane = { _ = $0.ensureNSView() }
+        state.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
         state.paneNeedsConfirmClose = { _ in false }
 
         let p = seedProject(state, name: "p", path: "/p")
@@ -171,7 +171,7 @@ struct BackgroundCreationTests {
         state.warmFocusedProject()
 
         let unseenPane = try #require(firstTab.splitRoot.allPanes().first)
-        let view = try #require(unseenPane.nsView)
+        let view = try #require(SurfaceRegistry.shared.view(of: unseenPane))
         #expect(view.onProcessExit != nil)
 
         // Simulate the shell ending on its own: the wired closure must close
@@ -187,7 +187,7 @@ struct BackgroundCreationTests {
     @Test
     func warmedExitClosure_closesInNewProject_afterPinnedToNormalMove() throws {
         let state = makeAppState()
-        state.incubatePane = { _ = $0.ensureNSView() }
+        state.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
         state.paneNeedsConfirmClose = { _ in false }
 
         let origin = seedProject(state, name: "origin", path: "/origin")
@@ -200,13 +200,13 @@ struct BackgroundCreationTests {
         let pane = try #require(pinnedTab.splitRoot.allPanes().first)
 
         state.warmStaggered([pane])
-        let view = try #require(pane.nsView)
+        let view = try #require(SurfaceRegistry.shared.view(of: pane))
         #expect(view.onProcessExit != nil)
 
         // Move it into a normal project: the pane's routing identity is
         // rebound, but its session and warmed surface stay put.
         let dest = seedProject(state, name: "dest", path: "/dest")
-        state.moveTab(tab.id, from: PinnedTabs.projectID, to: dest.id, destPath: dest.path)
+        state.moveTab(tab.id, from: PinnedTabs.workspaceID, to: dest.id, destPath: dest.path)
         #expect(pane.projectID == dest.id)
 
         let wsDest = try #require(state.workspaces[dest.id])

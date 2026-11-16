@@ -5,7 +5,14 @@ import Testing
 @MainActor
 struct WorkspaceTests {
     private func makeWorkspace() -> Workspace {
-        Workspace(projectID: UUID(), projectPath: "/tmp")
+        Workspace(id: UUID(), projectPath: "/tmp")
+    }
+
+    @Test
+    func the_kind_comes_from_the_workspace_id() {
+        #expect(Workspace(id: PinnedTabs.workspaceID, tabs: [], activeTabID: nil).kind == .pinned)
+        #expect(Workspace(id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil).kind == .scratch)
+        #expect(makeWorkspace().kind == .project)
     }
 
     @Test
@@ -68,20 +75,6 @@ struct WorkspaceTests {
         _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp", focus: false)
 
         #expect(selections == 1)
-    }
-
-    @Test(arguments: [false, true])
-    func createTab_stamps_remote_configuration_before_publishing_selection(focus: Bool) {
-        let ws = Workspace(projectID: UUID(), tabs: [], activeTabID: nil)
-        let zmxPath = "/opt/custom/bin/zmx"
-        var reportedPaths: [String?] = []
-        ws.onActiveTabChanged = { reportedPaths.append(ws.activeTab?.focusedPane?.remoteZmxPath) }
-
-        let tab = ModelWriter.tabCreate(in: ws, projectPath: "host:~/repo", remoteZmxPath: zmxPath, focus: focus)
-
-        #expect(tab.focusedPane?.remoteZmxPath == zmxPath)
-        #expect(reportedPaths == [zmxPath])
-        ws.onActiveTabChanged = nil
     }
 
     @Test

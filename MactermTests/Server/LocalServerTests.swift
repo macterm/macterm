@@ -134,25 +134,25 @@ struct LocalServerTests {
         buildTag: "abc"
     )
 
-    private func hello(level: UInt32 = MactermProtocol.level, build: String) -> MactermProtocol.Hello {
-        .init(level: level, minLevel: 1, build: build, role: .server, epoch: 1, caps: [])
+    private func hello(level: UInt32 = MactermProtocol.level, key: String) -> MactermProtocol.Hello {
+        .init(level: level, minLevel: 1, build: "1.0.1", role: .server, epoch: 1, caps: [], buildKey: key)
     }
 
     @Test
     func a_lower_level_is_older_and_a_higher_level_is_never_replaced() {
         let path = LocalServer.ServerExecutable.path(server.executable.path)
-        #expect(server.shouldReplace(hello(level: MactermProtocol.level - 1, build: "1.0.1+thdxg.abc"), executable: .unknown))
-        #expect(!server.shouldReplace(hello(level: MactermProtocol.level + 1, build: "1.0.1+thdxg.old"), executable: path))
+        #expect(server.shouldReplace(hello(level: MactermProtocol.level - 1, key: "abc"), executable: .unknown))
+        #expect(!server.shouldReplace(hello(level: MactermProtocol.level + 1, key: "old"), executable: path))
     }
 
     @Test
     func another_build_of_the_same_level_is_replaced_only_from_this_apps_path_or_a_removed_file() {
-        let other = hello(build: "1.0.1+thdxg.old")
+        let other = hello(key: "old")
         #expect(server.shouldReplace(other, executable: .path(server.executable.path)))
         #expect(server.shouldReplace(other, executable: .gone))
         #expect(!server.shouldReplace(other, executable: .path("/Applications/Macterm Debug.app/Contents/Resources/zmx/zmx")))
         #expect(!server.shouldReplace(other, executable: .unknown))
-        #expect(!server.shouldReplace(hello(build: "1.0.1+thdxg.abc"), executable: .gone))
+        #expect(!server.shouldReplace(hello(key: "abc"), executable: .gone))
 
         var unknownBuild = server
         unknownBuild.buildTag = nil

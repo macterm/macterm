@@ -6,16 +6,16 @@ private let logger = Logger(subsystem: appBundleID, category: "ControlHandler")
 
 /// Dispatches decoded control-socket requests into app state. Pure
 /// translate-and-delegate: every operation calls the same `AppState` /
-/// `ProjectStore` / `ZmxClient` methods the UI uses — no business logic of
+/// `ProjectStore` / `SessionClient` methods the UI uses — no business logic of
 /// its own. Injectable stores make it fully testable with the tempdir
 /// pattern used by `AppStateTests`.
 @MainActor
 final class ControlHandler {
     private let appState: AppState
     private let projectStore: ProjectStore
-    /// Follows `appState.zmx` so tests that stub the client (the established
+    /// Follows `appState.sessionClient` so tests that stub the client (the established
     /// AppStateTests pattern) drive this handler too.
-    private var zmx: ZmxClient { appState.zmx }
+    private var sessionClient: SessionClient { appState.sessionClient }
 
     init(appState: AppState, projectStore: ProjectStore) {
         self.appState = appState
@@ -68,6 +68,7 @@ final class ControlHandler {
 
     private func dispatch(_ request: ControlRequest, peerPID: pid_t?) async throws -> ControlData {
         let args = request.args ?? ControlArgs()
+        // Frozen: `ControlCommandFreezeTests` pins this list (design/011).
         switch request.command {
         case "status": return status()
         case "project.list": return projectList()
@@ -89,7 +90,6 @@ final class ControlHandler {
         case "pane.inspect": return try paneInspect(args)
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
-        case "pane.mirror": return try paneMirror(args)
         case "pane.focus": return try paneFocus(args)
         case "pane.close": return try paneClose(args)
         case "pane.run": return try paneRun(args)
@@ -424,7 +424,7 @@ final class ControlHandler {
     /// same `no_surface` contract `pane.run` uses.
     private func paneInspect(_ args: ControlArgs) throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
-        guard let view = pane.nsView, let size = view.surfaceSize else {
+        guard let view = SurfaceRegistry.shared.view(of: pane), let size = view.surfaceSize else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -460,7 +460,7 @@ final class ControlHandler {
             // remote pane the surface's own verdict is meaningless (the local
             // ssh client reads as a perpetually running program).
             needsConfirmQuit: pane.needsConfirmClose,
-            readOnly: pane.isReadOnly
+            readOnly: SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly
         )
         return ControlData(inspect: inspect)
     }
@@ -470,7 +470,7 @@ final class ControlHandler {
     private func paneDump(_ args: ControlArgs) throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
         let scrollback = args.scrollback == true
-        guard let view = pane.nsView, let text = view.readText(scrollback: scrollback) else {
+        guard let view = SurfaceRegistry.shared.view(of: pane), let text = view.readText(scrollback: scrollback) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -487,7 +487,7 @@ final class ControlHandler {
     }
 
     private func sessionList() async throws -> ControlData {
-        guard let sessions = await zmx.listSessions() else {
+        guard let sessions = await sessionClient.listSessions() else {
             throw ControlError(
                 code: .internalError,
                 message: "zmx session listing unavailable",
@@ -585,12 +585,12 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "project.select requires a project selector")
         }
         let project = try resolveProject(args.project)
-        if project.id == PinnedTabs.projectID {
+        if project.id == PinnedTabs.workspaceID {
             // The synthetic project must not go through `selectProject`, which
             // would treat it as a project rooted at the home directory; it has
             // its own selection path.
             appState.selectPinnedProject()
-        } else if project.id == ScratchTabs.projectID {
+        } else if project.id == ScratchTabs.workspaceID {
             try appState.selectScratchTabs(in: resolveWindow(args))
         } else {
             // `--window` targets a specific one; without it the key window,
@@ -829,9 +829,7 @@ final class ControlHandler {
     // MARK: - Pane mutations
 
     /// Resolve a `--direction` argument into the axis and side the new pane
-    /// lands on, measured against the pane it will act on. Shared by
-    /// `pane.split` and `pane.mirror` so the two can't drift on what a
-    /// direction means.
+    /// lands on, measured against the pane it will act on.
     private func splitPlacement(
         _ args: ControlArgs,
         relativeTo pane: Pane
@@ -843,8 +841,8 @@ final class ControlHandler {
         case "up": return (.vertical, .first)
         case "auto":
             // The UI's auto-split picks the longer on-screen axis from the
-            // pane as the key window draws it (a mirror there, #345); a
-            // never-shown pane measures zero and falls back to horizontal —
+            // pane as the key window draws it; a never-shown pane measures
+            // zero and falls back to horizontal —
             // same as AppState.autoSplitPane. `auto` has no side to infer, so
             // the new pane trails the target.
             return (SplitDirection.auto(for: appState.displayedSize(of: pane)), .second)
@@ -863,28 +861,11 @@ final class ControlHandler {
             position: placement.position,
             projectID: project.id,
             projectDirectory: project.path,
-            remoteZmxPath: project.zmxPath,
             command: args.run,
             focus: args.focus ?? true
         ), let newPane = target.tab.splitRoot.findPane(id: newID)
         else {
             throw ControlError(code: .internalError, message: "split failed")
-        }
-        return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
-    }
-
-    private func paneMirror(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
-        let target = try resolvePane(args, in: workspace)
-        let placement = try splitPlacement(args, relativeTo: target.pane)
-        guard let newID = appState.mirrorPane(
-            target.pane.id,
-            direction: placement.direction,
-            position: placement.position,
-            projectID: project.id
-        ), let newPane = target.tab.splitRoot.findPane(id: newID)
-        else {
-            throw ControlError(code: .internalError, message: "mirror failed")
         }
         return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
     }
@@ -931,9 +912,7 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
         let target = try resolvePane(args, in: workspace)
-        // Mirror-aware: a pane whose session another pane still attaches kills
-        // nothing when it closes, so it must not raise a warning that says it
-        // does (see AppState.closeNeedsConfirmation).
+        // The app's own guard (AppState.closeNeedsConfirmation).
         if appState.closeNeedsConfirmation([target.pane]), args.force != true {
             throw ControlError(
                 code: .busy,
@@ -971,14 +950,14 @@ final class ControlHandler {
     /// `no_surface` miss.
     private func paneSendText(_ args: ControlArgs, text: String) throws -> ControlData {
         if let target = widgetTarget(args) {
-            if target.pane.isReadOnly { throw Self.paneReadOnly }
-            guard let view = target.pane.nsView, view.sendText(text) else { throw Self.widgetNotLive }
+            if SurfaceRegistry.shared.preferredSurface(of: target.pane).isReadOnly { throw Self.paneReadOnly }
+            guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else { throw Self.widgetNotLive }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
         }
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        if target.pane.isReadOnly { throw Self.paneReadOnly }
-        guard let view = target.pane.nsView, view.sendText(text) else {
+        if SurfaceRegistry.shared.preferredSurface(of: target.pane).isReadOnly { throw Self.paneReadOnly }
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet",
@@ -1014,14 +993,17 @@ final class ControlHandler {
         /// still work on a read-only surface: refuse only a key that would go
         /// to the program.
         func refuseIfReadOnly(_ pane: Pane) throws {
-            guard pane.isReadOnly, let view = pane.nsView,
+            guard SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly,
+                  let view = SurfaceRegistry.shared.view(of: pane),
                   view.keyReachesProgram(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
             else { return }
             throw Self.paneReadOnly
         }
         if let target = widgetTarget(args) {
             try refuseIfReadOnly(target.pane)
-            guard let view = target.pane.nsView, view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers) else {
+            guard let view = SurfaceRegistry.shared.view(of: target.pane),
+                  view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
+            else {
                 throw Self.widgetNotLive
             }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
@@ -1029,7 +1011,7 @@ final class ControlHandler {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
         try refuseIfReadOnly(target.pane)
-        guard let view = target.pane.nsView,
+        guard let view = SurfaceRegistry.shared.view(of: target.pane),
               view.sendKey(keyCode: shortcut.keyCode, mods: shortcut.modifiers)
         else {
             throw ControlError(
@@ -1101,7 +1083,7 @@ final class ControlHandler {
         }
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.debugResizeSurface(cols: cols, rows: rows) else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.debugResizeSurface(cols: cols, rows: rows) else {
             throw ControlError(
                 code: .noSurface,
                 message: "the pane's terminal is not live yet (or its cell size is unknown)",
@@ -1123,11 +1105,11 @@ final class ControlHandler {
             guard let reply = PasswordPromptMonitor.Reply(rawValue: answer) else {
                 throw ControlError(code: .badRequest, message: "answer must be accept, dismiss or autofill")
             }
-            guard let view = target.pane.nsView, monitor.answer(reply, in: view) else {
+            guard let view = SurfaceRegistry.shared.view(of: target.pane), monitor.answer(reply, in: view) else {
                 throw ControlError(code: .badRequest, message: "no password bubble is up in that pane")
             }
         }
-        return ControlData(password: monitor.state(for: target.pane.nsView))
+        return ControlData(password: monitor.state(for: SurfaceRegistry.shared.view(of: target.pane)))
     }
 
     /// DEBUG-ONLY: a project's memory as a verb, so the e2e suite can turn
@@ -1197,7 +1179,7 @@ final class ControlHandler {
     private func paneCopyMode(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane) else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         switch args.copyMode {
@@ -1227,7 +1209,7 @@ final class ControlHandler {
     private func paneReadOnly(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.surface != nil else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         view.sendBindingAction("toggle_readonly")
@@ -1240,7 +1222,7 @@ final class ControlHandler {
     private func paneExplain(_ args: ControlArgs) throws -> ControlData {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
-        guard let view = target.pane.nsView, view.surface != nil else {
+        guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
         }
         switch args.explain {
@@ -1371,7 +1353,7 @@ final class ControlHandler {
         guard let name = args.session, !name.isEmpty else {
             throw ControlError(code: .badRequest, message: "session.kill requires a session name")
         }
-        guard let sessions = await zmx.listSessions() else {
+        guard let sessions = await sessionClient.listSessions() else {
             throw ControlError(code: .internalError, message: "zmx session listing unavailable")
         }
         guard sessions.contains(where: { $0.name == name && $0.isRunning }) else {
@@ -1381,7 +1363,7 @@ final class ControlHandler {
                 action: "run `macterm session list` to see live sessions"
             )
         }
-        await zmx.killSession(name)
+        await sessionClient.killSession(name)
         return ControlData()
     }
 
@@ -1432,7 +1414,7 @@ final class ControlHandler {
     /// workspace's tabs out from under the records.
     private func rejectSynthetic(_ project: Project, verb: String) throws {
         guard Project.isSynthetic(project.id) else { return }
-        if project.id == PinnedTabs.projectID {
+        if project.id == PinnedTabs.workspaceID {
             throw ControlError(
                 code: .badRequest,
                 message: "\(verb) does not apply to the pinned workspace. Macterm manages its layout by itself",
@@ -1464,7 +1446,7 @@ final class ControlHandler {
         // The scratch workspace exists on demand (#665): `tab new --project
         // scratch` is how a script makes the first scratch tab, and there is no
         // row to select first. Empty, it draws nothing in the sidebar.
-        if project.id == ScratchTabs.projectID { appState.ensureScratchWorkspace() }
+        if project.id == ScratchTabs.workspaceID { appState.ensureScratchWorkspace() }
         guard let workspace = appState.workspaces[project.id] else {
             throw ControlError(
                 code: .notFound,
@@ -1482,7 +1464,7 @@ final class ControlHandler {
     private func workspace(holding session: String) throws -> (Project, Workspace) {
         let candidates = [appState.activeProjectID].compactMap(\.self)
             + projectStore.projects.map(\.id)
-            + [PinnedTabs.projectID, ScratchTabs.projectID]
+            + [PinnedTabs.workspaceID, ScratchTabs.workspaceID]
         for projectID in candidates {
             guard let workspace = appState.workspaces[projectID],
                   workspace.tabs.contains(where: { tab in
@@ -1524,13 +1506,13 @@ final class ControlHandler {
         // (`PinnedTabs.reservesName`, a superset of this test), so only a
         // project named before that rule can be in this position.
         if selector.lowercased() == PinnedTabs.displayName.lowercased()
-            || selector == PinnedTabs.projectID.uuidString
+            || selector == PinnedTabs.workspaceID.uuidString
         {
             return PinnedTabs.project
         }
         // `--project scratch` (or `"Scratch Tabs"`, or the sentinel UUID) targets
         // the scratch workspace (#665), by the same rule.
-        if ScratchTabs.reservesName(selector) || selector == ScratchTabs.projectID.uuidString {
+        if ScratchTabs.reservesName(selector) || selector == ScratchTabs.workspaceID.uuidString {
             return ScratchTabs.project
         }
         let projects = projectStore.projects
@@ -1720,7 +1702,7 @@ final class ControlHandler {
             tabID: tab.id.uuidString,
             title: pane.displayTitle,
             process: pane.foregroundProcessName,
-            cwd: pane.nsView?.currentPwd ?? pane.projectPath,
+            cwd: SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? pane.projectPath,
             focused: tab.id == workspace.activeTabID && pane.id == tab.focusedPaneID,
             state: controlState(for: pane.executionState),
             mirror: appState.isMirrored(pane),

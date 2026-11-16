@@ -698,14 +698,17 @@ private struct DesktopWidgetTerminalView: View {
             onClosePane: { _ in onShellExit() },
             onCommandFinished: { paneID in
                 guard let pane = tab.splitRoot.findPane(id: paneID),
-                      pane.nsView?.window?.isKeyWindow == true
+                      SurfaceRegistry.shared.existingSurface(for: pane, in: .widget(widget.id))?.nsView?.window?.isKeyWindow == true
                 else { return }
                 pane.acknowledgeCommandCompletion()
             },
             onAdaptiveBackgroundChange: { paneID, color in
-                guard let pane = tab.splitRoot.findPane(id: paneID), pane.adaptiveBackgroundColor != color else { return }
-                pane.adaptiveBackgroundColor = color
+                guard let pane = tab.splitRoot.findPane(id: paneID) else { return }
+                let surface = SurfaceRegistry.shared.surface(for: pane, in: .widget(widget.id))
+                guard surface.adaptiveBackgroundColor != color else { return }
+                surface.adaptiveBackgroundColor = color
             }
         )
+        .environment(\.paneHost, .widget(widget.id))
     }
 }

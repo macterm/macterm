@@ -201,56 +201,55 @@ to_epoch() {
 # the name zmx until the app calls it by another. The gzip builds for every
 # host target go to Contents/Resources/server/macterm-<key>-<target>.gz.
 #
-# Its key is the tree hash of server/ and protocol/ (build-server.sh). In order:
+# Its key is the hash of the server's sources (build-server.sh). In order:
 #   1. A build for the key in build/server/: CI downloads its own server build
 #      there before setup.
-#   2. With changes under server/ or protocol/ that are not committed: build
-#      with Zig. A prebuilt never stands in for source that is not committed.
+#   2. With changes in the sources that are not committed: build with Zig. A
+#      prebuilt never stands in for source that is not committed.
 #   3. The prebuilt for the key from the server-prebuilt release, which CI on
 #      main and on pull requests from this repository uploads.
 #   4. Build with Zig.
-# Every tarball is checked against its .sha256 before it is used.
+# Every build is checked against its manifest (build-server.sh verify) before
+# it is used. The installed copy of the manifest, $SERVER_MANIFEST, is the
+# stamp: embed-zmx.sh reads the key from it.
 SERVER_REPO="macterm/macterm"
 SERVER_RELEASE="server-prebuilt"
 SERVER_DIR="Macterm/Resources/zmx"
-SERVER_STAMP=".server-key"
+SERVER_MANIFEST="$SERVER_DIR/server.json"
 SERVER_DIST="build/server"
-# The release file of the retired zmx installer (#699). The app reads the key
-# from the names of its server files now; setup removes an old copy.
+# The release file of the retired zmx installer (#699) and the key stamp
+# before the manifest. Setup removes old copies.
 OLD_RELEASE_FILE="Macterm/Resources/zmx-release.json"
-SERVER_TARGETS=(universal-macos x86_64-linux aarch64-linux)
+OLD_STAMP=".server-key"
 
-# Exit 0 when $1 holds a checked tarball for every target of key $2.
+# Exit 0 when $1 holds the checked build of key $2.
 server_dist_complete() {
-  local dir="$1" key="$2" target name
-  for target in "${SERVER_TARGETS[@]}"; do
-    name="macterm-$key-$target.tar.gz"
-    [[ -f "$dir/$name" && -f "$dir/$name.sha256" ]] || return 1
-    (cd "$dir" && shasum -a 256 -c "$name.sha256" >/dev/null) || {
-      echo "error: $dir/$name does not match its SHA-256" >&2
-      return 1
-    }
-  done
+  scripts/build-server.sh verify "$1" "$2" >/dev/null
+}
+
+# The key of the installed build, or nothing.
+installed_server_key() {
+  [[ -f "$SERVER_MANIFEST" ]] && plutil -extract key raw -o - "$SERVER_MANIFEST" 2>/dev/null
 }
 
 install_server() {
   local dir="$1" key="$2"
-  # The stamp goes first and comes back last, so an install that stops in the
-  # middle is never taken as complete.
-  rm -f "$SERVER_STAMP"
+  # The manifest is the last file that setup writes, so an install that stops
+  # in the middle is never taken as complete.
   rm -rf "$SERVER_DIR"
   mkdir -p "$SERVER_DIR"
   tar xzf "$dir/macterm-$key-universal-macos.tar.gz" -C "$SERVER_DIR" zmx
   chmod +x "$SERVER_DIR/zmx"
-  # The Linux builds go into the bundle as gzip files of the bare binary, for
+  # The other builds go into the bundle as gzip files of the bare binary, for
   # an install on a host with no download. embed-zmx.sh adds the macOS one from
   # the signed copy.
   local target
-  for target in x86_64-linux aarch64-linux; do
+  for target in $(scripts/build-server.sh targets); do
+    [[ "$target" == universal-macos ]] && continue
     tar xzf "$dir/macterm-$key-$target.tar.gz" -O zmx | gzip -n -9 > "$SERVER_DIR/macterm-$key-$target.gz"
   done
-  printf '%s\n' "$key" > "$SERVER_STAMP"
-  rm -f "$OLD_RELEASE_FILE"
+  cp "$dir/macterm-$key-server.json" "$SERVER_MANIFEST"
+  rm -f "$OLD_RELEASE_FILE" "$OLD_STAMP"
   rm -f .zmx-tag
   echo "Installed the server $key"
 }
@@ -268,12 +267,10 @@ build_server() {
 }
 
 ensure_server() {
-  local key stamped="" fetched
+  local key fetched
   key="$(scripts/build-server.sh key)"
-  [[ -f "$SERVER_STAMP" ]] && stamped="$(cat "$SERVER_STAMP")"
-  if [[ -x "$SERVER_DIR/zmx" && -f "$SERVER_DIR/macterm-$key-x86_64-linux.gz" &&
-    -f "$SERVER_DIR/macterm-$key-aarch64-linux.gz" && "$stamped" == "$key" ]]; then
-    rm -f "$OLD_RELEASE_FILE"
+  if [[ -x "$SERVER_DIR/zmx" && "$(installed_server_key)" == "$key" ]]; then
+    rm -f "$OLD_RELEASE_FILE" "$OLD_STAMP"
     return 0
   fi
   if server_dist_complete "$SERVER_DIST" "$key" 2>/dev/null; then
@@ -281,7 +278,7 @@ ensure_server() {
     return 0
   fi
   if scripts/build-server.sh dirty; then
-    echo "server/ or protocol/ has changes that are not committed"
+    echo "The server's sources have changes that are not committed"
     build_server "$key"
     install_server "$SERVER_DIST" "$key"
     return 0

@@ -127,7 +127,7 @@ enum SplitAnimation {
 ///   linear animation), and a closing pane's ghost is clipped to the strip
 ///   its sibling has not yet reclaimed.
 /// - **A closing pane is drawn as a ghost, not animated live.**
-///   `Pane.destroySurface` nils the view and detaches it a tick later, so
+///   `PaneSurface.destroy` nils the view and detaches it a tick later, so
 ///   moving the leaf itself would slide an empty host. The model snapshots
 ///   the pane's last frame (`PaneSurface.closingSnapshot`) WITHOUT a background
 ///   fill, so over the window tint it looks exactly as the pane did — an
@@ -181,8 +181,8 @@ struct AnimatedSplitView: View {
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
-    @Environment(\.paneHostID)
-    private var hostID
+    @Environment(\.paneHost)
+    private var host
 
     @State
     private var ghosts: [ClosingGhost] = []
@@ -315,7 +315,7 @@ struct AnimatedSplitView: View {
                         .transition(.identity)
                         .onAppear { settle(leaf.id) }
                         .onChange(of: leaf.hidden, initial: true) { _, hidden in
-                            leaf.pane.existingSurface(for: hostID)?.nsView?.hiddenInLayout = hidden
+                            SurfaceRegistry.shared.existingSurface(for: leaf.pane, in: host)?.nsView?.hiddenInLayout = hidden
                         }
                 }
 
@@ -477,7 +477,7 @@ struct AnimatedSplitView: View {
         let remaining = Set(new.leaves.map(\.id))
         let closing = old.leaves.filter { !remaining.contains($0.id) && !$0.hidden }
             .compactMap { leaf in
-                leaf.pane.existingSurface(for: hostID)?.closingSnapshot.map { snapshot in
+                SurfaceRegistry.shared.existingSurface(for: leaf.pane, in: host)?.closingSnapshot.map { snapshot in
                     ClosingGhost(
                         id: leaf.id,
                         rect: leaf.rect,

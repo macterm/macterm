@@ -6,12 +6,14 @@ This file loads when you work in `Macterm/Control/`. The root `AGENTS.md` has th
 
 A bundled CLI controls the app over `<App Support>/control.sock` (target `MactermCLI`, and `PRODUCT_MODULE_NAME` must stay `MactermCLI`). Xcode copies it to `Contents/Resources/bin/macterm`. Every pane gets it in `PATH`, together with `MACTERM_SOCKET` and `MACTERM_SESSION`. The full grammar is in `80-cli.md` (in the docs of `macterm/website`).
 
+**`control.sock` is frozen** (design/011). Do not add a command to it. A new verb goes into the server protocol as an app action that the server relays to the app. `ControlCommandFreezeTests` pins the list of commands.
+
 The verbs:
 
 - `status`
 - `project list/create/select/rename/remove`
 - `tab list/new/select/move/rename/close/merge`
-- `pane list/inspect/dump/split/focus/close/run/key/zoom/resize-split/mirror`
+- `pane list/inspect/dump/split/focus/close/run/key/zoom/resize-split`
 - `grid RxC`
 - `session list/info/kill`
 - `window list/new/focus/close`
@@ -28,7 +30,7 @@ Rules:
   - The `v` of a request is the minimum version of the server that it needs. Ordinary requests stay at v1. `focus` needs v2. The handler rejects newer versions before dispatch.
   - Apps of v1 that shipped earlier ignore `v`. The CLI must therefore check newer requests against the version in the response of the server before it sends any mutation. A new version number alone cannot stop an older app from ignoring `--no-focus` in silence.
 - **Server** (`ControlSocketServer`). A dedicated thread polls a non-blocking listen fd. The dispatch of each connection hops to `@MainActor`. The server starts in `applicationDidFinishLaunching`. The handler attaches in `installResponders` (early requests get `starting`). The socket has mode 0600 in a directory with mode 0700, for the same user only.
-- **Handler** (`ControlHandler`). It translates and delegates only. It resolves selectors (name, UUID, index from 1). It calls the same `AppState`, `ProjectStore` and `ZmxClient` methods that the UI uses. Close verbs return a typed `busy` error, and they do not stage dialogs. A session selector with no `--project` resolves in the project that holds the session (`MACTERM_SESSION` arrives in the same way). A pane in the background can therefore still reach itself while the user looks at another project.
+- **Handler** (`ControlHandler`). It translates and delegates only. It resolves selectors (name, UUID, index from 1). It calls the same `AppState`, `ProjectStore` and `SessionClient` methods that the UI uses. Close verbs return a typed `busy` error, and they do not stage dialogs. A session selector with no `--project` resolves in the project that holds the session (`MACTERM_SESSION` arrives in the same way). A pane in the background can therefore still reach itself while the user looks at another project.
 - **Client.**
   - Discovery order: `--socket`, then `MACTERM_SOCKET` (a hint, and the client falls through when it is stale), then the paths in App Support for each flavor.
   - stdout has output only on success. The exit code is 0 for ok, 1 for an error of the app, 2 for not reachable.

@@ -269,11 +269,11 @@ struct ControlHandlerTests {
         _ appState: AppState,
         sessions: [LocalSession]?
     ) {
-        appState.zmx = ZmxClient(
-            executableURL: { nil },
+        appState.sessionClient = SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { _ in },
-            killRemoteSession: { _, _, _ in },
+            killRemoteSession: { _, _ in },
             listSessions: { sessions },
             endV1Sessions: { _ in true }
         )
@@ -470,7 +470,7 @@ struct ControlHandlerTests {
         #expect(appState.activeProjectID == project.id)
         // …while `pinned` still means the pinned workspace, first.
         let pinned = await handler.handle(request("project.select", args: ControlArgs(project: "Pinned")))
-        #expect(pinned.data?.projects?.first?.id == PinnedTabs.projectID.uuidString)
+        #expect(pinned.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
     }
 
     @Test
@@ -540,7 +540,7 @@ struct ControlHandlerTests {
 
         let response = await handler.handle(request("project.select", args: ControlArgs(project: "pinned")))
         #expect(response.ok)
-        #expect(response.data?.projects?.first?.id == PinnedTabs.projectID.uuidString)
+        #expect(response.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
         #expect(response.data?.projects?.first?.index == nil)
     }
 
@@ -656,10 +656,10 @@ struct ControlHandlerTests {
         appState.newTabInheritsWorkingDirectory = { true }
         let project = seedProject(appState, projectStore, name: "target", path: "/target-project")
         let targetPane = try #require(appState.workspaces[project.id]?.activeTab?.focusedPane)
-        targetPane.ensureNSView().currentPwd = "/target-project/src"
+        SurfaceRegistry.shared.ensureView(of: targetPane).currentPwd = "/target-project/src"
         let activeProject = seedProject(appState, projectStore, name: "active", path: "/active-project")
         let activePane = try #require(appState.workspaces[activeProject.id]?.activeTab?.focusedPane)
-        activePane.ensureNSView().currentPwd = "/active-project/elsewhere"
+        SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/active-project/elsewhere"
 
         let response = await handler.handle(request(
             "tab.new",
@@ -680,22 +680,19 @@ struct ControlHandlerTests {
     }
 
     @Test(arguments: ["tab.new", "pane.split"], [false, true])
-    func remote_creation_stamps_zmx_path_before_spawning_without_selecting_the_project(
+    func remote_creation_warms_without_selecting_the_project(
         command: String, focus: Bool
     ) async throws {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "local")
         let selected = appState.activeProjectID
-        let remote = Project(name: "remote", path: "host:~/repo", zmxPath: "/opt/custom/bin/zmx")
+        let remote = Project(name: "remote", path: "host:~/repo")
         projectStore.add(remote)
-        // Restored but never opened: no selectProject stamp on any pane.
-        let workspace = Workspace(projectID: remote.id, projectPath: remote.path)
+        // Restored but never opened.
+        let workspace = Workspace(id: remote.id, projectPath: remote.path)
         appState.workspaces[remote.id] = workspace
         var warmed: [UUID] = []
-        appState.incubatePane = { pane in
-            #expect(pane.remoteZmxPath == remote.zmxPath)
-            warmed.append(pane.id)
-        }
+        appState.incubatePane = { pane in warmed.append(pane.id) }
 
         let response = await handler.handle(request(command, args: ControlArgs(
             project: remote.id.uuidString, focus: focus
@@ -710,7 +707,6 @@ struct ControlHandlerTests {
             child = try #require(workspace.activeTab?.splitRoot.allPanes().first { $0.id.uuidString == childID })
         }
         #expect(child.isRemote)
-        #expect(child.remoteZmxPath == remote.zmxPath)
         #expect(warmed == (focus ? [] : [child.id]))
         #expect(appState.activeProjectID == selected)
     }
@@ -792,9 +788,9 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         let activeProject = appState.activeProjectID
-        appState.incubatePane = { _ = $0.ensureNSView() }
+        appState.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
         if pinned { appState.ensurePinnedWorkspace() }
-        let projectID = pinned ? PinnedTabs.projectID : project.id
+        let projectID = pinned ? PinnedTabs.workspaceID : project.id
         // A split needs a source; create it in the background too.
         let created = await handler.handle(request("tab.new", args: ControlArgs(
             project: projectID.uuidString, focus: false
@@ -814,7 +810,7 @@ struct ControlHandlerTests {
             let childID = try #require(split.data?.panes?.first?.id)
             child = try #require(tab.splitRoot.allPanes().first { $0.id.uuidString == childID })
         }
-        let exit = try #require(child.nsView?.onProcessExit)
+        let exit = try #require(SurfaceRegistry.shared.view(of: child)?.onProcessExit)
 
         exit()
         // The asynchronous libghostty callback may be delivered twice.
@@ -836,33 +832,28 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func background_split_stamps_the_remote_tab_before_incubation() async throws {
+    func background_split_of_a_remote_tab_warms_only_the_new_pane() async throws {
         let (handler, appState, projectStore) = makeHandler()
-        appState.zmx = .noop
-        let remote = Project(name: "remote", path: "host:~/repo", zmxPath: "/opt/custom/bin/zmx")
+        appState.sessionClient = .noop
+        let remote = Project(name: "remote", path: "host:~/repo")
         projectStore.add(remote)
-        let workspace = Workspace(projectID: remote.id, projectPath: remote.path)
+        let workspace = Workspace(id: remote.id, projectPath: remote.path)
         appState.workspaces[remote.id] = workspace
         let tab = try #require(workspace.activeTab)
         let sourceID = try #require(tab.focusedPaneID)
         _ = ModelWriter.paneSplit(tab, paneID: sourceID, direction: .horizontal)
-        #expect(tab.splitRoot.allPanes().allSatisfy { $0.remoteZmxPath == nil })
         var warmed: [UUID] = []
-        appState.incubatePane = {
-            #expect($0.remoteZmxPath == remote.zmxPath)
-            warmed.append($0.id)
-        }
+        appState.incubatePane = { warmed.append($0.id) }
 
         let response = await handler.handle(request("pane.split", args: ControlArgs(
             project: remote.id.uuidString, focus: false
         )))
 
         #expect(response.ok)
-        // Only the new pane starts. Every pane of the tab carries the path,
-        // so the others start with it when the project is selected.
+        // Only the new pane starts. The others start when the project is
+        // selected.
         #expect(warmed.count == 1)
         #expect(tab.splitRoot.allPanes().count == 3)
-        #expect(tab.splitRoot.allPanes().allSatisfy { $0.remoteZmxPath == remote.zmxPath })
         #expect(appState.activeProjectID == nil)
     }
 
@@ -1113,10 +1104,10 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore, path: "/project")
         let tab = try #require(appState.workspaces[project.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        source.ensureNSView().currentPwd = "/project/source"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/source"
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         let focusedPane = try #require(tab.focusedPane)
-        focusedPane.ensureNSView().currentPwd = "/project/focused"
+        SurfaceRegistry.shared.ensureView(of: focusedPane).currentPwd = "/project/focused"
 
         let response = await handler.handle(request(
             "pane.split", args: ControlArgs(session: source.sessionName, direction: "down")
@@ -1180,7 +1171,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore, path: "devbox:~/repo")
         let tab = try #require(appState.workspaces[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        source.ensureNSView().currentPwd = "/repo/src"
+        SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/repo/src"
 
         let response = await handler.handle(request("pane.split", args: ControlArgs(direction: "right")))
 
@@ -1484,11 +1475,11 @@ struct ControlHandlerTests {
     func session_kill_verifies_then_kills() async {
         let (handler, appState, _) = makeHandler()
         let killed = KilledNames()
-        appState.zmx = ZmxClient(
-            executableURL: { nil },
+        appState.sessionClient = SessionClient(
+            runsSessions: { false },
             isBundled: { true },
             killSession: { name in await killed.append(name) },
-            killRemoteSession: { _, _, _ in },
+            killRemoteSession: { _, _ in },
             listSessions: { [LocalSession(name: "macterm-x-000011112222")] },
             endV1Sessions: { _ in true }
         )

@@ -1,12 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const lib_posix = @import("posix.zig");
-const Cfg = @import("cfg.zig");
-const socket = @import("socket.zig");
-const ipc = @import("ipc.zig");
+const Resize = @import("pty.zig").Resize;
+const getTerminalSize = @import("pty.zig").getTerminalSize;
 const foreground = @import("foreground.zig");
 const assert = std.debug.assert;
-const log = @import("log.zig");
 const cross = @import("cross");
 
 const Cmd = struct {
@@ -101,13 +99,12 @@ pub const PtyInfo = struct {
     }
 };
 
-/// What a v2 session sets apart from v1 (see `daemonize`). The defaults are
-/// v1's.
+/// What the session sets for its shell (see `daemonize`).
 pub const SpawnOpts = struct {
     /// The variable that names the session in the shell's environment.
-    session_var: []const u8 = "ZMX_SESSION",
+    session_var: []const u8,
     /// The pty's first size. Null reads the size of the caller's terminal.
-    size: ?ipc.Resize = null,
+    size: ?Resize = null,
 };
 
 /// spawnPty runs forkpty() and executes the shell or shell command the user
@@ -116,7 +113,7 @@ pub const SpawnOpts = struct {
 /// This is the second fork in the double-fork technique explained in the
 /// daemonize() comment.
 /// `session_var` names the session in the shell's environment.
-pub fn spawnPty(sesh_name: []const u8, cmd: Cmd, size: ipc.Resize, session_var: []const u8) !PtyInfo {
+pub fn spawnPty(sesh_name: []const u8, cmd: Cmd, size: Resize, session_var: []const u8) !PtyInfo {
     var ws: cross.struct_winsize = .{
         .ws_row = size.rows,
         .ws_col = size.cols,
@@ -156,27 +153,19 @@ pub fn spawnPty(sesh_name: []const u8, cmd: Cmd, size: ipc.Resize, session_var: 
     return info;
 }
 
-/// State the macOS daemon rebuilds itself from after `reexecDisclaimed`.
-/// Everything else a `Daemon` holds is either derived from the environment
-/// (`Cfg`) or created after this point.
+/// State the macOS session rebuilds itself from after `reexecDisclaimed`.
 pub const Reexec = struct {
     session_name: []const u8,
     shell: []const u8,
     command: ?[]const []const u8,
-    /// The session's cwd as `Daemon.cwd` holds it (OSC 7 form); empty when unknown.
-    cwd: []const u8,
     /// The already-bound listen socket. It is CLOEXEC, so `reexecDisclaimed`
     /// clears that flag: recreating it in the new image would race the
     /// client, which connects the moment the fork returns to it.
     /// `takeReexecState` sets the flag again in the new image.
     server_sock_fd: i32,
     /// The hidden subcommand that the new image runs.
-    subcommand: []const u8 = reexec_command,
+    subcommand: []const u8,
 };
-
-/// The hidden subcommand the re-exec'd image runs:
-/// `zmx __daemon <session> [-- command...]`.
-pub const reexec_command = "__daemon";
 
 /// Environment variables that carry the rest of `Reexec` plus the terminal
 /// size across the re-exec (argv carries only what is naturally argv: the
@@ -191,29 +180,27 @@ pub const reexec_env = struct {
     pub const xpixel = "ZMX_DAEMON_XPIXEL";
     pub const ypixel = "ZMX_DAEMON_YPIXEL";
     pub const shell = "ZMX_DAEMON_SHELL";
-    pub const cwd = "ZMX_DAEMON_CWD";
-    pub const all = [_][:0]const u8{ socket_fd, rows, cols, xpixel, ypixel, shell, cwd };
+    pub const all = [_][:0]const u8{ socket_fd, rows, cols, xpixel, ypixel, shell };
 };
 
-/// What `takeReexecState` hands the `__daemon` entry.
+/// What `takeReexecState` hands the `__session` entry.
 pub const ReexecState = struct {
     server_sock_fd: i32,
-    size: ipc.Resize,
+    size: Resize,
     shell: []const u8,
-    cwd: []const u8,
 };
 
 extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *std.c.posix_spawnattr_t, disclaim: c_int) c_int;
 
 /// macOS only. Replaces this process — already forked off the client and
-/// `setsid`'d — with a fresh image of zmx running `__daemon`, spawned with
+/// `setsid`'d — with a fresh image of zmx running `__session`, spawned with
 /// `responsibility_spawnattrs_setdisclaim` so the kernel records the daemon
 /// as its own *responsible process*. Returns only on failure; the caller then
 /// carries on in the forked image as before.
 ///
 /// Why: macOS attributes privacy-gated operations (Local Network, TCC) to the
 /// responsible process, a per-process value fixed at spawn and inherited from
-/// the parent, so a session created by `zmx attach` is attributed to the
+/// the parent, so a session created by `zmx session` is attributed to the
 /// terminal app that ran it. The moment that app exits, every process in the
 /// session becomes responsible for itself, and a client reattaching over the
 /// socket never re-attributes them: reattach is a connect, not a fork. From
@@ -228,7 +215,7 @@ extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *std.c.posix_spawnattr
 /// the app, and its code signature's identifier is what the system asks the
 /// user about: Macterm signs its bundled copy as the app itself, so the prompt
 /// names Macterm and the daemon shares the app's grant.
-fn reexecDisclaimed(spec: Reexec, size: ipc.Resize) !void {
+fn reexecDisclaimed(spec: Reexec, size: Resize) !void {
     const gpa = std.heap.c_allocator;
 
     _ = try lib_posix.fcntl(spec.server_sock_fd, lib_posix.F.SETFD, 0);
@@ -257,7 +244,6 @@ fn reexecDisclaimed(spec: Reexec, size: ipc.Resize) !void {
     try setReexecEnv(gpa, reexec_env.xpixel, "{d}", .{size.xpixel});
     try setReexecEnv(gpa, reexec_env.ypixel, "{d}", .{size.ypixel});
     try setReexecEnv(gpa, reexec_env.shell, "{s}", .{spec.shell});
-    try setReexecEnv(gpa, reexec_env.cwd, "{s}", .{spec.cwd});
 
     var attr: std.c.posix_spawnattr_t = undefined;
     if (std.c.posix_spawnattr_init(&attr) != 0) return error.SpawnAttrInit;
@@ -309,7 +295,6 @@ pub fn takeReexecState(gpa: std.mem.Allocator) !?ReexecState {
             .ypixel = try parseReexecInt(u16, reexec_env.ypixel),
         },
         .shell = try gpa.dupe(u8, lib_posix.getenv(reexec_env.shell) orelse return error.ReexecStateIncomplete),
-        .cwd = try gpa.dupe(u8, lib_posix.getenv(reexec_env.cwd) orelse ""),
     };
     return state;
 }
@@ -382,7 +367,7 @@ pub fn daemonize(sesh_name: []const u8, cmd: Cmd, keep_fds_open: []i32, reexec: 
     _ = try lib_posix.setsid();
 
     // Fetch terminal size before redirecting stdio FDs to /dev/null.
-    const term_size = opts.size orelse ipc.getTerminalSize(lib_posix.STDOUT_FILENO);
+    const term_size = opts.size orelse getTerminalSize(lib_posix.STDOUT_FILENO);
 
     // Redirect stdin/stdout/stderr to /dev/null. The daemon
     // communicates via its unix socket, not stdio. Without

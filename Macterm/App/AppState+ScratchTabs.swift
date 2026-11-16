@@ -4,7 +4,7 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "ScratchTabs")
 
 /// Scratch tabs (#665): a workspace below the projects, keyed by the fixed
-/// `ScratchTabs.projectID` sentinel. It holds ordinary tabs that belong to no
+/// `ScratchTabs.workspaceID` sentinel. It holds ordinary tabs that belong to no
 /// project.
 ///
 /// The rules, in one place:
@@ -24,15 +24,15 @@ private let logger = Logger(subsystem: appBundleID, category: "ScratchTabs")
 extension AppState {
     // MARK: - Queries
 
-    var scratchWorkspace: Workspace? { workspaces[ScratchTabs.projectID] }
+    var scratchWorkspace: Workspace? { workspaces[ScratchTabs.workspaceID] }
 
     /// Whether the sidebar has scratch rows to draw.
     var hasScratchTabs: Bool { !(scratchWorkspace?.tabs.isEmpty ?? true) }
 
     func ensureScratchWorkspace() {
-        if workspaces[ScratchTabs.projectID] == nil {
-            workspaces[ScratchTabs.projectID] = Workspace(
-                projectID: ScratchTabs.projectID, tabs: [], activeTabID: nil
+        if workspaces[ScratchTabs.workspaceID] == nil {
+            workspaces[ScratchTabs.workspaceID] = Workspace(
+                id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil
             )
         }
     }
@@ -57,7 +57,7 @@ extension AppState {
     /// first, then the tab.
     func selectScratchTab(_ tabID: UUID) {
         guard let ws = scratchWorkspace, ws.tabs.contains(where: { $0.id == tabID }) else { return }
-        activeProjectID = ScratchTabs.projectID
+        activeProjectID = ScratchTabs.workspaceID
         ModelWriter.tabSelect(tabID, in: ws)
         warmFocusedProject()
         saveWorkspaces()
@@ -72,10 +72,10 @@ extension AppState {
     @discardableResult
     func createScratchTab(command: String? = nil, env: [String: String]? = nil, focus: Bool = true) -> UUID? {
         ensureScratchWorkspace()
-        if focus, activeProjectID != ScratchTabs.projectID {
-            activeProjectID = ScratchTabs.projectID
+        if focus, activeProjectID != ScratchTabs.workspaceID {
+            activeProjectID = ScratchTabs.workspaceID
         }
-        let id = createTab(projectID: ScratchTabs.projectID, projects: [], command: command, env: env, focus: focus)
+        let id = createTab(projectID: ScratchTabs.workspaceID, projects: [], command: command, env: env, focus: focus)
         logger.info("createScratchTab: \(id?.uuidString ?? "nil", privacy: .public)")
         return id
     }
@@ -84,7 +84,7 @@ extension AppState {
     /// its own working directory. `toIndex` is the slot among the scratch
     /// rows; nil appends.
     func moveTabToScratchTabs(_ tabID: UUID, from sourceProjectID: UUID, toIndex: Int? = nil) {
-        guard sourceProjectID != ScratchTabs.projectID else { return }
-        moveTab(tabID, from: sourceProjectID, to: ScratchTabs.projectID, destPath: ScratchTabs.fallbackRoot, toIndex: toIndex)
+        guard sourceProjectID != ScratchTabs.workspaceID else { return }
+        moveTab(tabID, from: sourceProjectID, to: ScratchTabs.workspaceID, destPath: ScratchTabs.fallbackRoot, toIndex: toIndex)
     }
 }

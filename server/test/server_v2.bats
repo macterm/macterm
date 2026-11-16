@@ -9,19 +9,9 @@ setup_file() {
   export PYTHONPATH="$BATS_TEST_DIRNAME"
 }
 
-# test_helper's setup is v1's (ZMX_DIR); these replace it.
-setup() {
-  ZMX="${ZMX:-$REPO_DIR/zig-out/bin/zmx}"
-  if [[ ! -x "$ZMX" ]]; then
-    (cd "$REPO_DIR" && zig build)
-  fi
-  # Short: a socket path has at most 103 bytes on macOS.
-  RT="$(mktemp -d "${TMPDIR:-/tmp}/rt.XXXXXX")"
-  export MACTERM_RUNTIME_DIR="$RT/run"
-  export ZMX RT
-}
-
+# The helper's teardown, and the fake that a test starts.
 teardown() {
+  if [[ -f "$RT/fake.pid" ]]; then kill "$(<"$RT/fake.pid")" 2>/dev/null || true; fi
   local sock pid
   if [[ -S "$MACTERM_RUNTIME_DIR/.server" ]]; then
     pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" server-pid 2>/dev/null) && kill -KILL "$pid" 2>/dev/null || true
@@ -31,7 +21,6 @@ teardown() {
     pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid "$(basename "$sock")" 2>/dev/null) || continue
     kill -TERM "$pid" 2>/dev/null || true
   done
-  if [[ -f "$RT/fake.pid" ]]; then kill "$(<"$RT/fake.pid")" 2>/dev/null || true; fi
   rm -rf "$RT"
 }
 
@@ -444,5 +433,61 @@ assert n.sessions()["att"]["unseen"] is False
 assert n.call("pane.seen", id="att") == {}
 assert n.request("pane.seen", id="nope")["err"]["code"] == "not_found"
 n.call("session.kill", id="att")
+PY
+}
+
+@test "server: link.open opens a UDP port for the link, link.close frees it" {
+  MACTERM_LINK_PORTS=62501-62599 "$ZMX" server
+  python3 - <<'PY'
+import socket, time
+from v2client import ServerClient
+
+def bound(port):
+    # Dual stack or IPv4 only: a bind on either address fails while it is up.
+    for family, addr in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::")):
+        try:
+            s = socket.socket(family, socket.SOCK_DGRAM)
+        except OSError:
+            continue
+        try:
+            s.bind((addr, port))
+        except OSError:
+            return True
+        finally:
+            s.close()
+    return False
+
+def free(port):
+    for _ in range(50):
+        if not bound(port):
+            return True
+        time.sleep(0.1)
+    return False
+
+c = ServerClient(level=3)
+key = bytes(range(32))
+r = c.call("link.open", secret=key, key_id=11)
+port = r["port"]
+assert 62501 <= port <= 62599, r
+assert bound(port)
+
+# The same key id is refused, and a key of the wrong length too.
+assert c.request("link.open", secret=key, key_id=11)["err"]["code"] == "invalid_args"
+assert c.request("link.open", secret=b"short", key_id=12)["err"]["code"] == "invalid_args"
+
+c.call("link.close", key_id=11)
+assert free(port)
+assert c.request("link.close", key_id=11)["err"]["code"] == "not_found"
+
+PY
+}
+
+@test "server: link.open fails when the host turns the link off" {
+  MACTERM_LINK=off "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+res = c.request("link.open", secret=bytes(32), key_id=1)
+assert res["err"]["code"] == "unavailable", res
 PY
 }

@@ -137,6 +137,12 @@ struct MessagePackWriter {
         bytes.append(value ? 0xC3 : 0xC2)
     }
 
+    /// Always a float 64, as the Zig side writes an `f64`.
+    mutating func writeDouble(_ value: Double) {
+        bytes.append(0xCB)
+        appendBig(value.bitPattern)
+    }
+
     mutating func writeUnsigned(_ value: UInt64) {
         switch value {
         case 0 ... 0x7F:
@@ -274,6 +280,19 @@ struct MessagePackReader {
         return value
     }
 
+    /// The payload of a tagged union, `a` in `{t, a}`, which the union kept
+    /// as bytes until it read the tag. It is decoded inside the union's map,
+    /// with this reader's memory budget, as the Zig side does.
+    mutating func decodePayload<T: ProtocolValue>(_: T.Type, from raw: ProtocolRaw?) throws -> T {
+        var payload = try MessagePackReader(Self.required(raw, "a").bytes)
+        payload.depth = depth + 1
+        payload.allocated = allocated
+        let value = try T(from: &payload)
+        guard payload.isAtEnd else { throw MessagePackError.trailingBytes }
+        allocated = payload.allocated
+        return value
+    }
+
     /// The value of a field that has no default: an error if the map did
     /// not have it.
     static func required<T>(_ value: T?, _ key: String) throws -> T {
@@ -290,6 +309,15 @@ struct MessagePackReader {
         switch try byte() {
         case 0xC2: false
         case 0xC3: true
+        default: throw MessagePackError.wrongType
+        }
+    }
+
+    /// A float 64, or a float 32 that it widens.
+    mutating func readDouble() throws -> Double {
+        switch try byte() {
+        case 0xCA: try Double(Float(bitPattern: big(UInt32.self)))
+        case 0xCB: try Double(bitPattern: big(UInt64.self))
         default: throw MessagePackError.wrongType
         }
     }
@@ -499,6 +527,16 @@ extension Bool: ProtocolValue {
 
     func encode(to writer: inout MessagePackWriter) {
         writer.writeBool(self)
+    }
+}
+
+extension Double: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        self = try reader.readDouble()
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeDouble(self)
     }
 }
 

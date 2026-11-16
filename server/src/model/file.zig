@@ -76,8 +76,12 @@ pub fn load(gpa: Allocator, io: std.Io, path: []const u8, fault: *model.Fault) F
 }
 
 /// Writes `path` through a temporary file and a rename, so a crash leaves
-/// the old file whole. `path` is absolute.
-pub fn save(gpa: Allocator, io: std.Io, m: *const Model, path: []const u8) FileError!void {
+/// the old file whole. `path` is absolute. It compacts the model first
+/// (`Model.compact`): the server saves after each batch, debounced to 100 ms
+/// (design/010 §2), so the arena holds only the edits since the last
+/// save. Pointers into the model are invalid after a save.
+pub fn save(gpa: Allocator, io: std.Io, m: *Model, path: []const u8) FileError!void {
+    try m.compact();
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
     write(m, &out.writer) catch return error.OutOfMemory;

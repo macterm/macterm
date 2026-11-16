@@ -194,7 +194,7 @@ targets:
     postCompileScripts:
       # Copy the session server (built from server/ or downloaded as its
       # prebuilt by setup.sh) into the app bundle at
-      # Contents/Resources/zmx/zmx — ZmxClient resolves it via Bundle.main.
+      # Contents/Resources/zmx/zmx — LocalServer.bundled resolves it via Bundle.main.
       # Runs after compile so the bundle's Resources dir exists.
       - script: "${SRCROOT}/scripts/embed-zmx.sh"
         name: "Embed zmx"
@@ -306,9 +306,7 @@ targets:
     platform: macOS
     sources:
       - path: MactermTests
-        # CLIContractTests reads these through #filePath.
         excludes:
-          - CLI/Golden/**
           - AGENTS.md
           - CLAUDE.md
     dependencies:

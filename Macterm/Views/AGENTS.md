@@ -4,7 +4,7 @@ This file loads when you work in `Macterm/Views/`. The root `AGENTS.md` has the 
 
 ## Tab switcher previews (#344)
 
-When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each tab in the cycle (`AppState.tabCycleOrder`, limited by `Preferences.recentTabCandidates`). Each card is a mosaic of `PanePreview`s.
+When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each tab in the cycle (`TabCycler.order`, limited by `Preferences.recentTabCandidates`). Each card is a mosaic of `PanePreview`s.
 
 - The cards are **live**. `beginLivePreviews` sets `GhosttyTerminalNSView.rendersForPreview`. `syncOcclusion` then reports the pane as visible, and libghostty wakes its renderer. Macterm samples at 5 Hz until `commitTabCycle` runs `endLivePreviews`. Every exit from a cycle goes through it, so no renderer stays awake.
 - `PanePreview.frameID` skips a new sample of a pane whose IOSurface did not change. Macterm draws the thumbnail through a provider that does not copy. This keeps a hold at about 7% CPU, in place of 30%.

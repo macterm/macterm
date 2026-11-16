@@ -17,9 +17,9 @@ struct LocalSession: Equatable {
     var isRunning: Bool
     /// The clients that show the session. nil when the session did not say.
     var clients: Int?
-    /// The build that started the session (`1.0.1+thdxg.<key>`), which an
-    /// update never changes.
-    var build: String?
+    /// The build key of the build that started the session, which an update
+    /// never changes. nil when the session did not say.
+    var buildKey: String?
 
     init(
         name: String,
@@ -27,14 +27,14 @@ struct LocalSession: Equatable {
         ttyPath: String? = nil,
         isRunning: Bool = true,
         clients: Int? = 0,
-        build: String? = nil
+        buildKey: String? = nil
     ) {
         self.name = name
         self.shellPID = shellPID
         self.ttyPath = ttyPath
         self.isRunning = isRunning
         self.clients = clients
-        self.build = build
+        self.buildKey = buildKey
     }
 
     init(_ session: MactermProtocol.Session) {
@@ -44,7 +44,7 @@ struct LocalSession: Equatable {
             ttyPath: session.pty.map { String(decoding: $0.bytes, as: UTF8.self) },
             isRunning: session.state == .running,
             clients: session.clients.map(Int.init),
-            build: session.build
+            buildKey: session.buildKey
         )
     }
 }
@@ -91,7 +91,7 @@ actor LocalSessions {
     func kill(_ name: String) async {
         do {
             _ = try await call(MactermProtocol.SessionKill.self, .init(id: name))
-        } catch let ProtocolControlError.errorResponse(info) where info.code == "not_found" {
+        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
             return
         } catch {
             logger.warning("session kill \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
