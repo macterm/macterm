@@ -960,6 +960,8 @@ struct WindowStateTests {
         let tab = try #require(ws.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         _ = addPane(sharing: source, projectID: project.id, in: state)
+        // The source attached first, so it leads.
+        state.noteSessionLeader(source)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         claimed = []
