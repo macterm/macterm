@@ -470,14 +470,18 @@ enum WorkspaceSerializer {
     static func restoreTab(_ t: TabSnapshot, projectID: UUID) -> TerminalTab {
         var seen: Set<String> = []
         // The first pane of a tab is never a repeat in a new set.
-        return restoreTab(t, projectID: projectID, seen: &seen)!
+        let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) ?? t.splitRoot
+        return build(t, root: restoreNode(kept, projectID: projectID))
     }
 
     /// `restoreTab`, leaving out each pane whose session `seen` holds. Nil
     /// when no pane is left.
     static func restoreTab(_ t: TabSnapshot, projectID: UUID, seen: inout Set<String>) -> TerminalTab? {
         guard let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) else { return nil }
-        let root = restoreNode(kept, projectID: projectID)
+        return build(t, root: restoreNode(kept, projectID: projectID))
+    }
+
+    private static func build(_ t: TabSnapshot, root: SplitNode) -> TerminalTab {
         let focused = t.focusedPaneID.flatMap { root.findPane(id: $0)?.id } ?? root.allPanes().first?.id
         return TerminalTab(id: t.id, splitRoot: root, focusedPaneID: focused, customTitle: t.customTitle)
     }
