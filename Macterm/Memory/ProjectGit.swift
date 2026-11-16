@@ -135,7 +135,7 @@ enum ProjectGit {
     static func remoteStatus(_ remote: ProjectPath) async -> RemoteResult {
         guard case let .remote(user, host, directory) = remote else { return .unreachable }
         let result = await RemoteHosts.shared.run(
-            ["/bin/sh", "-c", HostCommands.gitProbeScript(directory: directory)],
+            HostCommands.gitProbeArgv(directory: directory),
             destination: HostCommands.destination(user: user, host: host),
             timeout: remoteTimeout
         )

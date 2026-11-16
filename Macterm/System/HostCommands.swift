@@ -1,17 +1,21 @@
 import Foundation
 
-/// Builds the commands that run on a remote host (#104). Pure string
-/// assembly: every command line is unit-testable without a host.
+/// Builds the commands that run on a remote host (#104). Every script is a
+/// constant, and the data (a folder, a build key) goes to it as arguments,
+/// never as shell text.
 ///
 /// - **The host scripts** (`Scripts`, `server/host/`): the check, the
-///   attach and the install of the host's server, sent as
-///   `sh -c '<script>' macterm <arguments>` (`command`).
-/// - **A pane's command** (`plainShellCommand`, for a host with no server): it runs
-///   on the tty of an ssh channel over the host's one connection
-///   (`SSHConnections.ttyArguments`, 0057). The login happened before, in
-///   the master, so the channel never asks. It has no persistence.
-/// - **A background read** (`gitProbeScript`): the host's server runs it
-///   (`RemoteHosts.run`, 0058). It opens no connection of its own.
+///   attach and the install of the host's server, and the plain shell for a
+///   host with no server, sent as `sh -c '<script>' macterm <arguments>`
+///   (`command`). sshd gives that line to the user's login shell, so each
+///   argument is one plain word: the plain shell gets its folder hex-encoded.
+///   The plain shell runs on the tty of an ssh channel over the host's one
+///   connection (`SSHConnections.ttyArguments`, 0057). The login happened
+///   before, in the master, so the channel never asks. It has no persistence.
+/// - **A `command.run` script** (`createProbeScript`, `gitProbeScript`): the
+///   host's server runs it as argv `/bin/sh -c <script> sh <folder>`
+///   (`RemoteHosts.run`, 0058), so no login shell parses it. It opens no
+///   connection of its own.
 ///
 /// Port, identity, ControlMaster, and IPv6 literals are deliberately not
 /// expressible here — point the host field at an `~/.ssh/config` alias for
@@ -22,19 +26,6 @@ enum HostCommands {
         if let user, !user.isEmpty { return "\(user)@\(host)" }
         return host
     }
-
-    /// How every remote command is delivered: `sh -c '<script>'`.
-    ///
-    /// NOT `sh -lc`: the login flag is unportable. Debian/Ubuntu `/bin/sh` is
-    /// dash, and older dash (e.g. on a real CMU host tested here) rejects `-l`
-    /// outright — `sh -lc '…'` then ignores the command and drops to an
-    /// interactive shell, silently. `sh -c` runs everywhere. Instead of what
-    /// `-l` would have done (source the user's login profiles), `remoteEnvPreamble`
-    /// appends a fixed fallback dir list to PATH — profiles are DELIBERATELY
-    /// never sourced (see `remoteEnvPreamble` for why every containment attempt
-    /// leaked a pane-killer). Naming `sh` explicitly keeps the script POSIX no
-    /// matter which login shell sshd hands the outer string to (bash/zsh/fish/nu).
-    static let remoteShell = "sh -c"
 
     /// PATH setup prepended to each script: append the common install dirs.
     /// sshd runs commands non-login/non-interactive with a bare PATH, so a
@@ -171,20 +162,45 @@ enum HostCommands {
     }
 
     /// What a new remote session needs from the host, in one command that the
-    /// host's server runs (`command.run`): the first line says if the folder
-    /// is there (`ok`) or the pane falls back to the home folder (`home`),
-    /// the second is the folder's physical path, and the rest is the
-    /// environment after the same settling of `TERM`, `COLORTERM` and
+    /// host's server runs (`command.run`, `createProbeArgv`): the first line
+    /// says if the folder is there (`ok`) or the pane falls back to the home
+    /// folder (`home`), the second is the folder's physical path, and the rest
+    /// is the environment after the same settling of `TERM`, `COLORTERM` and
     /// `TERM_PROGRAM` that a pane's script did. Never sources a profile.
     /// `session.create` has no shell to expand a `~`, so the host resolves it.
-    static func createProbeScript(directory: String) -> String {
+    /// The folder is `$1`, so no shell parses it.
+    static let createProbeScript =
         // No ssh pty gave the server a TERM. A shell may set a `dumb` one that
         // it does not export: replace it, and export the result.
         "case \"$TERM\" in \"\"|dumb) TERM=xterm-256color; infocmp xterm-ghostty >/dev/null 2>&1 && TERM=xterm-ghostty;; esac; "
             + "export TERM; "
             + remoteTermPreamble + remoteColorPreamble + remoteTerminalProgramPreamble
-            + "if cd \(quoteRemoteDirectory(directory)) 2>/dev/null; then echo ok; else echo home; cd; fi; pwd -P; env"
+            + "d=$1; " + expandTilde + " "
+            + "if cd \"$d\" 2>/dev/null; then echo ok; else echo home; cd; fi; pwd -P; env"
+
+    /// The `command.run` argv of `createProbeScript` for a folder.
+    static func createProbeArgv(directory: String) -> [String] {
+        ["/bin/sh", "-c", createProbeScript, "sh", directory]
     }
+
+    /// Makes `$d` a folder that `cd` takes: a `~` or `~name` at the start
+    /// becomes that home folder, as a shell expands it. A name with any
+    /// character other than `[A-Za-z0-9._-]` stays as it is, because only a
+    /// checked name goes into `eval`. The same text is in
+    /// `server/host/plain.sh`.
+    static let expandTilde = oneLine("""
+    case $d in
+      "~" | "~/"*) d=$HOME${d#"~"} ;;
+      "~"*)
+        n=${d%%/*};
+        n=${n#"~"};
+        if [ -z "$(printf "%s" "$n" | tr -d A-Za-z0-9._-)" ]; then
+          eval "u=~$n";
+          d=$u${d#"~$n"};
+        fi;
+        ;;
+    esac;
+    """)
 
     /// True for a folder that may go into a host command: a path (absolute,
     /// or from `~`) with no control character, no backslash and no single
@@ -198,19 +214,6 @@ enum HostCommands {
         }
     }
 
-    /// What a remote pane runs on a host with no server (the user declined
-    /// the install, or the host has no build): a plain login shell in
-    /// `directory`, as v1 without zmx. It ends with the connection.
-    static func plainShellCommand(directory: String) -> String {
-        let quoted = quoteRemoteDirectory(directory)
-        let script = assertSingleQuoteFree(
-            remoteTermPreamble + remoteColorPreamble + remoteTerminalProgramPreamble
-                + "cd \(quoted) || echo \"macterm: cannot cd to\" \(quoted) >&2; "
-                + "if [ -n \"$SHELL\" ]; then exec \"$SHELL\" -l; else exec /bin/sh; fi"
-        )
-        return "\(remoteShell) \(shellQuote(script))"
-    }
-
     /// The git reads of the memory panel for a remote project, in one
     /// command that the host's server runs (`ProjectGit.remoteStatus`): the
     /// same six reads that `ProjectGit.status` runs locally, with their
@@ -221,14 +224,16 @@ enum HostCommands {
     /// in a repository, and 0 in all other cases (`ProjectGit.branchLogScript`
     /// fails on a detached HEAD, which is not a failure of the read).
     /// `GIT_OPTIONAL_LOCKS=0` and `core.fsmonitor=false` for the same reasons
-    /// as locally. Never sources a profile (see `remoteEnvPreamble`).
-    static func gitProbeScript(directory: String) -> String {
+    /// as locally. Never sources a profile (see `remoteEnvPreamble`). The
+    /// folder is `$1`, so no shell parses it.
+    static let gitProbeScript: String = {
         let git = (["git"] + ProjectGit.gitOptions).joined(separator: " ")
         let separator = "printf \"\\036\""
         let branchFormat = "%(refname:short)%1f%(objectname:short)%1f%(committerdate:unix)%1f%(subject)"
         return remoteEnvPreamble
             + "GIT_OPTIONAL_LOCKS=0; GIT_TERMINAL_PROMPT=0; export GIT_OPTIONAL_LOCKS GIT_TERMINAL_PROMPT; "
-            + "cd \(quoteRemoteDirectory(directory)) 2>/dev/null || exit 2; "
+            + "d=$1; " + expandTilde + " "
+            + "cd \"$d\" 2>/dev/null || exit 2; "
             + "command -v git >/dev/null 2>&1 || exit 3; "
             + "s=$(\(git) status --porcelain=v2 --branch --show-stash 2>/dev/null) || exit 4; "
             + "printf \"%s\\n\" \"$s\"; \(separator); "
@@ -239,79 +244,11 @@ enum HostCommands {
             + "{ \(ProjectGit.branchLogScript(git: git)); } 2>/dev/null; \(separator); "
             + "if printf \"%s\\n\" \"$s\" | grep -q \"^[12u] \"; then "
             + "\(ProjectGit.diffCommand(git: git)); fi; exit 0"
-    }
+    }()
 
-    /// POSIX single-quote escaping: safe against spaces, globs, `$`, and
-    /// embedded quotes (`'` → `'\''`). For strings parsed by a shell that is
-    /// KNOWN to be POSIX — the local bash ghostty spawns through, or the
-    /// inside of an `sh -c` script. Never for text a remote login shell
-    /// tokenizes with embedded quotes present (see `remoteShell`).
-    static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    /// POSIX double-quote escaping (`\`, `"`, `$`, backtick), used INSIDE the
-    /// `sh -c` scripts so the script itself stays free of single quotes.
-    ///
-    /// A single quote in `value` is passed through literally (double quotes
-    /// don't escape `'`), which would violate the single-quote-free wire-format
-    /// invariant: `shellQuote` would then emit `'\''`, and fish/nu tokenize that
-    /// differently than POSIX sh. Callers that feed user-controlled fields
-    /// (the project directory) must reject `'` upstream — see
-    /// `assertSingleQuoteFree` — so this can never receive one in practice.
-    static func posixDoubleQuote(_ value: String) -> String {
-        var escaped = ""
-        for ch in value {
-            if ch == "\\" || ch == "\"" || ch == "$" || ch == "`" {
-                escaped.append("\\")
-            }
-            escaped.append(ch)
-        }
-        return "\"\(escaped)\""
-    }
-
-    /// The wire-format invariant: an assembled remote script must contain NO
-    /// single quotes, so `sh -c '<script>'` tokenizes identically under every
-    /// login shell (bash/zsh/fish/nu). Returns the script unchanged when it
-    /// holds, or a safe diagnostic script (never a `'`) when a user-supplied
-    /// field smuggled one in: the pane shows the diagnostic and drops into a
-    /// shell, so it stays usable (a bare exit would vanish the pane).
-    static func assertSingleQuoteFree(_ script: String) -> String {
-        guard script.contains("'") else { return script }
-        // Keep the replacement itself single-quote-free.
-        return remoteEnvPreamble
-            + "echo \"macterm: remote path contains an unsupported single quote\" >&2; "
-            + "exec ${SHELL:-/bin/sh}"
-    }
-
-    /// Quote a remote directory for the `cd` inside the `sh -c` script,
-    /// keeping ONLY a leading `~` or `~username` *unquoted* so sh still expands
-    /// it (`~`, `~/dev with spaces`, `~deploy/app`). A quoted tilde is a literal
-    /// directory named `~`, so the tilde itself can't be quoted — but anything
-    /// past it (and any `~username` segment) is either double-quoted or, if it
-    /// isn't a valid bare-safe username, the whole string falls back to full
-    /// double-quoting. This closes the hole where `~$(cmd)/sub` (or a slashless
-    /// `~$(cmd)`) shipped a command substitution unquoted into the `cd` line.
-    static func quoteRemoteDirectory(_ directory: String) -> String {
-        guard directory.hasPrefix("~") else { return posixDoubleQuote(directory) }
-        // Split into the tilde segment (`~` or `~name`) and the remainder.
-        let afterTilde = directory.index(after: directory.startIndex)
-        let slashIndex = directory[afterTilde...].firstIndex(of: "/")
-        let tildeSegment = String(directory[..<(slashIndex ?? directory.endIndex)])
-        // The username part between `~` and the first `/` (empty for a bare `~`).
-        let username = String(tildeSegment.dropFirst())
-        // A bare-safe username is a strict allowlist; anything else (spaces,
-        // `$`, backticks, command substitution) must NOT ship unquoted.
-        let usernameIsSafe = username.isEmpty
-            || username.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-" }
-        guard usernameIsSafe else { return posixDoubleQuote(directory) }
-        guard let slashIndex else {
-            // No slash: the whole string is just `~` or `~name` — emit the
-            // validated tilde segment bare (nothing else to quote).
-            return tildeSegment
-        }
-        let rest = String(directory[directory.index(after: slashIndex)...])
-        return rest.isEmpty ? "\(tildeSegment)/" : "\(tildeSegment)/\(posixDoubleQuote(rest))"
+    /// The `command.run` argv of `gitProbeScript` for a folder.
+    static func gitProbeArgv(directory: String) -> [String] {
+        ["/bin/sh", "-c", gitProbeScript, "sh", directory]
     }
 
     /// The script with no comment lines and no empty lines, its lines joined
@@ -327,10 +264,10 @@ enum HostCommands {
 
     /// nil when the script has a single quote, a newline or a `!` that csh
     /// reads as history (one that a blank, `=` or `(` does not follow), or an argument
-    /// is not one plain word. Fail closed: nothing goes to the host then.
+    /// is not one plain word (`isArgument`). Fail closed: nothing goes to the host then.
     static func command(_ script: String, _ arguments: [String]) -> String? {
         guard !script.contains("'"), !script.contains(where: \.isNewline), !hasHistoryMark(script),
-              arguments.allSatisfy(isWord)
+              arguments.allSatisfy(isArgument)
         else { return nil }
         return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
     }
@@ -345,7 +282,13 @@ enum HostCommands {
 
     /// Letters, digits and `-`, at most 64: a build key, a checksum, a host id.
     static func isWord(_ text: String) -> Bool {
-        !text.isEmpty && text.count <= 64 && text.unicodeScalars.allSatisfy {
+        text.count <= 64 && isArgument(text)
+    }
+
+    /// Letters, digits and `-`, at most 8192: one plain word on a command
+    /// line, also a folder in hex (`Scripts.plainCommand`).
+    static func isArgument(_ text: String) -> Bool {
+        !text.isEmpty && text.count <= 8192 && text.unicodeScalars.allSatisfy {
             ("a" ... "z").contains($0) || ("A" ... "Z").contains($0) || ("0" ... "9").contains($0) || $0 == "-"
         }
     }
@@ -359,6 +302,7 @@ extension HostCommands {
     struct Scripts: Equatable {
         var attach: String
         var install: String
+        var plain: String
 
         static var bundled: Scripts? {
             Bundle.main.resourceURL.flatMap { load(from: $0.appendingPathComponent("host", isDirectory: true)) }
@@ -367,9 +311,14 @@ extension HostCommands {
         /// Each script as the one line that goes to the host (`oneLine`).
         static func load(from directory: URL) -> Scripts? {
             guard let attach = try? String(contentsOf: directory.appendingPathComponent("attach.sh"), encoding: .utf8),
-                  let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8)
+                  let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8),
+                  let plain = try? String(contentsOf: directory.appendingPathComponent("plain.sh"), encoding: .utf8)
             else { return nil }
-            return Scripts(attach: HostCommands.oneLine(attach), install: HostCommands.oneLine(install))
+            return Scripts(
+                attach: HostCommands.oneLine(attach),
+                install: HostCommands.oneLine(install),
+                plain: HostCommands.oneLine(plain)
+            )
         }
 
         func attachCommand(key: String) -> String? {
@@ -378,6 +327,19 @@ extension HostCommands {
 
         func installCommand(key: String, sha256: String, hostID: String) -> String? {
             HostCommands.command(install, [key, sha256, hostID])
+        }
+
+        /// What a remote pane runs on a host with no server (the user
+        /// declined the install, or the host has no build): a plain login
+        /// shell in `directory`, as v1 without zmx, after the pane's TERM,
+        /// COLORTERM and TERM_PROGRAM lines. The folder goes as hex, one
+        /// plain word; no folder is the home folder. nil for a folder too
+        /// long for one argument.
+        func plainCommand(directory: String) -> String? {
+            let hex = (directory.isEmpty ? "~" : directory).utf8.map { String(format: "%02x", $0) }.joined()
+            let preambles = HostCommands.remoteTermPreamble + HostCommands.remoteColorPreamble
+                + HostCommands.remoteTerminalProgramPreamble
+            return HostCommands.command(preambles + plain, [hex])
         }
     }
 }

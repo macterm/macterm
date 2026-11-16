@@ -85,6 +85,8 @@ final class RemoteHosts {
         /// A host's link to its server is up: its background work starts
         /// (the terminfo install).
         var linkReady: @MainActor (String) -> Void = { _ in }
+        /// The host scripts: the plain shell of a host with no server.
+        var scripts: HostCommands.Scripts? = .bundled
 
         static var live: Configuration {
             Configuration(
@@ -306,10 +308,11 @@ final class RemoteHosts {
             return .wait(message: nil)
         case let .plain(route):
             mark(panes, lost: false)
+            guard let command = configuration.scripts?.plainCommand(directory: target.directory) else {
+                return .wait(message: RemotePaneText.noPlainShell)
+            }
             return .plain(
-                arguments: connections.ttyArguments(
-                    route, destination, HostCommands.plainShellCommand(directory: target.directory)
-                ),
+                arguments: connections.ttyArguments(route, destination, command),
                 message: RemotePaneText.plainShell(host: target.host)
             )
         case let .ready(link):
@@ -538,7 +541,7 @@ final class RemoteHosts {
     /// pane when the folder was not there. nil when the host did not answer.
     func createLaunch(link: RemoteServers.Link, directory: String) async -> (launch: PaneSession.Launch, note: String?)? {
         guard let result = await Self.run(
-            ["/bin/sh", "-c", HostCommands.createProbeScript(directory: directory)],
+            HostCommands.createProbeArgv(directory: directory),
             timeout: .seconds(10), over: link
         ), result.code == 0
         else { return nil }
@@ -651,6 +654,10 @@ enum RemotePaneText {
     static func serverSilent(host: String) -> String {
         "The server on \(host) does not answer."
     }
+
+    /// The bundle has no host scripts, or the folder is too long for one
+    /// argument.
+    static let noPlainShell = "Macterm cannot start a shell in this folder."
 
     static func plainShell(host: String) -> String {
         "Macterm has no server on \(host). This shell stops when the connection stops."
