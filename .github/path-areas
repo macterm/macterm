@@ -34,7 +34,6 @@ style              .github/workflows/checks.yml
 
 # The session server and the protocol, and the session layer benchmark.
 app,server,bench   server/*
-app,server,bench   protocol/*
 server,bench       scripts/build-server.sh
 server             Macterm/Protocol/*
 server             scripts/protocol.sh

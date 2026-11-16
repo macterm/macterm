@@ -6,7 +6,9 @@ name: Server Build
 # job that builds the app downloads it into build/server before setup, and
 # setup installs it from there.
 #
-# The build key is the tree hash of server/ and protocol/ (build-server.sh).
+# The build key is the hash of the server's sources (build-server.sh). Each
+# build has a manifest, `macterm-<key>-server.json`, with the SHA-256 of each
+# tarball; `build-server.sh verify` checks a build against it.
 # With `prebuilt`, the job takes the build for the key from the
 # `server-prebuilt` release when it is there. Without it (the release
 # workflows), it always builds from the commit.
@@ -69,14 +71,9 @@ jobs:
           mkdir -p build/server
           found=false
           if gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" \
-              --dir build/server --pattern "macterm-$KEY-*"; then
+              --dir build/server --pattern "macterm-$KEY-*" &&
+            scripts/build-server.sh verify build/server "$KEY"; then
             found=true
-            for target in universal-macos x86_64-linux aarch64-linux; do
-              name="macterm-$KEY-$target.tar.gz"
-              if ! (cd build/server && shasum -a 256 -c "$name.sha256"); then
-                found=false
-              fi
-            done
           fi
           if [[ "$found" != true ]]; then
             echo "No complete prebuilt for $KEY. Building it."
@@ -125,11 +122,11 @@ jobs:
             fi
           done
 
-      # The app bundles the Linux builds of build/server, so they must be the
-      # bytes that the release serves. When another run uploaded the key
-      # first, take its builds. The summary says if the two builds were the
+      # The app bundles the builds of build/server, so they must be the bytes
+      # that the release serves. When another run uploaded the key first,
+      # take its whole build. The summary says if the two builds were the
       # same bytes.
-      - name: Use the Served Linux Builds
+      - name: Use the Served Build
         if: steps.upload.outcome == 'success'
         env:
           KEY: ${{ steps.key.outputs.key }}
@@ -137,18 +134,16 @@ jobs:
           served="$RUNNER_TEMP/served"
           rm -rf "$served"
           mkdir -p "$served"
-          for target in x86_64-linux aarch64-linux; do
-            name="macterm-$KEY-$target.tar.gz"
-            gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir "$served" \
-              --pattern "$name" --pattern "$name.sha256"
-            (cd "$served" && shasum -a 256 -c "$name.sha256")
-            if cmp -s "$served/$name" "build/server/$name"; then
-              echo "$target: this build is the served build" | tee -a "$GITHUB_STEP_SUMMARY"
-            else
-              echo "$target: the served build has other bytes; using it" | tee -a "$GITHUB_STEP_SUMMARY"
-              cp "$served/$name" "$served/$name.sha256" build/server/
-            fi
-          done
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir "$served" \
+            --pattern "macterm-$KEY-*"
+          scripts/build-server.sh verify "$served" "$KEY"
+          if cmp -s "$served/macterm-$KEY-server.json" "build/server/macterm-$KEY-server.json"; then
+            echo "This build is the served build" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The served build has other bytes; using it" | tee -a "$GITHUB_STEP_SUMMARY"
+            rm -rf build/server
+            cp -R "$served" build/server
+          fi
 
       # Keeps main's current key at any age: setup on main downloads it.
       - name: Remove Old Prebuilts
