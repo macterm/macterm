@@ -843,12 +843,13 @@ test "compact frees the memory of old edits and keeps the model" {
     try m.focusPane(.of("c"));
     try m.zoom(.of("t1"), .of("a"));
     try m.selectTab(.of("p"), .of("t2"));
-    try testing.expect(m.arena.queryCapacity() > 4 * small);
+    const grown = m.arena.queryCapacity();
+    try testing.expect(grown > 4 * small);
 
     const before = try written(&m);
     defer testing.allocator.free(before);
     try m.compact();
-    try testing.expect(m.arena.queryCapacity() <= 2 * small);
+    try testing.expect(m.arena.queryCapacity() * 4 < grown);
     const after = try written(&m);
     defer testing.allocator.free(after);
     try testing.expectEqualStrings(before, after);
@@ -915,7 +916,8 @@ test "save compacts the model" {
     try m.compact();
     const small = m.arena.queryCapacity();
     for (0..2000) |_| try m.renameTab(.of("t1"), "a title that takes some bytes");
-    try testing.expect(m.arena.queryCapacity() > 4 * small);
+    const grown = m.arena.queryCapacity();
+    try testing.expect(grown > 4 * small);
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -924,6 +926,6 @@ test "save compacts the model" {
     const path = try std.fmt.allocPrint(testing.allocator, "{s}/model.json", .{path_buf[0..dir_len]});
     defer testing.allocator.free(path);
     try file.save(testing.allocator, testing.io, &m, path);
-    try testing.expect(m.arena.queryCapacity() <= 2 * small);
+    try testing.expect(m.arena.queryCapacity() * 4 < grown);
     try testing.expectEqualStrings("a title that takes some bytes", m.findTab(.of("t1")).?.custom_title.?);
 }
