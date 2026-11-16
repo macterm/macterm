@@ -27,7 +27,7 @@
 #
 # The build needs macOS (lipo makes the universal binary) and Zig
 # $ZIG_VERSION. Zig cannot link with Xcode 26.4 or later (zig#31658), so CI
-# builds on macos-15 (.github/workflows/server-build.yml).
+# builds on macos-26 with Xcode 26.3 (.github/workflows/server-build.yml).
 #
 # Each tarball holds one file, `zmx`: the app and the remote installer still
 # call the binary by that name.
