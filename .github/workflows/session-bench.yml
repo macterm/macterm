@@ -55,12 +55,13 @@ jobs:
     uses: ./.github/workflows/server-build.yml
 
   # v1's and v2's local panes side by side. The idle arm reads libproc, so it
-  # runs on macOS only.
+  # runs on macOS only. macos-26, because macos-15 runners are often not
+  # available. The job builds nothing, so the Xcode version is not important.
   macos:
     name: Session Layer (macOS)
     needs: [changes, server]
     if: ${{ !cancelled() && needs.changes.outputs.bench == 'true' }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     permissions:
       contents: read
