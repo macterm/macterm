@@ -51,7 +51,9 @@ struct RemoteServersTests {
         #expect(HostCommands.command("echo", ["a b"]) == nil)
         #expect(HostCommands.command("echo", ["a;rm"]) == nil)
         #expect(HostCommands.command("echo", [""]) == nil)
-        #expect(HostCommands.command("echo", [String(repeating: "a", count: 65)]) == nil)
+        #expect(HostCommands.command("echo", [String(repeating: "a", count: 8193)]) == nil)
+        // A word read from the host stays short.
+        #expect(!HostCommands.isWord(String(repeating: "a", count: 65)))
         // csh refuses a newline in single quotes, and reads `!x` as history.
         #expect(HostCommands.command("a\nb", ["abc"]) == nil)
         #expect(HostCommands.command("echo !x", ["abc"]) == nil)

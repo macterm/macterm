@@ -168,10 +168,10 @@ enum HostCommands {
     /// is the environment after the same settling of `TERM`, `COLORTERM` and
     /// `TERM_PROGRAM` that a pane's script did. Never sources a profile.
     /// `session.create` has no shell to expand a `~`, so the host resolves it.
-    /// The folder is `$1`, so no shell parses it.
+    /// The folder is `$1`, so no shell parses it. No ssh pty gave the server
+    /// a TERM, and a shell may set a `dumb` one that it does not export: the
+    /// first line replaces it, and exports the result.
     static let createProbeScript =
-        // No ssh pty gave the server a TERM. A shell may set a `dumb` one that
-        // it does not export: replace it, and export the result.
         "case \"$TERM\" in \"\"|dumb) TERM=xterm-256color; infocmp xterm-ghostty >/dev/null 2>&1 && TERM=xterm-ghostty;; esac; "
             + "export TERM; "
             + remoteTermPreamble + remoteColorPreamble + remoteTerminalProgramPreamble

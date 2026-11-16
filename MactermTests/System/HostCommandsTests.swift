@@ -43,18 +43,21 @@ struct HostCommandsTests {
 
         init() throws {
             let base = FileManager.default.temporaryDirectory.appendingPathComponent("hc-\(UUID().uuidString)")
-            url = base.appendingPathComponent("home", isDirectory: true).resolvingSymlinksInPath()
+            let home = base.appendingPathComponent("home", isDirectory: true)
             for folder in HostCommandsTests.folders.compactMap(\.made) {
-                try FileManager.default.createDirectory(at: url.appendingPathComponent(folder), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: home.appendingPathComponent(folder), withIntermediateDirectories: true)
             }
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            // The physical path, as `pwd -P` prints it: the temp folder is
+            // under a symlink, and `resolvingSymlinksInPath` drops `/private`.
+            let physical = try #require(realpath(home.path, nil))
+            defer { free(physical) }
+            url = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
             shell = base.appendingPathComponent("pwd.sh").path
             try "#!/bin/sh\npwd -P\n".write(toFile: shell, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell)
         }
 
         func expected(_ made: String?) -> String {
-            // The physical path: the temp folder is under a symlink.
             made.map { url.appendingPathComponent($0).path } ?? url.path
         }
 
@@ -91,7 +94,7 @@ struct HostCommandsTests {
             let result = try Self.run(HostCommands.createProbeArgv(directory: sent), environment: home.environment, in: home.url)
             let lines = result.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             #expect(lines.first == "ok", "\(sent)")
-            #expect(lines.dropFirst().first == home.expected(made), "\(sent)")
+            #expect(lines.dropFirst().first == home.expected(made), "\(sent): \(result.output)")
         }
         #expect(home.nothingRan)
     }
@@ -138,7 +141,7 @@ struct HostCommandsTests {
         let home = try Home()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", try plain("/nonexistent;touch pwned")]
+        process.arguments = try ["-c", plain("/nonexistent;touch pwned")]
         process.environment = home.environment
         process.currentDirectoryURL = home.url
         let pipe = Pipe()
