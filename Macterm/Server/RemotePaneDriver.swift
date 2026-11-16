@@ -28,15 +28,20 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     let name: String
-    private let surface: SurfaceChannelHost
+    private let surface: any PaneSessionHost
     private let hosts: RemoteHosts
     private var state = State.idle
     /// Tells a late answer from a current one.
     private var generation = 0
     private var wakeToken: Int32 = NOTIFY_TOKEN_INVALID
+    /// Input that waits for a session: a layout's `initial_input`, and keys
+    /// typed while the pane waits. The next attach sends it. A pane that
+    /// ended or runs plain drops it, because it was for another session.
     private var earlyInput = Data()
+    /// Input that a lost link refused, in order. It goes before `earlyInput`.
+    private var undelivered = Data()
 
-    init(name: String, surface: SurfaceChannelHost, hosts: RemoteHosts = .shared) {
+    init(name: String, surface: any PaneSessionHost, hosts: RemoteHosts = .shared) {
         self.name = name
         self.surface = surface
         self.hosts = hosts
@@ -83,12 +88,16 @@ final class RemotePaneDriver: PaneInputRoute {
             if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             state = .waiting
         case let .ended(message):
+            earlyInput = Data()
+            undelivered = Data()
             surface.paneFeed(Data(Self.paneText(message).utf8))
             state = .ended
         case .close:
             state = .closed
             surface.paneExited(code: nil, signal: nil)
         case let .plain(arguments, message):
+            earlyInput = Data()
+            undelivered = Data()
             surface.paneFeed(PaneSession.resetScreen)
             if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             runPlain(arguments)
@@ -117,10 +126,10 @@ final class RemotePaneDriver: PaneInputRoute {
             )
             state = .running(session)
             session.start()
-            if !earlyInput.isEmpty {
-                session.sendInput(earlyInput)
-                earlyInput = Data()
-            }
+            let waiting = undelivered + earlyInput
+            undelivered = Data()
+            earlyInput = Data()
+            if !waiting.isEmpty { session.sendInput(waiting) }
         }
     }
 
@@ -153,6 +162,7 @@ final class RemotePaneDriver: PaneInputRoute {
     /// The connection stopped: the pane dims and waits for a trigger.
     fileprivate func linkStopped() {
         if case .closed = state { return }
+        logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
         teardown()
         state = .waiting
         step(.lost)
@@ -160,7 +170,10 @@ final class RemotePaneDriver: PaneInputRoute {
 
     private func teardown() {
         switch state {
-        case let .running(session): session.stop()
+        case let .running(session):
+            session.stop()
+            // Input that never reached a channel waits for the next session.
+            undelivered.append(session.takePendingInput())
         case let .plain(shell): shell.terminate()
         default: break
         }
@@ -207,14 +220,30 @@ final class RemotePaneDriver: PaneInputRoute {
         switch state {
         case let .running(session): session.sendInput(data)
         case let .plain(shell): shell.sendInput(data)
-        case .waiting: step(.retry)
+        case .waiting:
+            // The key waits for the new session.
+            keep(data)
+            step(.retry)
         case .ended: if data.contains(0x0D) { step(.create) }
         case .idle:
             // The `initial_input` of a layout, written while the surface
             // starts: it goes to the session when one runs.
-            if earlyInput.count + data.count <= 1 << 20 { earlyInput.append(data) }
+            keep(data)
         case .closed: break
         }
+    }
+
+    fileprivate func keepUndelivered(_ data: Data) {
+        // A pane that ended or closed has no later attach.
+        switch state {
+        case .closed,
+             .ended: break
+        default: keep(data)
+        }
+    }
+
+    private func keep(_ data: Data) {
+        if earlyInput.count + data.count <= 1 << 20 { earlyInput.append(data) }
     }
 
     /// Macterm's line, on a line of its own: each line ends with CR LF,
@@ -230,9 +259,9 @@ final class RemotePaneDriver: PaneInputRoute {
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
         private let generation: Int
-        private let surface: SurfaceChannelHost
+        private let surface: any PaneSessionHost
 
-        init(driver: RemotePaneDriver, generation: Int, surface: SurfaceChannelHost) {
+        init(driver: RemotePaneDriver, generation: Int, surface: any PaneSessionHost) {
             self.driver = driver
             self.generation = generation
             self.surface = surface
@@ -264,6 +293,18 @@ final class RemotePaneDriver: PaneInputRoute {
                 MainActor.assumeIsolated {
                     guard let driver, driver.generation == mine, case .running = driver.state else { return }
                     driver.linkStopped()
+                }
+            }
+        }
+
+        func paneInputUndelivered(_ data: Data) {
+            let mine = generation
+            DispatchQueue.main.async { [weak driver] in
+                MainActor.assumeIsolated {
+                    guard let driver else { return }
+                    // A late failure of an old session counts only while the pane waits.
+                    let waits = if case .waiting = driver.state { true } else { false }
+                    if driver.generation == mine || waits { driver.keepUndelivered(data) }
                 }
             }
         }

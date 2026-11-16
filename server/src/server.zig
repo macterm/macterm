@@ -296,6 +296,9 @@ const Entry = struct {
     out: session.OutQueue = .{},
     connected_at: i64,
     build: []u8 = &.{},
+    /// The session's build key, from its `hello`. Null when it sent none, or
+    /// one that is not a key.
+    build_key: ?[]u8 = null,
     level: u32 = 0,
     /// Both hellos are in and the levels meet.
     greeted: bool = false,
@@ -341,6 +344,7 @@ const Entry = struct {
             .state = if (e.refused) .refused else if (e.exit != null) .exited else .running,
             .build = e.build,
             .level = e.level,
+            .build_key = e.build_key,
         };
         if (e.state) |*st| {
             out.pid = st.pid;
@@ -444,6 +448,7 @@ const Server = struct {
             .level = m.level,
             .min_level = m.min_level,
             .build = build_options.version,
+            .build_key = build_options.key,
             .role = .server,
             .epoch = s.epoch,
             .caps = &.{"udp-link"},
@@ -715,6 +720,7 @@ const Server = struct {
                 .hello => |h| {
                     if (e.greeted or e.refused) return;
                     e.build = s.gpa.dupe(u8, buildName(h.build)) catch return s.entryGone(e);
+                    if (keyOf(h.build_key)) |k| e.build_key = s.gpa.dupe(u8, k) catch return s.entryGone(e);
                     e.level = h.level;
                     switch (m.negotiate(s.hello(), h)) {
                         .speak => e.greeted = true,
@@ -833,8 +839,8 @@ const Server = struct {
         std.log.info("server: session {s} is gone", .{e.id});
         for (e.waiters.items) |w| switch (w.kind) {
             .kill => s.reply(w.peer, w.re, m.SessionKill, .{}),
-            .create => s.replyError(w.peer, w.re, "start_failed", "The session ended before it was ready."),
-            .info, .list, .seen => s.replyError(w.peer, w.re, "not_found", "No session has this id."),
+            .create => s.replyError(w.peer, w.re, .start_failed, "The session ended before it was ready."),
+            .info, .list, .seen => s.replyError(w.peer, w.re, .not_found, "No session has this id."),
         };
         e.waiters.clearRetainingCapacity();
         s.answerLists();
@@ -858,8 +864,8 @@ const Server = struct {
                 const waiters = e.waiters.toOwnedSlice(s.gpa) catch continue;
                 defer s.gpa.free(waiters);
                 for (waiters) |w| switch (w.kind) {
-                    .create => s.replyError(w.peer, w.re, "start_failed", "The session does not answer."),
-                    .info, .list, .seen => s.replyError(w.peer, w.re, "not_found", "The session does not answer."),
+                    .create => s.replyError(w.peer, w.re, .start_failed, "The session does not answer."),
+                    .info, .list, .seen => s.replyError(w.peer, w.re, .not_found, "The session does not answer."),
                     .kill => s.wait(&e.waiters, w),
                 };
             }
@@ -1011,7 +1017,7 @@ const Server = struct {
         if (s.connectEntry(sp.id)) |_| {
             const e = s.findEntry(sp.id).?;
             e.waiters.appendSlice(s.gpa, sp.waiters.items) catch
-                for (sp.waiters.items) |w| s.replyError(w.peer, w.re, "start_failed", "The server is out of memory.");
+                for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, "The server is out of memory.");
             return;
         } else |err| if (status.code == 0)
             std.log.warn("server: session {s} started but does not answer: {s}", .{ sp.id, @errorName(err) });
@@ -1019,7 +1025,7 @@ const Server = struct {
         const n = lib_posix.read(sp.err_fd, &buf) catch 0;
         const text = errorText(buf[0..n]);
         std.log.warn("server: session {s} did not start: {s}", .{ sp.id, text });
-        for (sp.waiters.items) |w| s.replyError(w.peer, w.re, "start_failed", text);
+        for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, text);
     }
 
     // ── Clients ─────────────────────────────────────────────────────────────
@@ -1150,14 +1156,14 @@ const Server = struct {
                 // Every connection to this socket is `local` (design/006 §2).
                 if (!m.maySend(M, .local)) {
                     std.log.warn("server: {s} from a local client, refused", .{M.name});
-                    return s.replyError(p.id, req.id, "forbidden", "This connection may not send this request.");
+                    return s.replyError(p.id, req.id, .forbidden, "This connection may not send this request.");
                 }
                 const args = m.decodeArgs(M, arena, req) catch
-                    return s.replyError(p.id, req.id, "invalid_args", "The arguments do not decode.");
+                    return s.replyError(p.id, req.id, .invalid_args, "The arguments do not decode.");
                 return s.call(M, p, req.id, args);
             }
         }
-        s.replyError(p.id, req.id, "unknown_method", "The server has no such method.");
+        s.replyError(p.id, req.id, .unknown_method, "The server has no such method.");
     }
 
     fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void {
@@ -1169,17 +1175,17 @@ const Server = struct {
             },
             m.SessionInfo => {
                 const e = s.findEntry(args.id) orelse
-                    return s.replyError(p.id, re, "not_found", "No session has this id.");
+                    return s.replyError(p.id, re, .not_found, "No session has this id.");
                 if (e.listed()) return s.reply(p.id, re, m.SessionInfo, .{ .session = e.info() });
                 s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .info });
             },
             m.SessionKill => s.kill(p, re, args.id),
             m.PaneSeen => {
                 const e = s.findEntry(args.id) orelse
-                    return s.replyError(p.id, re, "not_found", "No session has this id.");
-                if (e.refused) return s.replyError(p.id, re, "refused", "The session runs a build that this server cannot speak to.");
-                if (e.dead or e.exit != null) return s.replyError(p.id, re, "not_found", "No running session has this id.");
-                if (!e.listed()) return s.replyError(p.id, re, "starting", "The session is not ready.");
+                    return s.replyError(p.id, re, .not_found, "No session has this id.");
+                if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
+                if (e.dead or e.exit != null) return s.replyError(p.id, re, .not_found, "No running session has this id.");
+                if (!e.listed()) return s.replyError(p.id, re, .starting, "The session is not ready.");
                 s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .seen });
                 s.sendEntryPane(e, m.Seen, .{});
             },
@@ -1196,14 +1202,14 @@ const Server = struct {
             m.ChannelOpen => s.openChannel(p, re, args.session),
             m.ChannelClose => {
                 const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, "not_found", "No channel has this number.");
+                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
                 ch.closed = true;
                 ch.q.deinit(s.gpa);
                 s.reply(p.id, re, m.ChannelClose, .{});
             },
             m.ChannelPause => {
                 const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, "not_found", "No channel has this number.");
+                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
                 ch.flow.paused = true;
                 const open_kept = ch.q.dropStale(s.gpa);
                 ch.flow.discard_snapshot = ch.flow.in_snapshot and !open_kept;
@@ -1211,7 +1217,7 @@ const Server = struct {
             },
             m.ChannelResume => {
                 const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, "not_found", "No channel has this number.");
+                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
                 if (ch.flow.paused) {
                     ch.flow.paused = false;
                     s.askSnapshot(ch, s.now());
@@ -1223,37 +1229,37 @@ const Server = struct {
             m.LinkOpen => s.linkOpen(p, re, args),
             m.LinkClose => {
                 if (!s.links.closeKey(args.key_id))
-                    return s.replyError(p.id, re, "not_found", "No link has this key id.");
+                    return s.replyError(p.id, re, .not_found, "No link has this key id.");
                 s.reply(p.id, re, m.LinkClose, .{});
             },
-            else => s.replyError(p.id, re, "unknown_method", "The server has no such method."),
+            else => s.replyError(p.id, re, .unknown_method, "The server has no such method."),
         }
     }
 
     fn create(s: *Server, p: *Peer, re: u64, args: m.SessionCreate.Args) void {
         if (!session.validName(args.id))
-            return s.replyError(p.id, re, "invalid_args", "A session id can have only letters, digits, '-', '_' and '.'. It cannot start with '.' or '-'.");
+            return s.replyError(p.id, re, .invalid_args, "A session id can have only letters, digits, '-', '_' and '.'. It cannot start with '.' or '-'.");
         if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
-            return s.replyError(p.id, re, "invalid_args", "The folder must be an absolute path.");
+            return s.replyError(p.id, re, .invalid_args, "The folder must be an absolute path.");
         if (args.command) |command| for (command) |arg| if (std.mem.findScalar(u8, arg.bytes, 0) != null)
-            return s.replyError(p.id, re, "invalid_args", "A command argument cannot hold a NUL byte.");
+            return s.replyError(p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
         if (args.env) |env| for (env) |entry| if (std.mem.findScalar(u8, entry.bytes, 0) != null or std.mem.findScalar(u8, entry.bytes, '=') == null)
-            return s.replyError(p.id, re, "invalid_args", "An environment entry must be NAME=value with no NUL byte.");
+            return s.replyError(p.id, re, .invalid_args, "An environment entry must be NAME=value with no NUL byte.");
         if (args.cols == 0 or args.rows == 0)
-            return s.replyError(p.id, re, "invalid_args", "The size must be at least 1 by 1.");
+            return s.replyError(p.id, re, .invalid_args, "The size must be at least 1 by 1.");
         const waiter: Waiter = .{ .peer = p.id, .re = re, .kind = .create };
         // The same id again: the session that the first request started.
         if (s.findEntry(args.id)) |e| {
             // A session whose shell exited is not given out as a new one:
             // the client ends it (`session.kill`) and asks again.
-            if (e.exit != null) return s.replyError(p.id, re, "exited", "The session's shell exited. End the session first.");
+            if (e.exit != null) return s.replyError(p.id, re, .exited, "The session's shell exited. End the session first.");
             if (e.listed()) return s.reply(p.id, re, m.SessionCreate, .{ .session = e.info() });
             return s.wait(&e.waiters, waiter);
         }
         for (s.spawns.items) |sp| if (std.mem.eql(u8, sp.id, args.id)) return s.wait(&sp.waiters, waiter);
         const sp = s.spawn(args.id, args) catch |err| {
             std.log.warn("server: cannot start session {s}: {s}", .{ args.id, @errorName(err) });
-            return s.replyError(p.id, re, "start_failed", "The server cannot start a process.");
+            return s.replyError(p.id, re, .start_failed, "The server cannot start a process.");
         };
         s.wait(&sp.waiters, waiter);
     }
@@ -1278,9 +1284,9 @@ const Server = struct {
 
     fn linkOpen(s: *Server, p: *Peer, re: u64, args: m.LinkOpen.Args) void {
         const ports = linkPorts() orelse
-            return s.replyError(p.id, re, "unavailable", "The link is off on this host.");
+            return s.replyError(p.id, re, .unavailable, "The link is off on this host.");
         if (args.secret.bytes.len != 32)
-            return s.replyError(p.id, re, "invalid_args", "The key is not 32 bytes.");
+            return s.replyError(p.id, re, .invalid_args, "The key is not 32 bytes.");
         var seed: u32 = undefined;
         s.io.random(std.mem.asBytes(&seed));
         var key: [32]u8 = args.secret.bytes[0..32].*;
@@ -1288,33 +1294,33 @@ const Server = struct {
         const opened = s.links.open(p.id, key, args.key_id, s.now(), ports, seed) catch |err| {
             std.log.warn("server: link.open failed: {s}", .{@errorName(err)});
             return switch (err) {
-                error.KeyInUse => s.replyError(p.id, re, "invalid_args", "Another link has this key id."),
-                error.TooMany => s.replyError(p.id, re, "unavailable", "The server has too many links."),
-                else => s.replyError(p.id, re, "unavailable", "The server cannot open a link."),
+                error.KeyInUse => s.replyError(p.id, re, .invalid_args, "Another link has this key id."),
+                error.TooMany => s.replyError(p.id, re, .unavailable, "The server has too many links."),
+                else => s.replyError(p.id, re, .unavailable, "The server cannot open a link."),
             };
         };
         s.pending_peers.append(s.gpa, opened.peer_fd) catch {
             lib_posix.close(opened.peer_fd);
             _ = s.links.closeKey(args.key_id);
-            return s.replyError(p.id, re, "unavailable", "The server cannot open a link.");
+            return s.replyError(p.id, re, .unavailable, "The server cannot open a link.");
         };
         s.reply(p.id, re, m.LinkOpen, .{ .port = opened.port });
     }
 
     fn runCommand(s: *Server, p: *Peer, re: u64, args: m.CommandRun.Args) void {
         if (args.argv.len == 0 or args.argv[0].bytes.len == 0 or args.argv[0].bytes[0] != '/')
-            return s.replyError(p.id, re, "invalid_args", "The program must be an absolute path.");
+            return s.replyError(p.id, re, .invalid_args, "The program must be an absolute path.");
         for (args.argv) |arg| if (std.mem.findScalar(u8, arg.bytes, 0) != null)
-            return s.replyError(p.id, re, "invalid_args", "A command argument cannot hold a NUL byte.");
+            return s.replyError(p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
         if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
-            return s.replyError(p.id, re, "invalid_args", "The folder must be an absolute path.");
+            return s.replyError(p.id, re, .invalid_args, "The folder must be an absolute path.");
         if (args.timeout_ms == 0 or args.timeout_ms > run_timeout_max_ms)
-            return s.replyError(p.id, re, "invalid_args", "The time limit must be from 1 ms to 60 s.");
+            return s.replyError(p.id, re, .invalid_args, "The time limit must be from 1 ms to 60 s.");
         if (s.runs.items.len >= max_runs)
-            return s.replyError(p.id, re, "busy", "Too many commands run now.");
+            return s.replyError(p.id, re, .busy, "Too many commands run now.");
         s.startRun(p.id, re, args) catch |err| {
             std.log.warn("server: cannot run a command: {s}", .{@errorName(err)});
-            s.replyError(p.id, re, "start_failed", "The server cannot start a process.");
+            s.replyError(p.id, re, .start_failed, "The server cannot start a process.");
         };
     }
 
@@ -1408,7 +1414,7 @@ const Server = struct {
             }
             _ = s.runs.orderedRemove(i);
             if (r.timed_out) {
-                s.replyError(r.peer, r.re, "timeout", "The command did not end in time.");
+                s.replyError(r.peer, r.re, .timeout, "The command did not end in time.");
             } else {
                 const st = r.status.?;
                 s.reply(r.peer, r.re, m.CommandRun, .{
@@ -1424,9 +1430,9 @@ const Server = struct {
     }
 
     fn kill(s: *Server, p: *Peer, re: u64, id: []const u8) void {
-        const e = s.findEntry(id) orelse return s.replyError(p.id, re, "not_found", "No session has this id.");
-        if (e.refused) return s.replyError(p.id, re, "refused", "The session runs a build that this server cannot speak to.");
-        const st = e.state orelse return s.replyError(p.id, re, "starting", "The session is not ready.");
+        const e = s.findEntry(id) orelse return s.replyError(p.id, re, .not_found, "No session has this id.");
+        if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
+        const st = e.state orelse return s.replyError(p.id, re, .starting, "The session is not ready.");
         s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .kill });
         if (e.killing) return;
         e.killing = true;
@@ -1444,7 +1450,7 @@ const Server = struct {
 
     /// Adds a waiter, or answers it at once when there is no memory for it.
     fn wait(s: *Server, list: *std.ArrayList(Waiter), w: Waiter) void {
-        list.append(s.gpa, w) catch s.replyError(w.peer, w.re, "unavailable", "The server is out of memory.");
+        list.append(s.gpa, w) catch s.replyError(w.peer, w.re, .unavailable, "The server is out of memory.");
     }
 
     /// A refused session has no connection. Each list and each idle check
@@ -1495,9 +1501,9 @@ const Server = struct {
         s.sendBody(p, out.written());
     }
 
-    fn replyError(s: *Server, peer: u64, re: u64, code: []const u8, message: []const u8) void {
+    fn replyError(s: *Server, peer: u64, re: u64, code: m.ErrorCode, message: []const u8) void {
         const p = s.findPeer(peer) orelse return;
-        s.sendControl(p, m.Response{ .re = re, .err = .{ .code = code, .message = message } });
+        s.sendControl(p, m.Response{ .re = re, .err = .{ .code = @tagName(code), .message = message } });
     }
 
     /// One event is one batch: one consistent state (design/003 §5).
@@ -1598,30 +1604,30 @@ const Server = struct {
     // ── The relay (relay.zig) ───────────────────────────────────────────────
 
     fn openChannel(s: *Server, p: *Peer, re: u64, id: []const u8) void {
-        const e = s.findEntry(id) orelse return s.replyError(p.id, re, "not_found", "No session has this id.");
-        if (e.refused) return s.replyError(p.id, re, "refused", "The session runs a build that this server cannot speak to.");
-        if (e.state == null) return s.replyError(p.id, re, "starting", "The session is not ready.");
+        const e = s.findEntry(id) orelse return s.replyError(p.id, re, .not_found, "No session has this id.");
+        if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
+        if (e.state == null) return s.replyError(p.id, re, .starting, "The session is not ready.");
         if (p.channels.items.len >= max_channels)
-            return s.replyError(p.id, re, "busy", "This connection has too many open channels.");
+            return s.replyError(p.id, re, .busy, "This connection has too many open channels.");
         const path = socket.getSocketPath(s.gpa, s.dir, id) catch
-            return s.replyError(p.id, re, "unavailable", "The server is out of memory.");
+            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
         defer s.gpa.free(path);
         const fd = connectNonblocking(path) catch |err| {
             std.log.warn("server: cannot connect to session {s} for a channel: {s}", .{ id, @errorName(err) });
-            return s.replyError(p.id, re, "unavailable", "The session does not answer.");
+            return s.replyError(p.id, re, .unavailable, "The session does not answer.");
         };
         const ch = s.gpa.create(Channel) catch {
             lib_posix.close(fd);
-            return s.replyError(p.id, re, "unavailable", "The server is out of memory.");
+            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
         };
         ch.* = .{ .id = p.next_channel, .session = s.gpa.dupe(u8, id) catch {
             lib_posix.close(fd);
             s.gpa.destroy(ch);
-            return s.replyError(p.id, re, "unavailable", "The server is out of memory.");
+            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
         }, .fd = fd };
         p.channels.append(s.gpa, ch) catch {
             ch.deinit(s.gpa);
-            return s.replyError(p.id, re, "unavailable", "The server is out of memory.");
+            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
         };
         p.next_channel +%= 1;
         if (p.next_channel == frame.control_channel) p.next_channel = 1;
@@ -1765,7 +1771,7 @@ const Server = struct {
     }
 
     fn channelGone(s: *Server, p: *Peer, ch: *Channel) void {
-        if (ch.open_re) |re| s.replyError(p.id, re, "unavailable", "The session closed the connection.");
+        if (ch.open_re) |re| s.replyError(p.id, re, .unavailable, "The session closed the connection.");
         ch.open_re = null;
         if (ch.fd < 0) return;
         lib_posix.close(ch.fd);
@@ -1792,14 +1798,14 @@ const Server = struct {
     /// while a session's build has no key, and it keeps a file of the last
     /// minute (`fresh_build_ms`), whose proxy may still come.
     fn pruneBuilds(s: *Server) void {
-        const own = buildKey(build_options.version) orelse return;
+        const own = keyOf(build_options.key) orelse return;
         const folder = std.fs.path.dirname(s.exe) orelse return;
         if (!isBuildFile(std.fs.path.basename(s.exe), own)) return;
         var keys: std.ArrayList([]const u8) = .empty;
         defer keys.deinit(s.gpa);
         for (s.entries.items) |e| {
             if (e.dead) continue;
-            keys.append(s.gpa, buildKey(e.build) orelse return) catch return;
+            keys.append(s.gpa, e.build_key orelse return) catch return;
         }
         var dir = std.Io.Dir.openDirAbsolute(s.io, folder, .{ .iterate = true }) catch return;
         defer dir.close(s.io);
@@ -1867,6 +1873,7 @@ const Server = struct {
                 e.out.deinit(s.gpa);
                 e.waiters.deinit(s.gpa);
                 s.gpa.free(e.build);
+                if (e.build_key) |k| s.gpa.free(k);
                 s.gpa.free(e.id);
                 s.gpa.destroy(e);
                 _ = s.entries.orderedRemove(i);
@@ -1910,13 +1917,11 @@ fn buildName(build: []const u8) []const u8 {
     return build;
 }
 
-/// The build key in a version (`1.0.1+thdxg.<key>`, `scripts/build-server.sh`):
-/// lowercase hex, at most 40 characters. Null for any other version.
-pub fn buildKey(version: []const u8) ?[]const u8 {
-    const marker = "+thdxg.";
-    const at = std.mem.find(u8, version, marker) orelse return null;
-    const key = version[at + marker.len ..];
-    return if (validKey(key)) key else null;
+/// A build key (`hello.build_key`, `scripts/build-server.sh`) when it is
+/// one: lowercase hex, at most 40 characters. Null for anything else.
+fn keyOf(key: ?[]const u8) ?[]const u8 {
+    const k = key orelse return null;
+    return if (validKey(k)) k else null;
 }
 
 fn validKey(key: []const u8) bool {
@@ -1977,13 +1982,13 @@ test "the server signals no pid that reaches a group or every process" {
     try testing.expect(!validPid(@as(i64, std.math.maxInt(lib_posix.pid_t)) + 1));
 }
 
-test "a build key comes only from a version of the fork" {
-    try testing.expectEqualStrings("2705a118fde2c903", buildKey("1.0.1+thdxg.2705a118fde2c903").?);
-    try testing.expect(buildKey("1.0.1") == null);
-    try testing.expect(buildKey("unknown") == null);
-    try testing.expect(buildKey("1.0.1+thdxg.") == null);
-    try testing.expect(buildKey("1.0.1+thdxg.ABC") == null);
-    try testing.expect(buildKey("1.0.1+thdxg.a/b") == null);
+test "a build key is only lowercase hex" {
+    try testing.expectEqualStrings("2705a118fde2c903", keyOf("2705a118fde2c903").?);
+    try testing.expect(keyOf(null) == null);
+    try testing.expect(keyOf("") == null);
+    try testing.expect(keyOf("ABC") == null);
+    try testing.expect(keyOf("a/b") == null);
+    try testing.expect(keyOf("1.0.1+thdxg.abc") == null);
 }
 
 test "a server file goes only when it is another build that no session runs" {

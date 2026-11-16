@@ -11,6 +11,15 @@ struct ProtocolFixtureTests {
         let name: String
         let frame: String
         let reencodes: Bool
+        let replace: Replace?
+    }
+
+    /// The answer of the replace rule for a server's hello (`Replace` in
+    /// `schema.zig`).
+    private struct Replace: Decodable {
+        let key: String?
+        let owns: Bool
+        let replaces: Bool
     }
 
     private static func loadFixtures() throws -> [String: (bytes: Data, reencodes: Bool)] {
@@ -56,6 +65,9 @@ struct ProtocolFixtureTests {
             "channel.close request", "channel.close result",
             "error", "events", "later hello", "pane bytes",
             "attach", "exit", "claim",
+            "replace: a lower level", "replace: a higher level",
+            "replace: another build of the app", "replace: another build of another app",
+            "replace: the same build", "replace: a build with no key", "replace: an app with no key",
         ])
     }
 
@@ -81,10 +93,32 @@ struct ProtocolFixtureTests {
             build: "2.0.0-tip.1",
             role: .gui,
             epoch: 0x1234_5678_9ABC_DEF0,
-            caps: ["tcc", "password-tty"]
+            caps: ["tcc", "password-tty"],
+            buildKey: "0123456789abcdef"
         )
         #expect(try Self.control("hello") == .hello(hello))
         #expect(try Self.control("refuse") == .refuse(.init(reason: "level_too_low", needsLevel: 4)))
+    }
+
+    /// Each server hello with a `replace` answer, through the one rule.
+    @Test
+    func the_replace_rule_gives_the_answer_of_each_hello_pair() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("server/schema/frames.json")
+        let cases = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: url)).filter { $0.replace != nil }
+        #expect(cases.count == 7)
+        for fixture in cases {
+            let replace = try #require(fixture.replace)
+            guard case let .hello(hello) = try Self.control(fixture.name) else {
+                Issue.record("\(fixture.name): not a hello")
+                continue
+            }
+            let rule = ServerReplacement(key: replace.key, ownsServer: replace.owns)
+            #expect(rule.replaces(hello) == replace.replaces, "\(fixture.name)")
+        }
     }
 
     @Test
@@ -129,6 +163,18 @@ struct ProtocolFixtureTests {
         #expect(throws: ProtocolControlError.errorResponse(info)) {
             try failed.result(of: MactermProtocol.ChannelClose.self)
         }
+    }
+
+    @Test
+    func an_error_code_reads_as_its_case_and_a_later_code_as_unknown() {
+        #expect(MactermProtocol.ErrorInfo(code: "unknown_method", message: "").errorCode == .unknownMethod)
+        #expect(MactermProtocol.ErrorInfo(code: "not_found", message: "").errorCode == .notFound)
+        #expect(MactermProtocol.ErrorInfo(code: "on_fire", message: "").errorCode == .unknown("on_fire"))
+    }
+
+    @Test
+    func an_event_of_a_later_build_decodes_as_unknown() throws {
+        #expect(try MactermProtocol.Event(e: "pane.title").decoded() == .unknown("pane.title"))
     }
 
     @Test

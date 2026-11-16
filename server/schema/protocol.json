@@ -436,6 +436,12 @@
           "type": "[str]",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "build_key",
+          "type": "str",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],
@@ -844,6 +850,12 @@
           "type": "u32",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "build_key",
+          "type": "str",
+          "optional": true,
+          "since": 3
         },
         {
           "name": "pid",
@@ -1749,5 +1761,18 @@
       "cases": [],
       "variants": []
     }
+  ],
+  "error_codes": [
+    "busy",
+    "exited",
+    "forbidden",
+    "invalid_args",
+    "not_found",
+    "refused",
+    "start_failed",
+    "starting",
+    "timeout",
+    "unavailable",
+    "unknown_method"
   ]
 }

@@ -85,8 +85,8 @@ jobs:
         env:
           KEY: ${{ needs.server.outputs.key }}
         run: |
+          scripts/build-server.sh verify build/server "$KEY"
           name="macterm-$KEY-universal-macos.tar.gz"
-          (cd build/server && shasum -a 256 -c "$name.sha256")
           mkdir -p zmx
           tar xzf "build/server/$name" -C zmx zmx
           zmx/zmx version
@@ -147,8 +147,8 @@ jobs:
         env:
           KEY: ${{ needs.server.outputs.key }}
         run: |
+          scripts/build-server.sh verify build/server "$KEY"
           name="macterm-$KEY-x86_64-linux.tar.gz"
-          (cd build/server && sha256sum -c "$name.sha256")
           mkdir -p zmx
           tar xzf "build/server/$name" -C zmx zmx
           zmx/zmx version

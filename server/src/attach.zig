@@ -211,7 +211,7 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
                 switch (request_id) {
                     1 => {
                         const err = res.err orelse return null;
-                        if (!std.mem.eql(u8, err.code, "exited"))
+                        if (!std.mem.eql(u8, err.code, @tagName(m.ErrorCode.exited)))
                             return .{ .not_created = try gpa.dupe(u8, err.message) };
                         // The shell of a session of this name exited (while
                         // no app was there to end it): end it, and make a
@@ -245,6 +245,7 @@ fn helloMessage() m.Hello {
         .level = m.level,
         .min_level = m.min_level,
         .build = build_options.version,
+        .build_key = build_options.key,
         // The pane's client acts for the GUI. Not `cli`: a session of an
         // older build must still attach.
         .role = .gui,

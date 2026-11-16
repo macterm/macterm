@@ -88,6 +88,9 @@ pub const Metadata = struct {
     /// before they were added.
     pane_messages: []const Message = &.{},
     types: []const TypeDef,
+    /// The tags of `ErrorCode`. Empty in metadata from before they were
+    /// listed.
+    error_codes: []const []const u8 = &.{},
 };
 
 /// The schema of this build.
@@ -141,6 +144,13 @@ fn build() Metadata {
         var trust_out: [trust.len][]const u8 = undefined;
         for (trust, 0..) |name, i| trust_out[i] = name;
 
+        const codes = std.meta.fieldNames(messages.ErrorCode);
+        var code_out: [codes.len][]const u8 = undefined;
+        for (codes, 0..) |name, i| {
+            checkName(name);
+            code_out[i] = name;
+        }
+
         const h = handshake_out;
         const e = envelope_out;
         const ms = method_out;
@@ -148,6 +158,7 @@ fn build() Metadata {
         const pm = pane_out;
         const ty = type_out;
         const tr = trust_out;
+        const co = code_out;
         return .{
             .level = messages.level,
             .min_level = messages.min_level,
@@ -158,6 +169,7 @@ fn build() Metadata {
             .events = &ev,
             .pane_messages = &pm,
             .types = &ty,
+            .error_codes = &co,
         };
     }
 }
@@ -202,6 +214,7 @@ fn collect(comptime T: type, comptime list: []const type) []const type {
             Bin, Secret, Raw, []const u8 => return list,
             else => {},
         }
+        if (msgpack.isText(T)) return list;
         for (list) |L| if (L == T) return list;
         switch (@typeInfo(T)) {
             .optional => |o| return collect(o.child, list),
@@ -250,6 +263,7 @@ fn wireType(comptime T: type) []const u8 {
         u8, u16, u32, u64, i8, i16, i32, i64, f64 => return @typeName(T),
         else => {},
     }
+    if (msgpack.isText(T)) return "str";
     return switch (@typeInfo(T)) {
         .pointer => |p| if (p.size == .slice and @typeInfo(p.child) != .optional)
             "[" ++ wireType(p.child) ++ "]"
@@ -432,6 +446,15 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
     n += try checkMessages(w, "message", o.messages, new.messages, level);
     n += try checkMessages(w, "event", o.events, new.events, level);
     n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level);
+
+    for (o.error_codes) |code| {
+        for (new.error_codes) |c| {
+            if (std.mem.eql(u8, c, code)) break;
+        } else {
+            try w.print("error code {s} was removed\n", .{code});
+            n += 1;
+        }
+    }
 
     for (o.methods) |om| {
         const nm = findName(Method, new.methods, om.name) orelse {
@@ -714,6 +737,87 @@ pub fn writeSwift(w: *std.Io.Writer, meta: Metadata) std.Io.Writer.Error!void {
     for (meta.messages) |msg| try writeSwiftMessage(w, msg);
     for (meta.events) |ev| try writeSwiftMessage(w, ev);
     for (meta.pane_messages) |pm| try writeSwiftMessage(w, pm);
+
+    try writeSwiftErrorCodes(w, meta.error_codes);
+    try writeSwiftKinds(w, "PaneMessage", "PaneMessageKind", "t", "message", meta.pane_messages);
+    try writeSwiftKinds(w, "Event", "EventKind", "e", "event", meta.events);
+}
+
+/// `ErrorCode`: one case for each code, and `unknown` for a code that a
+/// later build added.
+fn writeSwiftErrorCodes(w: *std.Io.Writer, codes: []const []const u8) std.Io.Writer.Error!void {
+    try w.writeAll(
+        \\
+        \\extension MactermProtocol {
+        \\    /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
+        \\    enum ErrorCode: Equatable {
+        \\
+    );
+    for (codes) |c| try w.print("        case {f}\n", .{swiftCamel(c)});
+    try w.writeAll(
+        \\        case unknown(String)
+        \\
+        \\        init(_ code: String) {
+        \\            switch code {
+        \\
+    );
+    for (codes) |c| try w.print("            case \"{s}\": self = .{f}\n", .{ c, swiftCamel(c) });
+    try w.writeAll(
+        \\            default: self = .unknown(code)
+        \\            }
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\extension MactermProtocol.ErrorInfo {
+        \\    var errorCode: MactermProtocol.ErrorCode {
+        \\        .init(code)
+        \\    }
+        \\}
+        \\
+    );
+}
+
+/// An enum with one case for each message of `list`, and `decoded()` on the
+/// envelope that reads `key` and the fields with `<read>(of:)`.
+fn writeSwiftKinds(
+    w: *std.Io.Writer,
+    envelope: []const u8,
+    kind: []const u8,
+    key: []const u8,
+    read: []const u8,
+    list: []const Message,
+) std.Io.Writer.Error!void {
+    try w.print(
+        \\
+        \\extension MactermProtocol {{
+        \\    /// One `{s}` as its type. `unknown` holds the name of a message that a later build added.
+        \\    enum {s}: Equatable {{
+        \\
+    , .{ envelope, kind });
+    for (list) |msg| try w.print("        case {f}({s})\n", .{ swiftCase(msg.type), msg.type });
+    try w.print(
+        \\        case unknown(String)
+        \\    }}
+        \\}}
+        \\
+        \\extension MactermProtocol.{s} {{
+        \\    /// The message as its type. Throws when a message that this build knows does not read.
+        \\    func decoded() throws -> MactermProtocol.{s} {{
+        \\        switch {s} {{
+        \\
+    , .{ envelope, kind, key });
+    for (list) |msg| try w.print(
+        "        case MactermProtocol.{s}.name: try .{f}({s}(of: MactermProtocol.{s}.self))\n",
+        .{ msg.type, swiftCase(msg.type), read, msg.type },
+    );
+    try w.print(
+        \\        default: .unknown({s})
+        \\        }}
+        \\    }}
+        \\}}
+        \\
+    , .{key});
 }
 
 fn writeSwiftMessage(w: *std.Io.Writer, msg: Message) std.Io.Writer.Error!void {
@@ -946,6 +1050,17 @@ fn formatName(name: []const u8, w: *std.Io.Writer) std.Io.Writer.Error!void {
     try w.writeAll(name);
 }
 
+/// A type name as an enum case: `SnapshotStart` as `snapshotStart`.
+fn swiftCase(name: []const u8) std.fmt.Alt([]const u8, formatCase) {
+    return .{ .data = name };
+}
+
+fn formatCase(name: []const u8, w: *std.Io.Writer) std.Io.Writer.Error!void {
+    if (name.len == 0) return;
+    try w.writeByte(std.ascii.toLower(name[0]));
+    try w.writeAll(name[1..]);
+}
+
 /// `min_level` as `minLevel`, in backticks where it is a keyword.
 fn swiftCamel(name: []const u8) std.fmt.Alt([]const u8, formatCamel) {
     return .{ .data = name };
@@ -1082,6 +1197,20 @@ pub const Fixture = struct {
     /// False for a frame from a later build: it decodes, but this build
     /// writes it with fewer keys.
     reencodes: bool = true,
+    /// For a server's `hello`: whether an app of this level replaces that
+    /// server (`ServerReplacement` in the app).
+    replace: ?Replace = null,
+};
+
+pub const Replace = struct {
+    /// The app's build key. Null for a build with no key.
+    key: ?[]const u8,
+    /// The app owns the server's file: locally, the server runs from the
+    /// app's own file or from a file that an update removed; on a host, this
+    /// connect installed the app's build.
+    owns: bool,
+    /// The answer.
+    replaces: bool,
 };
 
 /// The frames that the Swift tests decode and encode again. Each one has
@@ -1097,6 +1226,7 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         .role = .gui,
         .epoch = 0x1234_5678_9abc_def0,
         .caps = &.{ "tcc", "password-tty" },
+        .build_key = "0123456789abcdef",
     };
     try list.append(arena, try control(arena, "hello", hello, true));
     try list.append(arena, try control(arena, "refuse", m.Refuse{ .reason = "level_too_low", .needs_level = 4 }, true));
@@ -1130,6 +1260,33 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         .caps = @as([]const []const u8, &.{ "tcc", "teleport" }),
         .region = .{ .name = @as([]const u8, "eu"), .ids = @as([]const u64, &.{ 1, 70000 }) },
     }, false));
+
+    // The replace rule (design/002): a lower level is older, a higher level
+    // is never downgraded, and at the same level the app replaces another
+    // build only when it owns the server's file.
+    const cases = [_]struct { []const u8, u32, ?[]const u8, Replace }{
+        .{ "replace: a lower level", m.level - 1, "bbbb", .{ .key = "aaaa", .owns = false, .replaces = true } },
+        .{ "replace: a higher level", m.level + 1, "bbbb", .{ .key = "aaaa", .owns = true, .replaces = false } },
+        .{ "replace: another build of the app", m.level, "bbbb", .{ .key = "aaaa", .owns = true, .replaces = true } },
+        .{ "replace: another build of another app", m.level, "bbbb", .{ .key = "aaaa", .owns = false, .replaces = false } },
+        .{ "replace: the same build", m.level, "aaaa", .{ .key = "aaaa", .owns = true, .replaces = false } },
+        .{ "replace: a build with no key", m.level, null, .{ .key = "aaaa", .owns = true, .replaces = true } },
+        .{ "replace: an app with no key", m.level, "bbbb", .{ .key = null, .owns = true, .replaces = false } },
+    };
+    for (cases) |c| {
+        const server_hello: m.Hello = .{
+            .level = c[1],
+            .min_level = 1,
+            .build = "1.0.1",
+            .role = .server,
+            .epoch = 1,
+            .caps = &.{},
+            .build_key = c[2],
+        };
+        var fixture = try control(arena, c[0], server_hello, true);
+        fixture.replace = c[3];
+        try list.append(arena, fixture);
+    }
 
     try m.encodePane(&buf.writer, m.Attach, .{ .cols = 120, .rows = 40 });
     try list.append(arena, try pane(arena, "attach", try buf.toOwnedSlice()));
@@ -1169,7 +1326,10 @@ fn hex(arena: std.mem.Allocator, bytes: []const u8) ![]const u8 {
 }
 
 pub fn writeFixtures(arena: std.mem.Allocator, w: *std.Io.Writer) !void {
-    try std.json.Stringify.value(try fixtures(arena), .{ .whitespace = .indent_2 }, w);
+    try std.json.Stringify.value(try fixtures(arena), .{
+        .whitespace = .indent_2,
+        .emit_null_optional_fields = false,
+    }, w);
     try w.writeByte('\n');
 }
 
@@ -1535,17 +1695,29 @@ test "the model's tree has a schema: a union, a pointer and an f64" {
     try testing.expect(!protocol.holdsSecret(model.tree.Node));
 }
 
+test "a model id is a str on the wire" {
+    const PaneId = model.tree.PaneId;
+    const bytes = try msgpack.encodeAlloc(testing.allocator, PaneId.of("p1"));
+    defer testing.allocator.free(bytes);
+    const plain = try msgpack.encodeAlloc(testing.allocator, @as([]const u8, "p1"));
+    defer testing.allocator.free(plain);
+    try testing.expectEqualSlices(u8, plain, bytes);
+    const back = try msgpack.decodeSlice(PaneId, testing.allocator, bytes);
+    try testing.expect(back.eql(.of("p1")));
+    try testing.expectEqualStrings("str", findName(Field, findName(TypeDef, &comptime typeDefs(model_types), "Pane").?.fields, "id").?.type);
+}
+
 test "the model's tree round-trips through MessagePack" {
     const tree = model.tree;
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var split: tree.Split = .{
-        .id = "s1",
+        .id = .of("s1"),
         .dir = .vertical,
         .ratio = 0.3,
-        .first = .{ .pane = .{ .id = "a", .session = "macterm-a" } },
-        .second = .{ .pane = .{ .id = "b", .session = "macterm-b", .host = "box", .attention = .failed } },
+        .first = .{ .pane = .{ .id = .of("a"), .session = "macterm-a" } },
+        .second = .{ .pane = .{ .id = .of("b"), .session = "macterm-b", .host = "box", .attention = .failed } },
     };
     const root: tree.Node = .{ .split = &split };
     const bytes = try msgpack.encodeAlloc(arena, root);

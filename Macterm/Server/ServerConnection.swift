@@ -312,12 +312,9 @@ enum ServerEvent: Equatable {
     case sessionExit(MactermProtocol.SessionExit)
 
     init?(_ event: MactermProtocol.Event) {
-        switch event.e {
-        case MactermProtocol.SessionExit.name:
-            guard let value = try? event.a?.decode(MactermProtocol.SessionExit.self) else { return nil }
-            self = .sessionExit(value)
-        default:
-            return nil
+        switch try? event.decoded() {
+        case let .sessionExit(value)?: self = .sessionExit(value)
+        default: return nil
         }
     }
 }

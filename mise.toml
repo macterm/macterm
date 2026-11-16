@@ -59,7 +59,6 @@ sources = [
   "scripts/build-server.sh",
   "scripts/_lib.sh",
   "server/**/*",
-  "protocol/**/*",
 ]
 outputs = { auto = true }
 run = """

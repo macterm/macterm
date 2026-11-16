@@ -16,6 +16,7 @@
 //! | integer              | the smallest int that holds it     |
 //! | enum                 | str, the tag name (1)              |
 //! | `[]const u8`         | str, valid UTF-8                   |
+//! | text struct (3)      | str, its `text`                    |
 //! | `Bin`                | bin, any bytes                     |
 //! | `Secret`             | bin, any bytes (see `Secret`)      |
 //! | `Raw`                | one encoded value, copied as it is |
@@ -31,11 +32,20 @@
 //! (2) The shape of a pane message. A `void` payload has no `a`. A tag that
 //! the union does not have decodes as in (1), with an `unknown: void` case.
 //!
+//! (3) A struct with one field `text: []const u8` and the declaration
+//! `pub const wire_str = {};`: an id of the model (`model/ids.zig`). It is a
+//! str on the wire, as in the model's JSON.
+//!
 //! `decode` copies nothing: a string, a `Bin` or a `Raw` points into the
 //! input. It allocates only the arrays. Give it an arena that lives as long
 //! as the input.
 
 const std = @import("std");
+
+/// True for a struct that is a str on the wire (rule (3) above).
+pub fn isText(comptime T: type) bool {
+    return @typeInfo(T) == .@"struct" and @hasDecl(T, "wire_str");
+}
 
 /// Bytes that are not text: a path or a command line that is not UTF-8.
 pub const Bin = struct {
@@ -104,6 +114,7 @@ pub fn encode(w: *std.Io.Writer, value: anytype) std.Io.Writer.Error!void {
         []const u8 => return writeStr(w, value),
         else => {},
     }
+    if (comptime isText(T)) return writeStr(w, value.text);
     switch (@typeInfo(T)) {
         .bool => try w.writeByte(if (value) 0xc3 else 0xc2),
         .int, .comptime_int => try writeInt(w, value),
@@ -281,6 +292,7 @@ pub const Reader = struct {
             []const u8 => return r.readStr(),
             else => {},
         }
+        if (comptime isText(T)) return .{ .text = try r.readStr() };
         switch (@typeInfo(T)) {
             .bool => return switch (try r.byte()) {
                 0xc2 => false,
