@@ -12,8 +12,7 @@ struct ControlCommandFreezeTests {
         "project.memory",
         "tab.list", "tab.new", "tab.select", "tab.move", "tab.rename", "tab.close", "tab.merge",
         "window.list", "window.new", "window.close", "window.focus",
-        // Issue 0277 removes `pane.mirror`. Remove it here in the same change.
-        "pane.list", "pane.inspect", "pane.dump", "pane.split", "pane.mirror", "pane.focus",
+        "pane.list", "pane.inspect", "pane.dump", "pane.split", "pane.focus",
         "pane.close", "pane.run", "pane.key", "pane.zoom", "pane.resize-split", "pane.resize",
         "pane.move", "pane.password", "pane.copy-mode", "pane.read-only", "pane.explain",
         "host.connect", "host.disconnect", "host.server",
