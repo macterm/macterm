@@ -288,8 +288,8 @@ struct WindowStateTests {
     // MARK: - Per-window tab selection
 
     /// A project with `count` tabs, selected in `state`.
-    private func seedProject(_ state: AppState, tabs count: Int) throws -> (Project, Workspace) {
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
+    private func seedProject(_ state: AppState, tabs count: Int, path: String = "/tmp") throws -> (Project, Workspace) {
+        let project = Project(name: "p", path: path, sortOrder: 0)
         state.restoreSelection(projects: [project])
         state.selectProject(project)
         let ws = try #require(state.workspaces[project.id])
@@ -1038,6 +1038,33 @@ struct WindowStateTests {
         #expect(session.claimed == [forA.id])
         #expect(forA.isLeader)
         #expect(!forB.isLeader)
+    }
+
+    @Test
+    func a_remote_tabs_back_window_claims_when_it_becomes_key() throws {
+        // Two windows on one tab of a remote project. The window that comes
+        // to the front claims at once: one click, with no click in a pane.
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let (project, ws) = try seedProject(state, tabs: 1, path: "me@devbox:~/dev/api")
+        let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
+        #expect(pane.isRemote)
+        let a = WindowState(activeProjectID: project.id)
+        let b = WindowState(activeProjectID: project.id)
+        state.registerWindow(a)
+        state.registerWindow(b)
+        state.noteKeyWindow(a)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        session.attach([forA, forB])
+        session.claimed = []
+
+        state.noteKeyWindow(b)
+
+        #expect(session.claimed == [forB.id])
+        #expect(forB.isLeader)
+        #expect(!forA.isLeader)
+        #expect(state.isLedFromAnotherWindow(pane, window: a.id))
     }
 
     @Test
