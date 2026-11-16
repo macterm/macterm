@@ -7,13 +7,14 @@ name: Server
 #
 # The three Test checks are required on main, and a required check must report
 # on every pull request. So the workflow starts on every pull request and every
-# push to main, and each job skips its steps when the commit changes no file of
-# the `server` area of .github/path-areas.
+# push to main, and each Test job skips its steps when the commit changes no
+# file of the `server` area of .github/path-areas (the job Detect Changes).
 # The skip is at step level: a matrix job that a job-level if: skips reports
-# its unexpanded name, which never matches the required name.
+# its unexpanded name, which never matches the required name. A Test job that
+# skips its steps runs on a 2 vCPU Linux runner, so it takes no macOS runner.
 #
-# macOS runs on macos-15: zig cannot link with Xcode 26.4 or later
-# (zig#31658), and the macOS 27 runner has nothing older.
+# macOS runs on macos-26 with Xcode 26.3: zig cannot link with Xcode 26.4 or
+# later (zig#31658), and the macOS 27 runner has nothing older.
 
 on:
   pull_request:
@@ -29,14 +30,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      server: ${{ steps.changes.outputs.server }}
+    steps:
+      # Depth 2: the merge commit of the pull request and its two parents.
+      - uses: useblacksmith/checkout@v1
+        with:
+          fetch-depth: 2
+      - name: Find Server Changes
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: scripts/changed-areas.sh
+
   test:
     name: Test (${{ matrix.name }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macOS
-            runner: macos-15
+            runner: macos-26
           # 4 vCPU, not 2 like the light jobs: Zig compiles with every core,
           # so 2 vCPU takes about twice as long for about the same billed
           # vCPU-minutes, and aarch64 is already the slowest required check.
@@ -44,27 +62,27 @@ jobs:
             runner: blacksmith-4vcpu-ubuntu-2404
           - name: Linux aarch64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ needs.changes.outputs.server == 'true' && matrix.runner || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 30
     defaults:
       run:
         working-directory: server
+    env:
+      SERVER: ${{ needs.changes.outputs.server }}
     steps:
-      # Depth 2: the merge commit of the pull request and its two parents.
       - uses: actions/checkout@v7
+        if: env.SERVER == 'true'
         with:
           fetch-depth: 2
 
-      - name: Find Server Changes
-        id: changes
-        working-directory: .
-        shell: bash
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: scripts/changed-areas.sh
+      - name: Select Xcode
+        if: env.SERVER == 'true' && runner.os == 'macOS'
+        uses: ./.github/actions/select-xcode
+        with:
+          version: "26.3"
 
       - name: Zig Version
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         id: zig
         working-directory: .
         run: echo "version=$(scripts/build-server.sh zig-version)" >> "$GITHUB_OUTPUT"
@@ -75,30 +93,30 @@ jobs:
       # save the cache only after a build that passed. The key changes only
       # when build.zig.zon or the Zig version changes, so each key is saved once.
       - name: Install Zig
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.zig.outputs.version }}
           use-cache: false
 
       - name: Restore the Zig Cache
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         id: zig-cache
         uses: actions/cache/restore@v6
         with:
           path: .zig-cache
-          key: server-zig-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-${{ hashFiles('server/build.zig.zon') }}
+          key: server-zig-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-${{ hashFiles('server/build.zig.zon') }}
           restore-keys: |
-            server-zig-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-
+            server-zig-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-
 
       - name: Fetch the Zig Packages
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         run: ../scripts/server-zig.sh fetch
 
       # host_install.bats runs its own sshd as the runner's user. macOS has
       # one at /usr/sbin/sshd.
       - name: Install Bats and sshd
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
             brew install bats-core
@@ -108,7 +126,7 @@ jobs:
           fi
 
       - name: Run the Zig Tests
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         run: ../scripts/server-zig.sh build test --summary all
 
       # The fuzz target for the packet parser of the roaming link (design/009).
@@ -117,17 +135,17 @@ jobs:
       # pcs_len was zero" (run 132269908310). The unit tests of the parser run
       # on every leg.
       - name: Fuzz the Link Packet Parser
-        if: steps.changes.outputs.server == 'true' && runner.os == 'macOS'
+        if: env.SERVER == 'true' && runner.os == 'macOS'
         run: ../scripts/server-zig.sh build fuzz-link --fuzz=500K
 
       - name: Build
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         run: ../scripts/server-zig.sh build
 
       # Only after a build that passed (the default if: is success()), and
       # only for a new key.
       - name: Save the Zig Cache
-        if: steps.changes.outputs.server == 'true' && steps.zig-cache.outputs.cache-hit != 'true'
+        if: env.SERVER == 'true' && steps.zig-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: .zig-cache
@@ -141,7 +159,7 @@ jobs:
       # - a message gets or loses a sender (design/006 §2);
       # - a reply or an event holds a secret (design/006 §1).
       - name: Check the Generated Protocol Files
-        if: steps.changes.outputs.server == 'true' && runner.os == 'macOS'
+        if: env.SERVER == 'true' && runner.os == 'macOS'
         working-directory: .
         run: |
           git fetch --no-tags --depth=1 origin main
@@ -154,7 +172,7 @@ jobs:
       # out. The short TMPDIR keeps the socket paths under the macOS limit of
       # 104 bytes.
       - name: Run the Bats Tests
-        if: steps.changes.outputs.server == 'true'
+        if: env.SERVER == 'true'
         shell: bash
         env:
           TMPDIR: ${{ runner.temp }}
