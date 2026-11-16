@@ -48,10 +48,9 @@ pub const Project = struct {
     sort_order: i64 = 0,
     /// Unix time in milliseconds.
     created_at: i64 = 0,
-    /// The group that holds this row. Null or empty is the top level. A
-    /// file can name a parent that is not a group (a removed group, a hand
-    /// edit): `Model.parentOf` reads it as the top level, and the file
-    /// stays valid (design/013 §2).
+    /// The group that holds this row. Null or empty is the top level.
+    /// `Model.parentOf` reads a parent that is not a group as the top
+    /// level. The file stays valid (design/013 §2).
     parent: ?ProjectId = null,
     kind: ProjectKind = .project,
 };
@@ -320,7 +319,8 @@ pub const Model = struct {
     }
 
     /// The group that holds `p`, or null for the top level. A parent that is
-    /// not a group, and a parent chain that loops, read as the top level.
+    /// not a group reads as the top level. When `p` is on a loop of parents,
+    /// `p` reads as the top level.
     pub fn parentOf(m: *const Model, p: *const Project) ?ProjectId {
         const first = topLevelIfEmpty(p.parent) orelse return null;
         if (!m.isGroup(first)) return null;
@@ -345,9 +345,14 @@ pub const Model = struct {
         const wanted = topLevelIfEmpty(parent);
         if (wanted) |g| {
             if (!m.isGroup(g)) return error.BadRequest;
+            // The parents as the file has them, so that a loop is seen too.
             var at: ?ProjectId = g;
-            while (at) |x| : (at = m.parentOf(m.findProject(x).?)) {
+            var steps: usize = 0;
+            while (at) |x| : (steps += 1) {
                 if (x.eql(id)) return error.BadRequest;
+                if (steps > m.data.projects.len) break;
+                const up = m.findProject(x) orelse break;
+                at = topLevelIfEmpty(up.parent);
             }
         }
         p.parent = try dupeId(a, wanted);
@@ -357,7 +362,10 @@ pub const Model = struct {
     /// `order` must hold each child once, and nothing else.
     pub fn reorderProjects(m: *Model, parent: ?ProjectId, order: []const ProjectId) Error!void {
         const wanted = topLevelIfEmpty(parent);
-        if (wanted) |g| if (!m.isGroup(g)) return error.NotFound;
+        if (wanted) |g| {
+            if (m.findProject(g) == null) return error.NotFound;
+            if (!m.isGroup(g)) return error.BadRequest;
+        }
         var children: usize = 0;
         for (m.data.projects) |*p| {
             if (sameParent(m.parentOf(p), wanted)) children += 1;
@@ -926,9 +934,9 @@ pub const Fault = struct {
 
 /// Checks that `data` is a model: ids that are not empty and are not used
 /// twice, ratios inside 0..1, a `focused` pane that is in its tree, an
-/// `active_tab` that is in its workspace, project workspaces that match
-/// their projects (a group has none, and no path), and a selected project
-/// that is not a group. Returns the first fault, or null.
+/// `active_tab` that is in its workspace, and project workspaces that match
+/// their projects. A group has no path, no workspace and no selection.
+/// Returns the first fault, or null.
 pub fn validate(gpa: Allocator, data: *const Data) Allocator.Error!?Fault {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
