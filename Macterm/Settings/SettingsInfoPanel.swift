@@ -16,12 +16,7 @@ struct SettingsInfoPanel: View {
         // (Notifications, Accessibility): a 26 pt tile, a 11 pt gap to the
         // text, the tile level with the title.
         HStack(alignment: .top, spacing: 11) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 26, height: 26)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityHidden(true)
+            SettingsInfoTile(symbol: symbol)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(captionWithLink)
@@ -44,5 +39,21 @@ struct SettingsInfoPanel: View {
         }
         text.append(link)
         return text
+    }
+}
+
+/// The icon of an info block: a 26 pt tile with a white glyph. The banners in
+/// General use it too, so that every block at the top of a pane looks the same.
+struct SettingsInfoTile: View {
+    let symbol: String
+    var tint: Color = .accentColor
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 26, height: 26)
+            .background(tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
