@@ -88,6 +88,8 @@ final class RemoteHosts {
         /// Whether to open a roaming link (design/009) after a connect. Off
         /// by default, so that a test never opens a UDP port.
         var roamingEnabled: @MainActor () -> Bool = { false }
+        /// The host scripts: the plain shell of a host with no server.
+        var scripts: HostCommands.Scripts? = .bundled
 
         static var live: Configuration {
             Configuration(
@@ -322,10 +324,11 @@ final class RemoteHosts {
             return .wait(message: nil)
         case let .plain(route):
             mark(panes, lost: false)
+            guard let command = configuration.scripts?.plainCommand(directory: target.directory) else {
+                return .wait(message: RemotePaneText.noPlainShell)
+            }
             return .plain(
-                arguments: connections.ttyArguments(
-                    route, destination, HostCommands.plainShellCommand(directory: target.directory)
-                ),
+                arguments: connections.ttyArguments(route, destination, command),
                 message: RemotePaneText.plainShell(host: target.host)
             )
         case let .ready(link):
@@ -373,7 +376,7 @@ final class RemoteHosts {
             // The shell exited while no pane showed it.
             await Self.kill(session, over: link)
         }
-        // A folder that the host reported must be safe for a command line.
+        // A folder that the host reported must be a plain path.
         let known = panes.lazy.compactMap(\.hostSessionDirectory).first
             .map { HostCommands.isSafeHostFolder($0) ? $0 : target.directory }
         let justCreated = created[session].map { Date().timeIntervalSince($0) < configuration.creationGrace } ?? false
@@ -636,7 +639,7 @@ final class RemoteHosts {
     /// pane when the folder was not there. nil when the host did not answer.
     func createLaunch(link: RemoteServers.Link, directory: String) async -> (launch: PaneSession.Launch, note: String?)? {
         guard let result = await Self.run(
-            ["/bin/sh", "-c", HostCommands.createProbeScript(directory: directory)],
+            HostCommands.createProbeArgv(directory: directory),
             timeout: .seconds(10), over: link
         ), result.code == 0
         else { return nil }
@@ -749,6 +752,10 @@ enum RemotePaneText {
     static func serverSilent(host: String) -> String {
         "The server on \(host) does not answer."
     }
+
+    /// The bundle has no host scripts, or the folder is too long for one
+    /// argument.
+    static let noPlainShell = "Macterm cannot start a shell in this folder."
 
     static func plainShell(host: String) -> String {
         "Macterm has no server on \(host). This shell stops when the connection stops."

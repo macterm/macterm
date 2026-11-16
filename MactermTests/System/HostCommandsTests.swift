@@ -3,36 +3,197 @@ import Foundation
 import Testing
 
 struct HostCommandsTests {
-    private let remote = ProjectPath.remote(user: nil, host: "devbox", directory: "~/dev/api")
-
-    // MARK: - Pane command
-
-    private let key = "0123abcd"
-
-    private func attach(_ session: String = "macterm-api-abc123") -> String {
-        HostCommands.createProbeScript(directory: "~/dev/api")
+    private func create() -> String {
+        HostCommands.createProbeScript
     }
 
-    private func create(_ directory: String = "~/dev/api") -> String {
-        HostCommands.createProbeScript(directory: directory)
+    /// The host scripts of the tree (`server/host/`).
+    private func scripts() throws -> HostCommands.Scripts {
+        let tree = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("server/host", isDirectory: true)
+        return try #require(HostCommands.Scripts.load(from: tree))
+    }
+
+    private func plain(_ directory: String) throws -> String {
+        try #require(try scripts().plainCommand(directory: directory))
+    }
+
+    // MARK: - Round trips
+
+    /// The folders that a round trip sends, relative to a home folder, and
+    /// the folder that each must reach.
+    private static let folders: [(sent: String, made: String?)] = [
+        ("~", nil),
+        ("~/a b", "a b"),
+        ("~/it's", "it's"),
+        ("~/$(touch pwned)", "$(touch pwned)"),
+        ("~/`touch pwned`", "`touch pwned`"),
+        ("~/back\\slash", "back\\slash"),
+        ("~/\"q\" $HOME", "\"q\" $HOME"),
+        ("~/ünï", "ünï"),
+        ("~/semi;colon", "semi;colon"),
+    ]
+
+    /// A home folder with the folders of `folders`, and a `SHELL` that
+    /// prints its physical folder.
+    private struct Home {
+        let url: URL
+        let shell: String
+
+        init() throws {
+            let base = FileManager.default.temporaryDirectory.appendingPathComponent("hc-\(UUID().uuidString)")
+            let home = base.appendingPathComponent("home", isDirectory: true)
+            for folder in HostCommandsTests.folders.compactMap(\.made) {
+                try FileManager.default.createDirectory(at: home.appendingPathComponent(folder), withIntermediateDirectories: true)
+            }
+            // The physical path, as `pwd -P` prints it: the temp folder is
+            // under a symlink, and `resolvingSymlinksInPath` drops `/private`.
+            let physical = try #require(realpath(home.path, nil))
+            defer { free(physical) }
+            url = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
+            shell = base.appendingPathComponent("pwd.sh").path
+            try "#!/bin/sh\npwd -P\n".write(toFile: shell, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell)
+        }
+
+        func expected(_ made: String?) -> String {
+            made.map { url.appendingPathComponent($0).path } ?? url.path
+        }
+
+        var environment: [String: String] {
+            ["HOME": url.path, "SHELL": shell, "TERM": "dumb", "PATH": "/usr/bin:/bin"]
+        }
+
+        /// No folder named `pwned` came from a command in a folder name.
+        var nothingRan: Bool {
+            !FileManager.default.fileExists(atPath: url.deletingLastPathComponent().appendingPathComponent("pwned").path)
+                && !FileManager.default.fileExists(atPath: url.appendingPathComponent("pwned").path)
+        }
+    }
+
+    private static func run(_ argv: [String], environment: [String: String], in folder: URL) throws -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: argv[0])
+        process.arguments = Array(argv.dropFirst())
+        process.environment = environment
+        process.currentDirectoryURL = folder
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
     @Test
-    func a_hostile_folder_stays_text_in_the_host_command() throws {
-        // A folder can come from the host (OSC 7). It must never run.
-        let command = HostCommands.plainShellCommand(directory: "/nonexistent;echo INJECTED")
+    func the_create_probe_reaches_each_folder() throws {
+        let home = try Home()
+        for (sent, made) in Self.folders {
+            let result = try Self.run(HostCommands.createProbeArgv(directory: sent), environment: home.environment, in: home.url)
+            let lines = result.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            #expect(lines.first == "ok", "\(sent)")
+            #expect(lines.dropFirst().first == home.expected(made), "\(sent): \(result.output)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func the_create_probe_falls_back_to_home_for_a_missing_or_hostile_folder() throws {
+        let home = try Home()
+        for sent in ["/no/such/folder", "~$(touch pwned)/x", "~`touch pwned`", "~a b/c", "/x;touch pwned"] {
+            let result = try Self.run(HostCommands.createProbeArgv(directory: sent), environment: home.environment, in: home.url)
+            let lines = result.output.split(separator: "\n").map(String.init)
+            #expect(Array(lines.prefix(2)) == ["home", home.url.path], "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func a_tilde_name_is_never_evaluated_when_tr_cannot_run() throws {
+        // The name check runs `tr`: when it fails, the name stays as it is.
+        let home = try Home()
+        var environment = home.environment
+        environment["PATH"] = "/nonexistent"
+        _ = try Self.run(HostCommands.createProbeArgv(directory: "~$(touch pwned)"), environment: environment, in: home.url)
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func the_git_probe_reaches_the_folder_or_exits_2() throws {
+        let home = try Home()
+        for (sent, _) in Self.folders {
+            let result = try Self.run(HostCommands.gitProbeArgv(directory: sent), environment: home.environment, in: home.url)
+            // Past the `cd`: no git (3) or no repository (4).
+            #expect([3, 4].contains(result.status), "\(sent): \(result.status)")
+        }
+        for sent in ["~/gone", "/x;exit 0", "~$(touch pwned)"] {
+            let result = try Self.run(HostCommands.gitProbeArgv(directory: sent), environment: home.environment, in: home.url)
+            #expect(result.status == 2, "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_plain_shell_starts_in_each_folder_under_a_login_shell(_ loginShell: String) throws {
+        // sshd gives the command line to the user's login shell.
+        let home = try Home()
+        for (sent, made) in Self.folders {
+            let result = try Self.run([loginShell, "-c", plain(sent)], environment: home.environment, in: home.url)
+            #expect(result.output.split(separator: "\n").last.map(String.init) == home.expected(made), "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_plain_shell_starts_in_home_for_a_hostile_folder(_ loginShell: String) throws {
+        // The pane's ssh starts in the home folder, as this process does.
+        let home = try Home()
+        for sent in ["~$(touch pwned)/x", "~`touch pwned`", "~a b/c", "/x;touch pwned"] {
+            let result = try Self.run([loginShell, "-c", plain(sent)], environment: home.environment, in: home.url)
+            #expect(result.output.split(separator: "\n").last.map(String.init) == home.url.path, "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func a_tilde_with_a_user_name_reaches_that_users_home() throws {
+        let home = try Home()
+        let user = NSUserName()
+        let real = try #require(realpath(FileManager.default.homeDirectory(forUser: user)?.path ?? "", nil))
+        defer { free(real) }
+        let expected = String(cString: real)
+        let probe = try Self.run(HostCommands.createProbeArgv(directory: "~\(user)"), environment: home.environment, in: home.url)
+        #expect(probe.output.split(separator: "\n").prefix(2).map(String.init) == ["ok", expected])
+        for loginShell in ["/bin/sh", "/bin/csh"] {
+            let result = try Self.run([loginShell, "-c", plain("~\(user)")], environment: home.environment, in: home.url)
+            #expect(result.output.split(separator: "\n").last.map(String.init) == expected, "\(loginShell)")
+        }
+    }
+
+    @Test
+    func the_plain_shell_says_when_the_folder_is_missing() throws {
+        let home = try Home()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        process.environment = ["SHELL": "/usr/bin/true", "TERM": "dumb", "PATH": "/usr/bin:/bin"]
+        process.arguments = try ["-c", plain("/nonexistent;touch pwned")]
+        process.environment = home.environment
+        process.currentDirectoryURL = home.url
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        process.waitUntilExit()
         let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        #expect(output.contains("cannot cd to /nonexistent;echo INJECTED"))
-        #expect(!output.contains("\nINJECTED"))
+        process.waitUntilExit()
+        #expect(output.contains("macterm: cannot cd to /nonexistent;touch pwned\n"))
+        #expect(output.hasSuffix(home.url.path + "\n"))
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func the_tilde_text_is_the_same_in_the_plain_script() throws {
+        #expect(try scripts().plain.contains(HostCommands.expandTilde))
     }
 
     @Test
@@ -46,17 +207,18 @@ struct HostCommandsTests {
     }
 
     @Test
-    func a_plain_shell_is_a_login_shell_in_the_folder() {
-        let plain = HostCommands.plainShellCommand(directory: "~/dev/api")
-        #expect(plain.hasPrefix("sh -c '"))
-        #expect(plain.contains("cd ~/\"dev/api\""))
-        #expect(plain.contains("if [ -n \"$SHELL\" ]; then exec \"$SHELL\" -l; else exec /bin/sh; fi"))
-        #expect(!plain.contains("connect"))
-        #expect(!plain.contains("ZMX_FOREGROUND_EVENTS"))
+    func a_plain_shell_is_a_login_shell_in_the_folder() throws {
+        let command = try plain("~/dev/api")
+        #expect(command.hasPrefix("sh -c '"))
+        #expect(command.hasSuffix("' macterm 7e2f6465762f617069"))
+        #expect(command.contains("if [ -n \"$SHELL\" ]; then exec \"$SHELL\" -l; else exec /bin/sh; fi"))
+        #expect(!command.contains("connect"))
+        // Only the two quotes around the script, under any login shell.
+        #expect(command.count { $0 == "'" } == 2)
     }
 
     @Test
-    func pane_command_settles_term_against_the_hosts_own_terminfo() {
+    func pane_command_settles_term_against_the_hosts_own_terminfo() throws {
         // A resolvable TERM is never touched — the outer test is negated, so
         // the replacement only runs when the arriving TERM has no entry. That
         // precedence matters: preferring xterm-ghostty whenever the host had it
@@ -69,7 +231,7 @@ struct HostCommandsTests {
         // `-o SetEnv=TERM=xterm-ghostty` from the client because its wrapper has
         // no remote-side script; ours reads the remote DB directly, so it needs
         // no cache and works where env requests are dropped.
-        for cmd in [attach(), HostCommands.plainShellCommand(directory: "~")] {
+        for cmd in try [create(), plain("~")] {
             #expect(cmd.contains("if ! infocmp \"$TERM\" >/dev/null 2>&1; then "))
             #expect(cmd.contains("if infocmp xterm-ghostty >/dev/null 2>&1; then TERM=xterm-ghostty;"))
             #expect(cmd.contains("else TERM=xterm-256color; fi; export TERM; fi;"))
@@ -78,12 +240,12 @@ struct HostCommandsTests {
         // left-to-right precedence binds the else-branch wrong.
         #expect(!HostCommands.remoteTermPreamble.contains("||"))
         // Pane-only: a background read has no terminal to describe.
-        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript
         #expect(!probe.contains("infocmp"))
     }
 
     @Test
-    func pane_command_declares_truecolor_host_side() {
+    func pane_command_declares_truecolor_host_side() throws {
         // A remote pane's surface is libghostty, so 24-bit color is a fact,
         // but nothing carries it across ssh on its own: TERM rides the pty
         // request while everything else is an env request the server filters
@@ -92,23 +254,24 @@ struct HostCommandsTests {
         // Without this, helix refuses a truecolor theme ("theme requires true
         // color support") on any host where TERM isn't xterm-ghostty — which
         // `remoteTermPreamble` can't fix, since it only ever downgrades.
-        #expect(attach().contains("COLORTERM=truecolor; export COLORTERM;"))
-        #expect(HostCommands.plainShellCommand(directory: "~").contains("COLORTERM=truecolor; export COLORTERM;"))
+        #expect(create().contains("COLORTERM=truecolor; export COLORTERM;"))
+        #expect(try plain("~").contains("COLORTERM=truecolor; export COLORTERM;"))
         // Pane-only: a background read renders nothing.
-        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript
         #expect(!probe.contains("COLORTERM"))
     }
 
     @Test
-    func pane_command_declares_the_terminal_program_host_side() {
+    func pane_command_declares_the_terminal_program_host_side() throws {
         // Claude Code sends OSC 9;4 progress — the agent's busy/done dot —
         // only to TERM_PROGRAM=ghostty at 1.2.0 or later, and ssh carries
         // neither variable on its own.
-        #expect(attach().contains(HostCommands.remoteTerminalProgramPreamble))
+        #expect(create().contains(HostCommands.remoteTerminalProgramPreamble))
+        #expect(try plain("~").contains(HostCommands.remoteTerminalProgramPreamble))
         #expect(HostCommands.remoteTerminalProgramPreamble.hasPrefix("TERM_PROGRAM=ghostty; export TERM_PROGRAM; "))
         let preamble = HostCommands.terminalProgramPreamble(version: "1.3.2-main+b368389")
         #expect(preamble.contains("TERM_PROGRAM_VERSION=1.3.2-main+b368389; export TERM_PROGRAM_VERSION;"))
-        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
+        let probe = HostCommands.gitProbeScript
         #expect(!probe.contains("TERM_PROGRAM"))
     }
 
@@ -121,115 +284,17 @@ struct HostCommandsTests {
     }
 
     @Test
-    func remote_scripts_never_source_profiles() {
+    func remote_scripts_never_source_profiles() throws {
         // Locked-in decision (#104): profiles are arbitrary code in the
         // pane's critical path. Sourcing them — inline, in a subshell, or
         // with stdin detached — produced three distinct pane-killers on real
         // hosts (exec hijack of our fds, tty-stdin read-block, profile
         // exec-loop spin). PATH comes from the fallback dir list.
-        let probe = HostCommands.gitProbeScript(directory: "~/dev/api")
-        for wire in [attach(), create(), HostCommands.plainShellCommand(directory: "~"), probe] {
+        let probe = HostCommands.gitProbeScript
+        for wire in try [create(), plain("~"), probe] {
             #expect(!wire.contains(".profile"))
             #expect(!wire.contains("/etc/profile"))
         }
-    }
-
-    @Test
-    func pane_command_script_is_single_quote_free() {
-        // Single quotes in the script would break the `sh -c '<script>'`
-        // wrapper on a non-POSIX login shell: the only two wrap it.
-        let cmd = HostCommands.plainShellCommand(directory: "/srv/app")
-        #expect(cmd.count { $0 == "'" } == 2)
-    }
-
-    // MARK: - Quoting
-
-    @Test
-    func shell_quote_survives_spaces_dollars_and_quotes() {
-        #expect(HostCommands.shellQuote("plain") == "'plain'")
-        #expect(HostCommands.shellQuote("with space") == "'with space'")
-        #expect(HostCommands.shellQuote("$HOME") == "'$HOME'")
-        #expect(HostCommands.shellQuote("it's") == "'it'\\''s'")
-    }
-
-    @Test
-    func remote_directory_keeps_tilde_expandable() {
-        // A quoted tilde is a literal directory named "~" — the tilde segment
-        // must stay bare so sh expands it. Double quotes, so the containing
-        // sh -c script stays single-quote-free.
-        #expect(HostCommands.quoteRemoteDirectory("~") == "~")
-        #expect(HostCommands.quoteRemoteDirectory("~/dev/api") == "~/\"dev/api\"")
-        #expect(HostCommands.quoteRemoteDirectory("~/dir with space") == "~/\"dir with space\"")
-        #expect(HostCommands.quoteRemoteDirectory("~deploy/app") == "~deploy/\"app\"")
-        #expect(HostCommands.quoteRemoteDirectory("~deploy") == "~deploy")
-    }
-
-    @Test
-    func remote_directory_quotes_plain_paths_whole() {
-        #expect(HostCommands.quoteRemoteDirectory("/srv/my app") == "\"/srv/my app\"")
-        #expect(HostCommands.quoteRemoteDirectory("work/api") == "\"work/api\"")
-    }
-
-    // MARK: - Security: tilde-segment injection (§5.3)
-
-    @Test
-    func remote_directory_never_ships_a_command_substitution_unquoted() {
-        // Only a literal `~` or a `[A-Za-z0-9._-]` username may stay bare. A
-        // tilde segment carrying `$(...)`, backticks, or spaces is NOT expandable
-        // config — it's an injection vector — so the WHOLE string is
-        // double-quoted (escaping `$`/backtick), never emitted raw into the `cd`.
-        #expect(HostCommands.quoteRemoteDirectory("~$(touch /tmp/pwned)/sub") == "\"~\\$(touch /tmp/pwned)/sub\"")
-        // Slashless form must also be quoted (was previously returned verbatim).
-        #expect(HostCommands.quoteRemoteDirectory("~$(id)") == "\"~\\$(id)\"")
-        #expect(HostCommands.quoteRemoteDirectory("~`id`") == "\"~\\`id\\`\"")
-        // A username with a space is not a valid bare-safe name → fully quoted.
-        #expect(HostCommands.quoteRemoteDirectory("~evil user/app") == "\"~evil user/app\"")
-    }
-
-    @Test
-    func remote_directory_bare_forms_produce_no_shell_metacharacters() {
-        // Every bare (unquoted) result must be free of shell-active characters,
-        // so nothing a tilde path can carry reaches `sh` unquoted.
-        for input in ["~", "~/dev/api", "~deploy/app", "~$(cmd)/x", "~a b/c", "/abs/$x"] {
-            let quoted = HostCommands.quoteRemoteDirectory(input)
-            // Strip the double-quoted spans; whatever remains bare must be inert.
-            let bareParts = quoted.split(separator: "\"", omittingEmptySubsequences: false)
-                .enumerated().filter { $0.offset.isMultiple(of: 2) }.map(\.element).joined()
-            #expect(!bareParts.contains("$"), "bare `$` leaked for \(input): \(quoted)")
-            #expect(!bareParts.contains("`"), "bare backtick leaked for \(input): \(quoted)")
-            #expect(!bareParts.contains(" "), "bare space leaked for \(input): \(quoted)")
-        }
-    }
-
-    // MARK: - Security: single-quote-free wire invariant (§5.4)
-
-    @Test
-    func assert_single_quote_free_passes_clean_scripts_through() {
-        let clean = "PATH=$PATH; exec \"zmx\" attach \"macterm-x-abc\""
-        #expect(HostCommands.assertSingleQuoteFree(clean) == clean)
-    }
-
-    @Test
-    func assert_single_quote_free_replaces_a_script_carrying_a_single_quote() {
-        // A `'` in a user-controlled field (the project dir) would, once
-        // wrapped by `shellQuote`, become `'\''` — which fish/nu tokenize
-        // differently than POSIX sh, the exact breakage the invariant prevents.
-        // Such a script is swapped for a diagnostic that is itself quote-free.
-        let dirty = "cd \"~/it's-a-dir\"; exec zmx"
-        let result = HostCommands.assertSingleQuoteFree(dirty)
-        #expect(result != dirty)
-        #expect(!result.contains("'"))
-        #expect(result.contains("unsupported single quote"))
-        #expect(result.contains("exec ${SHELL:-/bin/sh}"))
-    }
-
-    @Test
-    func posix_double_quote_escapes_shell_metacharacters() {
-        #expect(HostCommands.posixDoubleQuote("plain") == "\"plain\"")
-        #expect(HostCommands.posixDoubleQuote("a$b") == "\"a\\$b\"")
-        #expect(HostCommands.posixDoubleQuote("a\"b") == "\"a\\\"b\"")
-        #expect(HostCommands.posixDoubleQuote("a`b") == "\"a\\`b\"")
-        #expect(HostCommands.posixDoubleQuote("a\\b") == "\"a\\\\b\"")
     }
 
     // MARK: - Destination
@@ -244,9 +309,9 @@ struct HostCommandsTests {
 
     @Test
     func git_probe_runs_the_six_reads_in_one_command() {
-        let script = HostCommands.gitProbeScript(directory: "~/dev/api")
+        let script = HostCommands.gitProbeScript
         #expect(script.hasPrefix(HostCommands.remoteEnvPreamble))
-        #expect(script.contains("cd ~/\"dev/api\" 2>/dev/null || exit 2"))
+        #expect(script.contains("d=$1; " + HostCommands.expandTilde + " cd \"$d\" 2>/dev/null || exit 2"))
         #expect(script.contains("command -v git >/dev/null 2>&1 || exit 3"))
         #expect(script.contains("status --porcelain=v2 --branch --show-stash 2>/dev/null) || exit 4"))
         #expect(script.contains("log -5 --format=%h%x1f%s%x1f%ct"))
@@ -264,12 +329,5 @@ struct HostCommandsTests {
         #expect(script.components(separatedBy: "printf \"\\036\"").count == 6)
         // A git on the host's PATH only; profiles are never sourced.
         #expect(!script.contains("profile"))
-    }
-
-    @Test
-    func git_probe_reads_a_folder_with_a_single_quote() {
-        // The script is one argument of `command.run`, not text that a login
-        // shell parses, so a single quote inside double quotes is safe.
-        #expect(HostCommands.gitProbeScript(directory: "/it's").contains("cd \"/it's\" 2>/dev/null || exit 2"))
     }
 }
