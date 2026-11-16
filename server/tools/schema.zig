@@ -1,6 +1,7 @@
-//! The schema of the protocol, read from `messages.zig` by comptime
-//! reflection (design/003 §3). The server binary's hidden `__schema` command
-//! writes three files from it (`scripts/protocol.sh`):
+//! The schema of the protocol, read from `messages.zig` and the model by
+//! comptime reflection (design/003 §3). `zig build schema` builds this
+//! program into `zig-out/tools`. It is not in the shipped server.
+//! `scripts/protocol.sh` runs it to write three files:
 //!
 //! - `metadata`: every message, method, event, type and field, with `since`
 //!   and the trust levels that may send each one (`server/schema/protocol.json`);
@@ -9,13 +10,15 @@
 //!   decode and encode again (`server/schema/frames.json`).
 //!
 //! `check` compares the metadata of this build with an older one: the
-//! add-only rule of `messages.zig` as a test, and no saved secret in a reply
-//! or an event (design/006 §1).
+//! add-only rule of `messages.zig` as a test, no change to who may send a
+//! message, and no saved secret in a reply or an event (design/006 §1).
 
 const std = @import("std");
-const msgpack = @import("msgpack.zig");
-const messages = @import("messages.zig");
-const frame = @import("frame.zig");
+const protocol = @import("protocol");
+const model = @import("model");
+const msgpack = protocol.msgpack;
+const messages = protocol.messages;
+const frame = protocol.frame;
 
 const Bin = msgpack.Bin;
 const Secret = msgpack.Secret;
@@ -26,8 +29,8 @@ const Raw = msgpack.Raw;
 pub const Field = struct {
     /// The key on the wire.
     name: []const u8,
-    /// `bool`, `u8` to `u64`, `i8` to `i64`, `str`, `bin`, `secret`, `raw`,
-    /// `[T]` for an array, or the name of a type in `types`.
+    /// `bool`, `u8` to `u64`, `i8` to `i64`, `f64`, `str`, `bin`, `secret`,
+    /// `raw`, `[T]` for an array, or the name of a type in `types`.
     type: []const u8,
     optional: bool = false,
     /// The value that a decoder uses when the key is not there: a number,
@@ -36,12 +39,20 @@ pub const Field = struct {
     since: u32,
 };
 
-pub const TypeDef = struct {
-    /// The Zig name under `messages.zig`: `Hello`, `ChannelOpen.Args`.
+/// One case of a tagged union.
+pub const Variant = struct {
     name: []const u8,
-    kind: enum { @"struct", @"enum" },
+    /// The payload's wire type, as `Field.type`. Null for a case with none.
+    type: ?[]const u8 = null,
+};
+
+pub const TypeDef = struct {
+    /// The Zig name in its name space: `Hello`, `ChannelOpen.Args`, `Split`.
+    name: []const u8,
+    kind: enum { @"struct", @"enum", @"union" },
     fields: []const Field = &.{},
     cases: []const []const u8 = &.{},
+    variants: []const Variant = &.{},
 };
 
 pub const Message = struct {
@@ -115,8 +126,7 @@ fn build() Metadata {
         for (messages.events, 0..) |E, i| event_out[i] = message(E);
         var pane_out: [messages.pane_messages.len]Message = undefined;
         for (messages.pane_messages, 0..) |P, i| pane_out[i] = message(P);
-        var type_out: [types.len]TypeDef = undefined;
-        for (types, 0..) |T, i| type_out[i] = typeDef(T);
+        const type_out = typeDefs(types);
         // Swift declares a nested type in an extension of its parent, so the
         // parent must be a method or a type of the schema.
         for (type_out) |t| {
@@ -164,6 +174,21 @@ fn build() Metadata {
     }
 }
 
+/// The definitions of `types`. Two types with one name are an error: the
+/// Swift side would declare one of them twice.
+fn typeDefs(comptime types: []const type) [types.len]TypeDef {
+    comptime {
+        @setEvalBranchQuota(100_000);
+        var out: [types.len]TypeDef = undefined;
+        for (types, 0..) |T, i| {
+            out[i] = typeDef(T);
+            for (out[0..i]) |o| if (std.mem.eql(u8, o.name, out[i].name))
+                @compileError("two types of the schema are named " ++ o.name ++ ": rename one");
+        }
+        return out;
+    }
+}
+
 fn message(comptime T: type) Message {
     return .{
         .name = T.name,
@@ -189,6 +214,7 @@ fn collect(comptime T: type, comptime list: []const type) []const type {
             Bin, Secret, Raw, []const u8 => return list,
             else => {},
         }
+        if (msgpack.isText(T)) return list;
         for (list) |L| if (L == T) return list;
         switch (@typeInfo(T)) {
             .optional => |o| return collect(o.child, list),
@@ -199,18 +225,32 @@ fn collect(comptime T: type, comptime list: []const type) []const type {
                 for (s.field_types) |F| out = collect(F, out);
                 return out;
             },
+            .@"union" => |u| {
+                var out: []const type = list ++ &[_]type{T};
+                for (u.field_types) |F| out = collect(F, out);
+                return out;
+            },
             else => return list,
         }
     }
 }
 
-/// The name of a type declared in `messages.zig`, without its module path.
+/// The files whose types the schema may hold. A type's name in the schema
+/// is its name in its file, so a name must be unique across them all
+/// (`build` checks).
+const name_spaces = [_][]const u8{ "messages.", "model.", "tree." };
+
+/// The name of a type declared in one of `name_spaces`, without its module
+/// path.
 fn shortName(comptime T: type) []const u8 {
     const full = @typeName(T);
-    const marker = "messages.";
-    const i = std.mem.lastIndexOf(u8, full, marker) orelse
-        @compileError("declare " ++ full ++ " by name in messages.zig");
-    return full[i + marker.len ..];
+    // The marker nearest the end names the file that declares `T`.
+    var start: ?usize = null;
+    for (name_spaces) |marker| {
+        const i = std.mem.lastIndexOf(u8, full, marker) orelse continue;
+        if (start == null or i + marker.len > start.?) start = i + marker.len;
+    }
+    return full[start orelse @compileError("declare " ++ full ++ " by name in messages.zig or in the model") ..];
 }
 
 fn wireType(comptime T: type) []const u8 {
@@ -220,15 +260,18 @@ fn wireType(comptime T: type) []const u8 {
         Secret => return "secret",
         Raw => return "raw",
         []const u8 => return "str",
-        u8, u16, u32, u64, i8, i16, i32, i64 => return @typeName(T),
+        u8, u16, u32, u64, i8, i16, i32, i64, f64 => return @typeName(T),
         else => {},
     }
+    if (msgpack.isText(T)) return "str";
     return switch (@typeInfo(T)) {
         .pointer => |p| if (p.size == .slice and @typeInfo(p.child) != .optional)
             "[" ++ wireType(p.child) ++ "]"
+        else if (p.size == .one and @typeInfo(p.child) != .optional)
+            wireType(p.child)
         else
             @compileError("no wire type for " ++ @typeName(T)),
-        .@"struct", .@"enum" => shortName(T),
+        .@"struct", .@"enum", .@"union" => shortName(T),
         else => @compileError("no wire type for " ++ @typeName(T)),
     };
 }
@@ -251,6 +294,10 @@ fn typeDef(comptime T: type) TypeDef {
                     checkName(name);
                     const optional = @typeInfo(F) == .optional;
                     const Inner = if (optional) @typeInfo(F).optional.child else F;
+                    // Swift has no struct that holds itself: a pointer goes
+                    // through a union, which is an `indirect enum` there.
+                    if (@typeInfo(Inner) == .pointer and @typeInfo(Inner).pointer.size == .one)
+                        @compileError(name ++ ": a pointer is allowed only as the payload of a union case");
                     if (optional and attrs.defaultValue(F) != null and attrs.defaultValue(F).? != null)
                         @compileError(name ++ ": an optional field has no default but null");
                     fields[i] = .{
@@ -263,6 +310,18 @@ fn typeDef(comptime T: type) TypeDef {
                 }
                 const final = fields;
                 return .{ .name = shortName(T), .kind = .@"struct", .fields = &final };
+            },
+            .@"union" => |u| {
+                if (u.tag_type == null) @compileError(@typeName(T) ++ ": a union on the wire needs a tag");
+                var variants: [u.field_names.len]Variant = undefined;
+                for (u.field_names, u.field_types, 0..) |name, F, i| {
+                    checkName(name);
+                    if (std.mem.eql(u8, name, "unknown") and F != void)
+                        @compileError(@typeName(T) ++ ": the unknown case has no payload");
+                    variants[i] = .{ .name = name, .type = if (F == void) null else wireType(F) };
+                }
+                const final = variants;
+                return .{ .name = shortName(T), .kind = .@"union", .variants = &final };
             },
             else => unreachable,
         }
@@ -311,6 +370,10 @@ fn defaultText(comptime F: type, comptime value: F) []const u8 {
     }
     return switch (@typeInfo(F)) {
         .int => std.fmt.comptimePrint("{d}", .{value}),
+        .float => if (std.math.isFinite(value))
+            std.fmt.comptimePrint("{d}", .{value})
+        else
+            @compileError("a default float must be finite"),
         .@"enum" => @tagName(value),
         .pointer => if (value.len == 0) "[]" else @compileError("a default array must be empty"),
         else => @compileError("no default of type " ++ @typeName(F)),
@@ -327,33 +390,46 @@ pub fn writeMetadata(w: *std.Io.Writer, meta: Metadata) std.Io.Writer.Error!void
 
 // ── Check ───────────────────────────────────────────────────────────────────
 
+pub const Base = enum {
+    /// The metadata on `main`. Before a release, an addition may keep the
+    /// level of `main`.
+    main,
+    /// The metadata of a release. Peers of that level are out, so an
+    /// addition needs a level above it.
+    release,
+};
+
 /// Writes one line for each change from `old` to `new` that an older peer
-/// could not read, and for each reply or event that holds a `secret`.
-/// Returns the count of lines. `old` is null when there is no older
-/// metadata: only the secret check runs.
-pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Error!usize {
+/// could not read, for each change to who may send a message, and for each
+/// reply or event that holds a `secret`. Returns the count of lines. `old` is
+/// null when there is no older metadata: only the secret check runs.
+pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) std.Io.Writer.Error!usize {
     var n: usize = 0;
 
+    if (new.types.len > max_types) {
+        try w.print("{d} types: the check reads at most {d}\n", .{ new.types.len, max_types });
+        return n + 1;
+    }
     if (new.min_level > new.level) {
         try w.print("min_level {d} is over level {d}\n", .{ new.min_level, new.level });
         n += 1;
     }
 
     for (new.methods) |method| {
-        if (holdsSecret(new, method.result, 0)) {
+        if (holdsSecret(new, method.result)) {
             try w.print("method {s}: its result holds a secret\n", .{method.name});
             n += 1;
         }
     }
     for (new.events) |event| {
-        if (holdsSecret(new, event.type, 0)) {
+        if (holdsSecret(new, event.type)) {
             try w.print("event {s} holds a secret\n", .{event.name});
             n += 1;
         }
     }
     // A pane message goes to every client of the session, as an event does.
     for (new.pane_messages) |msg| {
-        if (holdsSecret(new, msg.type, 0)) {
+        if (holdsSecret(new, msg.type)) {
             try w.print("pane message {s} holds a secret\n", .{msg.name});
             n += 1;
         }
@@ -365,10 +441,11 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
         try w.print("level went down from {d} to {d}\n", .{ o.level, new.level });
         n += 1;
     }
+    const level: NewLevel = .{ .level = new.level, .released = if (against == .release) o.level else null };
 
-    n += try checkMessages(w, "message", o.messages, new.messages, new.level);
-    n += try checkMessages(w, "event", o.events, new.events, new.level);
-    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, new.level);
+    n += try checkMessages(w, "message", o.messages, new.messages, level);
+    n += try checkMessages(w, "event", o.events, new.events, level);
+    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level);
 
     for (o.error_codes) |code| {
         for (new.error_codes) |c| {
@@ -393,10 +470,11 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
             try w.print("method {s}: its args or result type changed\n", .{om.name});
             n += 1;
         }
+        n += try checkSenders(w, "method", om.name, om.senders, nm.senders);
     }
     for (new.methods) |nm| {
-        if (findName(Method, o.methods, nm.name) == null and nm.since != new.level) {
-            try w.print("method {s} is new, but its since is {d}, not {d}\n", .{ nm.name, nm.since, new.level });
+        if (findName(Method, o.methods, nm.name) == null and !level.ok(nm.since)) {
+            try w.print("method {s} is new, but {f}\n", .{ nm.name, level.why(nm.since) });
             n += 1;
         }
     }
@@ -413,8 +491,8 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
     for (new.types) |nt| {
         if (findName(TypeDef, o.types, nt.name) != null) continue;
         for (nt.fields) |nf| {
-            if (nf.since != new.level) {
-                try w.print("{s}.{s} is new, but its since is {d}, not {d}\n", .{ nt.name, nf.name, nf.since, new.level });
+            if (!level.ok(nf.since)) {
+                try w.print("{s}.{s} is new, but {f}\n", .{ nt.name, nf.name, level.why(nf.since) });
                 n += 1;
             }
         }
@@ -452,6 +530,26 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
                 n += 1;
             }
         };
+        for (ot.variants) |ov| {
+            const nv = findName(Variant, nt.variants, ov.name) orelse {
+                try w.print("union {s}: case {s} was removed\n", .{ ot.name, ov.name });
+                n += 1;
+                continue;
+            };
+            if (!optionalEql(nv.type, ov.type)) {
+                try w.print("union {s}: the payload of case {s} changed\n", .{ ot.name, ov.name });
+                n += 1;
+            }
+        }
+        // As for an enum: an older peer refuses a case that it does not
+        // know, unless the union has `unknown`.
+        const open_union = findName(Variant, ot.variants, "unknown") != null;
+        if (!open_union) for (nt.variants) |nv| {
+            if (findName(Variant, ot.variants, nv.name) == null) {
+                try w.print("union {s}: case {s} is new, but the union has no unknown case\n", .{ ot.name, nv.name });
+                n += 1;
+            }
+        };
         for (ot.fields) |of| {
             const nf = findName(Field, nt.fields, of.name) orelse {
                 try w.print("{s}.{s} was removed\n", .{ ot.name, of.name });
@@ -475,8 +573,8 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
                 try w.print("{s}.{s} is new, but it is not optional and has no default\n", .{ ot.name, nf.name });
                 n += 1;
             }
-            if (nf.since != new.level) {
-                try w.print("{s}.{s} is new, but its since is {d}, not {d}\n", .{ ot.name, nf.name, nf.since, new.level });
+            if (!level.ok(nf.since)) {
+                try w.print("{s}.{s} is new, but {f}\n", .{ ot.name, nf.name, level.why(nf.since) });
                 n += 1;
             }
         }
@@ -484,12 +582,37 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata) std.Io.Writer.Err
     return n;
 }
 
+/// The levels that an addition may have. Against `main`, only the current
+/// level. Against a release, any level over the release's, up to the current
+/// one: an earlier change since the release may have raised the level already.
+const NewLevel = struct {
+    level: u32,
+    released: ?u32,
+
+    fn ok(l: NewLevel, since: u32) bool {
+        const r = l.released orelse return since == l.level;
+        return since > r and since <= l.level;
+    }
+
+    fn why(l: NewLevel, since: u32) std.fmt.Alt([3]?u32, formatWhy) {
+        return .{ .data = .{ since, l.level, l.released } };
+    }
+
+    fn formatWhy(d: [3]?u32, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (d[2]) |r| {
+            if (d[1].? <= r) return w.print("level {d} is released: raise the level to {d}", .{ r, r + 1 });
+            return w.print("its since is {d}, and it must be from {d} to {d}", .{ d[0].?, r + 1, d[1].? });
+        }
+        try w.print("its since is {d}, not {d}", .{ d[0].?, d[1].? });
+    }
+};
+
 fn checkMessages(
     w: *std.Io.Writer,
     comptime what: []const u8,
     old: []const Message,
     new: []const Message,
-    level: u32,
+    level: NewLevel,
 ) std.Io.Writer.Error!usize {
     var n: usize = 0;
     for (old) |om| {
@@ -502,14 +625,42 @@ fn checkMessages(
             try w.print(what ++ " {s}: its since or type changed\n", .{om.name});
             n += 1;
         }
+        n += try checkSenders(w, what, om.name, om.senders, nm.senders);
     }
     for (new) |nm| {
-        if (findName(Message, old, nm.name) == null and nm.since != level) {
-            try w.print(what ++ " {s} is new, but its since is {d}, not {d}\n", .{ nm.name, nm.since, level });
+        if (findName(Message, old, nm.name) == null and !level.ok(nm.since)) {
+            try w.print(what ++ " {s} is new, but {f}\n", .{ nm.name, level.why(nm.since) });
             n += 1;
         }
     }
     return n;
+}
+
+/// A sender that is added gives a peer of that trust a new power; one that
+/// is removed refuses an older peer. Both are a line: a change of trust is
+/// a decision of design/006, and the check makes it visible.
+fn checkSenders(
+    w: *std.Io.Writer,
+    comptime what: []const u8,
+    name: []const u8,
+    old: []const []const u8,
+    new: []const []const u8,
+) std.Io.Writer.Error!usize {
+    var n: usize = 0;
+    for (new) |s| if (!containsName(old, s)) {
+        try w.print(what ++ " {s}: sender {s} was added\n", .{ name, s });
+        n += 1;
+    };
+    for (old) |s| if (!containsName(new, s)) {
+        try w.print(what ++ " {s}: sender {s} was removed\n", .{ name, s });
+        n += 1;
+    };
+    return n;
+}
+
+fn containsName(list: []const []const u8, name: []const u8) bool {
+    for (list) |item| if (std.mem.eql(u8, item, name)) return true;
+    return false;
 }
 
 fn findName(comptime T: type, items: []const T, name: []const u8) ?T {
@@ -522,14 +673,28 @@ fn optionalEql(a: ?[]const u8, b: ?[]const u8) bool {
     return std.mem.eql(u8, a.?, b.?);
 }
 
-fn holdsSecret(meta: Metadata, type_name: []const u8, depth: usize) bool {
+/// The most types that `holdsSecret` can track. `check` refuses more.
+const max_types = 4096;
+
+fn holdsSecret(meta: Metadata, type_name: []const u8) bool {
+    // Each type is read once. A type that holds itself (a split of two
+    // nodes) ends there, and the walk stays linear.
+    var seen: [max_types]bool = @splat(false);
+    return holdsSecretIn(meta, type_name, &seen);
+}
+
+fn holdsSecretIn(meta: Metadata, type_name: []const u8, seen: *[max_types]bool) bool {
     var t = type_name;
     while (t.len >= 2 and t[0] == '[') t = t[1 .. t.len - 1];
     if (std.mem.eql(u8, t, "secret")) return true;
-    // Types cannot nest deeper than there are types; this stops a cycle.
-    if (depth > meta.types.len) return false;
-    const def = findName(TypeDef, meta.types, t) orelse return false;
-    for (def.fields) |f| if (holdsSecret(meta, f.type, depth + 1)) return true;
+    const i = for (meta.types, 0..) |def, i| {
+        if (std.mem.eql(u8, def.name, t)) break i;
+    } else return false;
+    if (seen[i]) return false;
+    seen[i] = true;
+    const def = meta.types[i];
+    for (def.fields) |f| if (holdsSecretIn(meta, f.type, seen)) return true;
+    for (def.variants) |v| if (v.type) |vt| if (holdsSecretIn(meta, vt, seen)) return true;
     return false;
 }
 
@@ -539,7 +704,7 @@ pub fn writeSwift(w: *std.Io.Writer, meta: Metadata) std.Io.Writer.Error!void {
     try w.writeAll(
         \\import Foundation
         \\
-        \\/// Generated by the server binary's `__schema swift` from server/src/protocol/messages.zig.
+        \\/// Generated by server/tools/schema.zig from server/src/protocol/messages.zig.
         \\/// Do not edit. Run `mise run protocol` after a change to the Zig schema.
         \\enum MactermProtocol {
         \\
@@ -786,18 +951,91 @@ fn writeSwiftType(w: *std.Io.Writer, t: TypeDef) std.Io.Writer.Error!void {
             }
             try w.writeAll("    }\n}\n");
         },
+        .@"union" => try writeSwiftUnion(w, t, sep, parent, leaf),
     }
 }
 
+/// A tagged union is an `indirect enum`, so that it may hold itself through
+/// a struct (a split holds two nodes). On the wire it is `{t: tag, a:
+/// payload}`, and the keys may come in either order.
+fn writeSwiftUnion(w: *std.Io.Writer, t: TypeDef, sep: []const u8, parent: []const u8, leaf: []const u8) std.Io.Writer.Error!void {
+    try w.print("\nextension MactermProtocol{s}{s} {{\n", .{ sep, parent });
+    try w.print("    indirect enum {s}: Equatable {{\n", .{leaf});
+    for (t.variants) |v| {
+        if (v.type) |vt| {
+            try w.print("        case {f}({f})\n", .{ swiftName(v.name), swiftType(vt) });
+        } else {
+            try w.print("        case {f}\n", .{swiftName(v.name)});
+        }
+    }
+    try w.writeAll("    }\n}\n");
+
+    const has_unknown = findName(Variant, t.variants, "unknown") != null;
+    try w.print("\nextension MactermProtocol.{s}: ProtocolValue {{\n", .{t.name});
+    try w.writeAll(
+        \\    init(from reader: inout MessagePackReader) throws {
+        \\        var tag: String?
+        \\        var payload: ProtocolRaw?
+        \\        try reader.readMap { key, reader in
+        \\            switch key {
+        \\            case "t": tag = try reader.readString()
+        \\            case "a": payload = try ProtocolRaw(from: &reader)
+        \\            default: return false
+        \\            }
+        \\            return true
+        \\        }
+        \\        switch try MessagePackReader.required(tag, "t") {
+        \\
+    );
+    for (t.variants) |v| {
+        if (v.type) |vt| {
+            try w.print("        case \"{s}\": self = try .{f}(reader.decodePayload({f}.self, from: payload))\n", .{
+                v.name, swiftName(v.name), swiftType(vt),
+            });
+        } else {
+            try w.print("        case \"{s}\": self = .{f}\n", .{ v.name, swiftName(v.name) });
+        }
+    }
+    if (has_unknown) {
+        try w.writeAll("        default: self = .unknown\n");
+    } else {
+        try w.writeAll("        case let other: throw MessagePackError.unknownEnumTag(other)\n");
+    }
+    try w.writeAll(
+        \\        }
+        \\    }
+        \\
+        \\    func encode(to writer: inout MessagePackWriter) {
+        \\        switch self {
+        \\
+    );
+    for (t.variants) |v| {
+        if (v.type != null) {
+            try w.print("        case let .{f}(value):\n", .{swiftName(v.name)});
+            try w.writeAll("            writer.writeMapHeader(2)\n");
+        } else {
+            try w.print("        case .{f}:\n", .{swiftName(v.name)});
+            try w.writeAll("            writer.writeMapHeader(1)\n");
+        }
+        try w.writeAll("            writer.writeString(\"t\")\n");
+        try w.print("            writer.writeString(\"{s}\")\n", .{v.name});
+        if (v.type != null) {
+            try w.writeAll("            writer.writeString(\"a\")\n");
+            try w.writeAll("            value.encode(to: &writer)\n");
+        }
+    }
+    try w.writeAll("        }\n    }\n}\n");
+}
+
 const swift_keywords = [_][]const u8{
-    "as",      "associatedtype", "break",  "case",     "catch",  "class",   "continue",
-    "default", "defer",          "do",     "else",     "enum",   "extension", "fallthrough",
-    "false",   "for",            "func",   "guard",    "if",     "import",  "in",
-    "init",    "inout",          "is",     "let",      "nil",    "operator", "private",
-    "protocol", "public",        "repeat", "rethrows", "return", "self",    "Self",
-    "static",  "struct",         "super",  "switch",   "throw",  "throws",  "true",
-    "try",     "Type",           "typealias", "var",   "where",  "while",   "internal",
-    "deinit",  "fileprivate",    "subscript",
+    "as",       "associatedtype", "break",     "case",     "catch",  "class",     "continue",
+    "default",  "defer",          "do",        "else",     "enum",   "extension", "fallthrough",
+    "false",    "for",            "func",      "guard",    "if",     "import",    "in",
+    "init",     "inout",          "is",        "let",      "nil",    "operator",  "private",
+    "protocol", "public",         "repeat",    "rethrows", "return", "self",      "Self",
+    "static",   "struct",         "super",     "switch",   "throw",  "throws",    "true",
+    "try",      "Type",           "typealias", "var",      "where",  "while",     "internal",
+    "deinit",   "fileprivate",    "subscript",
 };
 
 /// A Swift identifier, in backticks where it is a keyword.
@@ -856,11 +1094,11 @@ fn formatType(wire: []const u8, w: *std.Io.Writer) std.Io.Writer.Error!void {
         return w.writeByte(']');
     }
     const map = [_][2][]const u8{
-        .{ "bool", "Bool" },     .{ "str", "String" },     .{ "bin", "ProtocolBin" },
-        .{ "secret", "ProtocolSecret" }, .{ "raw", "ProtocolRaw" },
-        .{ "u8", "UInt8" },      .{ "u16", "UInt16" },     .{ "u32", "UInt32" },
-        .{ "u64", "UInt64" },    .{ "i8", "Int8" },        .{ "i16", "Int16" },
-        .{ "i32", "Int32" },     .{ "i64", "Int64" },
+        .{ "bool", "Bool" },             .{ "str", "String" },      .{ "bin", "ProtocolBin" },
+        .{ "secret", "ProtocolSecret" }, .{ "raw", "ProtocolRaw" }, .{ "u8", "UInt8" },
+        .{ "u16", "UInt16" },            .{ "u32", "UInt32" },      .{ "u64", "UInt64" },
+        .{ "i8", "Int8" },               .{ "i16", "Int16" },       .{ "i32", "Int32" },
+        .{ "i64", "Int64" },             .{ "f64", "Double" },
     };
     for (map) |pair| {
         if (std.mem.eql(u8, pair[0], wire)) return w.writeAll(pair[1]);
@@ -875,7 +1113,7 @@ fn swiftDefault(wire: []const u8, text: []const u8) std.fmt.Alt([2][]const u8, f
 fn formatDefault(pair: [2][]const u8, w: *std.Io.Writer) std.Io.Writer.Error!void {
     const wire = pair[0];
     const text = pair[1];
-    const plain = [_][]const u8{ "bool", "str", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64" };
+    const plain = [_][]const u8{ "bool", "str", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f64" };
     for (plain) |p| {
         if (std.mem.eql(u8, p, wire)) return w.writeAll(text);
     }
@@ -897,6 +1135,57 @@ fn formatSenders(senders: []const []const u8, w: *std.Io.Writer) std.Io.Writer.E
         try formatName(s, w);
     }
     try w.writeByte(']');
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
+/// `macterm-schema swift | metadata | fixtures` writes that file to stdout.
+/// `macterm-schema check [--release] [old-metadata.json]` checks this schema
+/// against an older one, and exits 1 on a problem. `--release` says that the
+/// older one is a release's.
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const arena = init.arena.allocator();
+    var args = init.minimal.args.iterate();
+    _ = args.next();
+
+    var buf: [4096]u8 = undefined;
+    var out = std.Io.File.stdout().writer(io, &buf);
+    const w = &out.interface;
+    const kind = args.next() orelse fail(io, "macterm-schema needs swift, metadata, fixtures or check", .{});
+    if (std.mem.eql(u8, kind, "swift")) {
+        try writeSwift(w, metadata);
+    } else if (std.mem.eql(u8, kind, "metadata")) {
+        try writeMetadata(w, metadata);
+    } else if (std.mem.eql(u8, kind, "fixtures")) {
+        try writeFixtures(arena, w);
+    } else if (std.mem.eql(u8, kind, "check")) {
+        var against: Base = .main;
+        var path: ?[]const u8 = null;
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "--release")) against = .release else path = arg;
+        }
+        const old: ?Metadata = if (path) |p| blk: {
+            const text = std.Io.Dir.cwd().readFileAlloc(io, p, arena, .limited(16 * 1024 * 1024)) catch |err|
+                fail(io, "cannot read {s}: {s}", .{ p, @errorName(err) });
+            break :blk std.json.parseFromSliceLeaky(Metadata, arena, text, .{ .ignore_unknown_fields = true }) catch |err|
+                fail(io, "cannot parse {s}: {s}", .{ p, @errorName(err) });
+        } else null;
+        const problems_found = try check(w, old, metadata, against);
+        try w.flush();
+        if (problems_found > 0) fail(io, "{d} problems in the protocol schema", .{problems_found});
+    } else {
+        fail(io, "unknown output {s}", .{kind});
+    }
+    try w.flush();
+}
+
+fn fail(io: std.Io, comptime fmt: []const u8, args: anytype) noreturn {
+    var buf: [1024]u8 = undefined;
+    var err = std.Io.File.stderr().writer(io, &buf);
+    err.interface.print("macterm-schema: " ++ fmt ++ "\n", args) catch {};
+    err.interface.flush() catch {};
+    std.process.exit(1);
 }
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -1054,7 +1343,7 @@ fn problems(arena: std.mem.Allocator, old_json: ?[]const u8, new_json: []const u
     const new = try std.json.parseFromSliceLeaky(Metadata, arena, new_json, opts);
     const old = if (old_json) |j| try std.json.parseFromSliceLeaky(Metadata, arena, j, opts) else null;
     var out: std.Io.Writer.Allocating = .init(arena);
-    const n = try check(&out.writer, old, new);
+    const n = try check(&out.writer, old, new, .main);
     try testing.expectEqual(n, std.mem.count(u8, out.written(), "\n"));
     return out.written();
 }
@@ -1284,4 +1573,168 @@ test "Swift names: camel case and keywords" {
     try testing.expectEqualStrings("`default`", try std.fmt.bufPrint(&buf, "{f}", .{swiftCamel("default")}));
     try testing.expectEqualStrings("[MactermProtocol.Event]", try std.fmt.bufPrint(&buf, "{f}", .{swiftType("[Event]")}));
     try testing.expectEqualStrings(".gui", try std.fmt.bufPrint(&buf, "{f}", .{swiftDefault("Role", "gui")}));
+}
+
+test "the check refuses a changed sender" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const wider = try edit(arena, "\"since\": 1, \"senders\": [\"local\"],\n              \"args\"", "\"since\": 1, \"senders\": [\"local\", \"remote\"],\n              \"args\"");
+    try testing.expectEqualStrings("method pane.split: sender remote was added\n", try problems(arena, base, wider));
+
+    const narrower = try edit(arena, "\"type\": \"Hello\", \"since\": 1, \"senders\": [\"local\"]", "\"type\": \"Hello\", \"since\": 1, \"senders\": []");
+    try testing.expectEqualStrings("message hello: sender local was removed\n", try problems(arena, base, narrower));
+}
+
+test "against a release, an addition needs a level above the release" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const opts: std.json.ParseOptions = .{ .ignore_unknown_fields = true };
+    const old = try std.json.parseFromSliceLeaky(Metadata, arena, base, opts);
+
+    // A new optional field at level 1, the level of the release.
+    const same_level = try edit(arena, "[{\"name\": \"id\", \"type\": \"u64\", \"since\": 1}", "[{\"name\": \"id\", \"type\": \"u64\", \"since\": 1}, {\"name\": \"hint\", \"type\": \"str\", \"optional\": true, \"since\": 1}");
+    try testing.expectEqualStrings("", try problems(arena, base, same_level));
+    var out: std.Io.Writer.Allocating = .init(arena);
+    const new = try std.json.parseFromSliceLeaky(Metadata, arena, same_level, opts);
+    try testing.expectEqual(1, try check(&out.writer, old, new, .release));
+    try testing.expectEqualStrings("Request.hint is new, but level 1 is released: raise the level to 2\n", out.written());
+
+    // At level 2, it passes.
+    const bumped = try std.mem.replaceOwned(u8, arena, same_level, "{\"level\": 1", "{\"level\": 2");
+    const raised = try std.mem.replaceOwned(u8, arena, bumped, "\"optional\": true, \"since\": 1", "\"optional\": true, \"since\": 2");
+    out.clearRetainingCapacity();
+    try testing.expectEqual(0, try check(&out.writer, old, try std.json.parseFromSliceLeaky(Metadata, arena, raised, opts), .release));
+
+    // Two raises since the release: an addition of either level passes, and
+    // one of the released level does not.
+    const twice = try std.mem.replaceOwned(u8, arena, raised, "{\"level\": 2", "{\"level\": 3");
+    out.clearRetainingCapacity();
+    try testing.expectEqual(0, try check(&out.writer, old, try std.json.parseFromSliceLeaky(Metadata, arena, twice, opts), .release));
+    const stale = try std.mem.replaceOwned(u8, arena, twice, "\"optional\": true, \"since\": 2", "\"optional\": true, \"since\": 1");
+    out.clearRetainingCapacity();
+    try testing.expectEqual(1, try check(&out.writer, old, try std.json.parseFromSliceLeaky(Metadata, arena, stale, opts), .release));
+    try testing.expectEqualStrings("Request.hint is new, but its since is 1, and it must be from 2 to 3\n", out.written());
+
+    // No addition and no change of level: nothing to say.
+    out.clearRetainingCapacity();
+    try testing.expectEqual(0, try check(&out.writer, old, old, .release));
+}
+
+test "the check refuses a removed or changed union case, and a new one without unknown" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const with_union = try edit(arena, "\"types\": [",
+        \\"types": [{"name": "Node", "kind": "union", "variants": [{"name": "pane", "type": "str"}, {"name": "split", "type": "u8"}]},
+    );
+    try testing.expectEqualStrings("", try problems(arena, with_union, with_union));
+
+    const removed = try std.mem.replaceOwned(u8, arena, with_union, ", {\"name\": \"split\", \"type\": \"u8\"}", "");
+    try testing.expectEqualStrings("union Node: case split was removed\n", try problems(arena, with_union, removed));
+
+    const changed = try std.mem.replaceOwned(u8, arena, with_union, "\"type\": \"u8\"}]", "\"type\": \"u16\"}]");
+    try testing.expectEqualStrings("union Node: the payload of case split changed\n", try problems(arena, with_union, changed));
+
+    const added = try std.mem.replaceOwned(u8, arena, with_union, "\"type\": \"u8\"}]", "\"type\": \"u8\"}, {\"name\": \"tabs\"}]");
+    try testing.expectEqualStrings("union Node: case tabs is new, but the union has no unknown case\n", try problems(arena, with_union, added));
+}
+
+test "a secret in a union's payload is found" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const leak = try edit(arena, "{\"name\": \"PaneSplit.Result\", \"kind\": \"struct\", \"fields\": []}",
+        \\{"name": "PaneSplit.Result", "kind": "struct", "fields": [{"name": "node", "type": "Node", "since": 1}]},
+        \\{"name": "Node", "kind": "union", "variants": [{"name": "empty"}, {"name": "saved", "type": "secret"}]}
+    );
+    try testing.expectEqualStrings("method pane.split: its result holds a secret\n", try problems(arena, null, leak));
+}
+
+test "the secret check reads a type that holds itself once" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // A result that holds a tree. Each split holds two nodes and 60 types
+    // that hold the split again: a walk with no memory takes 2^60 steps.
+    var types: std.Io.Writer.Allocating = .init(arena);
+    const tw = &types.writer;
+    try tw.writeAll(
+        \\{"name": "PaneSplit.Result", "kind": "struct", "fields": [{"name": "root", "type": "Node", "since": 1}]},
+        \\{"name": "Node", "kind": "union", "variants": [{"name": "leaf", "type": "u8"}, {"name": "split", "type": "Split"}]},
+        \\{"name": "Split", "kind": "struct", "fields": [{"name": "a", "type": "Node", "since": 1}, {"name": "b", "type": "Hop0", "since": 1}]}
+    );
+    for (0..60) |i| try tw.print(",{{\"name\": \"Hop{d}\", \"kind\": \"struct\", \"fields\": [{{\"name\": \"a\", \"type\": \"{s}{d}\", \"since\": 1}}, {{\"name\": \"b\", \"type\": \"Split\", \"since\": 1}}]}}", .{ i, if (i == 59) "Lea" else "Hop", if (i == 59) 0 else i + 1 });
+    try tw.writeAll(",{\"name\": \"Lea0\", \"kind\": \"struct\", \"fields\": [{\"name\": \"s\", \"type\": \"secret\", \"since\": 1}]}");
+    const json = try edit(arena, "{\"name\": \"PaneSplit.Result\", \"kind\": \"struct\", \"fields\": []}", types.written());
+    try testing.expectEqualStrings("method pane.split: its result holds a secret\n", try problems(arena, null, json));
+    const clean = try std.mem.replaceOwned(u8, arena, json, "\"type\": \"secret\"", "\"type\": \"str\"");
+    try testing.expectEqualStrings("", try problems(arena, null, clean));
+}
+
+/// The model's split tree, as the schema would carry it (design/010 §3).
+const model_types = collect(model.tree.Node, &.{});
+
+test "the model's tree has a schema: a union, a pointer and an f64" {
+    const defs = comptime typeDefs(model_types);
+    const node = findName(TypeDef, &defs, "Node").?;
+    try testing.expectEqual(.@"union", node.kind);
+    try testing.expectEqualStrings("pane", node.variants[0].name);
+    try testing.expectEqualStrings("Pane", node.variants[0].type.?);
+    // `*Split` on the wire is the split itself.
+    try testing.expectEqualStrings("Split", node.variants[1].type.?);
+
+    const split = findName(TypeDef, &defs, "Split").?;
+    const ratio = findName(Field, split.fields, "ratio").?;
+    try testing.expectEqualStrings("f64", ratio.type);
+    try testing.expectEqualStrings("0.5", ratio.default.?);
+    try testing.expectEqualStrings("Node", findName(Field, split.fields, "first").?.type);
+    try testing.expectEqual(.@"enum", findName(TypeDef, &defs, "Dir").?.kind);
+    try testing.expect(!protocol.holdsSecret(model.tree.Node));
+}
+
+test "a model id is a str on the wire" {
+    const PaneId = model.tree.PaneId;
+    const bytes = try msgpack.encodeAlloc(testing.allocator, PaneId.of("p1"));
+    defer testing.allocator.free(bytes);
+    const plain = try msgpack.encodeAlloc(testing.allocator, @as([]const u8, "p1"));
+    defer testing.allocator.free(plain);
+    try testing.expectEqualSlices(u8, plain, bytes);
+    const back = try msgpack.decodeSlice(PaneId, testing.allocator, bytes);
+    try testing.expect(back.eql(.of("p1")));
+    try testing.expectEqualStrings("str", findName(Field, findName(TypeDef, &comptime typeDefs(model_types), "Pane").?.fields, "id").?.type);
+}
+
+test "the model's tree round-trips through MessagePack" {
+    const tree = model.tree;
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var split: tree.Split = .{
+        .id = .of("s1"),
+        .dir = .vertical,
+        .ratio = 0.3,
+        .first = .{ .pane = .{ .id = .of("a"), .session = "macterm-a" } },
+        .second = .{ .pane = .{ .id = .of("b"), .session = "macterm-b", .host = "box", .attention = .failed } },
+    };
+    const root: tree.Node = .{ .split = &split };
+    const bytes = try msgpack.encodeAlloc(arena, root);
+    const back = try msgpack.decodeSlice(tree.Node, arena, bytes);
+    try testing.expectEqual(0.3, back.split.ratio);
+    try testing.expectEqualStrings("box", back.split.second.pane.host.?);
+    try testing.expectEqualSlices(u8, bytes, try msgpack.encodeAlloc(arena, back));
+}
+
+test "the Swift output of a union is an indirect enum on {t, a}" {
+    const defs = comptime typeDefs(model_types);
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    for (defs) |t| try writeSwiftType(&out.writer, t);
+    const s = out.written();
+    try testing.expect(std.mem.indexOf(u8, s, "    indirect enum Node: Equatable {\n        case pane(MactermProtocol.Pane)\n        case split(MactermProtocol.Split)\n") != null);
+    try testing.expect(std.mem.indexOf(u8, s, "case \"split\": self = try .split(reader.decodePayload(MactermProtocol.Split.self, from: payload))") != null);
+    try testing.expect(std.mem.indexOf(u8, s, "case let other: throw MessagePackError.unknownEnumTag(other)") != null);
+    try testing.expect(std.mem.indexOf(u8, s, "var ratio: Double = 0.5\n") != null);
 }

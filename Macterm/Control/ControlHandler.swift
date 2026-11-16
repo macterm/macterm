@@ -68,6 +68,7 @@ final class ControlHandler {
 
     private func dispatch(_ request: ControlRequest, peerPID: pid_t?) async throws -> ControlData {
         let args = request.args ?? ControlArgs()
+        // Frozen: `ControlCommandFreezeTests` pins this list (design/011).
         switch request.command {
         case "status": return status()
         case "project.list": return projectList()
@@ -89,7 +90,6 @@ final class ControlHandler {
         case "pane.inspect": return try paneInspect(args)
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
-        case "pane.mirror": return try paneMirror(args)
         case "pane.focus": return try paneFocus(args)
         case "pane.close": return try paneClose(args)
         case "pane.run": return try paneRun(args)
@@ -829,9 +829,7 @@ final class ControlHandler {
     // MARK: - Pane mutations
 
     /// Resolve a `--direction` argument into the axis and side the new pane
-    /// lands on, measured against the pane it will act on. Shared by
-    /// `pane.split` and `pane.mirror` so the two can't drift on what a
-    /// direction means.
+    /// lands on, measured against the pane it will act on.
     private func splitPlacement(
         _ args: ControlArgs,
         relativeTo pane: Pane
@@ -843,8 +841,8 @@ final class ControlHandler {
         case "up": return (.vertical, .first)
         case "auto":
             // The UI's auto-split picks the longer on-screen axis from the
-            // pane as the key window draws it (a mirror there, #345); a
-            // never-shown pane measures zero and falls back to horizontal —
+            // pane as the key window draws it; a never-shown pane measures
+            // zero and falls back to horizontal —
             // same as AppState.autoSplitPane. `auto` has no side to infer, so
             // the new pane trails the target.
             return (SplitDirection.auto(for: appState.displayedSize(of: pane)), .second)
@@ -868,22 +866,6 @@ final class ControlHandler {
         ), let newPane = target.tab.splitRoot.findPane(id: newID)
         else {
             throw ControlError(code: .internalError, message: "split failed")
-        }
-        return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
-    }
-
-    private func paneMirror(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
-        let target = try resolvePane(args, in: workspace)
-        let placement = try splitPlacement(args, relativeTo: target.pane)
-        guard let newID = appState.mirrorPane(
-            target.pane.id,
-            direction: placement.direction,
-            position: placement.position,
-            projectID: project.id
-        ), let newPane = target.tab.splitRoot.findPane(id: newID)
-        else {
-            throw ControlError(code: .internalError, message: "mirror failed")
         }
         return ControlData(panes: [paneInfo(newPane, in: target.tab, workspace: workspace)])
     }
@@ -930,9 +912,7 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
         let target = try resolvePane(args, in: workspace)
-        // Mirror-aware: a pane whose session another pane still attaches kills
-        // nothing when it closes, so it must not raise a warning that says it
-        // does (see AppState.closeNeedsConfirmation).
+        // The app's own guard (AppState.closeNeedsConfirmation).
         if appState.closeNeedsConfirmation([target.pane]), args.force != true {
             throw ControlError(
                 code: .busy,

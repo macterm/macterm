@@ -96,7 +96,7 @@ struct ControlArgs: Codable, Equatable {
     /// true; `--no-focus` sends false, preserving selection and focus history.
     var focus: Bool?
     /// Direction, with a per-command vocabulary: `right`/`left`/`down`/`up`/`auto`
-    /// for `pane.split` and `pane.mirror` (`auto` picks the longer on-screen
+    /// for `pane.split` (`auto` picks the longer on-screen
     /// axis), `left`/`down`/`up`/`right` for `pane.focus` (where it makes the
     /// resolved pane the origin and focuses its neighbour).
     var direction: String?
@@ -518,11 +518,11 @@ struct ControlPaneInfo: Codable, Equatable {
     /// for). Optional per the additive-field convention above — nil when
     /// decoded from an older server that predates this field.
     var state: String?
-    /// Whether another pane shows this pane's session (#345). Optional per the
-    /// additive-field convention — nil from a server predating mirroring.
+    /// Whether another client (a second window) shows this pane's session.
+    /// Optional per the additive-field convention.
     var mirror: Bool?
-    /// Whether this pane drives its session's pty size — zmx's "leader"
-    /// client. Always true for an unmirrored pane, which is the only client.
+    /// Whether this pane drives its session's pty size (the session's
+    /// leader client). Always true for a pane with one client.
     var leader: Bool?
 }
 
@@ -590,13 +590,9 @@ struct ControlSessionInfo: Codable, Equatable {
     /// The live pane currently bound to this session, if any (a session with
     /// no pane is an orphan awaiting reap or reattach).
     ///
-    /// A mirrored session has several — this reports the leader, the pane
-    /// driving its size; see `paneIDs` for all of them. Kept so a client
-    /// predating mirroring still reads a sensible single value.
     var paneID: String?
-    /// Every live pane bound to this session, in tree order (#345). One entry
-    /// for an ordinary session; several once a session is mirrored. Optional
-    /// per the additive-field convention.
+    /// Every live pane bound to this session: one entry. Optional per the
+    /// additive-field convention.
     var paneIDs: [String]?
 }
 

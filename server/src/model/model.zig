@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const tree = @import("tree.zig");
+pub const tree = @import("tree.zig");
 const ids = @import("ids.zig");
 
 pub const Node = tree.Node;

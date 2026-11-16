@@ -145,95 +145,7 @@ struct AppStateTests {
         #expect(tab.focusedPaneID != before)
     }
 
-    // MARK: - Mirroring (#345)
-
-    @Test
-    func mirrorPane_attaches_a_second_pane_to_the_same_session() throws {
-        // The whole point: two panes, one zmx session. `zmx attach` is an
-        // upsert and its daemon broadcasts to every client, so both render the
-        // same live shell.
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-
-        #expect(tab.splitRoot.allPanes().count == 2)
-        #expect(mirrored.sessionName == source.sessionName)
-        #expect(mirrored.sessionID == source.sessionID)
-        // Distinct panes, though — each needs its own surface, because one
-        // NSView cannot live in two view hierarchies.
-        #expect(mirrored.id != source.id)
-    }
-
-    @Test
-    func mirrorPane_does_not_carry_the_sources_command_or_shell() throws {
-        // `command` is injected as initial_input on first surface build, and
-        // the record of a built view is per pane — so a mirror carrying it would re-type a
-        // declared layout `run:` into a session already running it.
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let withCommand = try #require(state.splitPane(
-            source.id, direction: .horizontal, projectID: p.id, command: "htop"
-        ))
-        let commanded = try #require(tab.splitRoot.findPane(id: withCommand))
-        #expect(commanded.command == "htop")
-
-        let mirrorID = try #require(state.mirrorPane(commanded.id, direction: .vertical, projectID: p.id))
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-
-        #expect(mirrored.command == nil)
-        #expect(mirrored.shell == nil)
-        #expect(mirrored.sessionName == commanded.sessionName)
-    }
-
-    @Test
-    func mirrorPane_does_not_steal_focus() throws {
-        // Unlike split: a mirror is a second view of work the user is already
-        // looking at, so taking focus would move them off the pane they use.
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let before = tab.focusedPaneID
-
-        _ = state.mirrorPane(source.id, direction: .horizontal, projectID: p.id)
-
-        #expect(tab.focusedPaneID == before)
-    }
-
-    @Test
-    func mirrorPane_unknown_pane_is_noop() throws {
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-
-        #expect(state.mirrorPane(UUID(), direction: .horizontal, projectID: p.id) == nil)
-        #expect(tab.splitRoot.allPanes().count == 1)
-    }
-
-    @Test
-    func closing_a_mirror_made_by_mirrorPane_spares_the_session() async throws {
-        // The end-to-end shape of #348's refcount, driven through the real
-        // mirror path rather than a hand-built pane.
-        let killed = KilledSessions()
-        let state = makeAppState()
-        state.sessionClient = recordingClient(into: killed)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
-
-        state.closePane(mirrorID, projectID: p.id)
-
-        await killed.settleExpectingNone()
-        #expect(await killed.names.isEmpty)
-        #expect(tab.splitRoot.allPanes().count == 1)
-    }
+    // MARK: - Two panes on one session
 
     @Test
     func an_unmirrored_pane_is_trivially_its_sessions_leader() throws {
@@ -257,7 +169,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
         #expect(state.isMirrored(source))
@@ -277,7 +189,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
         state.focusPane(mirrorID, projectID: p.id)
@@ -325,7 +237,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         state.focusPane(mirrorID, projectID: p.id)
         #expect(!state.isLeader(source))
 
@@ -360,7 +272,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
         #expect(state.isLeader(source))
 
@@ -387,7 +299,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
         state.claimSessionLeadership(mirrored)
@@ -415,7 +327,7 @@ struct AppStateTests {
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         #expect(source.isRemote)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
         state.claimSessionLeadership(mirrored)
@@ -440,7 +352,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         // The source leads (it attached first); close it.
         #expect(state.isLeader(source))
         sent = []
@@ -462,7 +374,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
 
         state.closePane(mirrorID, projectID: p.id)
 
@@ -479,8 +391,8 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let a = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
-        _ = try #require(state.mirrorPane(source.id, direction: .vertical, projectID: p.id))
+        let a = addPane(sharing: source, projectID: p.id, in: state)
+        _ = addPane(sharing: source, projectID: p.id, in: state)
         state.focusPane(a, projectID: p.id)
 
         let expected = Set(tab.splitRoot.allPanes().filter { !state.isLeader($0) }.map(\.id))
@@ -497,7 +409,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
 
         // Closing either one alone leaves the other holding the session.
@@ -522,7 +434,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let sourceTab = try #require(state.workspaces[p.id]?.activeTab)
         let source = try #require(sourceTab.splitRoot.allPanes().first)
-        let mirrorID = try #require(state.mirrorPane(source.id, direction: .horizontal, projectID: p.id))
+        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
         state.separatePane(mirrorID, toProject: p.id, destPath: p.path)
         let mirrorTab = try #require(state.workspaces[p.id]?.tabs.first { $0.splitRoot.contains(paneID: mirrorID) })
         #expect(mirrorTab.id != sourceTab.id)
@@ -2202,13 +2114,6 @@ struct AppStateTests {
         #expect(await killed.names == names)
     }
 
-    /// A pane attached to `name`, for building the mirror cases below. Uses
-    /// the same persisted-name init the restore path uses, which is the only
-    /// way two panes can legitimately share a session name today.
-    private func mirrorPane(of name: String, projectID: UUID) -> Pane {
-        Pane(projectPath: "/tmp", projectID: projectID, sessionName: name)
-    }
-
     @Test
     func closing_one_of_two_mirrors_spares_the_shared_session() async throws {
         // Two panes may attach one zmx session (the same session shown in
@@ -2889,4 +2794,23 @@ private actor KilledSessions {
     func settleExpectingNone() async {
         try? await Task.sleep(for: .milliseconds(200))
     }
+}
+
+/// A pane attached to `name`. The app makes no second pane on a session, but
+/// the session code still handles one until issue 0282 removes it.
+@MainActor
+func mirrorPane(of name: String, projectID: UUID, projectPath: String = "/tmp") -> Pane {
+    Pane(projectPath: projectPath, projectID: projectID, sessionName: name)
+}
+
+/// Put a second pane on `source`'s session beside it, in the same tab, and
+/// return its id. The pane does not take focus.
+@MainActor
+@discardableResult
+func addPane(sharing source: Pane, projectID: UUID, in state: AppState) -> UUID {
+    let tab = state.workspaces[projectID]!.tabs.first { $0.splitRoot.contains(paneID: source.id) }!
+    let pane = mirrorPane(of: source.sessionName, projectID: projectID, projectPath: source.projectPath)
+    let (root, _) = tab.splitRoot.inserting(pane: pane, at: source.id, direction: .horizontal, position: .second)
+    ModelWriter.tabSetTree(tab, root: root, focusedPaneID: tab.focusedPaneID)
+    return pane.id
 }

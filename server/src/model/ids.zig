@@ -1,7 +1,7 @@
 //! The ids of the model (design/010 §1). Each kind of thing has its own id
-//! type, so the compiler refuses a tab id where a pane id goes. In JSON an
-//! id is a plain string, as before: the types change no byte of
-//! `model.json`.
+//! type, so the compiler refuses a tab id where a pane id goes. In JSON and
+//! in MessagePack an id is a plain string, as before: the types change no
+//! byte of `model.json`.
 //!
 //! An id is text: a UUID, or a short name in a test. A pane id is its
 //! session id (design/004). Panes and splits share one namespace, so the
@@ -31,6 +31,9 @@ fn Id(comptime kind: IdKind) type {
         text: []const u8,
 
         const Self = @This();
+
+        /// A str on the wire, as in JSON (`msgpack.isText`).
+        pub const wire_str = {};
 
         pub fn of(text: []const u8) Self {
             return .{ .text = text };

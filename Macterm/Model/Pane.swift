@@ -34,11 +34,6 @@ final class Pane: Identifiable {
     /// scp-style spec and its session lives on the remote host. Cached at
     /// init: the poll and title paths read it every tick.
     let isRemote: Bool
-    /// A pane that `init(mirroring:)` made: a second pane on a session that
-    /// another pane owns (`pane mirror`). It parses the same shell marks, so
-    /// anything that counts a command (the project memory) reads only the
-    /// pane that is not a mirror.
-    let isMirror: Bool
     /// The remote host name for display fallback (`processTitle` shows it
     /// while no remote process name is known). nil for local panes.
     let remoteHost: String?
@@ -858,10 +853,8 @@ final class Pane: Identifiable {
         shell: String? = nil,
         env: [String: String]? = nil,
         activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay,
-        titleReportInterval: TimeInterval = PollCadence.fastInterval,
-        isMirror: Bool = false
+        titleReportInterval: TimeInterval = PollCadence.fastInterval
     ) {
-        self.isMirror = isMirror
         titleReportThrottle = TitleReportThrottle(interval: titleReportInterval)
         self.projectPath = projectPath
         self.projectID = projectID
@@ -896,36 +889,6 @@ final class Pane: Identifiable {
         executionTracker = TerminalExecutionTracker(
             hasUserInteraction: command != nil || env?[CustomPaletteScript.commandVariable] != nil
         )
-    }
-
-    /// A second pane attached to `source`'s session — the same running shell
-    /// shown twice in a tab (`pane mirror`, #345). The session broadcasts
-    /// output to every client, so both panes render the same live session;
-    /// only one of them (the leader) drives the pty size.
-    ///
-    /// This exists as its own initializer rather than as a call-site
-    /// convention because two of its arguments are hazards if a caller
-    /// forgets them:
-    ///
-    /// - `command` MUST be nil. It is injected as `initial_input` on the first
-    ///   surface build (`SurfaceRegistry`), and that record is per pane, not per session —
-    ///   so a mirror carrying its source's `command` would re-type a declared
-    ///   layout `run:` into a session that is already running it.
-    /// - `shell` MUST be nil for the same reason: the session's shell was
-    ///   chosen when it was created and the mirror only attaches to it.
-    ///
-    /// `env` is dropped too — it is spawn-time input, and the session's shell
-    /// already has the environment it was created with (including
-    /// `MACTERM_SESSION`, which both panes therefore report identically).
-    convenience init(mirroring source: Pane) {
-        self.init(
-            projectPath: source.projectPath,
-            projectID: source.projectID,
-            sessionID: source.sessionID,
-            sessionName: source.sessionName,
-            isMirror: true
-        )
-        hostSessionDirectory = source.hostSessionDirectory
     }
 
     /// Re-point this pane at a new workspace after its tab is moved between

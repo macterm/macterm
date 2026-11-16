@@ -51,6 +51,10 @@ esac
 if grep -qxE '\.github/path-areas|scripts/changed-areas\.sh' <<<"$files"; then
   all=true
 fi
+# The maps of the code for agents (AGENTS.md and its CLAUDE.md links) are in
+# no area: no build or test reads them. Checks / Agents Map checks them on
+# every commit.
+files="$(grep -vE '(^|/)(AGENTS|CLAUDE)\.md$' <<<"$files" || true)"
 
 output="${GITHUB_OUTPUT:-/dev/null}"
 for area in $(printf '%s\n' "${areas[@]}" | sort -u); do

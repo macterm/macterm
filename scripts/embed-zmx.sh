@@ -44,7 +44,7 @@ cp -p "${license_source}" "${destination_dir}/LICENSE"
 # Debug build that has one, the stable release certificate in CI) and, more
 # importantly, the app's own bundle identifier. Each zmx session daemon
 # disclaims the app at spawn and becomes the *responsible process* for every
-# program in its session (see the fork's daemonize.zig and AGENTS.md), and
+# program in its session (see the fork's daemonize.zig and server/AGENTS.md), and
 # macOS identifies a responsible process by its code signature's identifier:
 # with Macterm's, the daemon resolves to Macterm's name, usage descriptions
 # and existing Local Network / TCC grants, so pane programs are covered by the

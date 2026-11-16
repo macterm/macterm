@@ -915,45 +915,6 @@
   {
     "arguments": [
       "pane",
-      "mirror",
-      "--direction",
-      "down"
-    ],
-    "method": null,
-    "responses": {
-      "pane.mirror": {
-        "data": {
-          "panes": [
-            {
-              "cwd": "/tmp/api",
-              "focused": true,
-              "id": "A1",
-              "index": 1,
-              "process": "vim",
-              "session": "macterm-api-8f327ce4a3f8",
-              "state": "running",
-              "tabID": "T1",
-              "tabIndex": 1,
-              "title": "zsh"
-            },
-            {
-              "focused": false,
-              "id": "A2",
-              "index": 2,
-              "session": "macterm-api-0a1b2c3d4e5f",
-              "tabID": "T1",
-              "tabIndex": 1,
-              "title": "zsh"
-            }
-          ]
-        },
-        "ok": true
-      }
-    }
-  },
-  {
-    "arguments": [
-      "pane",
       "focus",
       "--pane",
       "2"

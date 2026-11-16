@@ -1922,7 +1922,6 @@
         "inspect",
         "dump",
         "split",
-        "mirror",
         "focus",
         "close",
         "run",
@@ -2334,112 +2333,6 @@
 
       ],
       "usage" : "macterm pane split [--direction <direction>] [--run <run>] [--no-focus] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
-    },
-    {
-      "abstract" : "Mirror a pane. Show the same session in a second pane.",
-      "arguments" : [
-
-      ],
-      "debug" : false,
-      "hidden" : false,
-      "options" : [
-        {
-          "abstract" : "right, left, down, up, or auto (longer on-screen axis).",
-          "debug" : false,
-          "default" : "auto",
-          "hidden" : false,
-          "names" : [
-            "--direction"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "direction"
-        },
-        {
-          "abstract" : "Project scope (name, UUID, or index). The default is the active project.",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--project"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "project"
-        },
-        {
-          "abstract" : "Tab scope (title, UUID, or index).",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--tab"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "tab"
-        },
-        {
-          "abstract" : "Target pane by UUID, or index within the tab (pane:2).",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--pane"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "pane"
-        },
-        {
-          "abstract" : "Target pane by zmx session name (restart-stable).",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--session"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "session"
-        },
-        {
-          "abstract" : "Control socket path. It overrides discovery.",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--socket"
-          ],
-          "optional" : true,
-          "repeating" : false,
-          "value" : "socket"
-        },
-        {
-          "abstract" : "Print the raw JSON payload instead of a table.",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "--json"
-          ],
-          "optional" : true,
-          "repeating" : false
-        },
-        {
-          "abstract" : "Show help information.",
-          "debug" : false,
-          "hidden" : false,
-          "names" : [
-            "-h",
-            "--help"
-          ],
-          "optional" : true,
-          "repeating" : false
-        }
-      ],
-      "path" : [
-        "pane",
-        "mirror"
-      ],
-      "subcommands" : [
-
-      ],
-      "usage" : "macterm pane mirror [--direction <direction>] [--project <project>] [--tab <tab>] [--pane <pane>] [--session <session>] [--socket <socket>] [--json]"
     },
     {
       "abstract" : "Focus a pane, or its neighbor in a direction. This selects its tab and brings the window forward.",

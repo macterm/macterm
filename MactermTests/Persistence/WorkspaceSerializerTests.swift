@@ -500,6 +500,46 @@ struct WorkspaceSerializerTests {
         #expect(FileManager.default.fileExists(atPath: tmp.path))
         #expect(WorkspaceStore(fileURL: tmp).load().workspaces.count == 1)
     }
+
+    @Test
+    func a_tab_with_two_panes_on_one_session_restores_the_first_pane_alone() throws {
+        // `pane mirror` of older builds put a second pane on a session in
+        // the same tab. One pane is one session, so the second pane goes,
+        // and its sibling takes its space.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let tab = ws.tabs[0]
+        let first = try #require(tab.focusedPane)
+        let repeated = Pane(projectPath: "/tmp", projectID: ws.id, sessionName: first.sessionName)
+        let other = Pane(projectPath: "/tmp", projectID: ws.id)
+        ModelWriter.tabSetTree(tab, root: .split(SplitBranch(
+            direction: .horizontal,
+            first: .pane(first),
+            second: .split(SplitBranch(direction: .vertical, first: .pane(repeated), second: .pane(other)))
+        )), focusedPaneID: repeated.id)
+
+        let restored = try #require(roundTrip([ws.id: ws]).first?.tabs.first)
+
+        let panes = restored.splitRoot.allPanes()
+        #expect(panes.map(\.sessionName) == [first.sessionName, other.sessionName])
+        #expect(restored.focusedPaneID == panes.first?.id)
+    }
+
+    @Test
+    func a_pane_that_repeats_a_session_of_another_tab_does_not_restore() throws {
+        // A pane of `pane mirror` could move to its own tab. That tab has no
+        // pane left, so it goes.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let firstTab = ws.tabs[0]
+        let first = try #require(firstTab.focusedPane)
+        let moved = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let repeated = Pane(projectPath: "/tmp", projectID: ws.id, sessionName: first.sessionName)
+        ModelWriter.tabSetTree(moved, root: .pane(repeated), focusedPaneID: repeated.id)
+
+        let restored = try #require(roundTrip([ws.id: ws]).first)
+
+        #expect(restored.tabs.map(\.id) == [firstTab.id])
+        #expect(restored.tabs[0].splitRoot.allPanes().map(\.sessionName) == [first.sessionName])
+    }
 }
 
 @MainActor

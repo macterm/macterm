@@ -221,7 +221,7 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_mirror_that_asks_before_the_new_session_starts_makes_it_too() async throws {
+    func a_second_view_that_asks_before_the_new_session_starts_makes_it_too() async throws {
         try await withSSHDHost { host in
             let fixture = Fixture(host)
             let pane = fixture.pane()
@@ -229,8 +229,7 @@ struct RemoteHostsTests {
             #expect(pane.hostSessionDirectory == fixture.directory)
             // The first pane has not made its session yet: the host has no
             // session. A second window's view of the pane asks now.
-            let mirror = Pane(mirroring: pane)
-            let (_, create) = try await fixture.attach(mirror)
+            let (_, create) = try await fixture.attach(pane)
             #expect(create == fixture.directory)
         }
     }
