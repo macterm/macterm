@@ -942,13 +942,13 @@ struct WindowStateTests {
         session.claimed = []
 
         state.noteKeyWindow(b)
-        #expect(Set(session.claimed) == Set(panes.map { $SurfaceRegistry.shared.surface(for: 0, in: .window(b.id)).id }))
+        #expect(Set(session.claimed) == Set(panes.map { SurfaceRegistry.shared.surface(for: $0, in: .window(b.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id) == Set(panes.map(\.id)))
         #expect(state.nonLeaderPaneIDs(in: tab, window: b.id).isEmpty)
 
         session.claimed = []
         state.noteKeyWindow(a)
-        #expect(Set(session.claimed) == Set(panes.map { $SurfaceRegistry.shared.surface(for: 0, in: .window(a.id)).id }))
+        #expect(Set(session.claimed) == Set(panes.map { SurfaceRegistry.shared.surface(for: $0, in: .window(a.id)).id }))
         #expect(state.nonLeaderPaneIDs(in: tab, window: a.id).isEmpty)
     }
 
