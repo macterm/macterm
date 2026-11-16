@@ -9,17 +9,19 @@ name: Server Build
 # The build key is the hash of the server's sources (build-server.sh). Each
 # build has a manifest, `macterm-<key>-server.json`, with the SHA-256 of each
 # tarball; `build-server.sh verify` checks a build against it.
-# With `prebuilt`, the job takes the build for the key from the
-# `server-prebuilt` release when it is there. Without it (the release
-# workflows), it always builds from the commit.
+# With `prebuilt`, the job Prebuilt takes the build for the key from the
+# `server-prebuilt` release when it is there, on a Linux runner, and the job
+# Build does not run. So a commit that changes no server source takes no macOS
+# runner. Without `prebuilt` (the release workflows), Build always builds from
+# the commit.
 #
 # A build that this job made goes to the `server-prebuilt` release, so that
 # setup on a Mac without Zig can download it. An asset is never replaced. A
 # pull request from a fork has a read-only token and uploads nothing. Assets
 # older than 90 days are removed, except the build of main's key.
 #
-# macos-15: lipo needs macOS, and zig cannot link with Xcode 26.4 or later
-# (zig#31658). The macOS 27 runner has nothing older.
+# macos-26 with Xcode 26.3: lipo needs macOS, and zig cannot link with Xcode
+# 26.4 or later (zig#31658). The macOS 27 runner has nothing older.
 
 on:
   workflow_call:
@@ -35,20 +37,22 @@ on:
     outputs:
       key:
         description: The build key.
-        value: ${{ jobs.build.outputs.key }}
+        value: ${{ jobs.prebuilt.outputs.key }}
 
 jobs:
-  build:
-    name: Build
-    runs-on: macos-15
-    timeout-minutes: 60
+  prebuilt:
+    name: Prebuilt
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE: server-prebuilt
     outputs:
       key: ${{ steps.key.outputs.key }}
+      zig: ${{ steps.key.outputs.zig }}
+      found: ${{ steps.prebuilt.outputs.found }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -81,14 +85,44 @@ jobs:
           fi
           echo "found=$found" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/upload-artifact@v7
+        if: steps.prebuilt.outputs.found == 'true'
+        with:
+          name: server
+          path: build/server/
+          if-no-files-found: error
+          retention-days: 3
+
+  build:
+    name: Build
+    needs: prebuilt
+    if: needs.prebuilt.outputs.found != 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE: server-prebuilt
+      KEY: ${{ needs.prebuilt.outputs.key }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: ./.github/actions/select-xcode
+        with:
+          version: "26.3"
+
       - name: Install Zig
-        if: steps.prebuilt.outputs.found != 'true'
         uses: mlugg/setup-zig@v2
         with:
-          version: ${{ steps.key.outputs.zig }}
+          version: ${{ needs.prebuilt.outputs.zig }}
 
+      # The build computes the key again from its own checkout. The upload
+      # below takes the files of the key of Prebuilt, so a different key
+      # fails there.
       - name: Build
-        if: steps.prebuilt.outputs.found != 'true'
         run: scripts/build-server.sh build build/server
 
       # Never replaces an asset: an app that is out carries the checksums of
@@ -97,11 +131,8 @@ jobs:
       - name: Upload the Prebuilt
         id: upload
         if: >-
-          steps.prebuilt.outputs.found != 'true'
-          && (github.event_name != 'pull_request'
-              || github.event.pull_request.head.repo.full_name == github.repository)
-        env:
-          KEY: ${{ steps.key.outputs.key }}
+          github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           if ! gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             # A second run can create it at the same time; then use theirs.
@@ -130,8 +161,6 @@ jobs:
       # same bytes.
       - name: Use the Served Build
         if: steps.upload.outcome == 'success'
-        env:
-          KEY: ${{ steps.key.outputs.key }}
         run: |
           served="$RUNNER_TEMP/served"
           rm -rf "$served"
