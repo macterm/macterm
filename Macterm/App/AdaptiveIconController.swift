@@ -168,7 +168,8 @@ final class AdaptiveIconController {
     /// The Dock shows the configured icon: the preview shows the same image.
     private func showPreview(of standIn: AdaptiveIcon.StandIn) {
         previewOnly = nil
-        setPreview(Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn))
+        let icons = standIn.showsIcon ? [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)] : []
+        setPreview(Preview(icons: icons, standIn: standIn))
     }
 
     /// The Dock shows the adaptive icon. While a side renders, its tile keeps

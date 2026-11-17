@@ -175,6 +175,15 @@ enum AdaptiveIcon {
         /// The theme has no gray apart from its background (`paint` is nil).
         case noLidGray
 
+        /// Whether the preview can show the Dock's image. In a Clear or Tinted
+        /// icon style the Dock styles the icon itself, and the app can read
+        /// only the image without the style: the Dock showed a blue icon in
+        /// Tinted where that image is gray. The preview then shows no icon,
+        /// only its line.
+        var showsIcon: Bool {
+            self != .iconStyle
+        }
+
         /// The last line of the App Icon section in Settings, nil where none is
         /// needed: the toggle says that the setting is off, and a run that
         /// cannot render shows the bundled icon with no error text. A custom

@@ -6,8 +6,9 @@ import SwiftUI
 ///
 /// The images are the ones the app gives the Dock (`AdaptiveIconController`),
 /// never a copy drawn here. While a side renders, its tile keeps its last
-/// image, with no spinner. `AdaptiveIconPreview.Footnote` is the line that
-/// says why the icon is not in the theme's colors.
+/// image, with no spinner. In a Clear or Tinted icon style it shows no icon
+/// (`AdaptiveIcon.StandIn.showsIcon`). `AdaptiveIconPreview.Footnote` is the
+/// line that says why the icon is not in the theme's colors.
 struct AdaptiveIconPreview: View {
     private let controller = AdaptiveIconController.shared
 
@@ -16,28 +17,31 @@ struct AdaptiveIconPreview: View {
 
     var body: some View {
         let preview = controller.preview
-        HStack(spacing: 24) {
-            ForEach(Array(preview.icons.enumerated()), id: \.offset) { _, icon in
-                VStack(spacing: 4) {
-                    Group {
-                        if let image = icon.image {
-                            Image(nsImage: image).resizable().interpolation(.high).accessibilityHidden(true)
-                        } else {
-                            Color.clear
+        // No row at all in a Clear or Tinted style: an empty row would show a gap.
+        if !preview.icons.isEmpty {
+            HStack(spacing: 24) {
+                ForEach(Array(preview.icons.enumerated()), id: \.offset) { _, icon in
+                    VStack(spacing: 4) {
+                        Group {
+                            if let image = icon.image {
+                                Image(nsImage: image).resizable().interpolation(.high).accessibilityHidden(true)
+                            } else {
+                                Color.clear
+                            }
                         }
-                    }
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-                    if preview.icons.count > 1, let appearance = icon.appearance {
-                        label(for: appearance).settingsSecondaryText()
+                        .frame(width: Self.iconSize, height: Self.iconSize)
+                        if preview.icons.count > 1, let appearance = icon.appearance {
+                            label(for: appearance).settingsSecondaryText()
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("App icon preview"))
+            .onAppear { controller.previewShown = true }
+            .onDisappear { controller.previewShown = false }
         }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("App icon preview"))
-        .onAppear { controller.previewShown = true }
-        .onDisappear { controller.previewShown = false }
     }
 
     private func label(for appearance: AdaptiveIconRequest.Appearance) -> Text {

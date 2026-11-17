@@ -267,6 +267,16 @@ struct AdaptiveIconTests {
 
     // MARK: - Preview
 
+    /// The Dock styles the icon itself in a Clear or Tinted style, so the
+    /// preview shows no icon there. Every other case shows the Dock's image.
+    @Test
+    func thePreviewShowsNoIconWhereTheDockStylesIt() {
+        #expect(!AdaptiveIcon.StandIn.iconStyle.showsIcon)
+        for standIn in [AdaptiveIcon.StandIn.disabled, .unavailable, .customIcon, .noLidGray] {
+            #expect(standIn.showsIcon)
+        }
+    }
+
     /// The preview shows a line only for an exception that the toggle does
     /// not explain. A run that cannot render shows no error text.
     @Test
