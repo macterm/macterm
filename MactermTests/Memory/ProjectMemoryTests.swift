@@ -55,6 +55,19 @@ struct ProjectMemoryTests {
         #expect(ProjectMemory.showsPanel(in: window))
         window.projectMemoryPanelVisible = false
         #expect(!ProjectMemory.showsPanel(in: window))
+
+        // The Git read after a command: only for a project that a window
+        // with its panel open shows.
+        let (p, q) = (UUID(), UUID())
+        let open = WindowState(activeProjectID: p)
+        let closed = WindowState(activeProjectID: q)
+        open.projectMemoryPanelVisible = true
+        state.registerWindow(open)
+        state.registerWindow(closed)
+        #expect(state.insightsPanelShows(p))
+        #expect(!state.insightsPanelShows(q))
+        preferences.projectMemory = false
+        #expect(!state.insightsPanelShows(p))
     }
 
     /// Project Insights needs Apple Intelligence: without the model, the

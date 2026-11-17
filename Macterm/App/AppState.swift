@@ -740,10 +740,13 @@ final class AppState {
     /// the CLI). Each window has its own (`WindowState.projectMemoryPanelVisible`).
     var projectMemoryPanelVisible: Bool {
         get { keyOrFirstWindow?.projectMemoryPanelVisible ?? false }
-        set {
-            keyOrFirstWindow?.projectMemoryPanelVisible = newValue
-            persistWindows()
-        }
+        set { keyOrFirstWindow?.projectMemoryPanelVisible = newValue }
+    }
+
+    /// Whether a window shows the panel for `projectID`. The Git read after
+    /// a command runs only then (`ProjectMemory.panelShows`).
+    func insightsPanelShows(_ projectID: UUID) -> Bool {
+        windows.contains { $0.activeProjectID == projectID && ProjectMemory.showsPanel(in: $0) }
     }
 
     var isCommandPaletteVisible: Bool {
@@ -1498,10 +1501,11 @@ final class AppState {
         // `pinned.yaml` (the file is authoritative for membership — see
         // AppState+PinnedTabs). Live tabs materialize async, after zmx says
         // which sessions actually survived.
-        savedWindowSnapshots = WindowSnapshot.adoptingLegacyPanelVisibility(
-            loaded.windows,
-            legacyVisible: legacyPanelVisible()
-        )
+        // The retired value is read (and removed) only when a window can
+        // take it.
+        savedWindowSnapshots = loaded.windows.isEmpty
+            ? []
+            : WindowSnapshot.adoptingLegacyPanelVisibility(loaded.windows, legacyVisible: legacyPanelVisible())
         restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
         reconcilePinnedLayoutAtLaunch(projects: projects)
         // The quick terminal's tab reattaches like any workspace tab. Before

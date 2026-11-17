@@ -82,10 +82,9 @@ final class WindowState: Identifiable {
     var sidebarVisible = true
 
     /// Whether this window shows the Project Insights panel
-    /// (`ProjectMemoryPanel`). Per window, saved as
-    /// `WindowSnapshot.projectMemoryPanelVisible`: each window keeps the
-    /// panel open or closed on its own (feedback 2026-11-17). Toggle Project
-    /// Insights flips the key window's copy through
+    /// (`ProjectMemoryPanel`). Each window opens and closes it on its own.
+    /// It is saved as `WindowSnapshot.projectMemoryPanelVisible`. Toggle
+    /// Project Insights changes the key window's value through
     /// `AppState.projectMemoryPanelVisible`.
     var projectMemoryPanelVisible = false
 

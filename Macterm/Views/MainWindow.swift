@@ -213,11 +213,7 @@ struct MainWindow: View {
                             String(localized: "Project Insights"),
                             systemImage: windowState.projectMemoryPanelVisible ? "info.circle.fill" : "info.circle"
                         ) {
-                            // This window's panel only. A click makes this
-                            // window the key window, so it is also what
-                            // Toggle Project Insights flips.
                             windowState.projectMemoryPanelVisible.toggle()
-                            appState.noteWindowChanged()
                         }
                         .help(String(localized: "Show or hide the Project Insights panel"))
                     }
@@ -373,6 +369,9 @@ struct MainWindow: View {
             _ = sidebarWidthHandoff.adoptStoredWidth(CGFloat(width))
         }
         .onChange(of: windowState.expandedProjects) {
+            appState.noteWindowChanged()
+        }
+        .onChange(of: windowState.projectMemoryPanelVisible) {
             appState.noteWindowChanged()
         }
         .onChange(of: windowState.sidebarVisible) { _, visible in

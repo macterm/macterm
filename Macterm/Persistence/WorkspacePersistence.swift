@@ -109,9 +109,9 @@ struct WindowSnapshot: Codable {
     /// nil (an older snapshot) means shown.
     var sidebarVisible: Bool?
     /// Whether the window showed the Project Insights panel
-    /// (`WindowState.projectMemoryPanelVisible`). nil (an older snapshot, or
-    /// one from the builds where the panel was one toggle for the app) takes
-    /// the retired app-wide value once (`adoptingLegacyPanelVisibility`).
+    /// (`WindowState.projectMemoryPanelVisible`). An older snapshot has no
+    /// value. It gets the retired app-wide value
+    /// (`adoptingLegacyPanelVisibility`).
     var projectMemoryPanelVisible: Bool?
     /// The window's frame, as AppKit's own `frameDescriptor` string (the frame
     /// plus the screen it was on, so `setFrame(from:)` can fit it to a display

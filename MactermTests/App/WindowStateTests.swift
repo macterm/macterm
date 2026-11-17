@@ -630,9 +630,8 @@ struct WindowStateTests {
 
     @Test
     func each_window_keeps_its_own_insights_panel_across_a_restart() {
-        // Feedback 2026-11-17: the panel is open or closed per window. The
-        // toggle acts on the key window only, and a restore gives each
-        // window its own value back.
+        // The panel is open or closed per window. The toggle acts on the key
+        // window only, and a restore gives each window its own value back.
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
         let projects = FileManager.default.temporaryDirectory

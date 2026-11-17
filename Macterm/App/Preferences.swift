@@ -454,13 +454,12 @@ final class Preferences {
     }
 
     /// The retired app-wide value of the Project Insights panel
-    /// (`macterm.memory.panelVisible`), read once and removed. The panel's
-    /// state is per window now (`WindowState.projectMemoryPanelVisible`);
-    /// the restore gives this value to each saved window that has no value
-    /// of its own (`WindowSnapshot.adoptingLegacyPanelVisibility`).
+    /// (`macterm.memory.panelVisible`). This call reads it and removes it.
+    /// The panel's state is per window now
+    /// (`WindowState.projectMemoryPanelVisible`).
     func takeLegacyProjectMemoryPanelVisible() -> Bool {
-        let visible = Keys.projectMemoryPanelVisible.read(defaults)
-        defaults.removeObject(forKey: Keys.projectMemoryPanelVisible.name)
+        let visible = Keys.legacyProjectMemoryPanelVisible.read(defaults)
+        defaults.removeObject(forKey: Keys.legacyProjectMemoryPanelVisible.name)
         return visible
     }
 
@@ -1260,7 +1259,7 @@ final class Preferences {
         static let autoAssignProjectColors = PreferenceStorageKey("macterm.projects.autoAssignColors", default: false)
         static let autoUpdateExtensions = PreferenceStorageKey("macterm.extensions.autoUpdate", default: true)
         static let projectMemory = PreferenceStorageKey("macterm.memory.enabled", default: false)
-        static let projectMemoryPanelVisible = PreferenceStorageKey("macterm.memory.panelVisible", default: false)
+        static let legacyProjectMemoryPanelVisible = PreferenceStorageKey("macterm.memory.panelVisible", default: false)
         static let showNewProjectButton = PreferenceStorageKey("macterm.sidebar.showNewProjectButton", default: true)
         static let showProjectNewTabButton = PreferenceStorageKey("macterm.sidebar.showProjectNewTabButton", default: true)
         static let reconnectRemotePanes = PreferenceStorageKey("macterm.remote.reconnectDroppedPanes", default: true)
