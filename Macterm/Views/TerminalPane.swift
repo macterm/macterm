@@ -23,6 +23,8 @@ struct TerminalPane: View {
     private var appState: AppState?
     @Environment(\.paneHost)
     private var host
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         // This window's view of the pane: its own search, copy mode and
@@ -126,23 +128,9 @@ struct TerminalPane: View {
                     // badge for every reason, and a click does nothing. While
                     // a try runs it says so; the app tries again by itself,
                     // and a key connects at once.
-                    switch pane.remoteLinkBadge {
-                    case .reconnecting:
-                        StatusPill(title: String(
-                            localized: "Reconnecting",
-                            comment: "The badge of a remote pane while a try to connect again runs"
-                        )) {
-                            ProgressView().controlSize(.mini)
-                        }
-                    case .lost:
-                        StatusPill(title: String(
-                            localized: "Connection lost",
-                            comment: "The badge of a remote pane whose connection stopped or failed"
-                        )) {
-                            Image(systemName: "network.slash")
-                        }
-                    case nil:
-                        EmptyView()
+                    if let badge = pane.remoteLinkBadge {
+                        RemoteLinkPill(badge: badge)
+                            .transition(PaletteMotion.transition)
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -151,6 +139,9 @@ struct TerminalPane: View {
                         SecureInputBadge()
                     }
                 }
+                // Only the remote-link badge animates: it changes while the
+                // user looks at the pane, with no action of theirs.
+                .animation(reduceMotion ? nil : PaletteMotion.animation, value: pane.remoteLinkBadge)
                 .padding(8)
             }
         }
@@ -182,6 +173,40 @@ private struct LinkHoverBanner: View {
             .frame(maxWidth: 480, alignment: .leading)
             .padding(6)
             .allowsHitTesting(false)
+    }
+}
+
+/// The badge of a remote pane whose connection is lost. One pill for both
+/// states, so that a change from `Reconnecting` to `Connection lost` (and
+/// back) is a change of its values: the text interpolates, the glyph
+/// cross-fades and the pill resizes, in the badge row's animation.
+private struct RemoteLinkPill: View {
+    let badge: Pane.RemoteLinkBadge
+
+    var body: some View {
+        StatusPill(title: title) {
+            switch badge {
+            case .reconnecting:
+                ProgressView().controlSize(.mini)
+            case .lost:
+                Image(systemName: "network.slash")
+            }
+        }
+    }
+
+    private var title: String {
+        switch badge {
+        case .reconnecting:
+            String(
+                localized: "Reconnecting",
+                comment: "The badge of a remote pane while a try to connect again runs"
+            )
+        case .lost:
+            String(
+                localized: "Connection lost",
+                comment: "The badge of a remote pane whose connection stopped or failed"
+            )
+        }
     }
 }
 
