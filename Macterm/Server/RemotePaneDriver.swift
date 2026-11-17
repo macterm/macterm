@@ -9,19 +9,19 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 ///
 /// - running: a `PaneSession` on the host's link feeds the surface;
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server;
-/// - waiting: a line of Macterm's is on the screen. A wake (a login that
-///   ended, a trigger of the reconnect sweep) or a key asks again;
-/// - ended: the session is gone from the host. Return makes a new shell.
+/// - waiting: no session yet. A wake (a login that ended, the reconnect
+///   sweep) or a key asks again.
 ///
 /// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane dims and waits for a trigger. The app's backoff and
-/// triggers (`AppState.reconnectDroppedRemotePanes`) own the next try.
+/// `lost`: the pane shows its badge and its disabled cursor, and waits.
+/// The app's sweep (`AppState.reconnectDroppedRemotePanes`) owns the next
+/// quiet try, and a key connects at once. A session that is gone from the
+/// host closes the pane.
 @MainActor
 final class RemotePaneDriver: PaneInputRoute {
     private enum State {
         case idle
         case waiting
-        case ended
         case running(PaneSession)
         case plain(PlainShell)
         case closed
@@ -34,12 +34,17 @@ final class RemotePaneDriver: PaneInputRoute {
     /// Tells a late answer from a current one.
     private var generation = 0
     private var wakeToken: Int32 = NOTIFY_TOKEN_INVALID
-    /// Input that waits for a session: a layout's `initial_input`, and keys
-    /// typed while the pane waits. The next attach sends it. A pane that
-    /// ended or runs plain drops it, because it was for another session.
+    /// Input that waits for the first session: a layout's `initial_input`,
+    /// and keys typed before the first connect ends. The next attach sends
+    /// it. A pane that runs plain drops it, because it was for another
+    /// session. Keys typed while the pane is lost are dropped, by decision
+    /// (Ethan, 2026-11-16, option C): they were typed at a stale screen.
     private var earlyInput = Data()
-    /// Input that a lost link refused, in order. It goes before `earlyInput`.
+    /// Input of a session that never attached, in order. It goes before
+    /// `earlyInput`.
     private var undelivered = Data()
+    /// A key found the link down: connect at once after the `lost` answer.
+    private var retryAfterLost = false
 
     init(name: String, surface: any PaneSessionHost, hosts: RemoteHosts = .shared) {
         self.name = name
@@ -54,6 +59,7 @@ final class RemotePaneDriver: PaneInputRoute {
 
     func stop() {
         generation += 1
+        retryAfterLost = false
         teardown()
         state = .closed
         if wakeToken != NOTIFY_TOKEN_INVALID {
@@ -87,11 +93,10 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .wait(message):
             if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             state = .waiting
-        case let .ended(message):
-            earlyInput = Data()
-            undelivered = Data()
-            surface.paneFeed(Data(Self.paneText(message).utf8))
-            state = .ended
+            if retryAfterLost {
+                retryAfterLost = false
+                step(.retry)
+            }
         case .close:
             state = .closed
             surface.paneExited(code: nil, signal: nil)
@@ -119,11 +124,15 @@ final class RemotePaneDriver: PaneInputRoute {
                 launch = made.launch
                 if let note = made.note { surface.paneFeed(Data(Self.paneText(note).utf8)) }
             }
+            // A step that came after this answer owns the pane now.
+            guard mine == generation else { return }
+            let forward = Forward(driver: self, surface: surface)
             let session = PaneSession(
                 name: name, launch: launch, wantsForeground: true, wantsTty: true, reconnects: false,
-                host: Forward(driver: self, generation: mine, surface: surface),
+                host: forward,
                 connect: { link.connection }
             )
+            forward.session = session
             state = .running(session)
             session.start()
             let waiting = undelivered + earlyInput
@@ -159,7 +168,11 @@ final class RemotePaneDriver: PaneInputRoute {
         }
     }
 
-    /// The connection stopped: the pane dims and waits for a trigger.
+    fileprivate func sessionAttached() {
+        hosts.sessionAttached(name, panes: hosts.panes?(name) ?? [])
+    }
+
+    /// The connection stopped: the pane is lost and waits for a try.
     fileprivate func linkStopped() {
         if case .closed = state { return }
         logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
@@ -221,10 +234,10 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .running(session): session.sendInput(data)
         case let .plain(shell): shell.sendInput(data)
         case .waiting:
-            // The key waits for the new session.
-            keep(data)
+            // The key connects at once. Its bytes wait only for a first
+            // session, never in a lost pane.
+            if !isLost { keep(data) }
             step(.retry)
-        case .ended: if data.contains(0x0D) { step(.create) }
         case .idle:
             // The `initial_input` of a layout, written while the surface
             // starts: it goes to the session when one runs.
@@ -233,13 +246,15 @@ final class RemotePaneDriver: PaneInputRoute {
         }
     }
 
-    fileprivate func keepUndelivered(_ data: Data) {
-        // A pane that ended or closed has no later attach.
-        switch state {
-        case .closed,
-             .ended: break
-        default: keep(data)
-        }
+    /// A key that the running session could not send: the link is down. The
+    /// key is dropped, and asks to connect, as a key in a lost pane does.
+    fileprivate func keyFoundLinkDown() {
+        retryAfterLost = true
+        linkStopped()
+    }
+
+    private var isLost: Bool {
+        hosts.panes?(name).contains { $0.isRemoteLinkLost } ?? false
     }
 
     private func keep(_ data: Data) {
@@ -255,16 +270,23 @@ final class RemotePaneDriver: PaneInputRoute {
     // MARK: - The session's host
 
     /// What a session of this driver reports: everything goes to the
-    /// surface, and a lost link goes to the driver.
+    /// surface, and a lost link goes to the driver. A report counts only from
+    /// the driver's running session: an old session must not stop a new one.
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
-        private let generation: Int
         private let surface: any PaneSessionHost
+        /// Set once, on the main actor, before the session starts.
+        weak var session: PaneSession?
 
-        init(driver: RemotePaneDriver, generation: Int, surface: any PaneSessionHost) {
+        init(driver: RemotePaneDriver, surface: any PaneSessionHost) {
             self.driver = driver
-            self.generation = generation
             self.surface = surface
+        }
+
+        @MainActor
+        private func isCurrent(_ driver: RemotePaneDriver) -> Bool {
+            guard case let .running(running) = driver.state, let session else { return false }
+            return running === session
         }
 
         func paneFeed(_ data: Data) {
@@ -279,6 +301,19 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneSnapshot(started: started)
         }
 
+        func paneLead(_ leader: Bool?) {
+            surface.paneLead(leader)
+            // The session tells each client that attached whether it leads:
+            // the session runs on the host.
+            guard leader != nil else { return }
+            DispatchQueue.main.async { [weak driver, self] in
+                MainActor.assumeIsolated {
+                    guard let driver, isCurrent(driver) else { return }
+                    driver.sessionAttached()
+                }
+            }
+        }
+
         func paneForeground(_ foreground: MactermProtocol.Foreground) {
             surface.paneForeground(foreground)
         }
@@ -287,32 +322,24 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneTtyMode(mode)
         }
 
-        func paneLead(_ leader: Bool?) {
-            surface.paneLead(leader)
-        }
-
         func paneExited(code: UInt8?, signal: UInt8?) {
             surface.paneExited(code: code, signal: signal)
         }
 
         func paneLinkLost() {
-            let mine = generation
-            DispatchQueue.main.async { [weak driver] in
+            DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
-                    guard let driver, driver.generation == mine, case .running = driver.state else { return }
+                    guard let driver, isCurrent(driver) else { return }
                     driver.linkStopped()
                 }
             }
         }
 
-        func paneInputUndelivered(_ data: Data) {
-            let mine = generation
-            DispatchQueue.main.async { [weak driver] in
+        func paneInputUndelivered(_: Data) {
+            DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
-                    guard let driver else { return }
-                    // A late failure of an old session counts only while the pane waits.
-                    let waits = if case .waiting = driver.state { true } else { false }
-                    if driver.generation == mine || waits { driver.keepUndelivered(data) }
+                    guard let driver, isCurrent(driver) else { return }
+                    driver.keyFoundLinkDown()
                 }
             }
         }

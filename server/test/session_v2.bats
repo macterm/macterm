@@ -424,6 +424,20 @@ PY
   kill %1 2>/dev/null || true
 }
 
+# The rewrite to `redraw=0` sees a prompt mark whole when a read cuts it.
+@test "session: a prompt mark that comes in two reads gets redraw=0" {
+  "$ZMX" session pm -- /bin/sh -c 'read -r _; printf "\033]133;A"; sleep 0.5; printf ";aid=1\007MARK_DONE\n"; exec sleep 30'
+  python3 - <<'PY2'
+from v2client import Client
+c = Client("pm")
+c.attach()
+c.wait_msg("state")
+c.type("go\n")
+c.wait_output("MARK_DONE")
+assert b"\x1b]133;A;aid=1;redraw=0\x07" in c.output, c.output[-200:]
+PY2
+}
+
 # A program that draws for itself (a full-screen app) waits for SIGWINCH to
 # draw again after a reattach. TIOCSWINSZ with the same size sends none, so
 # the session sends it.
@@ -441,4 +455,20 @@ second = Client("s1")
 second.attach(80, 24)
 second.wait_output("GOT_WINCH_2")
 PY
+}
+
+# A process that exits drains its terminal first. The session must not wait
+# for a shell whose output it no longer reads.
+@test "session: SIGTERM ends a session whose shell floods output" {
+  "$ZMX" session s1 -- /bin/sh -c 'while :; do printf "%0200d\n" 0; done'
+  pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid s1)
+  sleep 0.5
+  kill -TERM "$pid"
+  for _ in $(seq 1 40); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  echo "the session still runs 4 s after SIGTERM"
+  return 1
 }

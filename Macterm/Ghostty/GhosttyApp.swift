@@ -24,6 +24,10 @@ final class GhosttyApp {
     @ObservationIgnored
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    /// `config` with the disabled cursor last (`MactermConfig.
+    /// disabledCursorBody`), for a remote pane whose connection is lost.
+    /// Built with `config`, from the same files.
+    private var disabledCursorConfig: ghostty_config_t?
     private(set) var configVersion = 0
     @ObservationIgnored
     private var tickTimer: Timer?
@@ -110,8 +114,9 @@ final class GhosttyApp {
         // before the first window can build its toolbar, i.e. here.
         let numericLocale = ProcessLocale.pinNumericToC()
         logger.info("LC_NUMERIC pinned to C (libghostty had set \(numericLocale, privacy: .public))")
-        let (cfgOpt, _) = loadConfig()
-        guard let cfg = cfgOpt else {
+        let loaded = loadConfig()
+        disabledCursorConfig = loaded.disabledCursor
+        guard let cfg = loaded.config else {
             logger.error("ghostty_config_new failed")
             return
         }
@@ -282,16 +287,22 @@ final class GhosttyApp {
     @discardableResult
     func reloadConfig() -> ReloadResult {
         guard let app else { return ReloadResult(diagnostics: []) }
-        let (newConfig, result) = loadConfig()
-        guard let newConfig else { return result }
+        let loaded = loadConfig()
+        let (newConfig, newDisabledCursor, result) = (loaded.config, loaded.disabledCursor, loaded.result)
+        guard let newConfig else {
+            if let newDisabledCursor { ghostty_config_free(newDisabledCursor) }
+            return result
+        }
         let oldScheme = windowScheme
         ghostty_app_update_config(app, newConfig)
         // Also update each existing surface so changes take effect immediately
-        for surface in liveSurfaces() {
-            ghostty_surface_update_config(surface, newConfig)
+        for (surface, cursorDisabled) in liveSurfaces() {
+            ghostty_surface_update_config(surface, cursorDisabled ? newDisabledCursor ?? newConfig : newConfig)
         }
         if let old = config { ghostty_config_free(old) }
         config = newConfig
+        if let old = disabledCursorConfig { ghostty_config_free(old) }
+        disabledCursorConfig = newDisabledCursor
         // A changed `window-theme` or background can change the scheme.
         if windowScheme != oldScheme {
             resyncSurfaceScheme()
@@ -347,16 +358,24 @@ final class GhosttyApp {
     func softReloadConfig() {
         guard let app, let config else { return }
         ghostty_app_update_config(app, config)
-        for surface in liveSurfaces() {
-            ghostty_surface_update_config(surface, config)
+        for (surface, cursorDisabled) in liveSurfaces() {
+            ghostty_surface_update_config(surface, self.config(disabledCursor: cursorDisabled) ?? config)
         }
     }
 
+    /// The config for a surface: the app's, or the one with the disabled
+    /// cursor (built with it, `loadConfig`).
+    func config(disabledCursor: Bool) -> ghostty_config_t? {
+        disabledCursor ? disabledCursorConfig ?? config : config
+    }
+
     /// Every live surface: the panes, and the previews of Settings →
-    /// Animations (`PreviewSurfaceView`), which take each config too.
-    private func liveSurfaces() -> [ghostty_surface_t] {
-        GhosttyTerminalNSView.allLiveViews().compactMap(\.surface)
-            + PreviewSurfaceView.allLiveViews().compactMap(\.surface)
+    /// Animations (`PreviewSurfaceView`), which take each config too. A pane
+    /// whose connection is lost takes the disabled cursor
+    /// (`GhosttyTerminalNSView.isCursorDisabled`).
+    private func liveSurfaces() -> [(surface: ghostty_surface_t, cursorDisabled: Bool)] {
+        GhosttyTerminalNSView.allLiveViews().compactMap { view in view.surface.map { ($0, view.isCursorDisabled) } }
+            + PreviewSurfaceView.allLiveViews().compactMap { view in view.surface.map { ($0, false) } }
     }
 
     /// Reload and surface any user-visible errors (missing file, parse errors)
@@ -592,15 +611,53 @@ final class GhosttyApp {
         read(Keys.focusFollowsMouse) ?? false
     }
 
-    private func loadConfig() -> (ghostty_config_t?, ReloadResult) {
+    /// The app's config, and the same config with the disabled cursor last
+    /// (`MactermConfig.disabledCursorBody`) for a remote pane whose
+    /// connection is lost. Both come from the same files at the same moment.
+    private struct Loaded {
+        var config: ghostty_config_t?
+        var disabledCursor: ghostty_config_t?
+        var result: ReloadResult
+    }
+
+    private func loadConfig() -> Loaded {
         var result = ReloadResult(diagnostics: [])
-        guard let cfg = ghostty_config_new() else { return (nil, result) }
 
         // Recompute the wrapper files against the user's config as it exists
         // right now: the overrides' shell-integration-features line merges the
         // user's own value (#75), which may have changed since the last load.
         MactermConfig.shared.regenerate()
 
+        guard let cfg = buildConfig(missingPaths: &result.missingUserConfigPaths) else {
+            return Loaded(config: nil, disabledCursor: nil, result: result)
+        }
+        var ignored: [String] = []
+        let disabledCursor = buildConfig(missingPaths: &ignored, last: MactermConfig.shared.disabledCursorURL.path)
+
+        // Collect ghostty's diagnostics (parse errors, unknown keys, bad
+        // values). Log them and surface to the caller so the Settings reload
+        // button can show them in an alert.
+        let diagCount = ghostty_config_diagnostics_count(cfg)
+        for i in 0 ..< diagCount {
+            let diag = ghostty_config_get_diagnostic(cfg, i)
+            let s = String(cString: diag.message)
+            logger.warning("config: \(s, privacy: .public)")
+            result.diagnostics.append(s)
+        }
+
+        // Raw-text values the C API can't answer, re-read with the config
+        // they belong to.
+        let userConfigText = MactermConfig.userGhosttyConfigText()
+        mouseScrollMultiplier = MouseScrollMultiplier.resolve(userConfigText: userConfigText)
+        windowPadding = WindowPadding.resolve(userConfigText: userConfigText)
+
+        return Loaded(config: cfg, disabledCursor: disabledCursor, result: result)
+    }
+
+    /// One finalized config from the layers. `last`: one more file, after
+    /// every other layer.
+    private func buildConfig(missingPaths: inout [String], last: String? = nil) -> ghostty_config_t? {
+        guard let cfg = ghostty_config_new() else { return nil }
         // Three-layer ghostty config:
         //   1. Macterm defaults — tasteful first-launch values.
         //   2. User's Ghostty config files, overriding any default. In automatic
@@ -620,11 +677,11 @@ final class GhosttyApp {
             Preferences.shared.ghosttyConfigSelection
         }
         let source = GhosttyConfigSource(selection: selection)
-        result.missingUserConfigPaths = source.load(
+        missingPaths = source.load(
             loadDefaultFiles: { ghostty_config_load_default_files(cfg) },
             loadCustomFile: { path in
                 guard FileManager.default.fileExists(atPath: path) else {
-                    logger.info("user Ghostty config not found at \(path, privacy: .public); skipping")
+                    if last == nil { logger.info("user Ghostty config not found at \(path, privacy: .public); skipping") }
                     return false
                 }
                 path.withCString { ghostty_config_load_file(cfg, $0) }
@@ -633,26 +690,9 @@ final class GhosttyApp {
         )
         MactermConfig.shared.overridesPath.withCString { ghostty_config_load_file(cfg, $0) }
         ghostty_config_load_recursive_files(cfg)
+        last?.withCString { ghostty_config_load_file(cfg, $0) }
         ghostty_config_finalize(cfg)
-
-        // Collect ghostty's diagnostics (parse errors, unknown keys, bad
-        // values). Log them and surface to the caller so the Settings reload
-        // button can show them in an alert.
-        let diagCount = ghostty_config_diagnostics_count(cfg)
-        for i in 0 ..< diagCount {
-            let diag = ghostty_config_get_diagnostic(cfg, i)
-            let s = String(cString: diag.message)
-            logger.warning("config: \(s, privacy: .public)")
-            result.diagnostics.append(s)
-        }
-
-        // Raw-text values the C API can't answer, re-read with the config
-        // they belong to.
-        let userConfigText = MactermConfig.userGhosttyConfigText()
-        mouseScrollMultiplier = MouseScrollMultiplier.resolve(userConfigText: userConfigText)
-        windowPadding = WindowPadding.resolve(userConfigText: userConfigText)
-
-        return (cfg, result)
+        return cfg
     }
 
     /// Candidate ghostty resource dirs, highest priority first. Macterm ships

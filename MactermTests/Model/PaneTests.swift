@@ -15,6 +15,18 @@ struct PaneTests {
     }
 
     @Test
+    func a_lost_remote_pane_shows_reconnecting_while_a_try_runs_and_connection_lost_otherwise() {
+        let p = Pane(projectPath: "box:/srv", projectID: UUID())
+        #expect(p.remoteLinkBadge == nil)
+        p.isRemoteLinkLost = true
+        #expect(p.remoteLinkBadge == .lost)
+        p.isRemoteReconnecting = true
+        #expect(p.remoteLinkBadge == .reconnecting)
+        p.isRemoteLinkLost = false
+        #expect(p.remoteLinkBadge == nil)
+    }
+
+    @Test
     func processTitle_uses_foreground_process_when_running() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.foregroundProcessName = "btop"

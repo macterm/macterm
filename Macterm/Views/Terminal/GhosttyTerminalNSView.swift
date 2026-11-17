@@ -230,6 +230,22 @@ final class GhosttyTerminalNSView: NSView {
     /// keybind-passthrough policy uses.
     var rendersForeignGeometry = false
 
+    /// A remote pane whose connection is lost: the surface takes the config
+    /// with the disabled cursor (`GhosttyApp.config(disabledCursor:)`), so
+    /// that the cursor says the pane takes no input. Set from the pane
+    /// (`Pane.isRemoteLinkLost`) by `TerminalSurface`.
+    var isCursorDisabled = false {
+        didSet {
+            guard isCursorDisabled != oldValue else { return }
+            applyCursorConfig()
+        }
+    }
+
+    private func applyCursorConfig() {
+        guard let surface, let config = GhosttyApp.shared.config(disabledCursor: isCursorDisabled) else { return }
+        ghostty_surface_update_config(surface, config)
+    }
+
     var hasViewerOverlay: Bool {
         guard let surface else { return false }
         return ghostty_surface_has_selection(surface)
@@ -768,6 +784,7 @@ final class GhosttyTerminalNSView: NSView {
                 prepareChannel(launch: channelLaunch)
             }
             surface = ghostty_surface_new(app, &config)
+            if isCursorDisabled { applyCursorConfig() }
         }
         func makeSurface() {
             if envVars.isEmpty {

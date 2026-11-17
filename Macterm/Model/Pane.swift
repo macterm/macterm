@@ -44,26 +44,41 @@ final class Pane: Identifiable {
     @ObservationIgnored
     let remoteSpec: ProjectPath?
     /// For a remote pane, the host folder of its session, once its session
-    /// ran on the host's server (0057): the folder of its creation, then the
-    /// shell's own (OSC 7) at each save. nil: the pane never had a v2
-    /// session there (a new pane, or one from before v2), so a missing
-    /// session starts with no question. Persisted
+    /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
+    /// the folder of its creation, then the shell's own (OSC 7) at each
+    /// save. nil: the pane never had a v2 session there (a new pane, or one
+    /// from before v2), so a missing session is made. When it is set and
+    /// the session is gone, the pane closes. It is persisted
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
-    /// A remote pane whose connection stopped: it waits for a trigger or a
-    /// key (`RemoteHosts`). Its frozen screen is blurred and dimmed, as a
-    /// mirror that does not lead is, so that it does not look live. Never
-    /// persisted.
+    /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
+    /// app tries again by itself, and a key connects at once. Its frozen
+    /// screen is not dimmed: its cursor is faint and does not blink
+    /// (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row says
+    /// `Connection lost` (`TerminalPane`), so that it does not look live.
+    /// Never persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
     }
 
-    /// A lost pane that shows a line of Macterm's (why the connect failed,
-    /// "Press a key to try again."): the leaf only dims, so that the line
-    /// stays legible. Set by `RemoteHosts` with the line, cleared when the
-    /// link comes back or stops again.
-    var showsRemoteLinkMessage = false
+    /// A lost pane for which a try runs now: its badge says `Reconnecting`.
+    /// Never persisted.
+    var isRemoteReconnecting = false
+
+    /// The badge of a remote pane whose connection is lost, or nil.
+    enum RemoteLinkBadge: Equatable {
+        /// A try runs now.
+        case reconnecting
+        /// No try runs now.
+        case lost
+    }
+
+    var remoteLinkBadge: RemoteLinkBadge? {
+        guard isRemoteLinkLost else { return nil }
+        return isRemoteReconnecting ? .reconnecting : .lost
+    }
+
     /// Process the pane launches on first surface creation, injected into the
     /// shell as `command + "\n"`. Set from a declarative layout; nil for an
     /// interactively-created pane (plain shell). Recorded here so a layout
@@ -214,10 +229,9 @@ final class Pane: Identifiable {
     private(set) var isReceivingRemoteSnapshot = false
 
     /// The pane's connection stopped (`RemoteHosts`): a replay that it cut
-    /// is over, and the next attach clears any line of Macterm's.
+    /// is over.
     func remoteLinkDidStop() {
         isReceivingRemoteSnapshot = false
-        showsRemoteLinkMessage = false
     }
 
     @ObservationIgnored

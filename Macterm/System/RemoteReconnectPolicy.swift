@@ -1,14 +1,14 @@
 import Foundation
 
 /// Attempt gating for reconnecting dropped remote panes (#281). Pure state
-/// machine — no clocks, no I/O — so `AppState` owns the triggers (system
-/// wake, app activation, project selection) and this type only answers "may
-/// this pane be redialed NOW?". Two properties matter:
+/// machine — no clocks, no I/O — so `AppState` owns the triggers and the
+/// retry sweep, and this type only answers "may this pane be redialed
+/// NOW?". Two properties matter:
 ///
-/// - **It can never loop.** Attempts happen only when a trigger fires a sweep;
-///   between triggers nothing is scheduled. The backoff below additionally
-///   bounds how often repeated triggers (a wake burst, cmd-tab churn) may
-///   retry one pane whose host is still unreachable.
+/// - **It never polls hard.** The sweep runs on triggers, and again every
+///   few seconds while a pane is lost and the app is active. The backoff
+///   below bounds how often one pane whose host is still unreachable is
+///   tried: at most once a minute after the first few tries.
 /// - **Recovery is judged by survival, not by the attempt.** A respawned ssh
 ///   against a silently dead host can sit in TCP connect for ~75s looking
 ///   "alive" (`processExited == false`) before it fails, so a pane only

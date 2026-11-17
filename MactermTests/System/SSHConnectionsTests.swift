@@ -431,6 +431,37 @@ struct SSHConnectionsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(1)))
+    func a_quiet_login_never_asks_and_a_login_that_may_ask_does() async throws {
+        let sshd = try LocalSSHD(passphrase: "open sesame")
+        defer { sshd.stop() }
+        let log = sshd.directory.appendingPathComponent("askpass.log")
+        let askpass = sshd.directory.appendingPathComponent("askpass")
+        try "#!/bin/sh\necho \"$1\" >> '\(log.path)'\necho 'open sesame'\n".write(to: askpass, atomically: true, encoding: .utf8)
+        chmod(askpass.path, 0o700)
+        var configuration = sshd.configuration
+        configuration.askpass = askpass.path
+        let connections = SSHConnections(configuration: configuration)
+
+        // The key needs its passphrase: a quiet login fails and asks nothing.
+        await #expect(throws: SSHConnections.Failure.self) {
+            try await connections.connect("box", prompts: false)
+        }
+        #expect(!FileManager.default.fileExists(atPath: log.path))
+        // A login that may ask gets the passphrase from askpass.
+        _ = try await connections.connect("box")
+        #expect(try String(contentsOf: log, encoding: .utf8).contains("passphrase"))
+        await connections.disconnect("box")
+    }
+
+    @Test
+    func a_quiet_connection_runs_in_batch_mode() {
+        let quiet = SSHConnections.connectionArguments("box", path: "/tmp/cm", prompts: false)
+        #expect(quiet.contains("BatchMode=yes"))
+        #expect(!SSHConnections.connectionArguments("box", path: "/tmp/cm", prompts: true).contains("BatchMode=yes"))
+        #expect(quiet.suffix(2) == ["--", "box"])
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(1)))
     func a_quit_and_a_new_launch_log_in_once() async throws {
         let sshd = try LocalSSHD()
         defer { sshd.stop() }

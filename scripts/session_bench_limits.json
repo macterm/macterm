@@ -28,20 +28,20 @@
       "Local echo p50": {
         "kind": "ratio",
         "median": 1.198,
-        "noise": 0.307,
-        "limit": 1.308
+        "noise": 0.475,
+        "limit": 1.476
       },
       "Local echo p95": {
         "kind": "ratio",
         "median": 1.355,
-        "noise": 1.324,
-        "limit": 2.325
+        "noise": 1.679,
+        "limit": 2.679
       },
       "Memory, idle panes: 1": {
         "kind": "ratio",
         "median": 1.081,
-        "noise": 0.051,
-        "limit": 1.052
+        "noise": 0.133,
+        "limit": 1.133
       },
       "Memory, idle panes: 9": {
         "kind": "ratio",
@@ -72,14 +72,14 @@
       "Local echo p50": {
         "kind": "ratio",
         "median": 1.14,
-        "noise": 0.39,
-        "limit": 1.391
+        "noise": 0.291,
+        "limit": 1.291
       },
       "Local echo p95": {
         "kind": "ratio",
         "median": 1.217,
-        "noise": 3.19,
-        "limit": 4.191
+        "noise": 3.407,
+        "limit": 4.408
       },
       "New remote pane p50": {
         "kind": "ratio",

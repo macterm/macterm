@@ -991,6 +991,9 @@ final class AppState {
     /// pure bookkeeping, no UI reads it.
     @ObservationIgnored
     private var reconnectPolicy = RemoteReconnectPolicy()
+    /// A `.retry` sweep is planned (`scheduleReconnectRetry`).
+    @ObservationIgnored
+    private var reconnectRetryPlanned = false
     /// See `endV1SessionsOnce`.
     @ObservationIgnored
     var v1SessionsEnded = OnceFlag.preferences
@@ -1697,21 +1700,32 @@ final class AppState {
         case network
         /// A login brought a host's link back (`.remoteHostDidConnect`).
         case hostConnected
+        /// A pane became lost: its link stopped, or a try failed
+        /// (`.remoteLinkDidStop`).
+        case linkStopped
+        /// The next sweep while lost panes remain (`reconnectRetryInterval`).
+        case retry
     }
 
+    /// How often the sweep runs again while the active project has a lost
+    /// pane and the app is active. `RemoteReconnectPolicy` gates each pane.
+    static let reconnectRetryInterval: TimeInterval = 5
+
     /// Let the active project's lost remote panes connect again: panes whose
-    /// connection stopped while their session lives on the host. Each pane's
-    /// client (`macterm remote-pane`) waits on its tty; `RemoteHosts` wakes
-    /// it, and the attach replays the session's screen. A login, when the
-    /// connection needs one, comes now: the user is at the Mac.
+    /// connection stopped while their session lives on the host.
+    /// `RemoteHosts` wakes each pane's driver, and the attach replays the
+    /// session's screen. These tries never ask the user anything
+    /// (`RemoteHosts.reconnect`): a login that needs an answer waits for a
+    /// key in the pane.
     ///
-    /// Trigger-driven only (system wake, a network change, app activation,
-    /// project selection), never a timer, and rate-limited per pane by
-    /// `RemoteReconnectPolicy`, so a still-unreachable host is retried a
-    /// bounded number of times per return — not polled. Active project
-    /// only; other projects reconnect via `.projectSelected` when opened. A
-    /// key in a lost pane connects at once, with no backoff.
-    /// `destination`: only the panes of this host (`.hostConnected`).
+    /// The triggers (system wake, a network change, app activation, project
+    /// selection, a pane that became lost) run a sweep, and while a lost pane
+    /// remains, the sweep runs again every `reconnectRetryInterval` while the
+    /// app is active. `RemoteReconnectPolicy` gates each pane, so an
+    /// unreachable host is tried at most once a minute. Active project only;
+    /// other projects reconnect via `.projectSelected` when opened. A key in
+    /// a lost pane connects at once, with no backoff. `destination`: only
+    /// the panes of this host (`.hostConnected`).
     func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
@@ -1722,20 +1736,36 @@ final class AppState {
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
         let now = Date()
         var sessions: Set<String> = []
+        var anyLost = false
         for pane in ws.tabs.flatMap({ $0.splitRoot.allPanes() }) where pane.isRemote {
             if let destination, pane.remoteDestination != destination { continue }
             guard pane.isDisconnected else {
                 reconnectPolicy.observeAlive(pane.id, now: now)
                 continue
             }
-            guard reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
+            anyLost = true
+            // A try runs now: the next sweep judges it.
+            guard !pane.isRemoteReconnecting, reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
             reconnectPolicy.recordAttempt(pane.id, now: now)
             sessions.insert(pane.sessionName)
         }
+        if anyLost { scheduleReconnectRetry() }
         guard !sessions.isEmpty else { return }
         let count = sessions.count
         logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(count, privacy: .public) lost remote pane(s)")
         RemoteHosts.shared.reconnect(sessions)
+    }
+
+    /// One sweep later, unless one is already planned.
+    private func scheduleReconnectRetry() {
+        guard !reconnectRetryPlanned else { return }
+        reconnectRetryPlanned = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectRetryInterval) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.reconnectRetryPlanned = false
+                self?.reconnectDroppedRemotePanes(trigger: .retry)
+            }
+        }
     }
 
     // MARK: - The v1 sessions

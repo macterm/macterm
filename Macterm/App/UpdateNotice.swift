@@ -2,7 +2,7 @@ import Foundation
 
 /// The "Macterm updated to vX" toast on the first launch after an update.
 ///
-/// Sparkle installs an update while the app quits (`automaticallyDownloadsUpdates`)
+/// Sparkle installs an update while the app quits (`UpdatePolicy`)
 /// or relaunches it from the update prompt, and neither path leaves anything in
 /// the app that says the version changed. The rule is a comparison against the
 /// version that the previous launch recorded (`Preferences.lastLaunchedVersion`).

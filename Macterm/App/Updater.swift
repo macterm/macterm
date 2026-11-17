@@ -11,6 +11,25 @@ enum UpdaterAvailability {
     }
 }
 
+/// Updates are always automatic: Sparkle checks the appcast daily
+/// (`SUScheduledCheckInterval`), downloads a found update in the background
+/// and installs it when the app quits. The toolbar then offers
+/// Restart to Update.
+///
+/// Sparkle keeps both values in the user's defaults (`SUEnableAutomaticChecks`,
+/// `SUAutomaticallyUpdate`), and they win over `Info.plist`. A user who turned
+/// off an old toggle ("Check for updates automatically", "Update
+/// automatically") still has it off there. `Updater` therefore writes both
+/// values when the updater starts and again each time Sparkle schedules a
+/// check. Sparkle reads `automaticallyDownloadsUpdates` when that check runs.
+enum UpdatePolicy {
+    @MainActor
+    static func enforce(on updater: SPUUpdater) {
+        if !updater.automaticallyChecksForUpdates { updater.automaticallyChecksForUpdates = true }
+        if !updater.automaticallyDownloadsUpdates { updater.automaticallyDownloadsUpdates = true }
+    }
+}
+
 /// Thin wrapper around `SPUStandardUpdaterController` that exposes the
 /// observable bits SwiftUI views need.
 ///
@@ -42,7 +61,7 @@ final class Updater {
     var updateAvailable = false
 
     /// `true` once Sparkle has downloaded an update in the background
-    /// ("Update automatically") and holds it for install on quit. The toolbar
+    /// (`UpdatePolicy`) and holds it for install on quit. The toolbar
     /// then offers Restart to Update. Without it, a user who keeps Macterm open
     /// for weeks never learns that an update waits: Sparkle downloads silently
     /// and never shows a scheduled reminder for it.
@@ -105,18 +124,16 @@ final class Updater {
             self?.installAndRelaunchHandler = handler
             self?.updateReadyToInstall = true
         }
+        updaterDelegate.onWillScheduleCheck = { [updater = controller.updater] in
+            UpdatePolicy.enforce(on: updater)
+        }
         userDriverDelegate.onUpdateFound = { [weak self] in self?.updateAvailable = true }
         userDriverDelegate.onUpdateCleared = { [weak self] in self?.updateAvailable = false }
 
         // Now that callbacks are wired, actually start the updater. Local,
         // Debug, and benchmark builds skip it (see `startUpdater` above).
         if startUpdater {
-            // Checks are not a user choice: the daily check only reads the
-            // appcast, and the toolbar flag is how an update gets seen at all.
-            // This also turns checks back on for a user who switched the old
-            // "Check for updates automatically" toggle off. The one toggle that
-            // remains is `automaticallyDownloadsUpdates`.
-            controller.updater.automaticallyChecksForUpdates = true
+            UpdatePolicy.enforce(on: controller.updater)
             controller.startUpdater()
         }
     }
@@ -136,15 +153,6 @@ final class Updater {
             return
         }
         installAndRelaunchHandler()
-    }
-
-    /// Settings → Updates → "Update automatically". On: Sparkle downloads a
-    /// found update in the background and installs it when the app quits, so
-    /// the next launch is the new version. Off: the scheduled check only shows
-    /// the toolbar button.
-    var automaticallyDownloadsUpdates: Bool {
-        get { updater.automaticallyDownloadsUpdates }
-        set { updater.automaticallyDownloadsUpdates = newValue }
     }
 
     /// The appcast channel updates are drawn from. Sparkle asks the delegate for
@@ -207,6 +215,13 @@ private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
     }
 
     var onReadyToInstall: ((@escaping () -> Void) -> Void)?
+    var onWillScheduleCheck: (() -> Void)?
+
+    /// Sparkle calls this on the main thread each time it schedules the next
+    /// background check. `Updater` writes `UpdatePolicy` again here.
+    func updater(_: SPUUpdater, willScheduleUpdateCheckAfterDelay _: TimeInterval) {
+        onWillScheduleCheck?()
+    }
 
     /// Called on the main thread when a background download is ready to
     /// install on quit. Returning `true` takes control of the install: Sparkle
