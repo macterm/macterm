@@ -23,20 +23,6 @@ struct RemoteHostsTests {
     }
 
     @Test
-    func a_failed_login_says_why_in_macterms_words_for_the_common_errors() {
-        let resolve = "ssh: Could not resolve hostname devbox: nodename nor servname provided, or not known"
-        #expect(RemotePaneText.loginFailure(resolve, host: "devbox") == "No host is named devbox.")
-        let timeout = "ssh: connect to host 10.0.0.5 port 22: Operation timed out"
-        #expect(RemotePaneText.loginFailure(timeout, host: "devbox") == "devbox does not answer.")
-        let refused = "ssh: connect to host 10.0.0.5 port 22: Connection refused"
-        #expect(RemotePaneText.loginFailure(refused, host: "devbox") == "devbox refuses the connection.")
-        // Any other error: ssh's own last line, with no control characters.
-        let other = "bob@devbox: Permission denied (publickey).\u{1B}[31m"
-        #expect(RemotePaneText.loginFailure(other, host: "devbox") == "bob@devbox: Permission denied (publickey).[31m")
-        #expect(RemotePaneText.connectFailure(SSHConnections.Failure.cancelled, host: "devbox") == "You cancelled the login to devbox.")
-    }
-
-    @Test
     func a_pane_that_closed_gets_close() async {
         let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
         #expect(await hosts.answer(.ask, session: "macterm-x-1", panes: []).isClose)
@@ -103,16 +89,15 @@ struct RemoteHostsTests {
             // The link drops: the channel ends, and the driver reports it.
             host.sshd.dropConnections()
             try await first.host.waitFor { $0.linkLost > 0 }
-            let line = RemotePaneText.linkStopped(host: "box")
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: line))
+            // No line goes into the pane: its badge shows the state.
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
             #expect(pane.isRemoteLinkLost)
             #expect(pane.isDisconnected)
-            // No trigger yet: the pane keeps waiting. A view that asks now
-            // gets the line too.
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: line))
+            // No sweep yet: the pane keeps waiting.
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
 
-            // A trigger wakes the pane; it logs in again and attaches to the
-            // same session, which replays its screen.
+            // The sweep wakes the pane; it logs in again with no question and
+            // attaches to the same session, which replays its screen.
             fixture.woken.removeAll()
             fixture.hosts.reconnect([pane.sessionName])
             #expect(fixture.woken == [RemoteHosts.wakeName(for: pane.sessionName)])
@@ -125,21 +110,27 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_killed_ssh_connection_shows_a_line_and_a_key_connects_again() async throws {
-        try await lostConnection(signal: "TERM")
+    func a_killed_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
+        try await lostConnection(signal: "TERM", byKey: true)
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_hung_ssh_connection_shows_a_line_and_a_key_connects_again() async throws {
-        try await lostConnection(signal: "STOP")
+    func a_hung_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
+        try await lostConnection(signal: "STOP", byKey: true)
     }
 
-    private func lostConnection(signal: String) async throws {
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_killed_ssh_connection_connects_again_by_itself() async throws {
+        try await lostConnection(signal: "TERM", byKey: false)
+    }
+
+    /// Two windows show one pane. The link stops with nothing typed; then a
+    /// key, or the sweep with no key, brings both views back.
+    private func lostConnection(signal: String, byKey: Bool) async throws {
         try await withSSHDHost { host in
             let fixture = Fixture(host, wakes: true)
             let pane = fixture.pane()
             fixture.hosts.panes = { _ in [pane] }
-            // Two windows show the pane: a driver for each surface.
             let left = RecordingPaneHost()
             let right = RecordingPaneHost()
             let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
@@ -149,19 +140,30 @@ struct RemoteHostsTests {
             drivers[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
             try await left.waitFor { $0.screen.contains("before-kill") }
             try await right.waitFor { $0.screen.contains("before-kill") }
+            let resets = [left.snapshot().resets, right.snapshot().resets]
 
             try host.signalConnection(signal: signal)
-            // Nothing is typed: one plain line in each view says why, and the
-            // pane only dims under it.
-            let line = RemotePaneText.linkStopped(host: "box")
-            try await left.waitFor { $0.screen.contains(line) }
-            try await right.waitFor { $0.screen.contains(line) }
+            let deadline = Date().addingTimeInterval(20)
+            while !pane.isRemoteLinkLost, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
             #expect(pane.isRemoteLinkLost)
+            // The badge shows it: no line goes into either view.
+            #expect(!left.snapshot().screen.contains("onnection"))
+            #expect(!right.snapshot().screen.contains("onnection"))
 
-            // A key logs in again, and both views attach to the same session.
-            drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
-            try await left.waitFor { $0.screen.contains("after-key") }
-            try await right.waitFor { $0.screen.contains("after-key") }
+            if byKey {
+                // A key logs in again, and both views attach to the session.
+                drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
+                try await left.waitFor { $0.screen.contains("after-key") }
+                try await right.waitFor { $0.screen.contains("after-key") }
+            } else {
+                // The sweep, with no key: both views attach and replay.
+                #expect(fixture.linksStopped.contains(pane.sessionName))
+                fixture.hosts.reconnect([pane.sessionName])
+                try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
+                try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
+            }
             #expect(!pane.isRemoteLinkLost)
             #expect(host.sshd.acceptedLogins() == 2)
         }
@@ -184,8 +186,7 @@ struct RemoteHostsTests {
             try await first.host.waitFor { $0.linkLost > 0 }
             try await second.host.waitFor { $0.linkLost > 0 }
             for pane in [left, right] {
-                let line = RemotePaneText.linkStopped(host: "box")
-                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: line))
+                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
                 #expect(pane.isRemoteLinkLost)
             }
 
@@ -323,6 +324,9 @@ struct RemoteHostsTests {
         /// The hosts whose link came back (`hostDidConnect`).
         var connected: [String] { connections.value }
         private let readyHosts = LockedBox<[String]>([])
+        private let stopped = LockedBox<[String]>([])
+        /// The sessions whose link stopped (`linkStopped`), in order.
+        var linksStopped: [String] { stopped.value }
 
         /// The hosts whose link became ready, in order.
         var ready: [String] {
@@ -345,6 +349,7 @@ struct RemoteHostsTests {
             }
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
             configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
+            configuration.linkStopped = { [stopped] session in stopped.mutate { $0.append(session) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)
         }
 

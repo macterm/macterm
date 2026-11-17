@@ -736,8 +736,10 @@ private struct GeneralSettings: View {
             Section {
                 Toggle(isOn: $reconnectRemotePanes) {
                     Text("Reconnect panes after a dropped connection")
-                    Text("Connects a disconnected pane to its session again when you wake the Mac or return to the app.")
-                        .settingsDescription()
+                    Text(
+                        "Connects a disconnected pane again by itself. A login that needs an answer waits until you type in the pane."
+                    )
+                    .settingsDescription()
                 }
                 .onChange(of: reconnectRemotePanes) { _, v in
                     Preferences.shared.reconnectRemotePanes = v

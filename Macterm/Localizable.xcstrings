@@ -2649,18 +2649,18 @@
         }
       }
     },
-    "Connects a disconnected pane to its session again when you wake the Mac or return to the app." : {
+    "Connects a disconnected pane again by itself. A login that needs an answer waits until you type in the pane." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mac을 깨우거나 앱으로 돌아오면 연결이 끊어진 페인을 세션에 다시 연결합니다."
+            "value" : "연결이 끊어진 페인을 자동으로 다시 연결합니다. 응답이 필요한 로그인은 페인에 입력할 때까지 기다립니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "唤醒 Mac 或返回 App 时，将断开连接的窗格重新连接到其会话。"
+            "value" : "自动重新连接断开连接的窗格。需要回答的登录会等到你在窗格中输入时进行。"
           }
         }
       }
@@ -2971,6 +2971,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目录"
+          }
+        }
+      }
+    },
+    "Disconnected" : {
+      "comment" : "The badge of a remote pane whose connection stopped or failed",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 끊김"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已断开连接"
           }
         }
       }

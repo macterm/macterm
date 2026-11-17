@@ -9,13 +9,14 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 ///
 /// - running: a `PaneSession` on the host's link feeds the surface;
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server;
-/// - waiting: a line of Macterm's is on the screen. A wake (a login that
-///   ended, a trigger of the reconnect sweep) or a key asks again.
+/// - waiting: no session yet. A wake (a login that ended, the reconnect
+///   sweep) or a key asks again.
 ///
 /// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane dims under one line and waits for a trigger or a key.
-/// The app's backoff and triggers (`AppState.reconnectDroppedRemotePanes`)
-/// own the next try. A session that is gone from the host closes the pane.
+/// `lost`: the pane dims, shows its badge and waits. The app's sweep
+/// (`AppState.reconnectDroppedRemotePanes`) owns the next quiet try, and a
+/// key connects at once. A session that is gone from the host closes the
+/// pane.
 @MainActor
 final class RemotePaneDriver: PaneInputRoute {
     private enum State {

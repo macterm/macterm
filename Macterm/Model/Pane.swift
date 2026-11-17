@@ -52,11 +52,10 @@ final class Pane: Identifiable {
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
-    /// A remote pane whose connection stopped: it waits for a trigger or a
-    /// key (`RemoteHosts`). Its frozen screen is dimmed under a line of
-    /// Macterm's that says so (`RemotePaneText.linkStopped`), so that it does
-    /// not look live. It is not blurred, so the line stays legible. Never
-    /// persisted.
+    /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
+    /// app tries again by itself, and a key connects at once. Its frozen
+    /// screen is dimmed, and its badge row shows `Disconnected`
+    /// (`TerminalPane`), so that it does not look live. Never persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
     }

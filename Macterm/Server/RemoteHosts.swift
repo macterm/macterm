@@ -46,12 +46,12 @@ enum RemotePaneAnswer {
 ///   for them: it starts the work and says `wait`; when the work ends, the
 ///   app posts the pane's Darwin notification (`wakeName`), and the client
 ///   asks again.
-/// - **Lost.** A pane whose link stopped reports `lost`. The pane dims
-///   (`Pane.isRemoteLinkLost`) under one line of Macterm's
-///   (`RemotePaneText.linkStopped`) and waits for a trigger (wake, a network
-///   change, activation, the project's selection; `AppState.
-///   reconnectDroppedRemotePanes` with `RemoteReconnectPolicy`) or a key in
-///   the pane. The attach after it replays the session's screen.
+/// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
+///   (`Pane.isRemoteLinkLost`): it dims and shows one badge. It connects
+///   again by itself (`AppState.reconnectDroppedRemotePanes` with
+///   `RemoteReconnectPolicy`): such a try never asks the user anything
+///   (`reconnect`, a quiet login). A key in the pane connects at once, and
+///   may ask for the login. The attach replays the session's screen.
 /// - **Gone.** A pane whose session ran on the host
 ///   (`Pane.hostSessionDirectory`) and is gone there (a host restart) closes:
 ///   the pane exists only while its session exists. A
@@ -74,6 +74,12 @@ final class RemoteHosts {
         /// and its setting, lets the other lost panes of the host attach.
         var hostDidConnect: @MainActor (String) -> Void = {
             NotificationCenter.default.post(name: .remoteHostDidConnect, object: $0)
+        }
+
+        /// A pane's link stopped: the reconnect sweep starts, after this
+        /// answer.
+        var linkStopped: @MainActor (String) -> Void = { _ in
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .remoteLinkDidStop, object: nil) }
         }
 
         var declines: DeclineStore
@@ -124,8 +130,8 @@ final class RemoteHosts {
 
     private enum Host {
         /// A login and a check run. The token tells this prepare from a
-        /// later one.
-        case preparing(UUID, Task<Void, Never>)
+        /// later one. `prompts`: the login may ask the user.
+        case preparing(UUID, Task<Void, Never>, prompts: Bool)
         case ready(RemoteServers.Link)
         /// No server: plain shells.
         case plain(SSHConnections.Route)
@@ -148,8 +154,9 @@ final class RemoteHosts {
     @ObservationIgnored private var waiting: [String: Set<String>] = [:]
     /// Sessions whose connection stopped: they wait for a trigger or a key.
     @ObservationIgnored private var lost: Set<String> = []
-    /// A line for a session's pane, given with the next answer.
-    @ObservationIgnored private var messages: [String: String] = [:]
+    /// Sessions that the reconnect sweep woke: their next connect asks the
+    /// user nothing.
+    @ObservationIgnored private var quiet: Set<String> = []
     /// Lists that failed on the current link of a host, in a row.
     @ObservationIgnored private var listFailures: [String: Int] = [:]
     /// When the app last told a session's client to make it. A second client
@@ -183,9 +190,8 @@ final class RemoteHosts {
         switch event {
         case .ask:
             if lost.contains(session) {
-                // A view that starts while the pane is lost gets the line too.
                 mark(panes, lost: true)
-                return .wait(message: messages.removeValue(forKey: session) ?? RemotePaneText.linkStopped(host: target.host))
+                return .wait(message: nil)
             }
         case .lost:
             logger.info("remote pane: session=\(session, privacy: .public) host=\(target.destination, privacy: .public) lost")
@@ -200,11 +206,13 @@ final class RemoteHosts {
             if !isRoamingLink(target.destination) {
                 drop(target.destination)
             }
-            return .wait(message: RemotePaneText.linkStopped(host: target.host))
+            configuration.linkStopped(session)
+            return .wait(message: nil)
         case .retry:
             lost.remove(session)
+            quiet.remove(session)
         }
-        return await resolve(session, panes: panes, target: target)
+        return await resolve(session, panes: panes, target: target, prompts: quiet.remove(session) == nil)
     }
 
     /// The session of these panes attached: it ran on the host, so from now
@@ -221,6 +229,7 @@ final class RemoteHosts {
     /// the backoff.
     func reconnect(_ sessions: Set<String>) {
         for session in sessions where lost.remove(session) != nil {
+            quiet.insert(session)
             configuration.post(Self.wakeName(for: session))
         }
     }
@@ -283,7 +292,7 @@ final class RemoteHosts {
     /// user's click. New panes then get sessions; a plain shell stays plain.
     func installServer(_ destination: String) async throws {
         undecline(destination)
-        if case let .preparing(_, task) = hosts[destination] { await task.value }
+        if case let .preparing(_, task, _) = hosts[destination] { await task.value }
         drop(destination)
         _ = try await connections.connect(destination)
         do {
@@ -315,14 +324,19 @@ final class RemoteHosts {
         }
     }
 
-    private func resolve(_ session: String, panes: [Pane], target: Target) async -> RemotePaneAnswer {
+    /// `prompts`: a connect may ask the user (a login, the install). Only a
+    /// pane's own start and a key in it may; the reconnect sweep may not.
+    private func resolve(_ session: String, panes: [Pane], target: Target, prompts: Bool = true) async -> RemotePaneAnswer {
         let destination = target.destination
         switch hosts[destination] {
         case nil:
-            prepare(destination, host: target.host)
+            prepare(destination, prompts: prompts)
             waiting[destination, default: []].insert(session)
             return .wait(message: nil)
-        case .preparing:
+        case let .preparing(_, _, asks):
+            // A quiet try cannot answer a key: a key logs in itself. The
+            // quiet try's end then wakes its panes, which find this one.
+            if prompts, !asks { prepare(destination, prompts: true) }
             waiting[destination, default: []].insert(session)
             return .wait(message: nil)
         case let .plain(route):
@@ -335,7 +349,7 @@ final class RemoteHosts {
                 message: RemotePaneText.plainShell(host: target.host)
             )
         case let .ready(link):
-            return await decide(session, panes: panes, target: target, link: link)
+            return await decide(session, panes: panes, target: target, link: link, prompts: prompts)
         }
     }
 
@@ -343,7 +357,8 @@ final class RemoteHosts {
         _ session: String,
         panes: [Pane],
         target: Target,
-        link: RemoteServers.Link
+        link: RemoteServers.Link,
+        prompts: Bool
     ) async -> RemotePaneAnswer {
         let destination = target.destination
         guard configuration.key != nil else { return .close }
@@ -360,7 +375,7 @@ final class RemoteHosts {
             // counts, and drops it: another request may have made a new one
             // meanwhile. Two failures in a row are the host's answer.
             guard case let .ready(current) = hosts[destination], current === link else {
-                return await resolve(session, panes: panes, target: target)
+                return await resolve(session, panes: panes, target: target, prompts: prompts)
             }
             drop(destination)
             let failures = listFailures[destination, default: 0] + 1
@@ -369,9 +384,9 @@ final class RemoteHosts {
                 listFailures[destination] = nil
                 lost.insert(session)
                 mark(panes, lost: true)
-                return .wait(message: RemotePaneText.withRetry(RemotePaneText.serverSilent(host: target.host)))
+                return .wait(message: nil)
             }
-            return await resolve(session, panes: panes, target: target)
+            return await resolve(session, panes: panes, target: target, prompts: prompts)
         }
         listFailures[destination] = nil
         let found = sessions.first { $0.name == session }
@@ -440,33 +455,32 @@ final class RemoteHosts {
     }
 
     /// Log in, then check and install the server, for the sessions that
-    /// wait. The end wakes them.
-    private func prepare(_ destination: String, host: String) {
+    /// wait. The end wakes them. With `prompts` false, nothing asks the
+    /// user: no login question, no install, no plain shell.
+    private func prepare(_ destination: String, prompts: Bool) {
         let token = UUID()
         let task = Task { [weak self] in
             guard let self else { return }
-            let result: Result<Host, PrepareFailure>
+            let result: Result<Host, Error>
             do {
-                result = try await .success(open(destination))
+                result = try await .success(open(destination, prompts: prompts))
             } catch {
                 logger.info("remote host \(destination, privacy: .public): \(String(describing: error), privacy: .public)")
-                result = .failure(PrepareFailure(message: RemotePaneText.connectFailure(error, host: host)))
+                result = .failure(error)
             }
             finish(destination, token: token, result)
         }
-        hosts[destination] = .preparing(token, task)
+        hosts[destination] = .preparing(token, task, prompts: prompts)
     }
 
-    private struct PrepareFailure: Error {
-        var message: String
-    }
-
-    private func open(_ destination: String) async throws -> Host {
-        let route = try await connections.connect(destination)
+    private func open(_ destination: String, prompts: Bool) async throws -> Host {
+        let route = try await connections.connect(destination, prompts: prompts)
         do {
-            let link = try await servers.connect(destination, install: !declined.contains(destination))
+            let link = try await servers.connect(destination, login: prompts, install: prompts && !declined.contains(destination))
             return .ready(link)
         } catch let failure as RemoteServers.Failure {
+            // A quiet try leaves the choice of plain shells to the user.
+            guard prompts else { throw failure }
             switch failure {
             case .declined:
                 decline(destination)
@@ -485,9 +499,9 @@ final class RemoteHosts {
         }
     }
 
-    private func finish(_ destination: String, token: UUID, _ result: Result<Host, PrepareFailure>) {
+    private func finish(_ destination: String, token: UUID, _ result: Result<Host, Error>) {
         let sessions = waiting.removeValue(forKey: destination) ?? []
-        guard case let .preparing(current, _) = hosts[destination], current == token else {
+        guard case let .preparing(current, _, _) = hosts[destination], current == token else {
             // Another step replaced this prepare (an install from Settings).
             // Its waiting panes ask again and find that step's state.
             if case let .success(.ready(link)) = result { link.close() }
@@ -506,11 +520,10 @@ final class RemoteHosts {
                 configuration.linkReady(destination)
                 adoptRoaming(destination, over: link)
             }
-        case let .failure(failure):
+        case .failure:
             hosts[destination] = nil
             for session in sessions {
                 lost.insert(session)
-                messages[session] = RemotePaneText.withRetry(failure.message)
             }
         }
         for session in sessions {
@@ -607,7 +620,7 @@ final class RemoteHosts {
         created[session] = nil
         creating[session] = nil
         lost.remove(session)
-        messages[session] = nil
+        quiet.remove(session)
         for destination in waiting.keys {
             waiting[destination]?.remove(session)
         }
@@ -711,53 +724,14 @@ final class RemoteHosts {
 }
 
 /// The lines that a remote pane shows (0057). They stay English, as all
-/// text that Macterm writes into a pane. Pure.
+/// text that Macterm writes into a pane. A failed connect writes no line:
+/// the pane's badge shows it. Pure.
 enum RemotePaneText {
-    /// A failed connect, in Macterm's words for ssh's three common errors,
-    /// else ssh's last line, cleaned (Ethan, 2026-11-09).
-    static func connectFailure(_ error: Error, host: String) -> String {
-        switch error {
-        case let failure as SSHConnections.Failure:
-            switch failure {
-            case let .loginFailed(line): loginFailure(line, host: host)
-            case .cancelled: "You cancelled the login to \(host)."
-            case let .configUnreadable(line): "ssh cannot read its configuration: \(HostCheck.clean(line))"
-            default: "Macterm cannot connect to \(host): \(failure.description)."
-            }
-        case RemoteServers.Failure.windowsHost:
-            "\(host) runs Windows. Macterm does not support Windows hosts."
-        case let failure as RemoteServers.Failure:
-            "Macterm cannot start its server on \(host): \(failure.description)."
-        default:
-            "Macterm cannot connect to \(host)."
-        }
-    }
-
-    static func loginFailure(_ line: String, host: String) -> String {
-        if line.contains("Could not resolve hostname") { return "No host is named \(host)." }
-        if line.contains("Operation timed out") || line.contains("Connection timed out") { return "\(host) does not answer." }
-        if line.contains("Connection refused") { return "\(host) refuses the connection." }
-        let cleaned = HostCheck.clean(line)
-        return cleaned.isEmpty ? "The login to \(host) failed." : cleaned
-    }
-
-    static func withRetry(_ line: String) -> String {
-        "\(line)\nPress a key to try again."
-    }
-
-    static func serverSilent(host: String) -> String {
-        "The server on \(host) does not answer."
-    }
-
     /// The bundle has no host scripts, or the folder is too long for one
     /// argument.
     static let noPlainShell = "Macterm cannot start a shell in this folder."
 
     static func plainShell(host: String) -> String {
         "Macterm has no server on \(host). This shell stops when the connection stops."
-    }
-
-    static func linkStopped(host: String) -> String {
-        "The connection to \(host) stopped. Press a key to connect again."
     }
 }

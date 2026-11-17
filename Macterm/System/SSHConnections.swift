@@ -120,7 +120,8 @@ final class SSHConnections {
     /// The ssh of each login that has not finished. After the login, the
     /// master is in the background and is no child of Macterm.
     private var loggingIn: [String: Process] = [:]
-    private var connecting: [String: Task<Route, Error>] = [:]
+    /// The login in flight for each host, and whether it may ask the user.
+    private var connecting: [String: (task: Task<Route, Error>, prompts: Bool)] = [:]
     /// Masters whose login the user cancelled.
     private var cancelled: Set<pid_t> = []
     /// New logins for each host in this run.
@@ -142,14 +143,23 @@ final class SSHConnections {
     /// The route to `destination`, after the login if there is none yet.
     /// Calls for one host at the same time share one login. With `login`
     /// false, only a connection that is up: it throws `notConnected` and
-    /// never asks the user (a pane close ends its session with it).
-    func connect(_ destination: String, login: Bool = true) async throws -> Route {
+    /// never asks the user (a pane close ends its session with it). With
+    /// `prompts` false, the login runs in `BatchMode` with no askpass: it
+    /// succeeds only when it needs no answer from the user (a key with no
+    /// passphrase, an agent). An automatic reconnect logs in so.
+    func connect(_ destination: String, login: Bool = true, prompts: Bool = true) async throws -> Route {
         guard Self.isValidDestination(destination) else { throw Failure.invalidDestination(destination) }
         guard login else { return try await liveRoute(destination) }
-        if let task = connecting[destination] { return try await task.value }
-        let task = Task { try await self.open(destination) }
-        connecting[destination] = task
-        defer { connecting[destination] = nil }
+        while let busy = connecting[destination] {
+            if busy.prompts || !prompts { return try await busy.task.value }
+            // A quiet login cannot answer a caller that may ask: when it
+            // fails, that caller logs in itself.
+            if let route = try? await busy.task.value { return route }
+            if connecting[destination]?.task == busy.task { connecting[destination] = nil }
+        }
+        let task = Task { try await self.open(destination, prompts: prompts) }
+        connecting[destination] = (task, prompts)
+        defer { if connecting[destination]?.task == task { connecting[destination] = nil } }
         return try await task.value
     }
 
@@ -366,7 +376,7 @@ final class SSHConnections {
 
     // MARK: - Connect
 
-    private func open(_ destination: String) async throws -> Route {
+    private func open(_ destination: String, prompts: Bool) async throws -> Route {
         let config: String
         do {
             config = try await resolvedConfig(destination)
@@ -383,7 +393,7 @@ final class SSHConnections {
             logger.debug("ssh: host=\(destination, privacy: .public) uses the user's master")
             return Route(controlPath: path, isUsersOwn: true)
         }
-        return try await startConnection(destination, path: own)
+        return try await startConnection(destination, path: own, prompts: prompts)
     }
 
     /// The output of `ssh -G`. A config that ssh cannot read fails here, as
@@ -463,7 +473,7 @@ final class SSHConnections {
         Array(configuration.ssh.dropFirst()) + configuration.options + arguments
     }
 
-    private func startConnection(_ destination: String, path: String) async throws -> Route {
+    private func startConnection(_ destination: String, path: String, prompts: Bool) async throws -> Route {
         guard SSHControlPath.fitsSocket(path) else { throw Failure.controlPathTooLong(path) }
         try FileManager.default.createDirectory(
             at: configuration.controlDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
@@ -481,19 +491,9 @@ final class SSHConnections {
         guard let executable = configuration.ssh.first else { throw Failure.cannotStart("no ssh") }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = sshArguments([
-            // `-S`, not `-o ControlPath=`: ssh splits an `-o` value at
-            // spaces, and "Macterm Debug" has one.
-            "-M", "-N",
-            "-S", path,
-            "-o", "ControlPersist=yes",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=3",
-            "-o", "ConnectTimeout=10",
-            "--", destination,
-        ])
+        process.arguments = sshArguments(Self.connectionArguments(destination, path: path, prompts: prompts))
         var environment = ProcessInfo.processInfo.environment.merging(configuration.environment) { _, new in new }
-        if let askpass = configuration.askpass {
+        if prompts, let askpass = configuration.askpass {
             environment["SSH_ASKPASS"] = askpass
             environment["SSH_ASKPASS_REQUIRE"] = "force"
         }
@@ -558,6 +558,22 @@ final class SSHConnections {
         logins[destination] = count
         logger.info("ssh login: host=\(destination, privacy: .public) logins=\(count, privacy: .public)")
         return Route(controlPath: path, isUsersOwn: false)
+    }
+
+    /// The arguments of a master. With `prompts` false, `BatchMode` refuses
+    /// every question of the login.
+    nonisolated static func connectionArguments(_ destination: String, path: String, prompts: Bool) -> [String] {
+        // `-S`, not `-o ControlPath=`: ssh splits an `-o` value at spaces,
+        // and "Macterm Debug" has one.
+        ["-M", "-N", "-S", path]
+            + (prompts ? [] : ["-o", "BatchMode=yes"])
+            + [
+                "-o", "ControlPersist=yes",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "ConnectTimeout=10",
+                "--", destination,
+            ]
     }
 
     /// `[user@]host` and nothing that ssh could read as an option or that a

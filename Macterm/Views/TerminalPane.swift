@@ -77,10 +77,10 @@ struct TerminalPane: View {
             }
             .overlay(alignment: .topTrailing) {
                 // The pane's badges, one row in the trailing corner, in this
-                // order from the left: Read-Only, Copy Mode, Zoomed, then the
-                // lock. The Zoomed pill is here too, not on the tab: a zoomed
-                // pane is the only pane on screen, and one row cannot overlap
-                // itself.
+                // order from the left: Read-Only, Copy Mode, Outdated, Zoomed,
+                // Disconnected, then the lock. The Zoomed pill is here too, not
+                // on the tab: a zoomed pane is the only pane on screen, and one
+                // row cannot overlap itself.
                 HStack(spacing: 6) {
                     // Read-Only pill: libghostty sends no input to the pty.
                     // A click turns read-only off.
@@ -121,6 +121,18 @@ struct TerminalPane: View {
                     if isZoomed {
                         ZoomIndicator(onExit: onZoomRequest)
                             .transition(.opacity)
+                    }
+                    // A remote pane whose connection stopped or failed. One
+                    // badge for every reason; a click does nothing. The app
+                    // connects again by itself, and a key connects at once.
+                    if pane.isRemoteLinkLost {
+                        StatusBadge(
+                            title: String(
+                                localized: "Disconnected",
+                                comment: "The badge of a remote pane whose connection stopped or failed"
+                            ),
+                            systemImage: "network.slash"
+                        )
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -165,6 +177,24 @@ private struct LinkHoverBanner: View {
 
 /// Lock badge shown while secure keyboard input is active for the focused
 /// pane (`macos-secure-input-indication`).
+/// A state of the pane that a click cannot change, in the chrome of the
+/// flat `ModePill`.
+private struct StatusBadge: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(MactermTheme.fgMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(MactermTheme.bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(MactermTheme.border))
+            .allowsHitTesting(false)
+    }
+}
+
 private struct SecureInputBadge: View {
     var body: some View {
         Image(systemName: "lock.fill")
