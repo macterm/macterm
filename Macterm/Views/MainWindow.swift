@@ -1175,8 +1175,7 @@ struct ZoomIndicator: View {
 }
 
 /// A mode that the user can leave with one click, as a pill in a corner of
-/// the terminal: Zoomed, Copy Mode. On macOS 26 it is the native glass
-/// capsule button. Below that, it is a flat badge in the theme colors.
+/// the terminal: Zoomed, Copy Mode. A click leaves the mode.
 struct ModePill: View {
     let title: String
     let systemImage: String
@@ -1184,50 +1183,56 @@ struct ModePill: View {
     let action: () -> Void
 
     var body: some View {
-        if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-            Button(action: action) { label }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
-                .help(help)
-        } else {
-            Button(action: action) {
-                label
-                    .modifier(FlatPillChrome())
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+        PanePill(action: action) { Label(title, systemImage: systemImage) }
             .help(help)
-        }
-    }
-
-    private var label: some View {
-        Label(title, systemImage: systemImage)
     }
 }
 
 /// A state of a pane that a click cannot change, as a pill in the same
-/// corner as `ModePill`, with no hit target: the glass capsule on macOS 26,
-/// below that the flat badge.
+/// corner as `ModePill`, with no hit target.
 struct StatusPill<Icon: View>: View {
     let title: String
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
-        // An animated change of the title morphs the text in place.
-        let label = Label { Text(title).contentTransition(.interpolate) } icon: { icon() }
+        PanePill {
+            // An animated change of the title morphs the text in place.
+            Label { Text(title).contentTransition(.interpolate) } icon: { icon() }
+        }
+    }
+}
+
+/// The one chrome of every badge in a pane's corner, so that all of them
+/// have the same height, font, padding and corner: the native glass capsule
+/// button on macOS 26, below that the flat badge in the theme colors. With
+/// no action, the pill takes no clicks.
+struct PanePill<Content: View>: View {
+    /// The height of every pill's content. The glass button sizes to its
+    /// label, and the icons have different heights (19 to 21 pt pills).
+    static var contentHeight: CGFloat { 15 }
+
+    var action: (() -> Void)?
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
         Group {
             if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                label
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .glassEffect(.regular, in: .capsule)
+                Button(action: action ?? {}) { content().frame(height: Self.contentHeight) }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
             } else {
-                label.modifier(FlatPillChrome())
+                Button(action: action ?? {}) {
+                    content()
+                        .frame(height: Self.contentHeight)
+                        .modifier(FlatPillChrome())
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
-        .allowsHitTesting(false)
+        .allowsHitTesting(action != nil)
+        .accessibilityRemoveTraits(action == nil ? .isButton : [])
     }
 }
 

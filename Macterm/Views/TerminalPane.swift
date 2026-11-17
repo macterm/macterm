@@ -179,7 +179,7 @@ private struct LinkHoverBanner: View {
 
 /// The badge of a remote pane whose connection is lost. One pill for both
 /// states, so that a change of state animates in place.
-private struct RemoteLinkPill: View {
+struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 
     var body: some View {
@@ -210,17 +210,14 @@ private struct RemoteLinkPill: View {
 }
 
 /// Lock badge shown while secure keyboard input is active for the focused
-/// pane (`macos-secure-input-indication`).
-private struct SecureInputBadge: View {
+/// pane (`macos-secure-input-indication`). An icon only, in the chrome of
+/// the other badges.
+struct SecureInputBadge: View {
     var body: some View {
-        Image(systemName: "lock.fill")
-            .font(.caption)
-            .foregroundStyle(MactermTheme.fgMuted)
-            .padding(5)
-            .background(MactermTheme.bg, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MactermTheme.border))
-            .allowsHitTesting(false)
-            .help("Secure keyboard input is active")
+        PanePill {
+            Label(String(localized: "Secure keyboard input is active"), systemImage: "lock.fill")
+                .labelStyle(.iconOnly)
+        }
     }
 }
 
