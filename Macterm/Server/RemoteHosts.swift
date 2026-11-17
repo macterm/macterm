@@ -308,11 +308,12 @@ final class RemoteHosts {
 
     /// Install the server on a host where the user declined it, after the
     /// user's click. New panes then get sessions; a plain shell stays plain.
+    /// A second decline keeps the host plain, so its sidebar mark stays.
     func installServer(_ destination: String) async throws {
         undecline(destination)
         if case let .preparing(_, task, _) = hosts[destination] { await task.value }
         drop(destination)
-        _ = try await connections.connect(destination)
+        let route = try await connections.connect(destination)
         do {
             let link = try await servers.connect(destination)
             if case let .ready(old) = hosts[destination] { old.close() }
@@ -321,6 +322,7 @@ final class RemoteHosts {
             adoptRoaming(destination, over: link)
         } catch RemoteServers.Failure.declined {
             decline(destination)
+            hosts[destination] = .plain(route)
             throw RemoteServers.Failure.declined
         }
     }

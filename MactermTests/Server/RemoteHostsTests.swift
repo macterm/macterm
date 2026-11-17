@@ -345,6 +345,9 @@ struct RemoteHostsTests {
             #expect(host.asked == ["box"])
             #expect(fixture.hosts.declined == ["box"])
             #expect(fixture.hosts.plainDestinations == ["box"])
+            // A second decline from Settings keeps the host plain.
+            await #expect(throws: RemoteServers.Failure.self) { try await fixture.hosts.installServer("box") }
+            #expect(fixture.hosts.plainDestinations == ["box"])
         }
     }
 
