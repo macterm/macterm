@@ -12,6 +12,20 @@ struct WidgetsSettings: View {
     var body: some View {
         Form {
             Section {
+                SettingsInfoPanel(
+                    symbol: "widget.small",
+                    title: String(localized: "Widgets", comment: "Settings pane"),
+                    caption: String(
+                        localized: """
+                        A widget is a terminal on your desktop, next to the system widgets. Its shell keeps \
+                        running when you quit Macterm.
+                        """
+                    ),
+                    docs: .desktopWidgets
+                )
+            }
+
+            Section {
                 if appState.desktopWidgets.isEmpty {
                     Text("No widgets.")
                         .foregroundStyle(.secondary)
@@ -33,10 +47,10 @@ struct WidgetsSettings: View {
                     .truncationMode(.middle)
                     .disabled(!exists)
                 }
-                Text("A widget is a terminal on your desktop.")
-                    .settingsSecondaryText()
             } header: {
-                DocsSectionHeader("Widgets", docs: .desktopWidgets) {
+                HStack {
+                    Text("Widgets")
+                    Spacer()
                     Button {
                         appState.createDesktopWidget()
                     } label: {

@@ -21,13 +21,24 @@ struct PasswordsSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: $enabled) {
-                    Text("Enable password manager")
-                    Text(Self.enabledDescription).settingsDescription()
-                }
-                .onChange(of: enabled) { _, v in
-                    Preferences.shared.passwordManagerEnabled = v
-                }
+                SettingsInfoPanel(
+                    symbol: "key",
+                    title: String(localized: "Password Manager", comment: "Settings pane"),
+                    caption: String(
+                        localized: """
+                        Macterm offers to save a password that you type at a password prompt after it works, and fills it in the \
+                        next time. It keeps passwords in your login keychain.
+                        """
+                    ),
+                    docs: .passwords
+                )
+            }
+
+            Section {
+                Toggle("Enable password manager", isOn: $enabled)
+                    .onChange(of: enabled) { _, v in
+                        Preferences.shared.passwordManagerEnabled = v
+                    }
 
                 Group {
                     Picker(selection: $authentication) {
@@ -44,8 +55,6 @@ struct PasswordsSettings: View {
                     }
                 }
                 .disabled(!enabled)
-            } header: {
-                DocsSectionHeader("Password Manager", docs: .passwords)
             }
 
             Section {
@@ -106,13 +115,9 @@ struct PasswordsSettings: View {
         }
     }
 
-    private static let enabledDescription = String(localized: """
-    Offers to save a password that you type at a password prompt after it works, \
-    and fills it in the next time that the prompt appears.
-    """)
     private static let authenticationDescription = String(localized: """
     Asks for Touch ID, or your login password, before it fills in \
-    or shows a saved password. Macterm stores passwords in your login keychain.
+    or shows a saved password.
     """)
 
     private var filtered: [SavedPassword] {

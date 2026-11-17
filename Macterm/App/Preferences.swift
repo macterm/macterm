@@ -555,6 +555,15 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Keys.remoteServerDeclines) }
     }
 
+    /// Whether the roaming link (design/009) may be used. On by default: it is
+    /// the normal path where UDP works, with ssh as the fallback. A host turns
+    /// it off for itself with `MACTERM_LINK=off` in the environment of its
+    /// server. Read-through: nothing in the UI observes it.
+    var remoteRoamingLink: Bool {
+        get { defaults.object(forKey: Keys.remoteRoamingLink) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.remoteRoamingLink) }
+    }
+
     /// The `CFBundleShortVersionString` of the previous launch. `UpdateNotice`
     /// compares it with the running version to show the update toast. Like
     /// `hasSeededFirstRun`: nothing in the UI reads it, so it's a read-through.
@@ -1285,6 +1294,7 @@ final class Preferences {
         static let endedV1Sessions = "macterm.v2.endedV1Sessions"
         static let remoteServerConsents = "macterm.remote.serverConsents"
         static let remoteServerDeclines = "macterm.remote.serverDeclines"
+        static let remoteRoamingLink = "macterm.remote.roamingLink"
         static let lastLaunchedVersion = "macterm.lastLaunchedVersion"
         static let migrationV2GhosttyConfigOwned = "macterm.migration.v2_ghostty_config_owned"
         static let migrationRetiredToggleKeys = "macterm.migration.retired_toggle_keys"

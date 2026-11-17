@@ -1206,10 +1206,10 @@ extension View {
 private struct FullDiskAccessBanner: View {
     var body: some View {
         Section {
-            Label {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
+                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Full Disk Access is off")
-                        .font(.system(size: 13, weight: .semibold))
                     Text("""
                     macOS asks for each folder when a terminal command reads Documents, Downloads, \
                     or other protected places. One Full Disk Access grant covers all of them.
@@ -1221,11 +1221,9 @@ private struct FullDiskAccessBanner: View {
                         }
                     }
                 }
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(MactermTheme.warning)
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
         }
     }
 }
@@ -1240,10 +1238,10 @@ private struct FullDiskAccessBanner: View {
 private struct NotificationPermissionBanner: View {
     var body: some View {
         Section {
-            Label {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
+                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Macterm has no notification permission")
-                        .font(.system(size: 13, weight: .semibold))
                     Text("Your Ghostty config asks for notifications.")
                         .settingsSecondaryText()
                     if let url = NotificationHandler.settingsURL {
@@ -1252,11 +1250,9 @@ private struct NotificationPermissionBanner: View {
                         }
                     }
                 }
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(MactermTheme.warning)
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
         }
     }
 }
@@ -1669,17 +1665,25 @@ private struct QuickTerminalSettings: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent {
+                SettingsInfoPanel(
+                    symbol: "rectangle.bottomthird.inset.filled",
+                    title: String(localized: "Quick Terminal", comment: "Settings pane"),
+                    caption: String(
+                        localized: """
+                        A terminal that drops down over any app when you press its shortcut. Its shells keep \
+                        running when you quit Macterm.
+                        """
+                    ),
+                    docs: .quickTerminal
+                )
+            }
+
+            Section {
+                LabeledContent("Shortcut") {
                     Text(HotkeyRegistry.displayString(
                         for: HotkeyRegistry.selectedShortcutString(for: .toggleQuickTerminal)
                     ))
-                } label: {
-                    Text("Shortcut")
-                    Text("Works when Macterm is not the active app.")
-                        .settingsDescription()
                 }
-            } header: {
-                DocsSectionHeader("Quick Terminal", docs: .quickTerminal)
             }
 
             Section {

@@ -568,6 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard changed, path.status == .satisfied else { return }
             DispatchQueue.main.async {
+                RemoteHosts.shared.networkDidChange()
                 self?.appState?.reconnectDroppedRemotePanes(trigger: .network)
             }
         }
@@ -584,6 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func scheduleWakeReconnectBurst() {
         for delay in Self.wakeReconnectDelays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                RemoteHosts.shared.networkDidChange()
                 self?.appState?.reconnectDroppedRemotePanes(trigger: .wake)
             }
         }

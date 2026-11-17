@@ -118,18 +118,23 @@ final class RemoteServers {
     /// Its parts are thread-safe and never change.
     final class Link: @unchecked Sendable {
         let connection: ServerConnection
-        let process: Process
+        /// The ssh process of the proxy. Nil for a roaming link.
+        let process: Process?
         /// This connect installed the server.
         let installed: Bool
         /// The ssh commands that this connect ran over the master.
         let commands: Int
 
-        init(connection: ServerConnection, process: Process, installed: Bool, commands: Int) {
+        init(connection: ServerConnection, process: Process?, installed: Bool, commands: Int, isRoaming: Bool = false) {
+            self.isRoaming = isRoaming
             self.connection = connection
             self.process = process
             self.installed = installed
             self.commands = commands
         }
+
+        /// A roaming link (design/009), not the ssh connection.
+        let isRoaming: Bool
 
         private let watchLock = NSLock()
         private var watcher: Task<Void, Never>?
@@ -167,7 +172,7 @@ final class RemoteServers {
             watcher?.cancel()
             watchLock.unlock()
             connection.close()
-            if process.isRunning { process.terminate() }
+            if let process, process.isRunning { process.terminate() }
         }
     }
 
