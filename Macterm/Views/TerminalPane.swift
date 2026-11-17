@@ -179,9 +179,7 @@ private struct LinkHoverBanner: View {
 }
 
 /// The glass pills of one badge row share one `GlassEffectContainer`, so
-/// that they sample what is behind them as one. With no container and a
-/// `blurReplace` exit, a pill that went away flashed a dark band behind the
-/// row (the ui-review of PR 870).
+/// that they sample what is behind them as one.
 private struct PanePillRow: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *), WindowAppearance.glassSupported {
