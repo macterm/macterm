@@ -2280,6 +2280,23 @@
         }
       }
     },
+    "Click anywhere to move the cursor." : {
+      "comment" : "Text in the cursor preview of Settings → Animations",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아무 곳이나 클릭하여 커서를 이동하십시오."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按任意位置以移动光标。"
+          }
+        }
+      }
+    },
     "Click to work here" : {
       "localizations" : {
         "ko" : {
@@ -2857,6 +2874,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "光标"
+          }
+        }
+      }
+    },
+    "Cursor preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "커서 미리보기"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "光标预览"
           }
         }
       }
@@ -8683,6 +8716,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已存储截图"
+          }
+        }
+      }
+    },
+    "Scroll here with the wheel or the trackpad." : {
+      "comment" : "Text in the scroll preview of Settings → Animations",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "휠이나 트랙패드로 여기를 스크롤하십시오."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此处用滚轮或触控板滚动。"
+          }
+        }
+      }
+    },
+    "Scroll preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크롤 미리보기"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动预览"
           }
         }
       }

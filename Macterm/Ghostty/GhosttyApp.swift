@@ -236,6 +236,9 @@ final class GhosttyApp {
         for view in GhosttyTerminalNSView.allLiveViews() {
             view.syncColorScheme()
         }
+        for view in PreviewSurfaceView.allLiveViews() {
+            view.syncColorScheme()
+        }
         // Stale until those re-emits land (and no surface may be alive to
         // emit) — fall back to the theme file meanwhile.
         resolvedColors = nil
@@ -290,11 +293,9 @@ final class GhosttyApp {
         // Also update each existing surface so changes take effect immediately
         if let old = disabledCursorConfig { ghostty_config_free(old) }
         disabledCursorConfig = nil
-        for view in GhosttyTerminalNSView.allLiveViews() {
-            if let surface = view.surface {
-                let disabled = view.isCursorDisabled ? self.config(disabledCursor: true, base: newConfig) : nil
-                ghostty_surface_update_config(surface, disabled ?? newConfig)
-            }
+        for (surface, cursorDisabled) in liveSurfaces() {
+            let disabled = cursorDisabled ? self.config(disabledCursor: true, base: newConfig) : nil
+            ghostty_surface_update_config(surface, disabled ?? newConfig)
         }
         if let old = config { ghostty_config_free(old) }
         config = newConfig
@@ -353,11 +354,9 @@ final class GhosttyApp {
     func softReloadConfig() {
         guard let app, let config else { return }
         ghostty_app_update_config(app, config)
-        for view in GhosttyTerminalNSView.allLiveViews() {
-            if let surface = view.surface {
-                let disabled = view.isCursorDisabled ? self.config(disabledCursor: true) : nil
-                ghostty_surface_update_config(surface, disabled ?? config)
-            }
+        for (surface, cursorDisabled) in liveSurfaces() {
+            let disabled = cursorDisabled ? self.config(disabledCursor: true) : nil
+            ghostty_surface_update_config(surface, disabled ?? config)
         }
     }
 
@@ -369,6 +368,15 @@ final class GhosttyApp {
             disabledCursorConfig = loadConfig(extraPath: MactermConfig.shared.disabledCursorURL.path).0
         }
         return disabledCursorConfig ?? base ?? config
+    }
+
+    /// Every live surface: the panes, and the previews of Settings →
+    /// Animations (`PreviewSurfaceView`), which take each config too. A pane
+    /// whose connection is lost takes the disabled cursor
+    /// (`GhosttyTerminalNSView.isCursorDisabled`).
+    private func liveSurfaces() -> [(surface: ghostty_surface_t, cursorDisabled: Bool)] {
+        GhosttyTerminalNSView.allLiveViews().compactMap { view in view.surface.map { ($0, view.isCursorDisabled) } }
+            + PreviewSurfaceView.allLiveViews().compactMap { view in view.surface.map { ($0, false) } }
     }
 
     /// Reload and surface any user-visible errors (missing file, parse errors)

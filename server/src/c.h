@@ -1,7 +1,13 @@
 #ifndef MY_C_H
 #define MY_C_H
 
+// POSIX_SPAWN_SETSID in glibc's spawn.h.
+#if defined(__linux__)
+  #define _GNU_SOURCE
+#endif
+
 #include <stdlib.h>
+#include <spawn.h>
 #include <unistd.h>
 #include <termios.h>
 

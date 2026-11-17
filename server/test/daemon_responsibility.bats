@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 # macOS attributes privacy-gated operations (Local Network, TCC) to a process's
 # *responsible process*, a value fixed at spawn and inherited from the parent.
-# The session re-execs itself disclaimed (daemonize.reexecDisclaimed) so that it,
-# and not the process that ran `zmx session`, is the responsible process for
-# everything in the session -- and stays so after that process exits. These
+# The server spawns the session disclaimed (spawnSession in server.zig) so that
+# it, and not the server or the app, is the responsible process for everything
+# in the session -- and stays so after they exit. These
 # tests pin that contract. The semantics are Darwin-only, so they skip elsewhere.
 
 load test_helper
@@ -53,19 +53,4 @@ responsible_for() {
   # ...so the session's shell is attributed to the session, not to this test's own root.
   [ "$(responsible_for "$shell")" -eq "$session" ]
   [ "$(responsible_for $$)" -ne "$session" ]
-}
-
-@test "macos: the re-exec's state never reaches the session" {
-  [[ "$(uname)" == "Darwin" ]] || skip "the re-exec only happens on macOS"
-
-  "$ZMX" session leak-test -- sh -c "env > '$RT/env'; exec sleep 30"
-  local i=0
-  until [[ -s "$RT/env" ]]; do
-    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
-    sleep 0.1
-  done
-  run grep ZMX_DAEMON_ "$RT/env"
-  [ "$status" -ne 0 ]
-  # The re-exec happened: the variables are a test of nothing otherwise.
-  pgrep -f "__session leak-test" >/dev/null
 }

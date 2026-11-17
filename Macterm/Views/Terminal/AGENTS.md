@@ -79,6 +79,14 @@ Read-only is a mode of libghostty. The control is the **Read-Only Mode** `AppCom
 
 This is the motion pane. It is directly under Appearance in the sidebar of Settings. It has six toggles. **Smooth scrolling**, **Snap to whole row** and **Animate splits** ship **on**. The three cursor effects are opt-in. The pane was Settings → Experimental until the smooth-scrolling and split toggles graduated. Anything that is still settling in belongs here too, off by default, until it graduates.
 
+- **The Scrolling and Cursor groups each end with a live preview** (`PreviewSurfaceView`). The scroll preview has 120 numbered rows to scroll with the wheel or the trackpad, and no cursor. In the cursor preview, a click moves the cursor to the cell under the pointer.
+  - Each preview is a real libghostty surface, because the renderer draws the effects. A copy in SwiftUI would show a look that is not the real one.
+  - The surface is manual (`manual_io`), with no pty, shell or session. Macterm feeds the text (`ghostty_surface_feed`), and a click feeds a cursor position (CUP). The writes of the surface go nowhere. Nothing is persisted.
+  - Its userdata is nil, so each action of `GhosttyCallbacks` that needs a view returns early. It is not a `GhosttyTerminalNSView`, so no tab, window, quit prompt or pane list counts it.
+  - `GhosttyApp` gives it every config reload and color scheme (`liveSurfaces`). A toggle therefore applies at once, and the cursor shows the `cursor-style` and `cursor-style-blink` of the user's config.
+  - It is focused while the Settings window is key, because the cursor glides and blinks only on a focused surface. Its size goes through `SurfaceSizeGate`, and its occlusion through `SurfaceVisibility`, as for a pane.
+  - A click resolves to a cell from the IME point of the cursor (`PreviewSurfaceGrid`), so the window padding of the config needs no read of its own. The click first feeds the position of the cursor again, because a wrap or a reflow can move the cursor.
+
 - **Smooth scrolling** is fork patch 0005 (`0005-smooth-scroll.patch`). It is behind the fork key `smooth-scroll`. The toggle writes the key into the overrides through `MactermConfig.Animations` (`Preferences.smoothScrolling`, default on). The default of the ghostty key itself stays off.
   - `scrollCallback` of libghostty already accumulates precise trackpad deltas in pixels, and it commits whole rows. With the key on, the patch does these things:
     1. It keeps the sub-row remainder on `Screen.viewport_pixel_offset`.
