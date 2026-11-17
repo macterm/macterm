@@ -1617,7 +1617,7 @@
         }
       }
     },
-    "Automatic Updates" : {
+    "Automatic updates" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -4773,6 +4773,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 无法输入该工作树的路径。"
+          }
+        }
+      }
+    },
+    "Macterm checks for updates each day. It downloads an update automatically and installs it when you quit Macterm." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm은 매일 업데이트를 확인합니다. 업데이트를 자동으로 다운로드하고 Macterm을 종료할 때 설치합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 每天检查更新。它会自动下载更新，并在退出 Macterm 时安装。"
           }
         }
       }
@@ -11362,22 +11378,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要更新存储的密码吗？"
-          }
-        }
-      }
-    },
-    "Update automatically" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "자동으로 업데이트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动更新"
           }
         }
       }

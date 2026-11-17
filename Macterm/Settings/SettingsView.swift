@@ -2542,30 +2542,13 @@ private struct UpdatesSettings: View {
     /// tracks `canCheckForUpdates`/`updateAvailable` reads in `body`).
     private var updater: Updater { .shared }
     @State
-    private var automaticallyDownloads: Bool = Updater.shared.automaticallyDownloadsUpdates
-    @State
     private var updateChannel: String = Updater.shared.updateChannel.rawValue
 
     var body: some View {
         Form {
-            Section("Automatic Updates") {
-                Toggle("Update automatically", isOn: $automaticallyDownloads)
-                    .onChange(of: automaticallyDownloads) { _, v in
-                        updater.automaticallyDownloadsUpdates = v
-                    }
-
-                HStack {
-                    Spacer()
-                    Button("Check for Updates Now") {
-                        updater.checkForUpdates()
-                    }
-                    .disabled(!updater.canCheckForUpdates)
-                }
-            }
-
-            // Deliberately its own section: the channel governs which updates
-            // are visible to any check, including a manual "Check for Updates
-            // Now".
+            // The channel governs which updates any check can see, so the
+            // manual check is in the same section. Updates have no toggle:
+            // `UpdatePolicy` keeps them automatic.
             Section {
                 Picker(selection: $updateChannel) {
                     ForEach(UpdateChannel.allCases) { option in
@@ -2578,6 +2561,17 @@ private struct UpdatesSettings: View {
                 }
                 .onChange(of: updateChannel) { _, v in
                     updater.updateChannel = UpdateChannel(rawValue: v) ?? .stable
+                }
+
+                LabeledContent {
+                    Button("Check for Updates Now") {
+                        updater.checkForUpdates()
+                    }
+                    .disabled(!updater.canCheckForUpdates)
+                } label: {
+                    Text("Automatic updates")
+                    Text("Macterm checks for updates each day. It downloads an update automatically and installs it when you quit Macterm.")
+                        .settingsDescription()
                 }
             } header: {
                 Text("Channel")
