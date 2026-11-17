@@ -20,24 +20,25 @@ private func oid(_ object: AnyObject) -> String {
 /// ```
 /// SurfaceScrollView : NSScrollView
 ///   └─ documentView : NSView          (blank, height = total rows * cellHeight)
-///        └─ GhosttyTerminalNSView      (pinned to the visible rect)
+///        └─ ScrollbarSurface           (pinned to the visible rect)
 /// ```
 ///
 /// Wheel/trackpad events hit the frontmost surface view and go straight to
-/// libghostty, exactly as Ghostty.app sends them (`GhosttyTerminalNSView
-/// .scrollWheel`); this view never handles them, so scrolling feels like
+/// libghostty, exactly as Ghostty.app sends them (`ScrollbarSurface
+/// .forwardScrollWheel`); this view never handles them, so scrolling feels like
 /// Ghostty's and the user's `mouse-scroll-multiplier` governs it. (An
 /// iTerm2-style row accumulator lived here from #102 until it was removed in
 /// favor of ghostty's own path.) Scrollback geometry flows **into** this view
 /// via the `GHOSTTY_ACTION_SCROLLBAR` action (`onScrollbarUpdate`), and
 /// scroller drags flow **out** via the `scroll_to_row:<n>` keybind action,
 /// plus — with smooth scrolling on — the sub-row remainder of the drag as a
-/// precision scroll (`GhosttyTerminalNSView.applySubRowScrollOffset`), since
+/// precision scroll (`ScrollbarSurface.applySubRowScrollOffset`), since
 /// `scroll_to_row` alone can only land on whole rows.
 final class SurfaceScrollView: NSScrollView {
-    /// The Metal terminal surface. Owned by `Pane`; we just re-parent it into
+    /// The Metal terminal surface: a pane's view (owned by `PaneSurface`), or
+    /// the scroll preview of Settings → Animations. We just re-parent it into
     /// our document view.
-    let surfaceView: GhosttyTerminalNSView
+    let surfaceView: any ScrollbarSurface
 
     /// The blank spacer whose height represents the full scrollback.
     private let spacer = NSView()
@@ -131,7 +132,7 @@ final class SurfaceScrollView: NSScrollView {
         }
     }
 
-    init(surfaceView: GhosttyTerminalNSView) {
+    init(surfaceView: any ScrollbarSurface) {
         self.surfaceView = surfaceView
         super.init(frame: .zero)
 

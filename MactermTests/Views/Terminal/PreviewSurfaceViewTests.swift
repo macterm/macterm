@@ -1,9 +1,9 @@
-import Foundation
+import AppKit
 @testable import Macterm
 import Testing
 
-/// The pure parts of the Settings → Animations previews: the cell under a
-/// click, and the fixed text.
+/// The Settings → Animations previews: the cell under a click, the fixed
+/// text, and the frame that each preview sits in.
 @MainActor
 struct PreviewSurfaceViewTests {
     /// Cells of 8 × 16 pt, with the padding of 2 pt on the left and 4 pt on
@@ -64,5 +64,27 @@ struct PreviewSurfaceViewTests {
         let text = PreviewSurfaceText.cursor()
         #expect(text.bytes.hasSuffix("\u{1B}[2;1H"))
         #expect(text.cursor == .init(column: 0, row: 1))
+    }
+
+    @Test
+    func scrollPreviewSitsInAPaneScrollView() throws {
+        let container = PreviewSurfaceContainer(kind: .scroll)
+        let scroll = try #require(container.subviews.first as? SurfaceScrollView)
+        #expect(scroll.surfaceView === container.preview)
+        #expect(scroll.hasVerticalScroller)
+    }
+
+    @Test
+    func cursorPreviewHasNoScrollView() {
+        let container = PreviewSurfaceContainer(kind: .cursor)
+        #expect(container.subviews.count == 1)
+        #expect(container.subviews.first === container.preview)
+    }
+
+    @Test
+    func containerPaintsTheThemeBackground() {
+        let container = PreviewSurfaceContainer(kind: .cursor)
+        container.updateLayer()
+        #expect(container.layer?.backgroundColor == GhosttyApp.shared.backgroundColor.cgColor)
     }
 }
