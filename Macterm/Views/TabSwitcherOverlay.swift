@@ -309,39 +309,42 @@ private struct TabSwitcherCard: View {
         // there is no surplus to center and the panel's padding reads the same
         // on every side at every window shape.
         VStack(alignment: .leading, spacing: 6) {
-            PaneMosaic(node: tab.splitRoot, focusedPaneID: tab.focusedPaneID)
-                // The mosaic gets the pane region's real proportions, so every
-                // leaf inside it gets its own pane's proportions and the
-                // captured frames drop in uncropped.
-                .aspectRatio(Self.safeAspect(paneAspect), contentMode: .fit)
-                .frame(height: Self.previewHeight(forPaneAspect: paneAspect))
-                // The gaps between leaves are the miniature split dividers,
-                // and they are deliberately untinted: whatever sits behind the
-                // card shows through them — the selection fill on the selected
-                // one, the glass panel on the rest — so a divider reads as a
-                // gap in the picture rather than as a drawn line. That does
-                // mean two cards of the same layout differ by their backdrop,
-                // which is the intent, not a regression to fix with a fill.
-                .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .strokeBorder(MactermTheme.border.opacity(0.6), lineWidth: 1)
+            PaneMosaic(
+                node: tab.splitRoot,
+                markedPaneID: TabSwitcherMosaic.markedPaneID(in: tab.splitRoot, focusedPaneID: tab.focusedPaneID)
+            )
+            // The mosaic gets the pane region's real proportions, so every
+            // leaf inside it gets its own pane's proportions and the
+            // captured frames drop in uncropped.
+            .aspectRatio(Self.safeAspect(paneAspect), contentMode: .fit)
+            .frame(height: Self.previewHeight(forPaneAspect: paneAspect))
+            // The gaps between leaves are the miniature split dividers,
+            // and they are deliberately untinted: whatever sits behind the
+            // card shows through them — the selection fill on the selected
+            // one, the glass panel on the rest — so a divider reads as a
+            // gap in the picture rather than as a drawn line. That does
+            // mean two cards of the same layout differ by their backdrop,
+            // which is the intent, not a regression to fix with a fill.
+            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                    .strokeBorder(MactermTheme.border.opacity(0.6), lineWidth: 1)
+            )
+            // The selection is a fill hugging the PREVIEW, evenly on all
+            // four sides and concentric with its corner, rather than a
+            // stroke around the whole card. A card-sized box was the wrong
+            // shape for it: the preview takes the pane region's aspect, so
+            // on a portrait window it sits well inside a card widened to
+            // hold the title, and the highlight framed empty panel instead
+            // of the picture.
+            .padding(Self.selectionHalo)
+            .background(
+                RoundedRectangle(
+                    cornerRadius: Self.cornerRadius + Self.selectionHalo,
+                    style: .continuous
                 )
-                // The selection is a fill hugging the PREVIEW, evenly on all
-                // four sides and concentric with its corner, rather than a
-                // stroke around the whole card. A card-sized box was the wrong
-                // shape for it: the preview takes the pane region's aspect, so
-                // on a portrait window it sits well inside a card widened to
-                // hold the title, and the highlight framed empty panel instead
-                // of the picture.
-                .padding(Self.selectionHalo)
-                .background(
-                    RoundedRectangle(
-                        cornerRadius: Self.cornerRadius + Self.selectionHalo,
-                        style: .continuous
-                    )
-                    .fill(isSelected ? MactermTheme.fg.opacity(0.14) : .clear)
-                )
+                .fill(isSelected ? MactermTheme.fg.opacity(0.14) : .clear)
+            )
 
             HStack(spacing: 6) {
                 // The sidebar's own glyph, preferences and all — the chosen
@@ -375,12 +378,23 @@ private struct TabSwitcherCard: View {
 
 // MARK: - Pane mosaic
 
+/// Which leaf of a card's mosaic gets the focus outline.
+enum TabSwitcherMosaic {
+    /// The focused pane of a split tab, else nil. A tab with one pane has no
+    /// other pane to tell it from, so its card has no outline. No leaf is
+    /// dimmed: a pane dims only when it is an unfocused split (0327).
+    static func markedPaneID(in node: SplitNode, focusedPaneID: UUID?) -> UUID? {
+        guard case .split = node else { return nil }
+        return focusedPaneID
+    }
+}
+
 /// The tab's split tree, laid out at card scale with the branches' real
 /// ratios, so a 2x2 grid looks like a 2x2 grid. Each leaf renders its frozen
 /// preview with the pane's name over it.
 private struct PaneMosaic: View {
     let node: SplitNode
-    let focusedPaneID: UUID?
+    let markedPaneID: UUID?
 
     /// Gap between panes — the miniature of the split divider. Enough to read
     /// as a division at this scale without eating the previews.
@@ -389,7 +403,7 @@ private struct PaneMosaic: View {
     var body: some View {
         switch node {
         case let .pane(pane):
-            PaneMosaicLeaf(pane: pane, isFocused: pane.id == focusedPaneID)
+            PaneMosaicLeaf(pane: pane, isMarked: pane.id == markedPaneID)
         case let .split(branch):
             GeometryReader { geo in
                 let ratio = min(max(branch.ratio, 0.05), 0.95)
@@ -397,16 +411,16 @@ private struct PaneMosaic: View {
                 case .horizontal:
                     let first = max(0, (geo.size.width - Self.gap) * ratio)
                     HStack(spacing: Self.gap) {
-                        PaneMosaic(node: branch.first, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.first, markedPaneID: markedPaneID)
                             .frame(width: first)
-                        PaneMosaic(node: branch.second, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.second, markedPaneID: markedPaneID)
                     }
                 case .vertical:
                     let first = max(0, (geo.size.height - Self.gap) * ratio)
                     VStack(spacing: Self.gap) {
-                        PaneMosaic(node: branch.first, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.first, markedPaneID: markedPaneID)
                             .frame(height: first)
-                        PaneMosaic(node: branch.second, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.second, markedPaneID: markedPaneID)
                     }
                 }
             }
@@ -416,7 +430,7 @@ private struct PaneMosaic: View {
 
 private struct PaneMosaicLeaf: View {
     let pane: Pane
-    let isFocused: Bool
+    let isMarked: Bool
 
     @Environment(AppState.self)
     private var appState
@@ -443,8 +457,12 @@ private struct PaneMosaicLeaf: View {
                 }
             }
             .clipped()
-            // The focused pane is marked the way the split view marks it: the
-            // others are dimmed rather than this one being highlighted.
-            .overlay(isFocused ? Color.clear : Color.black.opacity(0.22))
+            // The focused pane of a split tab gets a thin accent outline. The
+            // other panes are not dimmed, so every preview stays readable.
+            .overlay {
+                if isMarked {
+                    Rectangle().strokeBorder(MactermTheme.accent, lineWidth: 1.5)
+                }
+            }
     }
 }
