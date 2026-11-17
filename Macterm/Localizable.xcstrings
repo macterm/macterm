@@ -1407,6 +1407,22 @@
         }
       }
     },
+    "App icon preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 아이콘 미리보기"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 图标预览"
+          }
+        }
+      }
+    },
     "Appearance" : {
       "comment" : "Settings pane",
       "localizations" : {
@@ -2923,6 +2939,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "青色"
+          }
+        }
+      }
+    },
+    "Dark" : {
+      "comment" : "Under the dark version of the app icon in Settings → Appearance.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다크"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深色"
           }
         }
       }
@@ -4667,6 +4700,23 @@
         }
       }
     },
+    "Light" : {
+      "comment" : "Under the light version of the app icon in Settings → Appearance.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "라이트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浅色"
+          }
+        }
+      }
+    },
     "Liquid Glass" : {
       "localizations" : {
         "ko" : {
@@ -4967,6 +5017,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 没有通知权限"
+          }
+        }
+      }
+    },
+    "Macterm has no server on %@. Shells of this project stop when the connection stops." : {
+      "comment" : "Help of the sidebar mark on a remote project whose host has no Macterm server.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 Macterm 서버가 없습니다. 연결이 끊기면 이 프로젝트의 셸도 종료됩니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上没有 Macterm 服务器。连接断开时，此项目的 shell 也会结束。"
           }
         }
       }
@@ -10216,18 +10283,18 @@
         }
       }
     },
-    "The Dock icon shows the colors of your terminal theme." : {
+    "The Dock icon shows the colors of your terminal theme. This has no effect in the Clear or Tinted icon style." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dock 아이콘이 터미널 테마의 색상으로 표시됩니다."
+            "value" : "Dock 아이콘이 터미널 테마의 색상으로 표시됩니다. 투명 또는 색조 아이콘 스타일에서는 효과가 없습니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "程序坞图标会显示终端主题的颜色。"
+            "value" : "程序坞图标会显示终端主题的颜色。在“透明”或“着色”图标样式下不起作用。"
           }
         }
       }
@@ -11931,6 +11998,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接中断时，此主机上的会话会继续运行。Macterm 会把服务器安装到 ~/.local/share/macterm。"
+          }
+        }
+      }
+    },
+    "Your theme has no gray color to paint the icon with." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "테마에 아이콘을 칠할 회색이 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的主题没有可用于绘制图标的灰色。"
           }
         }
       }

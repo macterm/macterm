@@ -172,11 +172,11 @@ struct HostCommandsTests {
         }
     }
 
-    @Test
-    func the_plain_shell_says_when_the_folder_is_missing() throws {
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_plain_shell_says_when_the_folder_is_missing(_ loginShell: String) throws {
         let home = try Home()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.executableURL = URL(fileURLWithPath: loginShell)
         process.arguments = try ["-c", plain("/nonexistent;touch pwned")]
         process.environment = home.environment
         process.currentDirectoryURL = home.url
@@ -186,8 +186,8 @@ struct HostCommandsTests {
         try process.run()
         let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
-        #expect(output.contains("macterm: cannot cd to /nonexistent;touch pwned\n"))
-        #expect(output.hasSuffix(home.url.path + "\n"))
+        // One line from Macterm, none from the host's cd, then the shell.
+        #expect(output == "macterm: cannot cd to /nonexistent;touch pwned\n" + home.url.path + "\n")
         #expect(home.nothingRan)
     }
 
