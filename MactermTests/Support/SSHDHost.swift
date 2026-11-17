@@ -67,9 +67,27 @@ final class SSHDHost {
         connection.close()
     }
 
+    /// The user's pkill of the host's ssh master, on the Mac's side. `STOP`
+    /// makes a master that hangs: only the link's ping sees it.
+    func signalConnection(signal: String = "TERM") throws {
+        #expect(try signalConnections(signal) == 0, "no master to kill")
+    }
+
+    @discardableResult
+    private func signalConnections(_ signal: String) throws -> Int32 {
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-\(signal)", "-f", "ssh.*-M.*\(sshd.directory.path)"]
+        try pkill.run()
+        pkill.waitUntilExit()
+        return pkill.terminationStatus
+    }
+
     func stop() async {
         try? await stopServer()
         await connections.disconnect("box")
+        // A master that a test stopped does not end by itself.
+        try? signalConnections("KILL")
         sshd.stop()
         try? FileManager.default.removeItem(at: home.deletingLastPathComponent())
     }

@@ -47,23 +47,20 @@ final class Pane: Identifiable {
     /// ran on the host's server (0057): the folder of its creation, then the
     /// shell's own (OSC 7) at each save. nil: the pane never had a v2
     /// session there (a new pane, or one from before v2), so a missing
-    /// session starts with no question. Persisted
+    /// session starts with no question. A pane with a folder whose session
+    /// is gone closes. Persisted
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
     /// A remote pane whose connection stopped: it waits for a trigger or a
-    /// key (`RemoteHosts`). Its frozen screen is blurred and dimmed, as a
-    /// mirror that does not lead is, so that it does not look live. Never
+    /// key (`RemoteHosts`). Its frozen screen is dimmed under a line of
+    /// Macterm's that says so (`RemotePaneText.linkStopped`), so that it does
+    /// not look live. It is not blurred, so the line stays legible. Never
     /// persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
     }
 
-    /// A lost pane that shows a line of Macterm's (why the connect failed,
-    /// "Press a key to try again."): the leaf only dims, so that the line
-    /// stays legible. Set by `RemoteHosts` with the line, cleared when the
-    /// link comes back or stops again.
-    var showsRemoteLinkMessage = false
     /// Process the pane launches on first surface creation, injected into the
     /// shell as `command + "\n"`. Set from a declarative layout; nil for an
     /// interactively-created pane (plain shell). Recorded here so a layout
@@ -214,10 +211,9 @@ final class Pane: Identifiable {
     private(set) var isReceivingRemoteSnapshot = false
 
     /// The pane's connection stopped (`RemoteHosts`): a replay that it cut
-    /// is over, and the next attach clears any line of Macterm's.
+    /// is over.
     func remoteLinkDidStop() {
         isReceivingRemoteSnapshot = false
-        showsRemoteLinkMessage = false
     }
 
     @ObservationIgnored

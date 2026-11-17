@@ -10,18 +10,17 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 /// - running: a `PaneSession` on the host's link feeds the surface;
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server;
 /// - waiting: a line of Macterm's is on the screen. A wake (a login that
-///   ended, a trigger of the reconnect sweep) or a key asks again;
-/// - ended: the session is gone from the host. Return makes a new shell.
+///   ended, a trigger of the reconnect sweep) or a key asks again.
 ///
 /// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane dims and waits for a trigger. The app's backoff and
-/// triggers (`AppState.reconnectDroppedRemotePanes`) own the next try.
+/// `lost`: the pane dims under one line and waits for a trigger or a key.
+/// The app's backoff and triggers (`AppState.reconnectDroppedRemotePanes`)
+/// own the next try. A session that is gone from the host closes the pane.
 @MainActor
 final class RemotePaneDriver: PaneInputRoute {
     private enum State {
         case idle
         case waiting
-        case ended
         case running(PaneSession)
         case plain(PlainShell)
         case closed
@@ -36,7 +35,7 @@ final class RemotePaneDriver: PaneInputRoute {
     private var wakeToken: Int32 = NOTIFY_TOKEN_INVALID
     /// Input that waits for a session: a layout's `initial_input`, and keys
     /// typed while the pane waits. The next attach sends it. A pane that
-    /// ended or runs plain drops it, because it was for another session.
+    /// runs plain drops it, because it was for another session.
     private var earlyInput = Data()
     /// Input that a lost link refused, in order. It goes before `earlyInput`.
     private var undelivered = Data()
@@ -87,11 +86,6 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .wait(message):
             if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             state = .waiting
-        case let .ended(message):
-            earlyInput = Data()
-            undelivered = Data()
-            surface.paneFeed(Data(Self.paneText(message).utf8))
-            state = .ended
         case .close:
             state = .closed
             surface.paneExited(code: nil, signal: nil)
@@ -224,7 +218,6 @@ final class RemotePaneDriver: PaneInputRoute {
             // The key waits for the new session.
             keep(data)
             step(.retry)
-        case .ended: if data.contains(0x0D) { step(.create) }
         case .idle:
             // The `initial_input` of a layout, written while the surface
             // starts: it goes to the session when one runs.
@@ -234,12 +227,9 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     fileprivate func keepUndelivered(_ data: Data) {
-        // A pane that ended or closed has no later attach.
-        switch state {
-        case .closed,
-             .ended: break
-        default: keep(data)
-        }
+        // A pane that closed has no later attach.
+        if case .closed = state { return }
+        keep(data)
     }
 
     private func keep(_ data: Data) {

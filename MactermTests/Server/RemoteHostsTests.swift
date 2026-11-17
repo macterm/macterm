@@ -1,5 +1,6 @@
 import Foundation
 @testable import Macterm
+import notify
 import Testing
 
 @MainActor
@@ -7,17 +8,18 @@ struct RemoteHostsTests {
     // MARK: - Pure rules
 
     @Test
-    func a_running_session_attaches_and_a_missing_one_asks_only_when_it_ran_on_the_host() {
-        func step(running: Bool = false, directory: String? = nil, create: Bool = false) -> RemoteHosts.Step {
-            RemoteHosts.step(running: running, sessionDirectory: directory, createRequested: create, projectDirectory: "~/app")
+    func a_running_session_attaches_and_a_missing_one_is_made_only_when_it_never_ran_on_the_host() {
+        func step(running: Bool = false, directory: String? = nil, justCreated: Bool = false) -> RemoteHosts.Step {
+            RemoteHosts.step(running: running, sessionDirectory: directory, justCreated: justCreated, projectDirectory: "~/app")
         }
         #expect(step(running: true, directory: "/srv") == .attach)
         // A new pane, or one from before v2: a new session, no question.
         #expect(step() == .create(directory: "~/app"))
-        // Its session ran on the host and is gone (a host restart): ask.
-        #expect(step(directory: "/srv/app/src") == .ended)
-        // The user pressed Return: a new shell in the same folder.
-        #expect(step(directory: "/srv/app/src", create: true) == .create(directory: "/srv/app/src"))
+        // Its session ran on the host and is gone (a host restart): the
+        // pane closes.
+        #expect(step(directory: "/srv/app/src") == .gone)
+        // The app made it a moment ago: it counts as made, in its folder.
+        #expect(step(directory: "/srv/app/src", justCreated: true) == .create(directory: "/srv/app/src"))
     }
 
     @Test
@@ -101,7 +103,8 @@ struct RemoteHostsTests {
             // The link drops: the channel ends, and the driver reports it.
             host.sshd.dropConnections()
             try await first.host.waitFor { $0.linkLost > 0 }
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            let line = RemotePaneText.linkStopped(host: "box")
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: line))
             #expect(pane.isRemoteLinkLost)
             #expect(pane.isDisconnected)
             // No trigger yet: the pane keeps waiting.
@@ -121,37 +124,45 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_pane_dims_when_its_ssh_connection_is_killed_with_nothing_typed() async throws {
+    func a_killed_ssh_connection_shows_a_line_and_a_key_connects_again() async throws {
+        try await lostConnection(signal: "TERM")
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_hung_ssh_connection_shows_a_line_and_a_key_connects_again() async throws {
+        try await lostConnection(signal: "STOP")
+    }
+
+    private func lostConnection(signal: String) async throws {
         try await withSSHDHost { host in
-            let fixture = Fixture(host)
+            let fixture = Fixture(host, wakes: true)
             let pane = fixture.pane()
             fixture.hosts.panes = { _ in [pane] }
-            let surface = RecordingPaneHost()
-            let driver = RemotePaneDriver(name: pane.sessionName, surface: surface, hosts: fixture.hosts)
-            defer { driver.stop() }
-            driver.start()
+            // Two windows show the pane: a driver for each surface.
+            let left = RecordingPaneHost()
+            let right = RecordingPaneHost()
+            let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
+            defer { drivers.forEach { $0.stop() } }
+            drivers.forEach { $0.start() }
             try await Task.sleep(for: .seconds(1))
-            driver.sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
-            try await surface.waitFor { $0.screen.contains("before-kill") }
-            #expect(!pane.isRemoteLinkLost)
+            drivers[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
+            try await left.waitFor { $0.screen.contains("before-kill") }
+            try await right.waitFor { $0.screen.contains("before-kill") }
 
-            // The user's pkill: the master of this host, on the Mac's side.
-            let pkill = Process()
-            pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            pkill.arguments = ["-TERM", "-f", "ssh.*-M.*\(host.sshd.directory.path)"]
-            try pkill.run()
-            pkill.waitUntilExit()
-            #expect(pkill.terminationStatus == 0, "no master to kill")
-
-            // Nothing is typed: the pane dims on its own.
-            let deadline = Date().addingTimeInterval(20)
-            while !pane.isRemoteLinkLost, Date() < deadline {
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            try host.signalConnection(signal: signal)
+            // Nothing is typed: one plain line in each view says why, and the
+            // pane only dims under it.
+            let line = RemotePaneText.linkStopped(host: "box")
+            try await left.waitFor { $0.screen.contains(line) }
+            try await right.waitFor { $0.screen.contains(line) }
             #expect(pane.isRemoteLinkLost)
-            #expect(pane.isDisconnected)
-            // The leaf blurs and dims it, as a mirror that does not lead.
-            #expect(SplitLeafView.obscures(pane, isNonLeaderMirror: false))
+
+            // A key logs in again, and both views attach to the same session.
+            drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
+            try await left.waitFor { $0.screen.contains("after-key") }
+            try await right.waitFor { $0.screen.contains("after-key") }
+            #expect(!pane.isRemoteLinkLost)
+            #expect(host.sshd.acceptedLogins() == 2)
         }
     }
 
@@ -172,9 +183,9 @@ struct RemoteHostsTests {
             try await first.host.waitFor { $0.linkLost > 0 }
             try await second.host.waitFor { $0.linkLost > 0 }
             for pane in [left, right] {
-                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
-                // Blurred: no line of Macterm's is on it.
-                #expect(pane.isRemoteLinkLost && !pane.showsRemoteLinkMessage)
+                let line = RemotePaneText.linkStopped(host: "box")
+                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: line))
+                #expect(pane.isRemoteLinkLost)
             }
 
             // A key in the left pane logs in again. The link that came back
@@ -197,7 +208,7 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_session_that_ended_on_the_host_asks_before_a_new_shell() async throws {
+    func a_pane_whose_session_is_gone_from_the_host_closes() async throws {
         try await withSSHDHost { host in
             // The host restarts at once: no grace for a new session.
             let fixture = Fixture(host, creationGrace: 0)
@@ -207,16 +218,10 @@ struct RemoteHostsTests {
             try await first.host.waitFor { $0.screen.contains("up-1") }
             first.stop()
 
-            // The host restarts: its server and sessions are gone.
+            // The host restarts: its server and sessions are gone, so the
+            // pane closes. No new shell takes its place.
             try await host.stopServer()
-            guard case let .ended(message) = await fixture.ask(pane) else {
-                Issue.record("the pane did not ask")
-                return
-            }
-            #expect(message.contains("ended"))
-            // Return: a new shell in the same folder.
-            let (_, create) = try await fixture.attach(pane, event: .create)
-            #expect(create == fixture.directory)
+            #expect(await fixture.ask(pane).isClose)
         }
     }
 
@@ -312,10 +317,14 @@ struct RemoteHostsTests {
             set { posted.mutate { $0 = newValue } }
         }
 
-        init(_ host: SSHDHost, creationGrace: TimeInterval = 30) {
+        /// `wakes`: the posts reach a pane's driver too, as in the app.
+        init(_ host: SSHDHost, creationGrace: TimeInterval = 30, wakes: Bool = false) {
             directory = host.home.path
             var configuration = RemoteHosts.Configuration(key: host.key, declines: .memory(), creationGrace: creationGrace)
-            configuration.post = { [posted] name in posted.mutate { $0.append(name) } }
+            configuration.post = { [posted] name in
+                posted.mutate { $0.append(name) }
+                if wakes { notify_post(name) }
+            }
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
             configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)

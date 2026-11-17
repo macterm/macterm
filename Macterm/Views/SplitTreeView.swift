@@ -146,16 +146,11 @@ struct SplitLeafView: View {
             || (!isFocused && isSplit && SurfaceRegistry.shared.surface(for: pane, in: host).adaptiveBackgroundColor == nil)
     }
 
-    /// Whether the pane is blurred and dimmed: a non-leader mirror, or a
-    /// remote pane whose connection stopped, which keeps its last screen. A
-    /// frozen program must not look live. A lost pane that shows a line of
-    /// Macterm's only dims, so that the line stays legible.
+    /// Whether the pane is blurred and dimmed: a non-leader mirror. A remote
+    /// pane whose connection stopped only dims (`isSplitDimmed`), so that the
+    /// line of Macterm's on it stays legible.
     private var isObscured: Bool {
-        Self.obscures(pane, isNonLeaderMirror: isNonLeaderMirror)
-    }
-
-    static func obscures(_ pane: Pane, isNonLeaderMirror: Bool) -> Bool {
-        isNonLeaderMirror || (pane.isRemoteLinkLost && !pane.showsRemoteLinkMessage)
+        isNonLeaderMirror
     }
 
     var body: some View {
@@ -183,8 +178,7 @@ struct SplitLeafView: View {
                 // garble legible. Neither split-dim gate applies: `isSplit` is
                 // false for a single-pane tab and for a zoomed pane, exactly
                 // the common mirrored case, and an adaptive background must
-                // not exempt it. A lost remote pane gets the same look: its
-                // frozen screen is not live either.
+                // not exempt it.
                 NonLeaderBlur()
                     .overlay(MactermTheme.dimOverlay)
                     .allowsHitTesting(false)

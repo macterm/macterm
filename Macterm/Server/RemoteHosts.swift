@@ -12,8 +12,6 @@ enum RemotePaneEvent: String, Codable {
     case lost
     /// The user pressed a key in a pane that waits: connect now.
     case retry
-    /// The user pressed Return at "the session ended": a new shell.
-    case create
 }
 
 /// The app's answer to a remote pane's driver (`RemotePaneDriver`).
@@ -27,9 +25,8 @@ enum RemotePaneAnswer {
     /// No server on the host: a plain ssh shell over the master (`ssh`
     /// arguments), after `message`.
     case plain(arguments: [String], message: String?)
-    /// The pane's session is gone (the host restarted). Ask for Return.
-    case ended(message: String)
-    /// No pane has the session any more: the pane ends.
+    /// The pane ends: no pane has the session any more, or the session is
+    /// gone from the host.
     case close
 }
 
@@ -49,17 +46,18 @@ enum RemotePaneAnswer {
 ///   for them: it starts the work and says `wait`; when the work ends, the
 ///   app posts the pane's Darwin notification (`wakeName`), and the client
 ///   asks again.
-/// - **Lost.** A client whose ssh exits 255 reports `lost`. The pane dims
-///   (`Pane.isRemoteLinkLost`) and waits for a trigger (wake, a network
+/// - **Lost.** A pane whose link stopped reports `lost`. The pane dims
+///   (`Pane.isRemoteLinkLost`) under one line of Macterm's
+///   (`RemotePaneText.linkStopped`) and waits for a trigger (wake, a network
 ///   change, activation, the project's selection; `AppState.
 ///   reconnectDroppedRemotePanes` with `RemoteReconnectPolicy`) or a key in
 ///   the pane. The attach after it replays the session's screen.
-/// - **Ended.** A pane whose session ran on the host
-///   (`Pane.hostSessionDirectory`) and is gone there (a host restart) asks
-///   for Return, then starts a new shell in the same folder. A server is
-///   never started empty in silence for a pane that expects a session. A
-///   pane from before v2 has no such folder: its first session starts with
-///   no question, as local panes did at the cut-over.
+/// - **Gone.** A pane whose session ran on the host
+///   (`Pane.hostSessionDirectory`) and is gone there (a host restart) closes:
+///   the pane exists only while its session exists (Ethan, 2026-11-16). A
+///   server is never started empty in silence for a pane that expects a
+///   session. A pane from before v2 has no such folder: its first session
+///   starts with no question, as local panes did at the cut-over.
 /// - **No server.** When the user declined the install, or the host has no
 ///   build, each pane is a plain ssh shell, with one line that says so. The
 ///   decline is kept (`declined`); Settings → Projects offers the install
@@ -139,10 +137,6 @@ final class RemoteHosts {
     @ObservationIgnored private var waiting: [String: Set<String>] = [:]
     /// Sessions whose connection stopped: they wait for a trigger or a key.
     @ObservationIgnored private var lost: Set<String> = []
-    /// Sessions that ended on the host and wait for Return.
-    @ObservationIgnored private var ended: Set<String> = []
-    /// Sessions whose user pressed Return at "the session ended".
-    @ObservationIgnored private var createRequested: Set<String> = []
     /// A line for a session's pane, given with the next answer.
     @ObservationIgnored private var messages: [String: String] = [:]
     /// Lists that failed on the current link of a host, in a row.
@@ -150,7 +144,7 @@ final class RemoteHosts {
     /// When the app last told a session's client to make it. A second client
     /// (a mirror) can ask before the host lists the new session, and a
     /// channel can drop before the session starts: in this time a missing
-    /// session is made, not reported as ended.
+    /// session is made, not reported as gone.
     @ObservationIgnored private var created: [String: Date] = [:]
 
     init(connections: SSHConnections, servers: RemoteServers, configuration: Configuration) {
@@ -175,11 +169,9 @@ final class RemoteHosts {
         switch event {
         case .ask:
             if lost.contains(session) {
-                let message = messages.removeValue(forKey: session)
-                mark(panes, lost: true, message: message != nil)
-                return .wait(message: message)
+                mark(panes, lost: true)
+                return .wait(message: messages.removeValue(forKey: session))
             }
-            if ended.contains(session) { return .ended(message: RemotePaneText.ended(host: target.host)) }
         case .lost:
             logger.info("remote pane: session=\(session, privacy: .public) host=\(target.destination, privacy: .public) lost")
             lost.insert(session)
@@ -189,12 +181,9 @@ final class RemoteHosts {
             mark(panes, lost: true)
             // The next connect checks the connection again.
             drop(target.destination)
-            return .wait(message: nil)
+            return .wait(message: RemotePaneText.linkStopped(host: target.host))
         case .retry:
             lost.remove(session)
-        case .create:
-            ended.remove(session)
-            createRequested.insert(session)
         }
         return await resolve(session, panes: panes, target: target)
     }
@@ -341,7 +330,7 @@ final class RemoteHosts {
             guard failures < 2 else {
                 listFailures[destination] = nil
                 lost.insert(session)
-                mark(panes, lost: true, message: true)
+                mark(panes, lost: true)
                 return .wait(message: RemotePaneText.withRetry(RemotePaneText.serverSilent(host: target.host)))
             }
             return await resolve(session, panes: panes, target: target)
@@ -360,7 +349,7 @@ final class RemoteHosts {
         let step = Self.step(
             running: found?.isRunning == true,
             sessionDirectory: known,
-            createRequested: createRequested.remove(session) != nil || justCreated,
+            justCreated: justCreated,
             projectDirectory: target.directory
         )
         switch step {
@@ -376,39 +365,38 @@ final class RemoteHosts {
             for pane in panes {
                 pane.hostSessionDirectory = directory
             }
-            // A mirror that waits at "the session ended" attaches now.
-            if ended.remove(session) != nil || panes.count > 1 {
+            if panes.count > 1 {
                 configuration.post(Self.wakeName(for: session))
             }
             return .attach(link: link, create: directory)
-        case .ended:
-            logger.info("remote pane: session=\(session, privacy: .public) ended on \(destination, privacy: .public)")
-            ended.insert(session)
-            mark(panes, lost: false)
-            return .ended(message: RemotePaneText.ended(host: target.host))
+        case .gone:
+            logger.info("remote pane: session=\(session, privacy: .public) is gone on \(destination, privacy: .public), the pane closes")
+            forget(session)
+            return .close
         }
     }
 
     enum Step: Equatable {
         case attach
         case create(directory: String)
-        case ended
+        case gone
     }
 
     /// What a pane does with its session. A running session attaches. A
-    /// missing one starts in the pane's folder when the user asked, or when
-    /// the pane never had a session on the host (a new pane, or one from
-    /// before v2). Otherwise it ended: the pane asks. Pure.
+    /// missing one starts in the pane's folder when the app made it in the
+    /// grace time, or when the pane never had a session on the host (a new
+    /// pane, or one from before v2). Otherwise it is gone: the pane closes.
+    /// Pure.
     nonisolated static func step(
         running: Bool,
         sessionDirectory: String?,
-        createRequested: Bool,
+        justCreated: Bool,
         projectDirectory: String
     ) -> Step {
         if running { return .attach }
-        if createRequested { return .create(directory: sessionDirectory ?? projectDirectory) }
+        if justCreated { return .create(directory: sessionDirectory ?? projectDirectory) }
         guard sessionDirectory != nil else { return .create(directory: projectDirectory) }
-        return .ended
+        return .gone
     }
 
     /// Log in, then check and install the server, for the sessions that
@@ -504,25 +492,16 @@ final class RemoteHosts {
     private func forget(_ session: String) {
         created[session] = nil
         lost.remove(session)
-        ended.remove(session)
-        createRequested.remove(session)
         messages[session] = nil
         for destination in waiting.keys {
             waiting[destination]?.remove(session)
         }
     }
 
-    /// `message`: the pane shows a line of Macterm's now. A line stays on
-    /// the screen until the next attach clears it, so only a link that
-    /// comes back or stops again (an attach ran in between) unsets it.
-    private func mark(_ panes: [Pane], lost: Bool, message: Bool = false) {
-        for pane in panes {
-            if pane.isRemoteLinkLost != lost {
-                logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
-                pane.isRemoteLinkLost = lost
-            }
-            let shows = lost && (message || pane.showsRemoteLinkMessage)
-            if pane.showsRemoteLinkMessage != shows { pane.showsRemoteLinkMessage = shows }
+    private func mark(_ panes: [Pane], lost: Bool) {
+        for pane in panes where pane.isRemoteLinkLost != lost {
+            logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
+            pane.isRemoteLinkLost = lost
         }
     }
 
@@ -663,7 +642,7 @@ enum RemotePaneText {
         "Macterm has no server on \(host). This shell stops when the connection stops."
     }
 
-    static func ended(host: String) -> String {
-        "The session on \(host) ended. Press Return to start a new shell."
+    static func linkStopped(host: String) -> String {
+        "The connection to \(host) stopped. Press a key to connect again."
     }
 }
