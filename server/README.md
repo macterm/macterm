@@ -16,8 +16,8 @@ has changes that are not committed or no prebuilt exists.
 ## Commands
 
 `session`, `server`, `connect`, `proxy`, `version` and `help`. `zmx help`
-lists `connect`, `version` and `help`. The hidden `__session` is the macOS
-session after its re-exec (change 0004), and `__schema` writes the protocol
+lists `connect`, `version` and `help`. The hidden `__session` is the session
+process that the server spawns, and `__schema` writes the protocol
 files. The server has no v1 code: v1's verbs (`attach`, `list`, `get`,
 `set`, `clear`, `history`, `send`, `kill`) and its daemon (`__daemon`) are
 gone (design/007 §6).
@@ -25,8 +25,8 @@ gone (design/007 §6).
 ## The v2 session
 
 `zmx session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`
-starts a v2 session process (`src/session.zig`) and returns when its socket
-accepts connections. It is the shell's parent, and it speaks the v2 frames
+asks the server to start a v2 session process (`src/session.zig`), and
+returns when its socket accepts connections. It is the shell's parent, and it speaks the v2 frames
 (`src/protocol/`). The server (below)
 runs it; `help` does not list it.
 
@@ -64,8 +64,9 @@ start it (design/001, A). Nothing calls it yet.
   same id again finds the same session), `session.list`, `session.info`,
   `session.kill` and `server.exit`, and the event `session.exit`. The types
   are in `src/protocol/messages.zig`.
-- **Sessions.** `session.create` runs `zmx session` (fork and exec of the
-  same binary, which does the `setsid` and the disclaim). At start the
+- **Sessions.** `session.create` spawns `zmx __session` with one
+  `posix_spawn` (the new session and, on macOS, the disclaim), and gives it
+  the spec on a socket pair. At start the
   server connects to every session socket in the directory and reads each
   session's state from its `hello` and `state`.
 - **Stores nothing.** A session keeps its exit status until a client sends

@@ -17,13 +17,6 @@ fn connect(path: []const u8) !i32 {
     return socket_fd;
 }
 
-pub fn cleanupStaleSocket(io: std.Io, dir: std.Io.Dir, session_name: []const u8) void {
-    std.log.warn("stale socket found, cleaning up session={s}", .{session_name});
-    dir.deleteFile(io, session_name) catch |err| {
-        std.log.warn("failed to delete stale socket err={s}", .{@errorName(err)});
-    };
-}
-
 pub fn createSocket(sesh: []const u8) !lib_posix.socket_t {
     // AF.UNIX: Unix domain socket for local IPC with client processes
     // SOCK.STREAM: Reliable, bidirectional communication

@@ -18,6 +18,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const log = @import("log.zig");
+const cross = @import("cross");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
@@ -42,7 +43,7 @@ pub const idle_exit_ms = 5000;
 /// SIGKILL. The session itself gives its shell 0.5 s after SIGHUP.
 pub const kill_grace_ms = 3000;
 
-/// A `session` child that does not exit this long after it started gets
+/// A session process that does not answer this long after it started gets
 /// SIGKILL, and the create fails.
 pub const spawn_ms = 10_000;
 
@@ -365,15 +366,27 @@ const Entry = struct {
     }
 };
 
-/// A `session create` child that has not exited yet. It exits when the
-/// session's socket accepts connections.
+/// A session process that has not answered yet (`Server.spawn`).
 const Spawn = struct {
     pid: lib_posix.pid_t,
     id: []u8,
-    /// The read end of the child's stderr, for the error text.
-    err_fd: i32,
+    /// The server's end of the socket pair: the spec goes out on it, and the
+    /// session's answer comes back on it.
+    fd: i32,
+    /// The encoded spec, and how much of it went out.
+    spec: []u8,
+    sent: usize = 0,
+    answer: std.ArrayList(u8) = .empty,
+    /// The session closed its end: `finishSpawns` answers the waiters.
+    done: bool = false,
     started_at: i64,
     waiters: std.ArrayList(Waiter) = .empty,
+
+    fn events(sp: *const Spawn) i16 {
+        var ev: i16 = lib_posix.POLL.IN;
+        if (sp.sent < sp.spec.len) ev |= lib_posix.POLL.OUT;
+        return ev;
+    }
 };
 
 /// A `command.run` child. The reply goes when its stdout gave EOF and the
@@ -412,6 +425,9 @@ const Server = struct {
     peers: std.ArrayList(*Peer) = .empty,
     entries: std.ArrayList(*Entry) = .empty,
     spawns: std.ArrayList(*Spawn) = .empty,
+    /// The session processes that the server started and has not reaped.
+    /// They are its children until it exits.
+    children: std.ArrayList(lib_posix.pid_t) = .empty,
     runs: std.ArrayList(*Run) = .empty,
     /// `session.list` requests that wait until every session settled.
     list_waiters: std.ArrayList(Waiter) = .empty,
@@ -487,6 +503,8 @@ const Server = struct {
             };
             const nruns = s.runs.items.len;
             for (s.runs.items) |r| try fds.append(s.gpa, .{ .fd = r.out_fd, .events = lib_posix.POLL.IN, .revents = 0 });
+            const nspawns = s.spawns.items.len;
+            for (s.spawns.items) |sp| try fds.append(s.gpa, .{ .fd = sp.fd, .events = sp.events(), .revents = 0 });
             const link_start = fds.items.len;
             try s.links.pollFds(&fds, s.gpa);
 
@@ -497,7 +515,7 @@ const Server = struct {
                     std.log.info("server: SIGTERM", .{});
                     return;
                 };
-                s.reapSpawns();
+                s.reapChildren();
                 s.reapRuns();
             }
             if (fds.items[0].revents & lib_posix.POLL.IN != 0) s.accept();
@@ -529,6 +547,11 @@ const Server = struct {
             for (s.runs.items[0..nruns], fds.items[2 + npeers + nentries + chans.items.len ..][0..nruns]) |r, pfd| {
                 if (r.out_fd >= 0 and pfd.revents != 0) s.readRun(r);
             }
+            for (s.spawns.items[0..nspawns], fds.items[2 + npeers + nentries + chans.items.len + nruns ..][0..nspawns]) |sp, pfd| {
+                if (!sp.done and pfd.revents & lib_posix.POLL.OUT != 0) s.writeSpawn(sp);
+                if (!sp.done and pfd.revents & ~@as(i16, lib_posix.POLL.OUT) != 0) s.readSpawn(sp);
+            }
+            s.finishSpawns();
             s.links.handle(fds.items[link_start..], s.now());
             for (s.pending_peers.items) |fd| s.addPeer(fd);
             s.pending_peers.clearRetainingCapacity();
@@ -881,7 +904,7 @@ const Server = struct {
         for (s.spawns.items) |sp| if (t >= sp.started_at + spawn_ms and sp.started_at >= 0) {
             std.log.warn("server: session {s} start takes too long, SIGKILL", .{sp.id});
             lib_posix.kill(sp.pid, lib_posix.SIG.KILL) catch {};
-            // Once: SIGCHLD reaps it, and the create fails.
+            // Once: its end of the socket pair closes, and the create fails.
             sp.started_at = -1;
         };
         for (s.runs.items) |r| if (!r.timed_out and t >= r.deadline) {
@@ -920,55 +943,51 @@ const Server = struct {
 
     // ── Starting a session ──────────────────────────────────────────────────
 
-    /// Forks and execs this binary as `session`. That command starts the
-    /// session process (setsid, and on macOS the disclaim, `session.zig`)
-    /// and exits when its socket accepts connections.
-    /// The size is cut to `session.max_cells`, as a session cuts a resize.
+    /// Starts this binary as `__session <id>` with one `posix_spawn`: the
+    /// leader of a new session (`SETSID`), and on macOS its own responsible
+    /// process (the disclaim, server/AGENTS.md) that gets only the fds of
+    /// the file actions (`CLOEXEC_DEFAULT`). On Linux every fd of the server
+    /// is close-on-exec. The spec, one msgpack `SessionCreate.Args`, goes on
+    /// a socket pair at `session.spec_fd`; the session answers on it when
+    /// its socket listens (`session.run`). stdin, stdout and stderr are
+    /// /dev/null. The size is cut to `session.max_cells`, as a session cuts
+    /// a resize.
     fn spawn(s: *Server, id: []const u8, args: m.SessionCreate.Args) !*Spawn {
         var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
         defer arena_state.deinit();
         const arena = arena_state.allocator();
 
-        var argv: std.ArrayList(?[*:0]const u8) = .empty;
-        try argv.append(arena, s.exe.ptr);
-        try argv.append(arena, "session");
-        try argv.append(arena, "--cols");
-        try argv.append(arena, (try std.fmt.allocPrintSentinel(arena, "{d}", .{@min(args.cols, session.max_cells)}, 0)).ptr);
-        try argv.append(arena, "--rows");
-        try argv.append(arena, (try std.fmt.allocPrintSentinel(arena, "{d}", .{@min(args.rows, session.max_cells)}, 0)).ptr);
-        if (args.cwd) |cwd| {
-            try argv.append(arena, "--cwd");
-            try argv.append(arena, (try arena.dupeSentinel(u8, cwd.bytes, 0)).ptr);
-        }
-        try argv.append(arena, (try arena.dupeSentinel(u8, id, 0)).ptr);
-        if (args.command) |command| {
-            try argv.append(arena, "--");
-            for (command) |arg| try argv.append(arena, (try arena.dupeSentinel(u8, arg.bytes, 0)).ptr);
-        }
-        try argv.append(arena, null);
+        const id_z = try arena.dupeSentinel(u8, id, 0);
+        const argv = [_:null]?[*:0]const u8{ s.exe.ptr, session.command_name, id_z.ptr };
         const envp = try s.sessionEnv(arena, args.env);
+        var spec_args = args;
+        spec_args.cols = @min(args.cols, session.max_cells);
+        spec_args.rows = @min(args.rows, session.max_cells);
+        // The environment is the process's own (`envp`).
+        spec_args.env = null;
+        const spec = try msgpack.encodeAlloc(s.gpa, spec_args);
+        errdefer s.gpa.free(spec);
 
-        const pipe = try lib_posix.pipe2(.{ .CLOEXEC = true, .NONBLOCK = true });
-        errdefer lib_posix.close(pipe[0]);
+        // No SOCK_CLOEXEC: macOS's socketpair refuses it. The server is one
+        // thread, so no other spawn can take the fds before the flag is set.
+        var pair: [2]i32 = undefined;
+        if (std.c.socketpair(lib_posix.AF.UNIX, lib_posix.SOCK.STREAM, 0, &pair) != 0) return error.SocketPair;
+        errdefer lib_posix.close(pair[0]);
+        defer lib_posix.close(pair[1]);
+        for (pair) |fd| _ = try lib_posix.fcntl(fd, lib_posix.F.SETFD, std.c.FD_CLOEXEC);
+        const flags = try lib_posix.fcntl(pair[0], lib_posix.F.GETFL, 0);
+        _ = try lib_posix.fcntl(pair[0], lib_posix.F.SETFL, flags | lib_posix.O_NONBLOCK);
+
+        const pid = try spawnSession(s.exe, &argv, envp, pair[1]);
+        // From here the child runs: it is in `children` until it is reaped.
+        s.children.append(s.gpa, pid) catch {};
+        errdefer lib_posix.kill(pid, lib_posix.SIG.KILL) catch {};
+
         const sp = try s.gpa.create(Spawn);
         errdefer s.gpa.destroy(sp);
-        sp.* = .{ .pid = 0, .id = try s.gpa.dupe(u8, id), .err_fd = pipe[0], .started_at = s.now() };
+        sp.* = .{ .pid = pid, .id = try s.gpa.dupe(u8, id), .fd = pair[0], .spec = spec, .started_at = s.now() };
         errdefer s.gpa.free(sp.id);
         try s.spawns.append(s.gpa, sp);
-        errdefer _ = s.spawns.pop();
-
-        const pid = lib_posix.fork() catch |err| {
-            lib_posix.close(pipe[1]);
-            return err;
-        };
-        if (pid == 0) {
-            // The child: stderr to the pipe, then this binary again.
-            lib_posix.dup2(pipe[1], lib_posix.STDERR_FILENO) catch std.c._exit(127);
-            _ = std.c.execve(s.exe.ptr, @ptrCast(argv.items.ptr), envp);
-            std.c._exit(127);
-        }
-        lib_posix.close(pipe[1]);
-        sp.pid = pid;
         std.log.info("server: starting session {s} pid={d}", .{ id, pid });
         return sp;
     }
@@ -989,41 +1008,88 @@ const Server = struct {
         return @ptrCast(list.items.ptr);
     }
 
-    /// Reaps the `session` children that exited. A session process is their
-    /// child, and it leaves. The server's only other children are the
-    /// commands of `command.run` (`reapRuns`).
-    fn reapSpawns(s: *Server) void {
+    /// Reaps the session processes that exited. The server's only other
+    /// children are the commands of `command.run` (`reapRuns`).
+    fn reapChildren(s: *Server) void {
+        var i: usize = 0;
+        while (i < s.children.items.len) {
+            const pid = s.children.items[i];
+            if (lib_posix.waitpid(pid, std.c.W.NOHANG).pid == pid) {
+                _ = s.children.swapRemove(i);
+            } else i += 1;
+        }
+    }
+
+    /// Sends the rest of the spec. After the last byte, the server shuts its
+    /// side for writes, so that the session reads EOF.
+    fn writeSpawn(s: *Server, sp: *Spawn) void {
+        _ = s;
+        const n = lib_posix.write(sp.fd, sp.spec[sp.sent..]) catch |err| switch (err) {
+            error.WouldBlock => return,
+            // The session is gone: its answer is the EOF.
+            else => {
+                sp.sent = sp.spec.len;
+                return;
+            },
+        };
+        sp.sent += n;
+        if (sp.sent == sp.spec.len) _ = std.c.shutdown(sp.fd, std.c.SHUT.WR);
+    }
+
+    /// Reads the answer. EOF ends it: the session answered and closed its
+    /// end, or it exited.
+    fn readSpawn(s: *Server, sp: *Spawn) void {
+        var buf: [1024]u8 = undefined;
+        while (true) {
+            const n = lib_posix.read(sp.fd, &buf) catch |err| switch (err) {
+                error.WouldBlock => return,
+                else => 0,
+            };
+            if (n == 0) {
+                sp.done = true;
+                return;
+            }
+            // More than any error text: the rest is dropped.
+            const room = 1024 -| sp.answer.items.len;
+            sp.answer.appendSlice(s.gpa, buf[0..@min(n, room)]) catch {};
+        }
+    }
+
+    /// Answers and frees each start that ended. Called after the poll loop
+    /// walked `spawns`.
+    fn finishSpawns(s: *Server) void {
         var i: usize = 0;
         while (i < s.spawns.items.len) {
             const sp = s.spawns.items[i];
-            const res = lib_posix.waitpid(sp.pid, std.c.W.NOHANG);
-            if (res.pid != sp.pid) {
+            if (!sp.done) {
                 i += 1;
                 continue;
             }
             _ = s.spawns.orderedRemove(i);
-            s.spawnDone(sp, session.ExitStatus.fromWait(res.status));
-            lib_posix.close(sp.err_fd);
+            s.spawnDone(sp);
+            lib_posix.close(sp.fd);
+            sp.answer.deinit(s.gpa);
             sp.waiters.deinit(s.gpa);
+            s.gpa.free(sp.spec);
             s.gpa.free(sp.id);
             s.gpa.destroy(sp);
         }
     }
 
-    /// The child exited. With 0, the session listens. Else a session of
-    /// this id may already run (one that the server did not start): the
-    /// server uses it, so that the same id finds the same session.
-    fn spawnDone(s: *Server, sp: *Spawn, status: session.ExitStatus) void {
+    /// The session answered. With `session.ready_answer`, it listens. Else a
+    /// session of this id may already run (one that the server did not
+    /// start): the server uses it, so that the same id finds the same
+    /// session.
+    fn spawnDone(s: *Server, sp: *Spawn) void {
+        const ready = std.mem.eql(u8, sp.answer.items, session.ready_answer);
         if (s.connectEntry(sp.id)) |_| {
             const e = s.findEntry(sp.id).?;
             e.waiters.appendSlice(s.gpa, sp.waiters.items) catch
                 for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, "The server is out of memory.");
             return;
-        } else |err| if (status.code == 0)
+        } else |err| if (ready)
             std.log.warn("server: session {s} started but does not answer: {s}", .{ sp.id, @errorName(err) });
-        var buf: [1024]u8 = undefined;
-        const n = lib_posix.read(sp.err_fd, &buf) catch 0;
-        const text = errorText(buf[0..n]);
+        const text = if (ready) errorText("") else errorText(sp.answer.items);
         std.log.warn("server: session {s} did not start: {s}", .{ sp.id, text });
         for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, text);
     }
@@ -1349,7 +1415,7 @@ const Server = struct {
         errdefer _ = s.runs.pop();
 
         // `main` ignores SIGPIPE, and that survives exec: the command gets
-        // the default, as a session's shell does (`daemonize.zig`).
+        // the default, as a session's shell does (`pty.zig`).
         const dfl: lib_posix.Sigaction = .{
             .handler = .{ .handler = lib_posix.SIG.DFL },
             .mask = lib_posix.sigemptyset(),
@@ -1883,6 +1949,49 @@ const Server = struct {
 };
 
 /// The absolute path of this binary, to start sessions with.
+extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *cross.posix_spawnattr_t, disclaim: c_int) c_int;
+
+/// The one `posix_spawn` of a session process (`Server.spawn`). `spec_fd` is
+/// the session's end of the socket pair; it becomes `session.spec_fd`.
+///
+/// The disclaim: macOS attributes privacy-gated work (Local Network, TCC) to
+/// a process's *responsible process*, which a process takes from its parent
+/// when it starts and which cannot change afterwards. Without the disclaim
+/// the session belongs to the server, and so to the app that started the
+/// server; once that app quits, each program in the session is judged by its
+/// own identity, and one that Apple did not sign gets EHOSTUNREACH on the
+/// local network with no prompt (macterm#419). The disclaim exists only as a
+/// spawn attribute: with it the session is its own responsible process for
+/// its whole life, and it has the app's signature, so a prompt names Macterm.
+fn spawnSession(exe: [:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8, spec_fd: i32) !lib_posix.pid_t {
+    var attr: cross.posix_spawnattr_t = undefined;
+    if (cross.posix_spawnattr_init(&attr) != 0) return error.SpawnAttr;
+    defer _ = cross.posix_spawnattr_destroy(&attr);
+    var flags: c_int = cross.POSIX_SPAWN_SETSID;
+    if (comptime builtin.os.tag.isDarwin()) flags |= cross.POSIX_SPAWN_CLOEXEC_DEFAULT;
+    if (cross.posix_spawnattr_setflags(&attr, @intCast(flags)) != 0) return error.SpawnAttr;
+    if (comptime builtin.os.tag.isDarwin()) {
+        if (responsibility_spawnattrs_setdisclaim(&attr, 1) != 0) return error.SpawnAttr;
+    }
+
+    var actions: cross.posix_spawn_file_actions_t = undefined;
+    if (cross.posix_spawn_file_actions_init(&actions) != 0) return error.SpawnActions;
+    defer _ = cross.posix_spawn_file_actions_destroy(&actions);
+    if (cross.posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", @bitCast(lib_posix.O{ .ACCMODE = .RDWR }), 0) != 0 or
+        cross.posix_spawn_file_actions_adddup2(&actions, 0, 1) != 0 or
+        cross.posix_spawn_file_actions_adddup2(&actions, 0, 2) != 0 or
+        cross.posix_spawn_file_actions_adddup2(&actions, spec_fd, session.spec_fd) != 0)
+        return error.SpawnActions;
+
+    var pid: cross.pid_t = undefined;
+    const rc = cross.posix_spawn(&pid, exe.ptr, &actions, &attr, @ptrCast(@constCast(argv)), @ptrCast(@constCast(envp)));
+    if (rc != 0) {
+        std.log.warn("server: posix_spawn failed rc={d}", .{rc});
+        return error.SpawnFailed;
+    }
+    return pid;
+}
+
 fn selfExe(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     if (comptime builtin.os.tag.isDarwin()) {
         // It can be relative to the folder at start.
@@ -1952,8 +2061,8 @@ fn validPid(pid: i64) bool {
     return pid > 1 and pid <= std.math.maxInt(lib_posix.pid_t);
 }
 
-/// The text of a `session` child's failure, for the error reply: its first
-/// line without the `error: ` prefix. Text that is not UTF-8 is replaced.
+/// The text of a session's failed answer, for the error reply: its first
+/// line without an `error: ` prefix. Text that is not UTF-8 is replaced.
 fn errorText(stderr: []const u8) []const u8 {
     var line = std.mem.trim(u8, stderr, " \r\n");
     if (std.mem.findScalar(u8, line, '\n')) |i| line = line[0..i];

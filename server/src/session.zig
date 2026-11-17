@@ -10,13 +10,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const cross = @import("cross");
-const Resize = @import("pty.zig").Resize;
+const Resize = pty_mod.Resize;
 const log = @import("log.zig");
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
-const daemonize = @import("daemonize.zig");
+const pty_mod = @import("pty.zig");
 const runtime = @import("runtime.zig");
 const terminal = @import("terminal.zig");
 const events = @import("events.zig");
@@ -28,8 +28,8 @@ const msgpack = protocol.msgpack;
 const ring = @import("ring.zig");
 const m = protocol.messages;
 
-/// The subcommand that the macOS session runs after its disclaiming re-exec.
-pub const reexec_command = "__session";
+/// The hidden verb of the session process. The server runs it (`Server.spawn`).
+pub const command_name = "__session";
 
 /// The most output that waits for one client. Over it, the session drops
 /// that client's queue and sends it a snapshot of the screen when the client
@@ -77,24 +77,56 @@ pub fn validName(name: []const u8) bool {
     return true;
 }
 
-pub const StartError = error{
-    InvalidName,
-    NameTooLong,
-    SessionExists,
-    RuntimeDir,
-};
+/// The fd on which the server gives `__session` its spec and reads the
+/// answer (`Server.spawn`).
+pub const spec_fd = 3;
 
-/// The `session` command: checks the runtime directory, binds the socket,
-/// and starts the session process. Returns in the caller once the socket
-/// accepts connections; the session process itself never returns from here.
-pub fn start(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, opts: Options) !void {
-    if (!validName(opts.name)) return error.InvalidName;
+/// The answer on `spec_fd` when the socket listens and the shell runs. Any
+/// other answer is the error text.
+pub const ready_answer = "ok";
+
+/// The `__session` process. The server started it with `posix_spawn`, so it
+/// is already the leader of its own session and, on macOS, its own
+/// responsible process (server/AGENTS.md). It enters `cwd`, binds its socket
+/// and starts the shell, then writes `ready_answer` or the error on
+/// `answer_fd`, and serves until the session ends. It never returns.
+pub fn run(dir: []const u8, opts: Options, cwd: ?[]const u8, answer_fd: i32) noreturn {
+    const gpa = std.heap.c_allocator;
+    var text_buf: [512]u8 = undefined;
+    const listen_fd = bindAndCheck(gpa, dir, opts.name) catch |err| {
+        const text = switch (err) {
+            error.InvalidName => std.fmt.bufPrint(&text_buf, "invalid session name \"{s}\": use letters, digits, '-', '_' and '.', not first", .{opts.name}),
+            error.NameTooLong => std.fmt.bufPrint(&text_buf, "session name \"{s}\" is too long for a socket in {s}", .{ opts.name, dir }),
+            error.SessionExists => std.fmt.bufPrint(&text_buf, "session \"{s}\" already exists", .{opts.name}),
+            error.RuntimeDir => dir: {
+                const reason = if (runtime.ensureDir(dir)) |_| "failed the check" else |e| runtime.describe(e);
+                break :dir std.fmt.bufPrint(&text_buf, "runtime directory {s} {s}", .{ dir, reason });
+            },
+            else => std.fmt.bufPrint(&text_buf, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }),
+        } catch "the session did not start";
+        answer(answer_fd, text);
+        std.process.exit(1);
+    };
+    var text: []const u8 = "";
+    const pty = startShell(opts, cwd, &text_buf, &text) orelse {
+        lib_posix.close(listen_fd);
+        unlinkSocket(dir, opts.name);
+        answer(answer_fd, text);
+        std.process.exit(1);
+    };
+    answer(answer_fd, ready_answer);
+    serveAndExit(dir, opts, listen_fd, pty);
+}
+
+/// Checks the runtime directory and binds the socket. The directory lock is
+/// held from the check to the bind, so that two starts of one name cannot
+/// both find the socket stale.
+fn bindAndCheck(gpa: std.mem.Allocator, dir: []const u8, name: []const u8) !i32 {
+    if (!validName(name)) return error.InvalidName;
     runtime.ensureDir(dir) catch return error.RuntimeDir;
-    const path = try socket.getSocketPath(gpa, dir, opts.name);
+    const path = try socket.getSocketPath(gpa, dir, name);
     defer gpa.free(path);
 
-    // From the check to the bind, so that two starts of one name cannot both
-    // find the socket stale. The lock goes with the fd when the caller exits.
     const lock_fd = try lockDir(dir);
     defer lib_posix.close(lock_fd);
 
@@ -103,50 +135,44 @@ pub fn start(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, opts: Options)
         return error.SessionExists;
     } else |err| switch (err) {
         // Nothing listens: a session that crashed left its socket.
-        error.ConnectionRefused => {
-            var dir_handle = try std.Io.Dir.openDirAbsolute(io, dir, .{});
-            defer dir_handle.close(io);
-            socket.cleanupStaleSocket(io, dir_handle, opts.name);
-        },
+        error.ConnectionRefused => unlinkSocket(dir, name),
         error.Unexpected => {},
     }
-
-    const listen_fd = try bindSocket(path);
-    const log_fd = if (log.log_system.file) |f| f.handle else -1;
-    var keep = [_]i32{ listen_fd, log_fd };
-    const cmd = try daemonize.createCmdZ(opts.shell, opts.command);
-
-    const reexec: ?daemonize.Reexec = if (builtin.os.tag.isDarwin()) .{
-        .session_name = opts.name,
-        .shell = opts.shell,
-        .command = opts.command,
-        .server_sock_fd = listen_fd,
-        .subcommand = reexec_command,
-    } else null;
-
-    const pty = daemonize.daemonize(opts.name, cmd, &keep, reexec, .{
-        .session_var = runtime.session_env,
-        .size = opts.size,
-    }) catch |err| {
-        lib_posix.close(listen_fd);
-        if (err == error.IsClientProc) return;
-        _ = std.c.unlink(@ptrCast((try gpa.dupeSentinel(u8, path, 0)).ptr));
-        return err;
-    };
-    // The forked session on Linux, or on macOS when the re-exec failed.
-    serveAndExit(dir, opts, listen_fd, pty);
+    return bindSocket(path);
 }
 
-/// The `__session` entry on macOS, after the disclaiming re-exec.
-pub fn resumeAfterReexec(dir: []const u8, opts: Options, listen_fd: i32) noreturn {
-    // `daemonize.takeReexecState` already set CLOEXEC on `listen_fd` again.
-    const cmd = daemonize.createCmdZ(opts.shell, opts.command) catch std.process.exit(1);
-    const pty = daemonize.spawnPty(opts.name, cmd, opts.size, runtime.session_env) catch |err| {
-        std.log.err("session {s}: pty failed: {s}", .{ opts.name, @errorName(err) });
-        unlinkSocket(dir, opts.name);
-        std.process.exit(1);
+/// Enters `cwd` and starts the shell in a new pty. Null on failure, with the
+/// text for the server in `text`.
+fn startShell(opts: Options, cwd: ?[]const u8, text_buf: []u8, text: *[]const u8) ?pty_mod.PtyInfo {
+    if (cwd) |dir| {
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        const dir_z = std.fmt.bufPrintSentinel(&buf, "{s}", .{dir}, 0) catch {
+            text.* = "the folder is too long";
+            return null;
+        };
+        if (std.c.chdir(dir_z.ptr) != 0) {
+            text.* = std.fmt.bufPrint(text_buf, "cannot enter directory {s}: {s}", .{ dir, @tagName(std.c.errno(-1)) }) catch "cannot enter the directory";
+            return null;
+        }
+    }
+    const cmd = pty_mod.createCmdZ(opts.shell, opts.command) catch {
+        text.* = "out of memory";
+        return null;
     };
-    serveAndExit(dir, opts, listen_fd, pty);
+    return pty_mod.spawnPty(opts.name, cmd, opts.size, runtime.session_env) catch |err| {
+        text.* = std.fmt.bufPrint(text_buf, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }) catch "the pty failed";
+        return null;
+    };
+}
+
+/// Writes the answer and closes `fd`, so that the server reads EOF after it.
+fn answer(fd: i32, text: []const u8) void {
+    var rest = text;
+    while (rest.len > 0) {
+        const n = lib_posix.write(fd, rest) catch break;
+        rest = rest[n..];
+    }
+    lib_posix.close(fd);
 }
 
 pub fn lockDir(dir: []const u8) !i32 {
@@ -174,9 +200,8 @@ pub fn unlinkSocket(dir: []const u8, name: []const u8) void {
     _ = std.c.unlink(path.ptr);
 }
 
-fn serveAndExit(dir: []const u8, opts: Options, listen_fd: i32, pty: daemonize.PtyInfo) noreturn {
-    // After a fork: no allocator or io of the parent. Their locks and threads
-    // stay in the parent, so a child that uses them can hang.
+fn serveAndExit(dir: []const u8, opts: Options, listen_fd: i32, pty: pty_mod.PtyInfo) noreturn {
+    // The session runs on one thread.
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
     const gpa = std.heap.c_allocator;
@@ -350,7 +375,7 @@ const Session = struct {
 
     const pty_in_max = 256 * 1024;
 
-    fn init(gpa: std.mem.Allocator, io: std.Io, opts: Options, listen_fd: i32, pty: daemonize.PtyInfo) !Session {
+    fn init(gpa: std.mem.Allocator, io: std.Io, opts: Options, listen_fd: i32, pty: pty_mod.PtyInfo) !Session {
         var epoch: u64 = undefined;
         io.random(std.mem.asBytes(&epoch));
         var s: Session = .{

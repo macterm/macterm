@@ -50,6 +50,10 @@ const create_timeout_ms = server.spawn_ms + handshake_timeout_ms;
 pub const Create = struct {
     /// The session's command (argv). Null: the session's login shell.
     command: ?[]const []const u8 = null,
+    /// The session's folder. Null: this process's folder.
+    cwd: ?[]const u8 = null,
+    /// The pty's first size. Null: the size of this process's terminal.
+    size: ?Resize = null,
 };
 
 pub const Outcome = union(enum) {
@@ -130,7 +134,7 @@ pub fn run(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, create: ?C
 ///
 /// A connection that ends before the reply is a server that exits (a newer
 /// app replaced it, or it was idle): one more try starts or finds the next.
-fn createSession(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: Create) (Error || error{OutOfMemory})!?Outcome {
+pub fn createSession(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: Create) (Error || error{OutOfMemory})!?Outcome {
     if (createOnce(gpa, dir, name, spec)) |outcome| {
         return outcome;
     } else |err| {
@@ -172,8 +176,8 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
         command = list;
     }
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd: ?msgpack.Bin = if (std.c.getcwd(&cwd_buf, cwd_buf.len)) |p| .{ .bytes = std.mem.sliceTo(@as([*:0]u8, @ptrCast(p)), 0) } else null;
-    const size = getTerminalSize(lib_posix.STDOUT_FILENO);
+    const cwd: ?msgpack.Bin = if (spec.cwd) |folder| .{ .bytes = folder } else if (std.c.getcwd(&cwd_buf, cwd_buf.len)) |p| .{ .bytes = std.mem.sliceTo(@as([*:0]u8, @ptrCast(p)), 0) } else null;
+    const size = spec.size orelse getTerminalSize(lib_posix.STDOUT_FILENO);
     const args: m.SessionCreate.Args = .{
         .id = name,
         .cwd = cwd,

@@ -5,12 +5,14 @@ const build_options = @import("build_options");
 const log = @import("log.zig");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
-const daemonize = @import("daemonize.zig");
 const v2session = @import("session.zig");
 const v2server = @import("server.zig");
 const v2proxy = @import("proxy.zig");
 const runtime = @import("runtime.zig");
+const Resize = @import("pty.zig").Resize;
 const v2attach = @import("attach.zig");
+const socket = @import("socket.zig");
+const protocol = @import("protocol/protocol.zig");
 const version = build_options.version;
 const ghostty_version = build_options.ghostty_version;
 
@@ -55,11 +57,8 @@ fn mainImpl(init: std.process.Init) !void {
     log.log_system.io = io;
 
     const cmd = first_arg orelse return help(io);
-    if (std.mem.eql(u8, cmd, "session")) {
-        const shell = init.environ_map.get("SHELL") orelse "/bin/sh";
-        return sessionCommand(gpa, io, init.environ_map, shell, &args);
-    }
-    if (std.mem.eql(u8, cmd, v2session.reexec_command)) return sessionEntry(gpa, io, init.environ_map, &args);
+    if (std.mem.eql(u8, cmd, "session")) return sessionCommand(gpa, io, init.environ_map, &args);
+    if (std.mem.eql(u8, cmd, v2session.command_name)) return sessionEntry(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "server")) return serverCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "connect")) return connectCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "proxy")) return proxyCommand(gpa, io, init.environ_map, &args);
@@ -68,49 +67,59 @@ fn mainImpl(init: std.process.Init) !void {
     return printError(io, "unknown command \"{s}\"", .{cmd});
 }
 
-/// `session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`: starts
-/// a v2 session (session.zig) and returns once its socket accepts
-/// connections. Not in `help` yet: the server (issue 0048) runs it.
-fn sessionCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, shell: []const u8, args: anytype) !void {
-    var opts: v2session.Options = .{ .name = "", .shell = shell };
+/// `session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`: asks
+/// the server to start a session, and starts the server when its socket does
+/// not answer. Returns once the session's socket accepts connections. Not in
+/// `help`: tests run it.
+fn sessionCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
+    var name: []const u8 = "";
+    var size: Resize = .{ .cols = 80, .rows = 24 };
+    var cwd: ?[]const u8 = null;
     var command: std.ArrayList([]const u8) = .empty;
     defer command.deinit(gpa);
     while (args.next()) |arg| {
-        if (opts.name.len > 0) {
+        if (name.len > 0) {
             if (command.items.len == 0 and std.mem.eql(u8, arg, "--")) continue;
             try command.append(gpa, arg);
         } else if (std.mem.eql(u8, arg, "--cols") or std.mem.eql(u8, arg, "--rows")) {
             const value = args.next() orelse return printError(io, "{s} requires a number", .{arg});
             const n = std.fmt.parseInt(u16, value, 10) catch 0;
             if (n == 0) return printError(io, "{s}: not a size: {s}", .{ arg, value });
-            if (arg[2] == 'c') opts.size.cols = n else opts.size.rows = n;
+            if (arg[2] == 'c') size.cols = n else size.rows = n;
         } else if (std.mem.eql(u8, arg, "--cwd")) {
-            const dir = args.next() orelse return printError(io, "--cwd requires a directory", .{});
-            const handle = std.Io.Dir.openDirAbsolute(io, dir, .{}) catch |err|
-                return printError(io, "cannot open directory {s}: {s}", .{ dir, @errorName(err) });
-            defer handle.close(io);
-            std.process.setCurrentDir(io, handle) catch |err|
-                return printError(io, "cannot enter directory {s}: {s}", .{ dir, @errorName(err) });
+            cwd = args.next() orelse return printError(io, "--cwd requires a directory", .{});
         } else if (std.mem.startsWith(u8, arg, "-")) {
             return printError(io, "unknown option \"{s}\"", .{arg});
         } else {
-            opts.name = arg;
+            name = arg;
         }
     }
-    if (opts.name.len == 0) return printError(io, "session name required", .{});
-    if (command.items.len > 0) opts.command = command.items;
+    if (name.len == 0) return printError(io, "session name required", .{});
+    if (!v2session.validName(name)) return printError(io, "invalid session name \"{s}\": use letters, digits, '-', '_' and '.', not first", .{name});
 
     const dir = runtime.resolveDir(gpa, env) catch return printError(io, "no runtime directory: set {s}", .{runtime.dir_env});
     defer gpa.free(dir);
-    v2session.start(gpa, io, dir, opts) catch |err| switch (err) {
-        error.InvalidName => return printError(io, "invalid session name \"{s}\": use letters, digits, '-', '_' and '.', not first", .{opts.name}),
-        error.NameTooLong => return printError(io, "session name \"{s}\" is too long for a socket in {s}", .{ opts.name, dir }),
-        error.SessionExists => return printError(io, "session \"{s}\" already exists", .{opts.name}),
-        error.RuntimeDir => {
-            const reason = if (runtime.ensureDir(dir)) |_| "failed the check" else |e| runtime.describe(e);
-            return printError(io, "runtime directory {s} {s}", .{ dir, reason });
-        },
-        else => return printError(io, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }),
+    runtime.ensureDir(dir) catch |err| return printError(io, "runtime directory {s} {s}", .{ dir, runtime.describe(err) });
+    // The server gives out a session that runs. This command makes a new one.
+    const path = try socket.getSocketPath(gpa, dir, name);
+    defer gpa.free(path);
+    if (socket.connectSession(path)) |fd| {
+        lib_posix.close(fd);
+        return printError(io, "session \"{s}\" already exists", .{name});
+    } else |_| {}
+
+    const outcome = v2attach.createSession(gpa, dir, name, .{
+        .command = if (command.items.len > 0) command.items else null,
+        .cwd = cwd,
+        .size = size,
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => return printError(io, "cannot start session \"{s}\": {s}", .{ name, @errorName(err) }),
+    };
+    if (outcome) |o| switch (o) {
+        .not_created => |text| return printError(io, "{s}", .{text}),
+        .session_too_old, .refused => return printError(io, "cannot start session \"{s}\": the server runs another build", .{name}),
+        else => return printError(io, "cannot start session \"{s}\"", .{name}),
     };
 }
 
@@ -186,27 +195,45 @@ fn connectCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.En
     }
 }
 
-/// The macOS v2 session after its disclaiming re-exec; not a user command.
-/// argv is `__session <name> [-- command...]`, the rest rides in
-/// `daemonize.reexec_env`.
+/// The session process; not a user command. The server starts it
+/// (`Server.spawn`) with argv `__session <name>` and its spec, one msgpack
+/// `SessionCreate.Args`, on `session.spec_fd`.
 fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
-    const name = args.next() orelse return printError(io, "{s}: session name required", .{v2session.reexec_command});
-    var command: std.ArrayList([]const u8) = .empty;
-    defer command.deinit(gpa);
-    if (args.next()) |sep| {
-        if (!std.mem.eql(u8, sep, "--")) return printError(io, "{s}: unexpected argument \"{s}\"", .{ v2session.reexec_command, sep });
-        while (args.next()) |arg| try command.append(gpa, arg);
+    const name = args.next() orelse return printError(io, "{s}: session name required", .{v2session.command_name});
+    const fd = v2session.spec_fd;
+    // The shell must not get the server's end of the answer.
+    _ = lib_posix.fcntl(fd, lib_posix.F.SETFD, std.c.FD_CLOEXEC) catch
+        return printError(io, "{s}: no spec on fd {d}", .{ v2session.command_name, fd });
+    var spec: std.ArrayList(u8) = .empty;
+    var buf: [16 * 1024]u8 = undefined;
+    while (true) {
+        const n = lib_posix.read(fd, &buf) catch |err| return printError(io, "{s}: cannot read the spec: {s}", .{ v2session.command_name, @errorName(err) });
+        if (n == 0) break;
+        if (spec.items.len + n > spec_max) return printError(io, "{s}: the spec is too large", .{v2session.command_name});
+        try spec.appendSlice(gpa, buf[0..n]);
     }
-    const state = (try daemonize.takeReexecState(gpa)) orelse
-        return printError(io, "{s}: no re-exec state in the environment", .{v2session.reexec_command});
+    var arena_state: std.heap.ArenaAllocator = .init(gpa);
+    const arena = arena_state.allocator();
+    const create = protocol.msgpack.decodeSlice(protocol.messages.SessionCreate.Args, arena, spec.items) catch |err|
+        return printError(io, "{s}: the spec does not decode: {s}", .{ v2session.command_name, @errorName(err) });
+    if (!std.mem.eql(u8, create.id, name)) return printError(io, "{s}: the spec names another session", .{v2session.command_name});
+    var command: ?[]const []const u8 = null;
+    if (create.command) |argv| {
+        const list = try arena.alloc([]const u8, argv.len);
+        for (argv, list) |arg, *item| item.* = arg.bytes;
+        command = list;
+    }
     const dir = try runtime.resolveDir(gpa, env);
-    v2session.resumeAfterReexec(dir, .{
+    v2session.run(dir, .{
         .name = name,
-        .command = if (command.items.len > 0) command.items else null,
-        .shell = state.shell,
-        .size = state.size,
-    }, state.server_sock_fd);
+        .command = command,
+        .shell = env.get("SHELL") orelse "/bin/sh",
+        .size = .{ .cols = create.cols, .rows = create.rows },
+    }, if (create.cwd) |c| c.bytes else null, fd);
 }
+
+/// The largest spec that `__session` reads.
+const spec_max = 1024 * 1024;
 
 fn help(io: std.Io) !void {
     const help_text =

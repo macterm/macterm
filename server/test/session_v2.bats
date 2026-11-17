@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# The v2 session process (src/session.zig): `zmx session`, its socket in the
-# runtime directory, and the frames on it. test/v2client.py is the client.
+# The v2 session process (src/session.zig): `zmx session` (through the
+# server), its socket in the runtime directory, and the frames on it. test/v2client.py is the client.
 
 load test_helper
 
@@ -71,6 +71,17 @@ PY
   run lsof -p "$program"
   [ -n "$output" ]
   [[ "$output" != *"$MACTERM_RUNTIME_DIR/s1"* ]]
+}
+
+@test "session: no program in the session gets the fd of the spec" {
+  # The server gives the spec on fd 3 (session.spec_fd).
+  "$ZMX" session s1 -- /bin/sh -c "if { : >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
+  local i=0
+  until [[ -s "$RT/fd3" ]]; do
+    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
+    sleep 0.1
+  done
+  [ "$(< "$RT/fd3")" = "closed" ]
 }
 
 @test "session: the leader's resize reaches the pty" {

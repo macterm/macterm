@@ -5,7 +5,6 @@ comptime {
     _ = @import("pty.zig");
     _ = @import("signal.zig");
     _ = @import("terminal.zig");
-    _ = @import("daemonize.zig");
     _ = @import("foreground.zig");
     _ = @import("posix.zig");
     _ = @import("protocol/protocol.zig");

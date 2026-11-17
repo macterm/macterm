@@ -35,13 +35,11 @@ responsible process, which is fixed at spawn. A session that outlived the app
 that started it belonged to nothing, and its programs got `EHOSTUNREACH` on
 the local network with no prompt (macterm#419).
 
-- The session starts itself again as `zmx __session` with
-  `POSIX_SPAWN_SETEXEC` and `responsibility_spawnattrs_setdisclaim`: same pid,
-  session and fds. Its state rides `ZMX_DAEMON_*` variables, which the child
-  that execs the shell removes. Linux is unchanged.
-- No process that keeps running calls `unsetenv`: zig 0.17's `std.Io` caches
-  the environment block and panics on a shortened one.
-- Code: `src/daemonize.zig`, `src/main.zig`, `src/session.zig`.
+- Since issue 0269, the server spawns `zmx __session` with one `posix_spawn`
+  that has `responsibility_spawnattrs_setdisclaim`. Before, the session
+  started itself again with `POSIX_SPAWN_SETEXEC`, and its state rode
+  `ZMX_DAEMON_*` variables.
+- Code: `src/server.zig` (`spawnSession`), `src/main.zig`, `src/session.zig`.
 - Test: `test/daemon_responsibility.bats` (Darwin only).
 
 ### 0005: attach creates a session quietly
@@ -97,7 +95,7 @@ few seconds, and the answer was a round trip old (macterm#695).
 - The daemon removes the variable in the child that execs the shell, so a
   nested `zmx connect` does not subscribe.
 - Code: `src/foreground.zig`, `src/session.zig`, `src/attach.zig`,
-  `src/daemonize.zig`.
+  `src/pty.zig`.
 - Tests: `src/foreground.zig`, `src/test.zig`.
 
 ### The daemon frees only what it allocated
