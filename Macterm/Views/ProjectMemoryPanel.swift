@@ -15,11 +15,6 @@ struct ProjectMemoryPanel: View {
     private var appState
     @Environment(ProjectStore.self)
     private var projectStore
-    /// The sidebar's project icon (Settings → Appearance → Project icon), so
-    /// the header shows the same glyph as the project's row.
-    @AppStorage(Preferences.Keys.projectIconSymbol)
-    private var projectIconSymbol: String
-
     static let width: CGFloat = 320
     /// The failure card's corner: the rows are cards like it.
     static let rowCornerRadius: CGFloat = 12
@@ -96,20 +91,10 @@ struct ProjectMemoryPanel: View {
         }
     }
 
-    /// The project's row icon in the sidebar: the same symbol, number and
-    /// color tag. Nothing when the setting is no icon.
-    @ViewBuilder
+    /// The project's row icon in the sidebar: the folder, in the color tag.
     private var projectIcon: some View {
-        if projectIconSymbol != Preferences.noIcon {
-            let index = (projectStore.projects.firstIndex { $0.id == project.id } ?? 0) + 1
-            if let color = project.color {
-                TabRowIcon(symbol: projectIconSymbol, index: index)
-                    .foregroundStyle(MactermTheme.color(for: color))
-            } else {
-                TabRowIcon(symbol: projectIconSymbol, index: index)
-                    .foregroundStyle(MactermTheme.fgMuted)
-            }
-        }
+        Image(systemName: "folder")
+            .foregroundStyle(project.color.map { MactermTheme.color(for: $0) } ?? MactermTheme.fgMuted)
     }
 
     // MARK: - Content

@@ -237,9 +237,9 @@ Desktop widgets are terminals on the desktop (`DesktopWidget`, `AppState+Desktop
 
 ## Project color tags
 
-`Project.colorName` tints glyphs that the row already draws (the project icon, the icons of the tab rows, including agent logos and status glyphs).
+`Project.colorName` tints glyphs that the row already draws (the project's folder glyph, the icons of the tab rows, including agent logos and status glyphs). A project row always draws its folder glyph, so a tag always shows.
 
-- **No stripes. No glyph means no tag. No indicator in the titlebar**. We tried each alternative and rejected it.
+- **No stripes. No indicator in the titlebar**. We tried each alternative and rejected it. A tab row with no glyph (Tab icon: None) shows the tag only through the project row.
 - The colors are fixed system colors (`MactermTheme.color(for:)`). They are deliberately not derived from the ghostty palette.
 - The picker is `.pickerStyle(.palette)` (`ProjectColorMenu`). It is the only menu form that renders.
 - Macterm stores the color as a String, so that an unknown value becomes untagged.

@@ -1115,7 +1115,6 @@ private struct SidebarProjectHeader: View {
     var body: some View {
         SidebarProjectRow(
             project: project,
-            index: index,
             presentation: presentation,
             isInteractive: isInteractive,
             onRename: onRename
@@ -1176,15 +1175,12 @@ private struct SidebarProjectHeader: View {
 
 private struct SidebarProjectRow: View {
     let project: Project
-    let index: Int
     @Bindable
     var presentation: SidebarPresentationState
     let isInteractive: Bool
     let onRename: (String) -> Void
     @Environment(AppState.self)
     private var appState
-    @AppStorage(Preferences.Keys.projectIconSymbol)
-    private var projectIconSymbol: String
     @FocusState
     private var focused: Bool
 
@@ -1234,23 +1230,16 @@ private struct SidebarProjectRow: View {
     }
 
     var body: some View {
-        Group {
-            if projectIconSymbol == Preferences.noIcon {
-                titleContent
-                    .padding(.leading, 6)
+        Label {
+            titleContent
+        } icon: {
+            // Only when tagged: forcing a color on an untagged row
+            // would flatten the styling AppKit gives a selected row.
+            if let color = project.color {
+                Image(systemName: "folder")
+                    .foregroundStyle(MactermTheme.color(for: color))
             } else {
-                Label {
-                    titleContent
-                } icon: {
-                    // Only when tagged: forcing a color on an untagged row
-                    // would flatten the styling AppKit gives a selected row.
-                    if let color = project.color {
-                        TabRowIcon(symbol: projectIconSymbol, index: index)
-                            .foregroundStyle(MactermTheme.color(for: color))
-                    } else {
-                        TabRowIcon(symbol: projectIconSymbol, index: index)
-                    }
-                }
+                Image(systemName: "folder")
             }
         }
         .task(id: appState.renamingProjectID) {

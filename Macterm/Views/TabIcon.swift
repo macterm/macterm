@@ -100,12 +100,10 @@ struct TabStatusGlyph: View {
     /// `SidebarTabRow.tagColor`, or the switcher's selection color.
     var tint: Color?
     var spinnerOverAgent = true
-    @AppStorage(Preferences.Keys.sidebarIconSize)
-    private var iconSize: SidebarIconSize
-
-    private var size: SidebarIconSize {
-        iconSize
-    }
+    /// The Mac's sidebar icon size (System Settings → Appearance). A sidebar
+    /// list sets it; elsewhere it stays `.medium`.
+    @Environment(\.sidebarRowSize)
+    private var size: SidebarRowSize
 
     /// The spinner is a control, so it steps between AppKit's control sizes
     /// rather than scaling continuously with the icons. `.mini` (12pt) matches
@@ -202,16 +200,14 @@ struct TabRowIcon: View {
     /// red project's icons read as a mistake rather than as a brand. Nil
     /// (untagged) keeps the brand color.
     var agentTint: Color?
-    @AppStorage(Preferences.Keys.sidebarIconSize)
-    private var iconSize: SidebarIconSize
+    /// The Mac's sidebar icon size. The SF Symbols follow it through the row's
+    /// font; the glyphs sized by hand follow it through `glyphScale`.
+    @Environment(\.sidebarRowSize)
+    private var size: SidebarRowSize
     /// Scales with the user's text size like the sibling SF Symbols do; a
     /// fixed 15pt would stay small next to enlarged row text.
     @ScaledMetric(relativeTo: .body)
     private var agentIconSize: CGFloat = 15
-
-    private var size: SidebarIconSize {
-        iconSize
-    }
 
     var body: some View {
         if let agent {
@@ -230,21 +226,22 @@ struct TabRowIcon: View {
             NumberGlyph(index: index, variant: symbol, size: size)
         } else {
             Image(systemName: symbol)
-                .imageScale(size.imageScale)
         }
     }
 }
 
-extension SidebarIconSize {
-    /// SwiftUI's own symbol scaling, which sizes a symbol against whatever font
-    /// the row hands it. `medium` is the default, so the middle case leaves an
-    /// icon exactly the size it was before this preference existed rather than
-    /// pinning it to a point size of our own.
-    var imageScale: Image.Scale {
+extension SidebarRowSize {
+    /// Multiplier for the sidebar glyphs sized by hand rather than by the
+    /// row's font: the agent logo's frame, the plain-digit number glyph, the
+    /// running spinner, the completion dot. Taken from AppKit rather than
+    /// guessed so those glyphs track the SF Symbols beside them:
+    /// `NSImage.SymbolConfiguration` renders a 13pt symbol 12/14/18pt tall at
+    /// small/medium/large.
+    var glyphScale: CGFloat {
         switch self {
-        case .small: .small
-        case .medium: .medium
-        case .large: .large
+        case .small: 12.0 / 14.0
+        case .medium: 1
+        case .large: 18.0 / 14.0
         }
     }
 }
@@ -252,7 +249,7 @@ extension SidebarIconSize {
 private struct NumberGlyph: View {
     let index: Int
     let variant: String
-    var size: SidebarIconSize = .medium
+    var size: SidebarRowSize = .medium
     /// The `.body` point size, as a metric so the digits keep tracking the
     /// user's text size once `glyphScale` has been applied — `imageScale` is
     /// no help here, since these variants draw text rather than a symbol.
@@ -271,7 +268,6 @@ private struct NumberGlyph: View {
             // SF Symbols ships `1.<shape>` through `50.<shape>`; beyond that,
             // fall back to plain digits so we don't render a missing glyph.
             Image(systemName: "\(index).\(suffix)")
-                .imageScale(size.imageScale)
         } else {
             Text(verbatim: "\(index)")
                 .font(digitFont)
