@@ -74,8 +74,9 @@ PY
 }
 
 @test "session: no program in the session gets the fd of the spec" {
-  # The server gives the spec on fd 3 (session.spec_fd).
-  "$ZMX" session s1 -- /bin/sh -c "if { : >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
+  # The server gives the spec on fd 3 (session.spec_fd). `true`, not `:`: a
+  # redirect that fails on a special builtin ends a POSIX shell.
+  "$ZMX" session s1 -- /bin/sh -c "if { true >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
   local i=0
   until [[ -s "$RT/fd3" ]]; do
     (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
