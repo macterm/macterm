@@ -62,7 +62,11 @@ jobs:
     needs: [changes, server]
     if: ${{ !cancelled() && needs.changes.outputs.bench == 'true' }}
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     permissions:
       contents: read
     steps:
@@ -103,13 +107,14 @@ jobs:
       - name: Measure
         run: |
           python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --out session-macos.json
+          python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --out session-macos-again.json
           python3 scripts/session_bench.py report session-macos.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
         uses: actions/upload-artifact@v7
         with:
-          name: session-results-macos
-          path: session-macos.json
+          name: session-results-macos-${{ matrix.run }}
+          path: session-macos*.json
 
       # Fails when v2 is worse than v1 beyond the limits.
       - name: Compare v2 with v1
@@ -124,7 +129,11 @@ jobs:
     needs: [changes, server]
     if: ${{ !cancelled() && needs.changes.outputs.bench == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     permissions:
       contents: read
     steps:
@@ -183,13 +192,15 @@ jobs:
         run: |
           python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --ssh-host localhost \
             --network "localhost, netem delay 25 ms each way, 100 Mbit/s" --out session-linux.json
+          python3 scripts/session_bench.py run --zmx zmx/zmx --v1-zmx zmx-v1/zmx --ssh-host localhost \
+            --network "localhost, netem delay 25 ms each way, 100 Mbit/s" --out session-linux-again.json
           python3 scripts/session_bench.py report session-linux.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
         uses: actions/upload-artifact@v7
         with:
-          name: session-results-linux
-          path: session-linux.json
+          name: session-results-linux-${{ matrix.run }}
+          path: session-linux*.json
 
       # Fails when v2 is worse than v1 beyond the limits.
       - name: Compare v2 with v1
