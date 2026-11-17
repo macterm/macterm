@@ -1175,7 +1175,7 @@ struct ZoomIndicator: View {
 }
 
 /// A mode that the user can leave with one click, as a pill in a corner of
-/// the terminal: Zoomed, Copy Mode. A click leaves the mode.
+/// the terminal: Zoomed, Copy Mode.
 struct ModePill: View {
     let title: String
     let systemImage: String
@@ -1189,7 +1189,7 @@ struct ModePill: View {
 }
 
 /// A state of a pane that a click cannot change, as a pill in the same
-/// corner as `ModePill`, with no hit target.
+/// corner as `ModePill`. It takes no clicks.
 struct StatusPill<Icon: View>: View {
     let title: String
     @ViewBuilder let icon: () -> Icon
@@ -1207,8 +1207,8 @@ struct StatusPill<Icon: View>: View {
 /// button on macOS 26, below that the flat badge in the theme colors. With
 /// no action, the pill takes no clicks.
 struct PanePill<Content: View>: View {
-    /// The height of every pill's content. The glass button sizes to its
-    /// label, and the icons have different heights (19 to 21 pt pills).
+    /// The least height of every pill's content: the tallest icon. The
+    /// glass button sizes to its label, and the icons have different heights.
     static var contentHeight: CGFloat { 15 }
 
     var action: (() -> Void)?
@@ -1217,14 +1217,14 @@ struct PanePill<Content: View>: View {
     var body: some View {
         Group {
             if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                Button(action: action ?? {}) { content().frame(height: Self.contentHeight) }
+                Button(action: action ?? {}) { content().frame(minHeight: Self.contentHeight) }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
             } else {
                 Button(action: action ?? {}) {
                     content()
-                        .frame(height: Self.contentHeight)
+                        .frame(minHeight: Self.contentHeight)
                         .modifier(FlatPillChrome())
                         .contentShape(Rectangle())
                 }
@@ -1232,6 +1232,7 @@ struct PanePill<Content: View>: View {
             }
         }
         .allowsHitTesting(action != nil)
+        .focusable(action != nil)
         .accessibilityRemoveTraits(action == nil ? .isButton : [])
     }
 }
