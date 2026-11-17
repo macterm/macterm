@@ -6,9 +6,6 @@ import AppKit
 ///
 /// `NSApp.applicationIconImage` changes the Dock tile and the app switcher,
 /// never the bundle's icon in Finder. Assigning nil restores the bundle icon.
-/// Macterm does not read Ghostty's `macos-icon` and `macos-custom-icon` keys:
-/// a user who sets them gets the bundled or the adaptive icon, with no
-/// message.
 @MainActor
 enum AppIconPresenter {
     /// Whether the adaptive icon is installed. Lets a refresh that keeps the

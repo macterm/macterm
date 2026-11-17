@@ -8,9 +8,9 @@ private let logger = Logger(subsystem: appBundleID, category: "AdaptiveIconContr
 ///
 /// `GhosttyApp` starts it when the first config loads. The theme colors, the
 /// system's appearance and icon style and the preference are read again on
-/// each `refresh`, which runs on every config change, when
-/// the app becomes active (System Settings sends no notice when the icon
-/// style changes) and when the preference changes. A refresh whose request is
+/// each `refresh`, which runs on every config change, when the app becomes
+/// active (System Settings sends no notice when the icon style changes) and
+/// when the preference changes. A refresh whose request is
 /// the one already shown or in flight does nothing, so the frequent config
 /// notifications cost a few color reads.
 ///

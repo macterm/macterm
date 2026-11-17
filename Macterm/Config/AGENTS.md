@@ -40,7 +40,7 @@ Overrides that Macterm must lock. The `smooth-scroll`, `smooth-cursor`, `cursor-
 
 The state of the UI of Macterm lives in `Preferences`. It never touches this pipeline.
 
-**Macterm does not read `macos-icon` or `macos-custom-icon`**. The Dock shows the adaptive icon or the bundled icon for every value, `custom` too, with no message (`IconRenderer/AGENTS.md`). The other values name artwork of the Ghostty brand that we do not ship.
+**Macterm does not read `macos-icon` or `macos-custom-icon`**. The Dock shows the adaptive icon or the bundled icon for every value, `custom` too, with no message (`IconRenderer/AGENTS.md`). The values other than `custom` name artwork of the Ghostty brand that we do not ship.
 
 **`macos-hidden`**. `never` and `always` of ghostty map to `.regular` and `.accessory` through `MacosHidden`. This is a pure function with tests. The raw values are the own tag names of ghostty, so a rename of a case breaks the wire.
 

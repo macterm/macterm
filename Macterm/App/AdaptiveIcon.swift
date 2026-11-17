@@ -190,9 +190,7 @@ enum AdaptiveIcon {
 
     /// What the Dock shows.
     enum Decision: Equatable {
-        /// The bundled icon, and why. Macterm does not read `macos-icon`:
-        /// every value of it, `custom` too, gets this icon or the adaptive
-        /// icon.
+        /// The bundled icon, and why.
         case bundled(StandIn)
         /// The bundled icon, repainted in the theme for this stack.
         case adaptive(AdaptiveIconRequest.Appearance)
