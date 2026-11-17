@@ -36,8 +36,8 @@ struct SettingsInfoPanel: View {
 
 /// The layout of every block at the top of a pane: the info panels and the
 /// banners in General. Sizes measured in the header of the System Settings
-/// panes (Notifications, Accessibility): a 14 pt semibold glyph, a 26 pt tile,
-/// an 11 pt gap to the text.
+/// panes (Notifications, Accessibility): a 14 pt semibold glyph, an 11 pt gap
+/// to the text.
 struct SettingsInfoBlock<Content: View>: View {
     let symbol: String
     var tint: Color = .accentColor
@@ -56,13 +56,13 @@ struct SettingsInfoBlock<Content: View>: View {
     }
 }
 
-/// The two looks of the icon that issue 0328 shows Ethan side by side. The
-/// switch is temporary: the merge keeps one look and removes this type.
+/// The two looks of the icon. Temporary: the merge keeps one look and removes
+/// this type.
 enum SettingsInfoIconStyle: String {
     /// The glyph centered in a box as wide as the widest glyph, with no
     /// background, so that the text starts at the same x in every pane.
     case box
-    /// The glyph in white on a tile of the tint, as in System Settings.
+    /// The glyph in white on a 26 pt tile of the tint, as in System Settings.
     case tile
 
     /// The defaults key `settingsInfoIconStyle` (`box` or `tile`) of a Debug
@@ -95,9 +95,8 @@ struct SettingsInfoTile: View {
         switch style {
         case .box:
             // A hidden line in the title's font gives the box the height and
-            // the baseline of the title's first line, whatever the glyph's own
-            // height. The glyph is centered on that line, so a tall glyph
-            // (`key`) does not make its block taller than the others.
+            // baseline of the title's first line. The glyph is centered on it,
+            // so a tall glyph (`key`) does not make its block taller.
             Text(verbatim: " ")
                 .hidden()
                 .frame(width: Self.boxWidth)

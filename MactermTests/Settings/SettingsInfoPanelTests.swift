@@ -20,11 +20,11 @@ struct SettingsInfoPanelTests {
     ]
 
     @Test
-    func every_glyph_fits_in_the_box() {
-        for symbol in Self.symbols {
-            let glyph = NSHostingView(rootView: Image(systemName: symbol).font(.system(size: 14, weight: .semibold)))
-            #expect(glyph.fittingSize.width <= SettingsInfoTile.boxWidth, "\(symbol)")
+    func the_box_is_as_wide_as_the_widest_glyph() {
+        let widths = Self.symbols.map {
+            NSHostingView(rootView: Image(systemName: $0).font(.system(size: 14, weight: .semibold))).fittingSize.width
         }
+        #expect(widths.max() == SettingsInfoTile.boxWidth, "\(widths)")
     }
 
     @Test(arguments: [SettingsInfoIconStyle.box, .tile])
