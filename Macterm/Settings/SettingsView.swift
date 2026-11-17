@@ -1206,24 +1206,19 @@ extension View {
 private struct FullDiskAccessBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full Disk Access is off")
-                    Text("""
-                    macOS asks for each folder when a terminal command reads Documents, Downloads, \
-                    or other protected places. One Full Disk Access grant covers all of them.
-                    """)
-                    .settingsSecondaryText()
-                    if let url = FullDiskAccess.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Full Disk Access is off")
+                Text("""
+                macOS asks for each folder when a terminal command reads Documents, Downloads, \
+                or other protected places. One Full Disk Access grant covers all of them.
+                """)
+                .settingsSecondaryText()
+                if let url = FullDiskAccess.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }
@@ -1238,21 +1233,16 @@ private struct FullDiskAccessBanner: View {
 private struct NotificationPermissionBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Macterm has no notification permission")
-                    Text("Your Ghostty config asks for notifications.")
-                        .settingsSecondaryText()
-                    if let url = NotificationHandler.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Macterm has no notification permission")
+                Text("Your Ghostty config asks for notifications.")
+                    .settingsSecondaryText()
+                if let url = NotificationHandler.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }

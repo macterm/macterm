@@ -12,19 +12,11 @@ struct SettingsInfoPanel: View {
     let docs: DocsSection
 
     var body: some View {
-        // Sizes measured in the header of the System Settings panes
-        // (Notifications, Accessibility): a 26 pt icon, a 11 pt gap to the
-        // text, the glyph on the baseline of the title.
-        HStack(alignment: .firstTextBaseline, spacing: 11) {
-            SettingsInfoTile(symbol: symbol)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(captionWithLink)
-                    .settingsSecondaryText()
-            }
-            Spacer(minLength: 0)
+        SettingsInfoBlock(symbol: symbol) {
+            Text(title)
+            Text(captionWithLink)
+                .settingsSecondaryText()
         }
-        .padding(.vertical, 4)
     }
 
     /// The caption, then the docs link as its own phrase, as System Settings
@@ -42,16 +34,76 @@ struct SettingsInfoPanel: View {
     }
 }
 
-/// The icon of an info block: a glyph with no frame and no background, so its own edge is the left edge. The banners in
-/// General use it too, so that every block at the top of a pane looks the same.
-struct SettingsInfoTile: View {
+/// The layout of every block at the top of a pane: the info panels and the
+/// banners in General. Sizes measured in the header of the System Settings
+/// panes (Notifications, Accessibility): a 14 pt semibold glyph, a 26 pt tile,
+/// an 11 pt gap to the text.
+struct SettingsInfoBlock<Content: View>: View {
     let symbol: String
     var tint: Color = .accentColor
+    var style: SettingsInfoIconStyle = .current
+    @ViewBuilder let content: Content
 
     var body: some View {
-        Image(systemName: symbol)
+        HStack(alignment: style == .tile ? .top : .firstTextBaseline, spacing: 11) {
+            SettingsInfoTile(symbol: symbol, tint: tint, style: style)
+            VStack(alignment: .leading, spacing: 2) {
+                content
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// The two looks of the icon that issue 0328 shows Ethan side by side. The
+/// switch is temporary: the merge keeps one look and removes this type.
+enum SettingsInfoIconStyle: String {
+    /// The glyph centered in a box as wide as the widest glyph, with no
+    /// background, so that the text starts at the same x in every pane.
+    case box
+    /// The glyph in white on a tile of the tint, as in System Settings.
+    case tile
+
+    /// The defaults key `settingsInfoIconStyle` (`box` or `tile`) of a Debug
+    /// build. A Release build shows `box`.
+    static var current: Self {
+        #if DEBUG
+        Preferences.defaults.string(forKey: "settingsInfoIconStyle").flatMap(Self.init(rawValue:)) ?? .box
+        #else
+        .box
+        #endif
+    }
+}
+
+/// The icon of an info block. Every pane draws it at the same width, so the
+/// text column starts at the same x in every pane.
+struct SettingsInfoTile: View {
+    /// The width of the widest glyph that a block uses at 14 pt semibold
+    /// (`puzzlepiece.extension` and `rectangle.bottomthird.inset.filled`).
+    /// `SettingsInfoPanelTests` measures each glyph against it.
+    static let boxWidth: CGFloat = 21
+    static let tileSize: CGFloat = 26
+
+    let symbol: String
+    var tint: Color = .accentColor
+    var style: SettingsInfoIconStyle = .current
+
+    var body: some View {
+        let glyph = Image(systemName: symbol)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(tint)
-            .accessibilityHidden(true)
+        switch style {
+        case .box:
+            glyph
+                .foregroundStyle(tint)
+                .frame(width: Self.boxWidth)
+                .accessibilityHidden(true)
+        case .tile:
+            glyph
+                .foregroundStyle(.white)
+                .frame(width: Self.tileSize, height: Self.tileSize)
+                .background(tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .accessibilityHidden(true)
+        }
     }
 }
