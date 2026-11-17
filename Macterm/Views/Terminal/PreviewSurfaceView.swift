@@ -9,7 +9,8 @@ import SwiftUI
 /// The surface is manual (`manual_io`): no pty, no shell, no session. Macterm
 /// feeds the text with `ghostty_surface_feed`. A write of the surface (a
 /// terminal reply) goes nowhere. Its userdata is nil, so each action of
-/// `GhosttyCallbacks` that needs a view returns early. It is not a
+/// `GhosttyCallbacks` that needs a view returns early, except the scrollbar
+/// action (see below). It is not a
 /// `GhosttyTerminalNSView`, so no tab, window, quit prompt or pane list counts
 /// it. `GhosttyApp` gives it each config reload (`liveSurfaces`). A toggle
 /// therefore applies to it at once. It takes the user's whole config, cursor
@@ -46,7 +47,8 @@ final class PreviewSurfaceView: NSView, ScrollbarSurface {
 
     var scrollAccumulator = ScrollAccumulator()
     var onScrollbarUpdate: ((UInt64, UInt64, UInt64) -> Void)?
-    /// The preview gets no mouse-shape action, so this is never called.
+    /// Never called: the preview sends no pointer position, so libghostty
+    /// computes no pointer shape for it, and the pointer stays an arrow.
     var onMouseShapeChange: ((NSCursor) -> Void)?
 
     func surfaceDidUpdateScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
@@ -160,6 +162,8 @@ final class PreviewSurfaceView: NSView, ScrollbarSurface {
     private func destroySurface() {
         if let surface { ghostty_surface_free(surface) }
         surface = nil
+        // A new surface starts with an empty accumulator.
+        scrollAccumulator = ScrollAccumulator()
     }
 
     private func updateSize() {
@@ -380,7 +384,7 @@ final class PreviewSurfaceContainer: NSView {
         configObserver = NotificationCenter.default.addObserver(
             forName: .mactermConfigDidChange, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.needsDisplay = true }
+            MainActor.assumeIsolated { self?.paintBackground() }
         }
     }
 
@@ -398,6 +402,10 @@ final class PreviewSurfaceContainer: NSView {
     }
 
     override func updateLayer() {
+        paintBackground()
+    }
+
+    private func paintBackground() {
         layer?.backgroundColor = GhosttyApp.shared.backgroundColor.cgColor
     }
 }

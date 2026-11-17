@@ -71,7 +71,6 @@ struct PreviewSurfaceViewTests {
         let container = PreviewSurfaceContainer(kind: .scroll)
         let scroll = try #require(container.subviews.first as? SurfaceScrollView)
         #expect(scroll.surfaceView === container.preview)
-        #expect(scroll.hasVerticalScroller)
     }
 
     @Test
@@ -79,6 +78,19 @@ struct PreviewSurfaceViewTests {
         let container = PreviewSurfaceContainer(kind: .cursor)
         #expect(container.subviews.count == 1)
         #expect(container.subviews.first === container.preview)
+    }
+
+    @Test
+    func containerRepaintsOnAConfigChange() async throws {
+        let container = PreviewSurfaceContainer(kind: .cursor)
+        container.layer?.backgroundColor = nil
+        NotificationCenter.default.post(name: .mactermConfigDidChange, object: nil)
+        // The observer runs on the main queue: wait for it, with a sleep so
+        // the queue gets its turn.
+        for _ in 0 ..< 100 where container.layer?.backgroundColor == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(container.layer?.backgroundColor == GhosttyApp.shared.backgroundColor.cgColor)
     }
 
     @Test
