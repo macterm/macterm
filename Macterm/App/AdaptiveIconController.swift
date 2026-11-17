@@ -29,17 +29,21 @@ final class AdaptiveIconController {
     static let shared = AdaptiveIconController()
 
     /// One icon of the preview in Settings.
-    struct PreviewIcon {
+    struct PreviewIcon: Equatable {
         /// Nil for the configured icon, which has one image for both sides.
         var appearance: AdaptiveIconRequest.Appearance?
         /// Nil until the first image of this side exists: the tile stays
         /// empty, with no spinner.
         var image: NSImage?
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.appearance == rhs.appearance && lhs.image === rhs.image
+        }
     }
 
     /// What the preview in Settings shows: the Dock's icon for the current
     /// state, and why it is not in the theme's colors (`StandIn.previewLine`).
-    struct Preview {
+    struct Preview: Equatable {
         var icons: [PreviewIcon] = []
         var standIn: AdaptiveIcon.StandIn?
     }
@@ -69,6 +73,11 @@ final class AdaptiveIconController {
     /// queue the same request again.
     @ObservationIgnored
     private var previewRender: AdaptiveIconRequest?
+    /// The last request for the preview that the helper failed. It is not
+    /// tried again, and it never turns off the Dock's icon: only the Dock's
+    /// own render does that.
+    @ObservationIgnored
+    private var previewFailed: AdaptiveIconRequest?
     /// The request for the appearance that only the preview shows, nil when
     /// the preview shows no such side.
     @ObservationIgnored
@@ -159,7 +168,10 @@ final class AdaptiveIconController {
     /// The Dock shows the configured icon: the preview shows the same image.
     private func showPreview(of standIn: AdaptiveIcon.StandIn) {
         previewOnly = nil
-        preview = Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn)
+        // A custom image that cannot be read leaves the bundled icon, and
+        // the line about the key would then be wrong.
+        let standIn = standIn == .customIcon && !AppIconPresenter.showsCustomImage ? .unavailable : standIn
+        setPreview(Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn))
     }
 
     /// The Dock shows the adaptive icon. While a side renders, its tile keeps
@@ -182,23 +194,32 @@ final class AdaptiveIconController {
             if image == nil, appearance == shown.appearance { image = NSApp.applicationIconImage }
             icons.append(PreviewIcon(appearance: appearance, image: image))
         }
-        preview = Preview(icons: icons, standIn: nil)
+        setPreview(Preview(icons: icons, standIn: nil))
         renderPreviewOnlySide()
+    }
+
+    /// A refresh that changes nothing does not redraw the preview.
+    private func setPreview(_ new: Preview) {
+        guard new != preview else { return }
+        preview = new
     }
 
     /// Renders the side that only the preview shows, after the Dock's render.
     private func renderPreviewOnlySide() {
-        guard let request = previewOnly, dockRenders == 0, previewRender != request, knownImage(for: request) == nil else { return }
+        guard let request = previewOnly, dockRenders == 0, previewRender != request, previewFailed != request,
+              knownImage(for: request) == nil
+        else { return }
         previewRender = request
         renders.render(request) { [self] result in
             if previewRender == request { previewRender = nil }
-            guard case let .success(png) = result else {
-                // A failure here is the helper's, and the Dock's next render
-                // meets it too. `.superseded` says nothing.
-                if case let .failure(failure) = result, failure != .superseded { fail(failure) }
+            guard case let .success(png) = result, let image = NSImage(data: png) else {
+                // The tile keeps its last image. `.superseded` says nothing.
+                if case let .failure(failure) = result, failure == .superseded { return }
+                previewFailed = request
+                logger.warning("the preview's adaptive icon (\(request.appearance.rawValue, privacy: .public)) did not render")
                 return
             }
-            guard request == previewOnly, let image = NSImage(data: png) else { return }
+            guard request == previewOnly else { return }
             remember(image, for: request)
             cache.store(png, for: request)
             refresh()

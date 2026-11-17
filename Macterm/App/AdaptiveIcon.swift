@@ -234,7 +234,8 @@ enum AdaptiveIcon {
         iconStyle: String?,
         themeHasTwoSides: Bool
     ) -> [AdaptiveIconRequest.Appearance] {
-        let followsSystem = [nil, "Regular", "RegularAutomatic"].contains(iconStyle)
+        let followsSystem = appearance(iconStyle: iconStyle, systemScheme: .light) == .light
+            && appearance(iconStyle: iconStyle, systemScheme: .dark) == .dark
         guard followsSystem, !themeHasTwoSides else { return [shown] }
         return [.light, .dark]
     }

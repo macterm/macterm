@@ -43,6 +43,12 @@ enum AppIconPresenter {
     }
 
     /// The bundled icon repainted in the theme (`AdaptiveIconController`).
+    /// Whether the Dock shows the user's custom image. A custom image that
+    /// cannot be read leaves the bundled icon.
+    static var showsCustomImage: Bool {
+        installed == .custom
+    }
+
     static func applyAdaptive(_ image: NSImage) {
         install(image, as: .adaptive)
     }

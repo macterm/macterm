@@ -21,7 +21,7 @@ struct AdaptiveIconPreview: View {
                 VStack(spacing: 4) {
                     Group {
                         if let image = icon.image {
-                            Image(nsImage: image).resizable().interpolation(.high)
+                            Image(nsImage: image).resizable().interpolation(.high).accessibilityHidden(true)
                         } else {
                             Color.clear
                         }
@@ -34,7 +34,7 @@ struct AdaptiveIconPreview: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("App icon preview"))
         .onAppear { controller.previewShown = true }
         .onDisappear { controller.previewShown = false }

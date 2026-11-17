@@ -288,6 +288,7 @@ struct AdaptiveIconTests {
         }
         #expect(AdaptiveIcon.previewAppearances(shown: .light, iconStyle: "RegularLight", themeHasTwoSides: false) == [.light])
         #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "RegularDark", themeHasTwoSides: false) == [.dark])
+        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "Something New", themeHasTwoSides: false) == [.dark])
     }
 
     /// The controller reads the system scheme from `GhosttyApp.shared`. With
