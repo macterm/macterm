@@ -1175,7 +1175,8 @@ def gate_base(kind, median):
 
 def cmd_limits(args):
     """Each limit is the base (gate_base) plus the noise: the largest distance
-    of one run's statistic from the median of all runs. The runs are of one
+    of one run's statistic from the base. The noise is measured from the base,
+    so each run passes its own limit without the floor. The runs are of one
     commit, or of commits that do not change the session layer."""
     by_system = {}
     for result in load_results(args.results):
@@ -1193,13 +1194,14 @@ def cmd_limits(args):
             kind = gate_values(results[0]["arms"])[name][2]
             stats = [gate_statistic(*gate_values(r["arms"])[name][:3]) for r in results]
             median = statistics.median(stats)
-            noise = max(abs(s - median) for s in stats)
+            base = gate_base(kind, median)
+            noise = max(abs(s - base) for s in stats)
             entries[name] = {
                 "kind": kind,
                 "median": round(median, 3),
                 "noise": round(noise, 3),
                 # Up, so that the run that set the noise passes its own limit.
-                "limit": math.ceil((gate_base(kind, median) + noise) * 1000) / 1000,
+                "limit": math.ceil((base + noise) * 1000) / 1000,
             }
         limits["systems"][system] = entries
         limits["runs"][system] = {
@@ -1215,20 +1217,25 @@ def cmd_limits(args):
 
 def cmd_check(args):
     """Fail when v2 is worse than its base (gate_base) beyond the noise of
-    the limits, and worse than that base by the floor or more."""
+    the limits, and worse than that base by the floor or more. With more
+    than one run of a system (the workflow measures on two runners), a
+    measurement fails only when it fails in each run of its system. A
+    system with no limits, or a measurement that a run does not have, fails
+    at once."""
     with open(args.limits) as f:
         limits = json.load(f)["systems"]
-    failed = False
-    failures = []
+    runs = {}
+    misses = {}
+    missing = []
     lines = ["## Session layer gate", ""]
     for path, result in zip(args.results, load_results(args.results)):
         system = result["runner"]["system"]
+        runs[system] = runs.get(system, 0) + 1
         lines += [f"### {system} ({os.path.basename(path)})", ""]
         entries = limits.get(system)
         if not entries:
             lines += [f"No limits for {system}. Fail.", ""]
-            failures.append(f"No limits for {system}")
-            failed = True
+            missing.append(f"No limits for {system}")
             continue
         values = gate_values(result["arms"])
         lines += [
@@ -1238,8 +1245,7 @@ def cmd_check(args):
         for name, entry in entries.items():
             if name not in values:
                 lines.append(f"| {name} | — | — | — | {entry['limit']:.3f} | Fail: not measured |")
-                failures.append(f"{system}: {name} not measured")
-                failed = True
+                missing.append(f"{system}: {name} not measured")
                 continue
             v1, v2, kind, floor = values[name]
             stat = gate_statistic(v1, v2, kind)
@@ -1251,14 +1257,19 @@ def cmd_check(args):
                 verdict = f"Pass: under {floor:g} {'MB' if 'emory' in name else 'ms'}"
             else:
                 verdict = "Fail"
-                failures.append(f"{system}: {name}: v1 {v1:.3f}, v2 {v2:.3f}, limit {entry['limit']:.3f}")
-                failed = True
+                misses.setdefault((system, name), []).append(
+                    f"{system}: {name}: v1 {v1:.3f}, v2 {v2:.3f}, limit {entry['limit']:.3f}"
+                )
             lines.append(
                 f"| {name} | {v1:.3f} | {v2:.3f} | {stat:.3f} | {entry['limit']:.3f} | {verdict} |"
             )
         lines.append("")
+    failures = missing + [m for (system, _), ms in misses.items() if len(ms) == runs[system] for m in ms]
+    for system, count in runs.items():
+        if count > 1:
+            lines += [f"{count} runs of {system}: a measurement fails only when it fails in each run.", ""]
     print("\n".join(lines))
-    if failed:
+    if failures:
         print("Gate failed:", *failures, sep="\n", file=sys.stderr)
         sys.exit(1)
 

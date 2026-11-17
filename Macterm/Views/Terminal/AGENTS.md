@@ -6,6 +6,7 @@ This file loads when you work in `Macterm/Views/Terminal/`. The root `AGENTS.md`
 
 - Never tear down the NSView from a SwiftUI path.
 - `SurfaceRegistry.destroySurfaces(of:)` kills the shell. Call it only when a pane is closed for good, or for a remote reconnect, which never kills the session.
+- **A destroyed surface never gets a view again** (`PaneSurface.isDestroyed`). `TerminalSurface` makes nothing for it in `makeNSView` and `updateNSView`. Do not call `ensureNSView` or `ensureScrollView` on a surface after `PaneSurface.destroy`.
 - `createSurface()` needs a frame that is not zero, and a window. `TerminalSurface` waits until it is attached. `Pane.command`, `shell` and `env` map to `initial_input`, `command` and `env_vars` of libghostty. Macterm passes them on the first build only.
 - The `closeSurface` callback is asynchronous. Guard against a double close.
 - The handoff of the first responder goes through `FocusRestoration`. A bare `makeFirstResponder` races with the attachment of the window.
