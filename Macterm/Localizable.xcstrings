@@ -4795,6 +4795,22 @@
         }
       }
     },
+    "Macterm cannot connect to %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 %@에 연결할 수 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法连接到 %@。"
+          }
+        }
+      }
+    },
     "Macterm cannot install its server on %@" : {
       "localizations" : {
         "ko" : {
@@ -10759,6 +10775,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "网页目标不包含有效的主机。"
+          }
+        }
+      }
+    },
+    "There is no folder %@ on %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "There is no folder %1$@ on %2$@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@에 %1$@ 폴더가 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上没有文件夹 %1$@。"
           }
         }
       }
