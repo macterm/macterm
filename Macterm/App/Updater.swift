@@ -413,11 +413,15 @@ struct CheckForUpdatesMenuItem: View {
 /// No button while idle.
 ///
 /// Both states are toolbar buttons, so the toolbar gives each one the same
-/// native height, edge margin and inner padding. A plain view in a toolbar
-/// item gets no inner padding. Downloading… is disabled: there is nothing
-/// to click while Sparkle downloads.
+/// native height, edge margin and inner padding. Downloading… is disabled:
+/// there is nothing to click while Sparkle downloads.
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
+
+    /// Added to the toolbar's own inner padding (about 8 pt) at each end of a
+    /// label with text, in the macOS 26 toolbar capsule. The system amount
+    /// fits an icon, and is narrow for a title.
+    static let textInset: CGFloat = 4
 
     var body: some View {
         switch updater.status {
@@ -426,7 +430,7 @@ struct UpdateToolbarButton: View {
         case .downloading,
              .extracting:
             Button {} label: {
-                Label {
+                inset(Label {
                     Text("Downloading…")
                 } icon: {
                     Group {
@@ -438,15 +442,26 @@ struct UpdateToolbarButton: View {
                     }
                     .progressViewStyle(.circular)
                     .controlSize(.small)
-                }
+                })
             }
-            .labelStyle(.titleAndIcon)
             .disabled(true)
         case .readyToRestart:
-            Button("Restart to Update", systemImage: "arrow.clockwise") {
+            Button {
                 updater.installAndRelaunch()
+            } label: {
+                inset(Label("Restart to Update", systemImage: "arrow.clockwise"))
             }
-            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    @ViewBuilder
+    private func inset(_ label: some View) -> some View {
+        if WindowAppearance.glassSupported {
+            label
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, Self.textInset)
+        } else {
+            label.labelStyle(.titleAndIcon)
         }
     }
 }
