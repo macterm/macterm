@@ -171,7 +171,7 @@ struct SplitLeafView: View {
                 // false for a single-pane tab and for a zoomed pane, exactly
                 // the common mirrored case, and an adaptive background must
                 // not exempt it. The blur has no dim on top: a pane dims only
-                // when it is an unfocused split (0327).
+                // when it is an unfocused split.
                 NonLeaderBlur()
                     .allowsHitTesting(false)
             } else {
