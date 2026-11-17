@@ -325,6 +325,9 @@ const Session = struct {
     clients: std.ArrayList(*Client) = .empty,
     leader: ?*Client = null,
     pty_in: std.ArrayList(u8) = .empty,
+    /// The end of the last read that may be the start of a prompt mark
+    /// (`forwardOutput`). No client has these bytes yet.
+    held: std.ArrayList(u8) = .empty,
     has_output: bool = false,
     had_attached: bool = false,
     /// The shell's status, once reaped.
@@ -533,6 +536,8 @@ const Session = struct {
         if (n == 0) {
             s.pty_closed = true;
             lib_posix.close(s.pty_fd);
+            s.sendOutput(s.held.items);
+            s.held.clearRetainingCapacity();
             // SIGCHLD can come before or after the EOF. The exit goes out
             // when both are in.
             s.reap();
@@ -541,10 +546,9 @@ const Session = struct {
         }
         const data = buf[0..n];
         s.has_output = true;
-        // With no client that shows the pane, answer the terminal queries
-        // that a shell waits for (fish waits 10 s), as v1 does.
-        if (!s.hasAttached() and s.pty_in.items.len < pty_in_max)
-            util.respondToDeviceAttributes(s.gpa, &s.pty_in, data);
+        // With no leader, no terminal of a client answers the queries: the
+        // session's terminal answers them (`Watch.answers_all`).
+        s.watch.answers_all = s.leader == null;
 
         // A foreground change goes before the output: a report that the
         // shell is back lands before the shell's prompt (zmx 0010).
@@ -574,8 +578,26 @@ const Session = struct {
         s.forwardOutput(data[sent..]);
     }
 
-    /// Queues pane output for every client that shows the pane.
+    /// Sends pane output, after the bytes that the last call held. A prompt
+    /// mark that a read cut in two waits for the next read
+    /// (`util.promptStartTail`), so the rewrite sees it whole.
     fn forwardOutput(s: *Session, data: []const u8) void {
+        if (data.len == 0) return;
+        var bytes = data;
+        var joined: ?[]u8 = null;
+        defer if (joined) |j| s.gpa.free(j);
+        if (s.held.items.len > 0) {
+            joined = std.mem.concat(s.gpa, u8, &.{ s.held.items, data }) catch null;
+            if (joined) |j| bytes = j else s.sendOutput(s.held.items);
+            s.held.clearRetainingCapacity();
+        }
+        const keep = util.promptStartTail(bytes);
+        s.sendOutput(bytes[0 .. bytes.len - keep]);
+        s.held.appendSlice(s.gpa, bytes[bytes.len - keep ..]) catch s.sendOutput(bytes[bytes.len - keep ..]);
+    }
+
+    /// Queues pane output for every client that shows the pane.
+    fn sendOutput(s: *Session, data: []const u8) void {
         if (data.len == 0) return;
         const out = util.rewritePromptRedraw(s.gpa, data) orelse data;
         defer if (out.ptr != data.ptr) s.gpa.free(out);

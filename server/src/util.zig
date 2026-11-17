@@ -7,51 +7,6 @@ const cross = @import("cross");
 const lib_posix = @import("posix.zig");
 const testing = std.testing;
 
-const DA1_QUERY = "\x1b[c";
-const DA1_QUERY_EXPLICIT = "\x1b[0c";
-const DA2_QUERY = "\x1b[>c";
-const DA2_QUERY_EXPLICIT = "\x1b[>0c";
-const DA1_RESPONSE = "\x1b[?62;22c";
-const DA2_RESPONSE = "\x1b[>1;10;0c";
-
-pub fn respondToDeviceAttributes(alloc: std.mem.Allocator, buf: *std.ArrayList(u8), data: []const u8) void {
-    // Scan for DA queries in PTY output and respond on behalf of the terminal.
-    // This handles the case where no client is attached (e.g. after a detach)
-    // and the shell (e.g. fish) sends a DA query that would otherwise go unanswered.
-    //
-    // Responses are queued into the daemon's pty_write_buf (not written
-    // directly) so they don't interleave with any already-buffered input —
-    // e.g. a large `zmx send` payload still draining after the client
-    // disconnected.
-    //
-    // DA1 query: ESC [ c  or  ESC [ 0 c
-    // DA2 query: ESC [ > c  or  ESC [ > 0 c
-    // DA1 response (from terminal): ESC [ ? ... c  (has '?' after '[')
-    //
-    // We must NOT match DA responses (which contain '?') as queries.
-    var i: usize = 0;
-    while (i < data.len) {
-        if (data[i] == '\x1b' and i + 1 < data.len and data[i + 1] == '[') {
-            // Skip DA responses which have '?' after CSI
-            if (i + 2 < data.len and data[i + 2] == '?') {
-                i += 3;
-                continue;
-            }
-            if (matchSeq(data[i..], DA2_QUERY) or matchSeq(data[i..], DA2_QUERY_EXPLICIT)) {
-                buf.appendSlice(alloc, DA2_RESPONSE) catch {};
-            } else if (matchSeq(data[i..], DA1_QUERY) or matchSeq(data[i..], DA1_QUERY_EXPLICIT)) {
-                buf.appendSlice(alloc, DA1_RESPONSE) catch {};
-            }
-        }
-        i += 1;
-    }
-}
-
-fn matchSeq(data: []const u8, seq: []const u8) bool {
-    if (data.len < seq.len) return false;
-    return std.mem.eql(u8, data[0..seq.len], seq);
-}
-
 /// OSC 133;A (prompt start) marker.
 const OSC_133_A = "\x1b]133;A";
 
@@ -126,6 +81,42 @@ pub fn rewritePromptRedraw(alloc: std.mem.Allocator, data: []const u8) ?[]const 
     }
 
     return result.toOwnedSlice(alloc) catch null;
+}
+
+/// The longest prompt mark that `promptStartTail` holds back.
+const held_max = 1024;
+
+/// The length of the end of `data` that may be the start of an OSC 133;A with
+/// no terminator yet, or 0. The caller holds those bytes back until the next
+/// read, so that `rewritePromptRedraw` sees whole marks.
+pub fn promptStartTail(data: []const u8) usize {
+    const esc = std.mem.lastIndexOfScalar(u8, data, '\x1b') orelse return 0;
+    const tail = data[esc..];
+    if (tail.len < OSC_133_A.len and std.mem.startsWith(u8, OSC_133_A, tail)) {
+        // The ESC of an ST can end a mark: `ESC ] 133;A ... ESC`.
+        const mark = std.mem.lastIndexOf(u8, data[0..esc], OSC_133_A) orelse return tail.len;
+        if (std.mem.indexOfScalarPos(u8, data[0..esc], mark, '\x07') != null) return tail.len;
+        return if (data.len - mark <= held_max) data.len - mark else 0;
+    }
+    if (!std.mem.startsWith(u8, tail, OSC_133_A)) return 0;
+    if (std.mem.indexOfScalar(u8, tail, '\x07') != null) return 0;
+    return if (tail.len <= held_max) tail.len else 0;
+}
+
+test "promptStartTail: holds the start of a prompt mark" {
+    try testing.expectEqual(0, promptStartTail("plain text"));
+    try testing.expectEqual(0, promptStartTail("a\x1b]133;A\x07$ "));
+    try testing.expectEqual(0, promptStartTail("a\x1b]133;A\x1b\\"));
+    try testing.expectEqual(1, promptStartTail("out\x1b"));
+    try testing.expectEqual(4, promptStartTail("out\x1b]13"));
+    try testing.expectEqual(7, promptStartTail("out\x1b]133;A"));
+    try testing.expectEqual(13, promptStartTail("out\x1b]133;A;aid=1"));
+    try testing.expectEqual(14, promptStartTail("out\x1b]133;A;aid=1\x1b"));
+    // Another sequence, or a mark too long to be a prompt mark.
+    try testing.expectEqual(0, promptStartTail("out\x1b]2;title"));
+    var long: [held_max + 1]u8 = @splat('x');
+    @memcpy(long[0..OSC_133_A.len], OSC_133_A);
+    try testing.expectEqual(0, promptStartTail(&long));
 }
 
 test "rewritePromptRedraw: no OSC 133;A returns null" {

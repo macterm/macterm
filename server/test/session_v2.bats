@@ -386,6 +386,20 @@ PY
   kill %1 2>/dev/null || true
 }
 
+# The rewrite to `redraw=0` sees a prompt mark whole when a read cuts it.
+@test "session: a prompt mark that comes in two reads gets redraw=0" {
+  "$ZMX" session pm -- /bin/sh -c 'read -r _; printf "\033]133;A"; sleep 0.5; printf ";aid=1\007MARK_DONE\n"; exec sleep 30'
+  python3 - <<'PY2'
+from v2client import Client
+c = Client("pm")
+c.attach()
+c.wait_msg("state")
+c.type("go\n")
+c.wait_output("MARK_DONE")
+assert b"\x1b]133;A;aid=1;redraw=0\x07" in c.output, c.output[-200:]
+PY2
+}
+
 # A program that draws for itself (a full-screen app) waits for SIGWINCH to
 # draw again after a reattach. TIOCSWINSZ with the same size sends none, so
 # the session sends it.
