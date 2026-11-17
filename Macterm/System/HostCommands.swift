@@ -307,6 +307,7 @@ extension HostCommands {
         var attach: String
         var install: String
         var plain: String
+        var folder: String
 
         static var bundled: Scripts? {
             Bundle.main.resourceURL.flatMap { load(from: $0.appendingPathComponent("host", isDirectory: true)) }
@@ -316,12 +317,14 @@ extension HostCommands {
         static func load(from directory: URL) -> Scripts? {
             guard let attach = try? String(contentsOf: directory.appendingPathComponent("attach.sh"), encoding: .utf8),
                   let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8),
-                  let plain = try? String(contentsOf: directory.appendingPathComponent("plain.sh"), encoding: .utf8)
+                  let plain = try? String(contentsOf: directory.appendingPathComponent("plain.sh"), encoding: .utf8),
+                  let folder = try? String(contentsOf: directory.appendingPathComponent("folder.sh"), encoding: .utf8)
             else { return nil }
             return Scripts(
                 attach: HostCommands.oneLine(attach),
                 install: HostCommands.oneLine(install),
-                plain: HostCommands.oneLine(plain)
+                plain: HostCommands.oneLine(plain),
+                folder: HostCommands.oneLine(folder)
             )
         }
 
@@ -340,10 +343,27 @@ extension HostCommands {
         /// plain word; no folder is the home folder. nil for a folder too
         /// long for one argument.
         func plainCommand(directory: String) -> String? {
-            let hex = (directory.isEmpty ? "~" : directory).utf8.map { String(format: "%02x", $0) }.joined()
             let preambles = HostCommands.remoteTermPreamble + HostCommands.remoteColorPreamble
                 + HostCommands.remoteTerminalProgramPreamble
-            return HostCommands.command(preambles + plain, [hex])
+            return HostCommands.command(preambles + plain, [Self.hex(directory)])
+        }
+
+        /// The ssh command of the folder check (`folder.sh`) on a host with
+        /// no server. nil for a folder too long for one argument.
+        func folderCommand(directory: String) -> String? {
+            HostCommands.command(folder, [Self.hex(directory)])
+        }
+
+        /// The `command.run` argv of the folder check on a host with a
+        /// server: the same script, with no login shell between.
+        func folderArgv(directory: String) -> [String] {
+            ["/bin/sh", "-c", folder, "sh", Self.hex(directory)]
+        }
+
+        /// The folder as one plain word, two hex digits for each byte. No
+        /// folder is the home folder.
+        static func hex(_ directory: String) -> String {
+            (directory.isEmpty ? "~" : directory).utf8.map { String(format: "%02x", $0) }.joined()
         }
     }
 }

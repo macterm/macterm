@@ -80,9 +80,10 @@ struct RemoteServersTests {
         let attach = try #require(scripts.attachCommand(key: "abc123"))
         let install = try #require(scripts.installCommand(key: "abc123", sha256: String(repeating: "f", count: 64), hostID: "id-1"))
         let plain = try #require(scripts.plainCommand(directory: "~/a b"))
+        let folder = try #require(scripts.folderCommand(directory: "~/a b"))
         // Each line is valid sh, and the command parses with csh as the
         // login shell (here as the arguments of `true`).
-        for (script, command) in [(scripts.attach, attach), (scripts.install, install), (scripts.plain, plain)] {
+        for (script, command) in [(scripts.attach, attach), (scripts.install, install), (scripts.plain, plain), (scripts.folder, folder)] {
             #expect(Self.status("/bin/sh", ["-n", "-c", script]) == 0, "not valid sh: \(script)")
             #expect(Self.status("/bin/csh", ["-f", "-c", "true " + command.dropFirst("sh -c ".count)]) == 0)
         }

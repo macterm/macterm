@@ -5,8 +5,10 @@ import SwiftUI
 /// ControlMaster live in `~/.ssh/config`), and a remote directory, composing
 /// them into the scp-style `Project.path`. Validation is `ProjectPath`'s:
 /// the Add button enables only when the fields form a well-formed remote
-/// spec. No connection probe here — the first pane's ssh is the probe, and
-/// its failure output renders right in the pane.
+/// spec. Add then connects to the host as a pane does (the login and the
+/// server install may ask) and adds the project only when the folder is
+/// there (`RemoteHosts.checkFolder`, 0358). A missing folder or a host that
+/// does not answer shows a line, and nothing is added.
 struct NewRemoteProjectSheet: View {
     @Environment(AppState.self)
     private var appState
@@ -21,6 +23,12 @@ struct NewRemoteProjectSheet: View {
     private var host = ""
     @State
     private var directory = "~"
+    /// The folder check that runs, from Add. Cancel stops it.
+    @State
+    private var check: Task<Void, Never>?
+    /// Why the last Add added nothing. An edit clears it.
+    @State
+    private var failure: String?
 
     private var composedPath: String? {
         ProjectPath.composeRemote(host: host, directory: directory)
@@ -44,8 +52,8 @@ struct NewRemoteProjectSheet: View {
                 TextField("Directory", text: $directory, prompt: Text(verbatim: "~/dev/api"))
             }
             .textFieldStyle(.roundedBorder)
-            if let reservedNameMessage {
-                Text(reservedNameMessage)
+            if let message = reservedNameMessage ?? failure {
+                Text(message)
                     .font(.caption)
                     .foregroundStyle(MactermTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -59,28 +67,55 @@ struct NewRemoteProjectSheet: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             HStack {
+                if check != nil {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) {
+                    check?.cancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
                 Button("Add") { add() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(composedPath == nil || reservedNameMessage != nil)
+                    .disabled(composedPath == nil || reservedNameMessage != nil || check != nil)
             }
         }
         .padding(20)
         .frame(width: 380)
+        .onChange(of: [name, host, directory]) { failure = nil }
+        .onDisappear { check?.cancel() }
     }
 
     private func add() {
-        guard let path = composedPath, reservedNameMessage == nil else { return }
+        guard let path = composedPath, reservedNameMessage == nil, check == nil,
+              case let .remote(user, remoteHost, remoteDirectory) = ProjectPath.parse(path)
+        else { return }
+        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
+        let trimmedDirectory = directory.trimmingCharacters(in: .whitespaces)
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        // Always create: a directory can back several projects, so a repeat
-        // host:dir here adds a distinct project rather than reusing the last.
-        let project = projectStore.create(
-            name: trimmedName.isEmpty ? host.trimmingCharacters(in: .whitespaces) : trimmedName,
-            path: path
-        )
-        appState.selectProject(project)
-        dismiss()
+        failure = nil
+        check = Task {
+            let result = await RemoteHosts.shared.checkFolder(
+                remoteDirectory,
+                destination: HostCommands.destination(user: user, host: remoteHost)
+            )
+            check = nil
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .exists:
+                // Always create: a directory can back several projects, so a
+                // repeat host:dir here adds a distinct project rather than
+                // reusing the last.
+                let project = projectStore.create(name: trimmedName.isEmpty ? trimmedHost : trimmedName, path: path)
+                appState.selectProject(project)
+                dismiss()
+            case .missing:
+                failure = String(localized: "There is no folder \(trimmedDirectory) on \(trimmedHost).")
+            case .unreachable:
+                failure = String(localized: "Macterm cannot connect to \(trimmedHost).")
+            }
+        }
     }
 }

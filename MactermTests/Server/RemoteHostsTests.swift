@@ -351,6 +351,38 @@ struct RemoteHostsTests {
         }
     }
 
+    // MARK: - The folder check of a new project (0358)
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_new_project_finds_its_folder_on_the_hosts_server_and_the_login_stays_for_its_panes() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~", destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(fixture.ready == ["box"])
+            // The project's first pane uses the same login.
+            _ = try await fixture.attach(fixture.pane())
+            #expect(host.sshd.acceptedLogins() == 1)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_new_project_finds_its_folder_over_ssh_when_the_host_has_no_server() async throws {
+        try await withSSHDHost(answer: false) { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(fixture.hosts.plainDestinations == ["box"])
+        }
+    }
+
+    @Test
+    func a_host_name_that_is_not_valid_is_unreachable() async {
+        let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
+        #expect(await hosts.checkFolder("/tmp", destination: "-oProxyCommand=x") == .unreachable)
+    }
+
     // MARK: - The probe of a new session
 
     @Test

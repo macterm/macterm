@@ -306,6 +306,63 @@ final class RemoteHosts {
         }
     }
 
+    /// The answer of `checkFolder`.
+    enum FolderCheck: Equatable {
+        case exists
+        case missing
+        /// No connection, or the check did not run to its end.
+        case unreachable
+    }
+
+    /// Whether `directory` is on the host, before a remote project for it is
+    /// added (0358). It connects as a new pane does: the login and the server
+    /// install may ask the user, and the host's connection stays for the
+    /// project's panes. With a server, the server runs `folder.sh`
+    /// (`command.run`). With no server, the script runs over the ssh
+    /// connection. Fail closed: anything other than the script's own answer
+    /// is `unreachable`.
+    func checkFolder(_ directory: String, destination: String) async -> FolderCheck {
+        guard SSHConnections.isValidDestination(destination), let scripts = configuration.scripts else { return .unreachable }
+        // A link that broke since its last use gets one more connect.
+        for _ in 0 ..< 2 {
+            switch hosts[destination] {
+            case nil:
+                prepare(destination, prompts: true)
+            case let .preparing(_, _, asks) where !asks:
+                prepare(destination, prompts: true)
+            default:
+                break
+            }
+            if case let .preparing(_, task, _) = hosts[destination] { await task.value }
+            switch hosts[destination] {
+            case let .ready(link):
+                guard let result = await Self.run(scripts.folderArgv(directory: directory), timeout: .seconds(20), over: link) else {
+                    if case let .ready(current) = hosts[destination], current === link { drop(destination) }
+                    continue
+                }
+                return Self.folderCheck(status: result.signal == nil ? result.code.map(Int32.init) : nil)
+            case .plain:
+                guard let command = scripts.folderCommand(directory: directory),
+                      let outcome = try? await connections.run(destination, command, timeout: .seconds(20))
+                else { return .unreachable }
+                return Self.folderCheck(status: outcome.status)
+            case .preparing,
+                 nil:
+                return .unreachable
+            }
+        }
+        return .unreachable
+    }
+
+    /// The answer for the exit status of `folder.sh`. Pure.
+    nonisolated static func folderCheck(status: Int32?) -> FolderCheck {
+        switch status {
+        case 0: .exists
+        case 3: .missing
+        default: .unreachable
+        }
+    }
+
     /// Install the server on a host where the user declined it, after the
     /// user's click. New panes then get sessions; a plain shell stays plain.
     /// A second decline keeps the host plain, so its sidebar mark stays.

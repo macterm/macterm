@@ -190,7 +190,8 @@ def _failed_connects(app):
 
 
 def _unreachable_remote_pane(app, name):
-    app.cli("project", "create", f"{BAD_HOST}:/tmp", "--name", name, "--select")
+    # A host that never answers fails the folder check of `project create`.
+    app.cli("project", "create", f"{BAD_HOST}:/tmp", "--name", name, "--select", "--skip-folder-check")
     pane = wait_for(lambda: app.panes(), timeout=30, message="the remote pane")[0]
     wait_for(
         lambda: _failed_connects(app) >= 1,

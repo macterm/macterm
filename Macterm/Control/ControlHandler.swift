@@ -17,9 +17,20 @@ final class ControlHandler {
     /// AppStateTests pattern) drive this handler too.
     private var sessionClient: SessionClient { appState.sessionClient }
 
-    init(appState: AppState, projectStore: ProjectStore) {
+    /// Whether a folder is on a host, for `project.create` of a remote spec:
+    /// (folder, ssh destination). Tests answer it with no host.
+    private let checkRemoteFolder: @MainActor (String, String) async -> RemoteHosts.FolderCheck
+
+    init(
+        appState: AppState,
+        projectStore: ProjectStore,
+        checkRemoteFolder: @escaping @MainActor (String, String) async -> RemoteHosts.FolderCheck = {
+            await RemoteHosts.shared.checkFolder($0, destination: $1)
+        }
+    ) {
         self.appState = appState
         self.projectStore = projectStore
+        self.checkRemoteFolder = checkRemoteFolder
     }
 
     /// Data-level entry point for `ControlSocketServer`: decode, dispatch,
@@ -72,7 +83,7 @@ final class ControlHandler {
         switch request.command {
         case "status": return status()
         case "project.list": return projectList()
-        case "project.create": return try projectCreate(args)
+        case "project.create": return try await projectCreate(args)
         case "project.select": return try projectSelect(args)
         case "project.rename": return try projectRename(args)
         case "project.remove": return try projectRemove(args)
@@ -532,17 +543,19 @@ final class ControlHandler {
     /// rules: trimmed, then refused when empty or reserved by the pinned
     /// workspace. Leaving the flag out takes the directory's own name, which
     /// nobody typed, so that one is `ProjectStore.create`'s to disambiguate.
-    private func projectCreate(_ args: ControlArgs) throws -> ControlData {
+    /// A remote spec is created only when its folder is on the host
+    /// (`RemoteHosts.checkFolder`, 0358), after the other checks, so a bad
+    /// name never connects.
+    private func projectCreate(_ args: ControlArgs) async throws -> ControlData {
         guard let rawPath = args.path, !rawPath.isEmpty else {
             throw ControlError(code: .badRequest, message: "project.create requires a path")
         }
         guard let parsed = ProjectPath.parse(rawPath) else {
             throw ControlError(code: .badRequest, message: "\"\(rawPath)\" is not an absolute or ~-prefixed path")
         }
-        // A remote spec ([user@]host:dir, #104) is stored verbatim — there is
-        // no local directory to canonicalize or existence-check; a wrong host
-        // or dir surfaces in the pane itself (ssh's error / the cd
-        // diagnostic), same as a sheet-created remote project.
+        // A remote spec ([user@]host:dir, #104) is stored verbatim: there is
+        // no local directory to canonicalize. Its folder is checked on the
+        // host below.
         let canonical: String
         switch parsed {
         case .local:
@@ -563,6 +576,23 @@ final class ControlHandler {
         if let name {
             guard !name.isEmpty else { throw Self.emptyNameError }
             try Self.checkReservedName(name)
+        }
+        #if DEBUG
+        // `--skip-folder-check`: the e2e suite's project on a host that never answers.
+        let checksFolder = args.force != true
+        #else
+        let checksFolder = true
+        #endif
+        if checksFolder, case let .remote(user, host, directory) = parsed {
+            let destination = HostCommands.destination(user: user, host: host)
+            switch await checkRemoteFolder(directory, destination) {
+            case .exists:
+                break
+            case .missing:
+                throw ControlError(code: .notFound, message: "no directory at \(canonical)")
+            case .unreachable:
+                throw ControlError(code: .internalError, message: "cannot connect to \(destination)")
+            }
         }
 
         // Always create — `project create` is not idempotent: re-running adds a

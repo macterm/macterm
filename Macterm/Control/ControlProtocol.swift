@@ -101,7 +101,8 @@ struct ControlArgs: Codable, Equatable {
     /// resolved pane the origin and focuses its neighbour).
     var direction: String?
     /// Skip the busy-confirmation and destructive-plan guards
-    /// (`project.remove`, `tab.close`, `pane.close`, `layout.apply`).
+    /// (`project.remove`, `tab.close`, `pane.close`, `layout.apply`), and the
+    /// debug-only remote folder check of `project.create`.
     var force: Bool?
     /// Grid shape (`grid`); also the target grid for the debug-only
     /// `pane.resize` in-place surface resize.
