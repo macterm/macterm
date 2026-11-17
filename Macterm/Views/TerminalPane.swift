@@ -139,10 +139,11 @@ struct TerminalPane: View {
                         SecureInputBadge()
                     }
                 }
-                // Only the remote-link badge animates: it changes while the
-                // user looks at the pane, with no action of theirs.
-                .animation(reduceMotion ? nil : PaletteMotion.animation, value: pane.remoteLinkBadge)
                 .padding(8)
+                // The row's place in the corner animates too, so that no
+                // badge jumps when the remote-link badge comes or goes.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .animation(reduceMotion ? nil : PaletteMotion.animation, value: pane.remoteLinkBadge)
             }
         }
         .background {
@@ -177,9 +178,7 @@ private struct LinkHoverBanner: View {
 }
 
 /// The badge of a remote pane whose connection is lost. One pill for both
-/// states, so that a change from `Reconnecting` to `Connection lost` (and
-/// back) is a change of its values: the text interpolates, the glyph
-/// cross-fades and the pill resizes, in the badge row's animation.
+/// states, so that a change of state animates in place.
 private struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 

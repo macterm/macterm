@@ -1214,7 +1214,7 @@ struct StatusPill<Icon: View>: View {
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
-        // A change of the title morphs the text in place (in an animation).
+        // An animated change of the title morphs the text in place.
         let label = Label { Text(title).contentTransition(.interpolate) } icon: { icon() }
         Group {
             if #available(macOS 26.0, *), WindowAppearance.glassSupported {
