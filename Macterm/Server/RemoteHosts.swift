@@ -401,7 +401,7 @@ final class RemoteHosts {
             // The shell exited while no pane showed it.
             await Self.kill(session, over: link)
         }
-        // A folder that the host reported must be a path with no control character.
+        // A reported folder with a control character, or a relative one, gives the project folder.
         let known = panes.lazy.compactMap(\.hostSessionDirectory).first
             .map { HostCommands.isSafeHostFolder($0) ? $0 : target.directory }
         let justCreated = created[session].map { Date().timeIntervalSince($0) < configuration.creationGrace } ?? false

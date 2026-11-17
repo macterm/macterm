@@ -205,7 +205,8 @@ enum HostCommands {
 
     /// True for a folder that the host reported (OSC 7) and that a new
     /// session may start in: a path (absolute, or from `~`) with no control
-    /// character. A control character is never a folder the user typed. A
+    /// or format character (`CharacterSet.controlCharacters`). Such a character
+    /// is never a folder the user typed. A
     /// quote or a backslash is allowed: every script gets the folder as an
     /// argument (`createProbeArgv`, `Scripts.plainCommand`), so no shell
     /// parses it.
