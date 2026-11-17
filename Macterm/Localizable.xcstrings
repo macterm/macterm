@@ -1407,6 +1407,22 @@
         }
       }
     },
+    "App icon preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 아이콘 미리보기"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 图标预览"
+          }
+        }
+      }
+    },
     "Appearance" : {
       "comment" : "Settings pane",
       "localizations" : {
@@ -2906,6 +2922,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "青色"
+          }
+        }
+      }
+    },
+    "Dark" : {
+      "comment" : "Under the dark version of the app icon in Settings → Appearance.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다크"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深色"
           }
         }
       }
@@ -4646,6 +4679,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "左"
+          }
+        }
+      }
+    },
+    "Light" : {
+      "comment" : "Under the light version of the app icon in Settings → Appearance.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "라이트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浅色"
           }
         }
       }
@@ -10488,6 +10538,22 @@
         }
       }
     },
+    "The macos-icon key in your Ghostty config sets the Dock icon." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ghostty 설정의 macos-icon 키가 Dock 아이콘을 지정합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ghostty 配置中的 macos-icon 键设定了程序坞图标。"
+          }
+        }
+      }
+    },
     "The pane has no frame yet. Try again." : {
       "localizations" : {
         "ko" : {
@@ -11901,6 +11967,22 @@
         }
       }
     },
+    "Your theme has no gray color to paint the icon with." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "테마에 아이콘을 칠할 회색이 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的主题没有可用于绘制图标的灰色。"
+          }
+        }
+      }
+    },
     "Zoom Pane" : {
       "localizations" : {
         "ko" : {
@@ -12075,6 +12157,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当终端命令读取“文稿”“下载”或其他受保护的位置时，macOS 会针对每个文件夹询问。授予一次完全磁盘访问权限即可涵盖所有位置。"
+          }
+        }
+      }
+    },
+    "macOS draws the Dock icon in your Clear or Tinted icon style." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS가 Dock 아이콘을 투명 또는 색조 아이콘 스타일로 그립니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 以你的“透明”或“着色”图标样式绘制程序坞图标。"
           }
         }
       }

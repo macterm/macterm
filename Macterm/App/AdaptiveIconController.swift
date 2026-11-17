@@ -121,10 +121,10 @@ final class AdaptiveIconController {
 
     func refresh() {
         switch adaptiveRequest() {
-        case let .failure(standIn):
+        case let .configured(standIn):
             showConfigured()
             showPreview(of: standIn)
-        case let .success((request, paint)):
+        case let .adaptive(request, paint):
             note("on (\(request.appearance.rawValue))")
             showDock(request)
             showPreview(of: request, paint: paint)
@@ -209,9 +209,14 @@ final class AdaptiveIconController {
         CFPreferencesCopyAppValue(AdaptiveIcon.iconStyleKey as CFString, kCFPreferencesAnyApplication) as? String
     }
 
+    private enum Outcome {
+        case configured(AdaptiveIcon.StandIn)
+        case adaptive(AdaptiveIconRequest, AdaptiveIcon.Paint)
+    }
+
     /// The request for the adaptive icon and its paint, or why the Dock shows
     /// the configured icon. Each stand-in says why in the log.
-    private func adaptiveRequest() -> Result<(AdaptiveIconRequest, AdaptiveIcon.Paint), AdaptiveIcon.StandIn> {
+    private func adaptiveRequest() -> Outcome {
         let iconStyle = Self.iconStyle()
         let enabled = Preferences.shared.adaptiveIcon
         let supported = AdaptiveIcon.isSupported
@@ -228,23 +233,23 @@ final class AdaptiveIconController {
             let suspended = suspension != nil
             let style = iconStyle ?? "none"
             note("off (enabled \(enabled), supported \(supported), suspended \(suspended), configured \(configured), icon style \(style))")
-            return .failure(standIn)
+            return .configured(standIn)
         case let .adaptive(side):
             appearance = side
         }
         guard let theme = themeColors() else {
             note("off (a theme color cannot be read)")
-            return .failure(.unavailable)
+            return .configured(.unavailable)
         }
         guard let paint = AdaptiveIcon.paint(for: theme) else {
             note("off (the theme has no gray for the lid)")
-            return .failure(.noLidGray)
+            return .configured(.noLidGray)
         }
         guard let request = request(for: appearance, paint: paint) else {
             note("off (the bundle has no Assets.car)")
-            return .failure(.unavailable)
+            return .configured(.unavailable)
         }
-        return .success((request, paint))
+        return .adaptive(request, paint)
     }
 
     /// Logs what a refresh decided, once for each change: a refresh runs on
