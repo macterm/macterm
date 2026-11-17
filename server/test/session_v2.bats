@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
-# The v2 session process (src/session.zig): `zmx session`, its socket in the
-# runtime directory, and the frames on it. test/v2client.py is the client.
+# The v2 session process (src/session.zig): `zmx session` (through the
+# server), its socket in the runtime directory, and the frames on it.
+# test/v2client.py is the client.
 
 load test_helper
 
@@ -71,6 +72,43 @@ PY
   run lsof -p "$program"
   [ -n "$output" ]
   [[ "$output" != *"$MACTERM_RUNTIME_DIR/s1"* ]]
+}
+
+@test "session: --cwd is the shell's folder, also a relative one, and a bad folder leaves no socket" {
+  mkdir "$RT/work"
+  (cd "$RT" && "$ZMX" session --cwd work s1 -- /bin/sh -c "pwd -P > '$RT/pwd'; exec sleep 30")
+  local i=0
+  until [[ -s "$RT/pwd" ]]; do
+    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
+    sleep 0.1
+  done
+  [ "$(< "$RT/pwd")" = "$(cd "$RT/work" && pwd -P)" ]
+
+  run "$ZMX" session --cwd "$RT/gone" s2 -- /bin/sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot open directory"* ]]
+  # root enters any folder.
+  [[ "$(id -u)" != 0 ]] || return 0
+  rmdir "$RT/work"
+  mkdir "$RT/work"
+  chmod 000 "$RT/work"
+  run "$ZMX" session --cwd "$RT/work" s3 -- /bin/sh
+  chmod 700 "$RT/work"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot enter directory"* ]]
+  [ ! -e "$MACTERM_RUNTIME_DIR/s3" ]
+}
+
+@test "session: no program in the session gets the fd of the spec" {
+  # The server gives the spec on fd 3 (session.spec_fd). `true`, not `:`: a
+  # redirect that fails on a special builtin ends a POSIX shell.
+  "$ZMX" session s1 -- /bin/sh -c "if { true >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
+  local i=0
+  until [[ -s "$RT/fd3" ]]; do
+    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
+    sleep 0.1
+  done
+  [ "$(< "$RT/fd3")" = "closed" ]
 }
 
 @test "session: the leader's resize reaches the pty" {
@@ -384,6 +422,20 @@ PY
   wait_lines "$RT/da2" 1
   [ "$(cat "$RT/da2")" = TIMEOUT ]
   kill %1 2>/dev/null || true
+}
+
+# The rewrite to `redraw=0` sees a prompt mark whole when a read cuts it.
+@test "session: a prompt mark that comes in two reads gets redraw=0" {
+  "$ZMX" session pm -- /bin/sh -c 'read -r _; printf "\033]133;A"; sleep 0.5; printf ";aid=1\007MARK_DONE\n"; exec sleep 30'
+  python3 - <<'PY2'
+from v2client import Client
+c = Client("pm")
+c.attach()
+c.wait_msg("state")
+c.type("go\n")
+c.wait_output("MARK_DONE")
+assert b"\x1b]133;A;aid=1;redraw=0\x07" in c.output, c.output[-200:]
+PY2
 }
 
 # A program that draws for itself (a full-screen app) waits for SIGWINCH to

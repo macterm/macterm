@@ -79,8 +79,12 @@ pub const Watch = struct {
     records: std.ArrayList(Record) = .empty,
     /// Counts the record changes, to find the least recently changed one.
     record_seq: u64 = 0,
-    /// Bytes for the pty: the reply to an OSC 7501 support query.
+    /// Bytes for the pty: the terminal's replies to queries.
     reply: std.ArrayList(u8) = .empty,
+    /// No client leads, so no terminal of a client answers the queries: the
+    /// session's terminal answers every query. While a client leads, it
+    /// answers only the OSC 7501 support query (`onWritePty`).
+    answers_all: bool = true,
 
     pub fn init(gpa: std.mem.Allocator, term: ghostty_vt.Terminal) Watch {
         return .{ .gpa = gpa, .term = term };
@@ -109,6 +113,7 @@ pub const Watch = struct {
         // Also makes the terminal answer the OSC 7501 support query.
         handler.effects.program_status = &onProgramStatus;
         handler.effects.write_pty = &onWritePty;
+        handler.effects.device_attributes = &onDeviceAttributes;
     }
 
     /// Parses pty output at time `now`.
@@ -472,13 +477,29 @@ pub const Watch = struct {
         fromHandler(h).programReport(r);
     }
 
-    /// Keeps only the OSC 7501 support reply. The terminal of the client that
-    /// shows the pane answers every other query, and a second answer would
-    /// reach the program as input. That terminal does not answer this one.
+    /// Keeps the replies to the queries. Some programs wait for a reply:
+    /// fish waits 10 s for DA1.
+    ///
+    /// - While a client leads, keeps only the OSC 7501 support reply. The
+    ///   leader's terminal answers every other query, and a second answer
+    ///   would reach the program as input. That terminal does not answer
+    ///   this one.
+    /// - While no client leads, keeps every reply but the OSC color reports
+    ///   and the kitty graphics replies. The session does not know the
+    ///   app's colors, and the images are not the session's.
     fn onWritePty(h: *Handler, data: []const u8) void {
-        if (!std.mem.startsWith(u8, data, "\x1b]7501;")) return;
         const w = fromHandler(h);
+        if (!std.mem.startsWith(u8, data, "\x1b]7501;")) {
+            if (!w.answers_all) return;
+            if (std.mem.startsWith(u8, data, "\x1b]") or std.mem.startsWith(u8, data, "\x1b_")) return;
+        }
         w.reply.appendSlice(w.gpa, data) catch {};
+    }
+
+    /// The device attributes of Ghostty, which the app's terminal reports:
+    /// a program sees the same terminal with a client and without one.
+    fn onDeviceAttributes(_: *Handler) ghostty_vt.device_attributes.Attributes {
+        return .{ .secondary = .{ .firmware_version = 10 } };
     }
 
     fn onSemanticPrompt(h: *Handler, e: SemanticPrompt) void {
@@ -1053,15 +1074,65 @@ test "events: past the most records, the one that changed least recently goes" {
     try testing.expectEqualStrings("new", f.w.records.items[m.max_program_records - 1].rec.id);
 }
 
-test "events: the session answers the program status query and no other query" {
+test "events: while a client leads, the session answers the program status query and no other query" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
+    f.w.answers_all = false;
     f.feed("\x1b[c\x1b[6n\x1b]7501;?\x1b\\", 0);
     try testing.expectEqualStrings("\x1b]7501;" ++ program_status.query_reply ++ "\x1b\\", f.w.reply.items);
     f.w.reply.clearRetainingCapacity();
     f.feed("\x1b]7501;?\x07", 1);
     try testing.expectEqualStrings("\x1b]7501;" ++ program_status.query_reply ++ "\x07", f.w.reply.items);
+}
+
+/// The session's reply to `query` while no client leads.
+fn expectReply(query: []const u8, reply: []const u8) !void {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("ab\r\nc", 0);
+    f.feed(query, 1);
+    try testing.expectEqualStrings(reply, f.w.reply.items);
+}
+
+test "events: with no leader, the session answers each query as Ghostty does" {
+    // Device attributes: DA1, DA2 and their explicit forms.
+    try expectReply("\x1b[c", "\x1b[?62;22c");
+    try expectReply("\x1b[0c", "\x1b[?62;22c");
+    try expectReply("\x1b[>c", "\x1b[>1;10;0c");
+    try expectReply("\x1b[>0c", "\x1b[>1;10;0c");
+    // DA3.
+    try expectReply("\x1b[=c", "\x1bP!|00000000\x1b\\");
+    // Device status: operating status, cursor position, extended position.
+    try expectReply("\x1b[5n", "\x1b[0n");
+    try expectReply("\x1b[6n", "\x1b[2;2R");
+    try expectReply("\x1b[?6n", "\x1b[?2;2;1R");
+    // A mode report (DECRQM): bracketed paste is reset.
+    try expectReply("\x1b[?2004$p", "\x1b[?2004;2$y");
+    // The kitty keyboard flags.
+    try expectReply("\x1b[?u", "\x1b[?0u");
+    // XTVERSION.
+    try expectReply("\x1b[>q", "\x1bP>|libghostty\x1b\\");
+    try expectReply("\x1b]7501;?\x07", "\x1b]7501;" ++ program_status.query_reply ++ "\x07");
+    // A DA1 reply that a program echoes is not a query.
+    try expectReply("\x1b[?62;22c", "");
+    // The session does not know the app's colors: no OSC 4, 10 or 11 report.
+    try expectReply("\x1b]4;1;?\x07", "");
+    try expectReply("\x1b]10;?\x07", "");
+    try expectReply("\x1b]11;?\x1b\\", "");
+    // The kitty graphics query: the images are not the session's.
+    try expectReply("\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\", "");
+}
+
+test "events: the session answers a query that comes in two reads" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("out\x1b[", 0);
+    try testing.expectEqualStrings("", f.w.reply.items);
+    f.feed(">c", 1);
+    try testing.expectEqualStrings("\x1b[>1;10;0c", f.w.reply.items);
 }
 
 test "events: a new client gets the program status records" {

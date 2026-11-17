@@ -736,8 +736,10 @@ private struct GeneralSettings: View {
             Section {
                 Toggle(isOn: $reconnectRemotePanes) {
                     Text("Reconnect panes after a dropped connection")
-                    Text("Connects a disconnected pane to its session again when you wake the Mac or return to the app.")
-                        .settingsDescription()
+                    Text(
+                        "Connects a disconnected pane again by itself. A login that needs an answer waits until you type in the pane."
+                    )
+                    .settingsDescription()
                 }
                 .onChange(of: reconnectRemotePanes) { _, v in
                     Preferences.shared.reconnectRemotePanes = v
@@ -1206,24 +1208,19 @@ extension View {
 private struct FullDiskAccessBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full Disk Access is off")
-                    Text("""
-                    macOS asks for each folder when a terminal command reads Documents, Downloads, \
-                    or other protected places. One Full Disk Access grant covers all of them.
-                    """)
-                    .settingsSecondaryText()
-                    if let url = FullDiskAccess.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Full Disk Access is off")
+                Text("""
+                macOS asks for each folder when a terminal command reads Documents, Downloads, \
+                or other protected places. One Full Disk Access grant covers all of them.
+                """)
+                .settingsSecondaryText()
+                if let url = FullDiskAccess.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }
@@ -1238,21 +1235,16 @@ private struct FullDiskAccessBanner: View {
 private struct NotificationPermissionBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Macterm has no notification permission")
-                    Text("Your Ghostty config asks for notifications.")
-                        .settingsSecondaryText()
-                    if let url = NotificationHandler.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Macterm has no notification permission")
+                Text("Your Ghostty config asks for notifications.")
+                    .settingsSecondaryText()
+                if let url = NotificationHandler.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }
@@ -1592,6 +1584,11 @@ private struct AnimationsSettings: View {
                 }
                 .disabled(!smoothScrolling)
                 .padding(.leading, 16)
+
+                PreviewSurface(kind: .scroll)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .accessibilityLabel(Text("Scroll preview"))
             } header: {
                 DocsSectionHeader("Scrolling", docs: .animations)
             }
@@ -1627,6 +1624,11 @@ private struct AnimationsSettings: View {
                 .onChange(of: cursorTrail) { _, v in
                     Preferences.shared.cursorTrail = v
                 }
+
+                PreviewSurface(kind: .cursor)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 72)
+                    .accessibilityLabel(Text("Cursor preview"))
             } header: {
                 DocsSectionHeader("Cursor", docs: .animations)
             }
@@ -2542,30 +2544,13 @@ private struct UpdatesSettings: View {
     /// tracks `canCheckForUpdates`/`updateAvailable` reads in `body`).
     private var updater: Updater { .shared }
     @State
-    private var automaticallyDownloads: Bool = Updater.shared.automaticallyDownloadsUpdates
-    @State
     private var updateChannel: String = Updater.shared.updateChannel.rawValue
 
     var body: some View {
         Form {
-            Section("Automatic Updates") {
-                Toggle("Update automatically", isOn: $automaticallyDownloads)
-                    .onChange(of: automaticallyDownloads) { _, v in
-                        updater.automaticallyDownloadsUpdates = v
-                    }
-
-                HStack {
-                    Spacer()
-                    Button("Check for Updates Now") {
-                        updater.checkForUpdates()
-                    }
-                    .disabled(!updater.canCheckForUpdates)
-                }
-            }
-
-            // Deliberately its own section: the channel governs which updates
-            // are visible to any check, including a manual "Check for Updates
-            // Now".
+            // The channel governs which updates any check can see, so the
+            // manual check is in the same section. Updates have no toggle:
+            // `UpdatePolicy` keeps them automatic.
             Section {
                 Picker(selection: $updateChannel) {
                     ForEach(UpdateChannel.allCases) { option in
@@ -2578,6 +2563,17 @@ private struct UpdatesSettings: View {
                 }
                 .onChange(of: updateChannel) { _, v in
                     updater.updateChannel = UpdateChannel(rawValue: v) ?? .stable
+                }
+
+                LabeledContent {
+                    Button("Check for Updates Now") {
+                        updater.checkForUpdates()
+                    }
+                    .disabled(!updater.canCheckForUpdates)
+                } label: {
+                    Text("Automatic updates")
+                    Text("Macterm checks for updates each day. It downloads an update automatically and installs it when you quit Macterm.")
+                        .settingsDescription()
                 }
             } header: {
                 Text("Channel")

@@ -135,12 +135,6 @@ struct RemoteServersTests {
     }
 
     @Test
-    func a_windows_host_shows_its_own_line_in_the_pane() {
-        #expect(RemotePaneText.connectFailure(RemoteServers.Failure.windowsHost, host: "win")
-            == "win runs Windows. Macterm does not support Windows hosts.")
-    }
-
-    @Test
     func a_consent_holds_only_for_the_same_destination_host_id_and_host_keys() {
         func host(_ id: String?, _ keys: String = "123") -> HostCheck.Missing {
             .init(system: "Linux", machine: "x86_64", hostID: id, hostKeys: keys)

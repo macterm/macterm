@@ -1,0 +1,33 @@
+name: Server Prebuilt Prune
+
+# Removes old builds from the `server-prebuilt` release
+# (scripts/prune-server-prebuilts.sh). GitHub allows at most 1000 assets on
+# one release, and server-build.yml adds a build for each new build key. The
+# prune is not part of an upload: when the release is full, uploads fail,
+# and this run still frees space.
+
+on:
+  schedule:
+    - cron: "41 */6 * * *" # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: server-prebuilt-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Remove Old Prebuilts
+        run: scripts/prune-server-prebuilts.sh

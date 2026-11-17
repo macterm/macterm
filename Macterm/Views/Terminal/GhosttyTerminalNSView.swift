@@ -230,6 +230,22 @@ final class GhosttyTerminalNSView: NSView {
     /// keybind-passthrough policy uses.
     var rendersForeignGeometry = false
 
+    /// A remote pane whose connection is lost: the surface takes the config
+    /// with the disabled cursor (`GhosttyApp.config(disabledCursor:)`), so
+    /// that the cursor says the pane takes no input. Set from the pane
+    /// (`Pane.isRemoteLinkLost`) by `TerminalSurface`.
+    var isCursorDisabled = false {
+        didSet {
+            guard isCursorDisabled != oldValue else { return }
+            applyCursorConfig()
+        }
+    }
+
+    private func applyCursorConfig() {
+        guard let surface, let config = GhosttyApp.shared.config(disabledCursor: isCursorDisabled) else { return }
+        ghostty_surface_update_config(surface, config)
+    }
+
     var hasViewerOverlay: Bool {
         guard let surface else { return false }
         return ghostty_surface_has_selection(surface)
@@ -768,6 +784,7 @@ final class GhosttyTerminalNSView: NSView {
                 prepareChannel(launch: channelLaunch)
             }
             surface = ghostty_surface_new(app, &config)
+            if isCursorDisabled { applyCursorConfig() }
         }
         func makeSurface() {
             if envVars.isEmpty {
@@ -1057,7 +1074,7 @@ final class GhosttyTerminalNSView: NSView {
     /// `createSurface` judges a creation size by before that surface has a
     /// font of its own. Zero until the first push; the gate then admits any
     /// non-empty size.
-    private static var lastMeasuredCellSize: (width: UInt32, height: UInt32) = (0, 0)
+    private(set) static var lastMeasuredCellSize: (width: UInt32, height: UInt32) = (0, 0)
 
     private func applySurfaceSize(_ backingSize: CGSize) {
         guard let surface else { return }
@@ -1694,7 +1711,7 @@ final class GhosttyTerminalNSView: NSView {
             y *= 2
         }
         noteScroll(y: y, precise: event.hasPreciseScrollingDeltas)
-        ghostty_surface_mouse_scroll(surface, x, y, scrollMods(for: event))
+        ghostty_surface_mouse_scroll(surface, x, y, Self.scrollMods(for: event))
     }
 
     // MARK: - Sub-row scroll offset (smooth scrolling)
@@ -1752,14 +1769,15 @@ final class GhosttyTerminalNSView: NSView {
         ghostty_surface_mouse_scroll(surface, 0, delta, 1)
     }
 
-    private func scrollMods(for event: NSEvent) -> ghostty_input_scroll_mods_t {
+    /// The scroll mods of libghostty for a wheel event: precision and momentum.
+    static func scrollMods(for event: NSEvent) -> ghostty_input_scroll_mods_t {
         var scrollMods: ghostty_input_scroll_mods_t = 0
         if event.hasPreciseScrollingDeltas { scrollMods |= 1 }
         scrollMods |= scrollMomentum(for: event.momentumPhase) << 1
         return scrollMods
     }
 
-    private func scrollMomentum(for phase: NSEvent.Phase) -> ghostty_input_scroll_mods_t {
+    private static func scrollMomentum(for phase: NSEvent.Phase) -> ghostty_input_scroll_mods_t {
         switch phase {
         case .began: 1
         case .stationary: 2

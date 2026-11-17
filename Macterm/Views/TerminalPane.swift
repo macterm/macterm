@@ -77,10 +77,10 @@ struct TerminalPane: View {
             }
             .overlay(alignment: .topTrailing) {
                 // The pane's badges, one row in the trailing corner, in this
-                // order from the left: Read-Only, Copy Mode, Zoomed, then the
-                // lock. The Zoomed pill is here too, not on the tab: a zoomed
-                // pane is the only pane on screen, and one row cannot overlap
-                // itself.
+                // order from the left: Read-Only, Copy Mode, Outdated, Zoomed,
+                // Reconnecting or Connection lost, then the lock. The Zoomed pill is here too, not
+                // on the tab: a zoomed pane is the only pane on screen, and one
+                // row cannot overlap itself.
                 HStack(spacing: 6) {
                     // Read-Only pill: libghostty sends no input to the pty.
                     // A click turns read-only off.
@@ -121,6 +121,28 @@ struct TerminalPane: View {
                     if isZoomed {
                         ZoomIndicator(onExit: onZoomRequest)
                             .transition(.opacity)
+                    }
+                    // A remote pane whose connection stopped or failed: one
+                    // badge for every reason, and a click does nothing. While
+                    // a try runs it says so; the app tries again by itself,
+                    // and a key connects at once.
+                    switch pane.remoteLinkBadge {
+                    case .reconnecting:
+                        StatusPill(title: String(
+                            localized: "Reconnecting",
+                            comment: "The badge of a remote pane while a try to connect again runs"
+                        )) {
+                            ProgressView().controlSize(.mini)
+                        }
+                    case .lost:
+                        StatusPill(title: String(
+                            localized: "Connection lost",
+                            comment: "The badge of a remote pane whose connection stopped or failed"
+                        )) {
+                            Image(systemName: "network.slash")
+                        }
+                    case nil:
+                        EmptyView()
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -306,6 +328,7 @@ private struct TerminalSurface: NSViewRepresentable {
         context.coordinator.wasFocused = focused
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
+        view.isCursorDisabled = pane.isRemoteLinkLost
         if focused, !wasFocused {
             AdaptiveTerminalChrome.shared.focusDidChange(to: view)
             view.notifySurfaceFocused()

@@ -154,6 +154,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         lock.unlock()
         guard let channel = currentChannel() else {
             host.paneInputUndelivered(data)
+            // A key in a channel that ended reports it again.
+            host.paneLinkLost()
             return
         }
         output.async { [host] in
