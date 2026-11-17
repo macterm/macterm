@@ -32,7 +32,7 @@ struct GhosttyConfigKeyTests {
     bell-audio-volume = 0.75
     macos-auto-secure-input = false
     macos-hidden = always
-    macos-icon = custom
+    window-theme = light
     """
 
     @Test
@@ -62,7 +62,7 @@ struct GhosttyConfigKeyTests {
         let bell = try #require(GhosttyConfigKey.packed("bell-features").read(from: config))
         #expect(bell & (1 << 1) != 0 && bell & (1 << 2) != 0)
         #expect(GhosttyConfigKey.tag("macos-hidden").read(from: config) == "always")
-        #expect(GhosttyConfigKey.tag("macos-icon").read(from: config) == "custom")
+        #expect(GhosttyConfigKey.tag("window-theme").read(from: config) == "light")
         #expect(GhosttyConfigKey.path("bell-audio-path").read(from: config) == "/tmp/ding.wav")
 
         let background = try #require(GhosttyConfigKey.color("background").read(from: config))
@@ -78,11 +78,11 @@ struct GhosttyConfigKeyTests {
 
     @Test
     func unsetOptionalsAndUnknownKeysReadNil() throws {
-        let config = try makeConfig("macos-icon = custom")
+        let config = try makeConfig("font-size = 13")
         defer { ghostty_config_free(config) }
 
         // An unset `?[:0]const u8` is a null pointer behind a *true* return.
-        #expect(GhosttyConfigKey.tag("macos-custom-icon").read(from: config) == nil)
+        #expect(GhosttyConfigKey.tag("title").read(from: config) == nil)
         // An unset Path is an empty string, which reads as unset.
         #expect(GhosttyConfigKey.path("bell-audio-path").read(from: config) == nil)
         // A key libghostty doesn't know fails the getter outright.
@@ -95,7 +95,5 @@ struct GhosttyConfigKeyTests {
         // Wire contracts: renaming any of these breaks the read silently.
         #expect(MacosHidden.key.name == "macos-hidden")
         #expect(ShortcutsAccess.key.name == "macos-shortcuts")
-        #expect(GhosttyAppIcon.styleKey.name == "macos-icon")
-        #expect(GhosttyAppIcon.customPathKey.name == "macos-custom-icon")
     }
 }

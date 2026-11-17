@@ -130,7 +130,7 @@ final class GhosttyApp {
         }
         app = createdApp
         config = cfg
-        applyAppIcon()
+        AdaptiveIconController.shared.start()
 
         // Ticking is event-driven: libghostty's `wakeup_cb` fires whenever the
         // core needs `ghostty_app_tick` (GhosttyCallbacks.wakeup schedules it
@@ -308,34 +308,8 @@ final class GhosttyApp {
             resyncSurfaceScheme()
         }
         configVersion += 1
-        applyAppIcon()
         NotificationCenter.default.post(name: .mactermConfigDidChange, object: nil)
         return result
-    }
-
-    // MARK: - App icon (`macos-icon`)
-
-    /// Install the icon the config asks for — on every load and reload, the
-    /// way Ghostty.app does, so unsetting the key or fixing the path takes
-    /// effect on the next reload without a relaunch. Both keys are read from
-    /// the loaded config rather than the raw text so a `config-file` include
-    /// counts; the decision itself is `GhosttyAppIcon`. The config's choice
-    /// goes to `AdaptiveIconController`, which shows it or, for the bundled
-    /// icon, the adaptive icon; the write is `AppIconPresenter`.
-    private func applyAppIcon() {
-        let style = read(GhosttyAppIcon.styleKey)
-        let customPath = read(GhosttyAppIcon.customPathKey)
-        let icon = GhosttyAppIcon.resolve(style: style, customPath: customPath)
-        if GhosttyAppIcon.isGhosttyArtwork(style: style) {
-            logger.info(
-                "macos-icon = \(style ?? "", privacy: .public) names Ghostty artwork Macterm doesn't ship; using the bundled icon"
-            )
-        } else if GhosttyAppIcon.isCustom(style: style), icon == .bundled {
-            logger.warning(
-                "macos-custom-icon = \(customPath ?? "", privacy: .public) is not an absolute path; using the bundled icon"
-            )
-        }
-        AdaptiveIconController.shared.configuredIconDidChange(icon)
     }
 
     /// Re-apply the *current* config object to the app and every live surface,
@@ -509,7 +483,7 @@ final class GhosttyApp {
     }
 
     /// Keys read only here. Keys a Macterm type interprets live on that
-    /// type (`MacosHidden.key`, `ShortcutsAccess.key`, `GhosttyAppIcon`).
+    /// type (`MacosHidden.key`, `ShortcutsAccess.key`, `WindowTheme.key`).
     private enum Keys {
         static let background = GhosttyConfigKey.color("background")
         static let foreground = GhosttyConfigKey.color("foreground")

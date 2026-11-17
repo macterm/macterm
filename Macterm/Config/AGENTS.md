@@ -22,7 +22,6 @@ In automatic mode, Macterm delegates the user layer to `ghostty_config_load_defa
 - `macos-shortcuts` (App Intents).
 - `tab-inherit-working-directory` and `split-inherit-working-directory`. `false` means the project directory. In a project-based terminal, this is the "default working directory" of ghostty. `AppState.newTabInheritsWorkingDirectory` is the read that you can inject.
 - `macos-hidden`.
-- `macos-icon`.
 - `window-theme`, and the `set_window_theme` action, which overrides it until `set_window_theme:config` (`WindowTheme`, the rule of Ghostty.app). They give one light or dark scheme (`GhosttyApp.windowScheme`): the chrome (`MactermTheme.colorScheme`) and the scheme of each surface, which picks the side of a `theme = light:X,dark:Y` split. `auto` follows the terminal background, as before. `system` and `ghostty` follow macOS. The override is in memory only and survives a config reload. The window title (the project name and the path) is drawn over the terminal, so it takes the scheme of the window's terminal background, not this one (`WindowAppearance.titleAppearanceName`). Ghostty.app's transparent titlebar does the same for the whole terminal window. Where AppKit paints its own titlebar background (fullscreen), the title keeps the window's scheme.
 - `focus-follows-mouse`. Macterm reads it live on each pointer move. It moves focus only away from another pane.
 - `font-family` is for terminal panes only (libghostty reads it). Monospaced UI text (panels, sheets, Settings, keybinds) uses the system monospaced font: `.monospaced()` or `design: .monospaced` in SwiftUI, `NSFont.monospacedSystemFont` in AppKit. Macterm never reads `font-family` for its own UI. `.monospacedDigit()` sets only the digits of the system font.
@@ -41,13 +40,7 @@ Overrides that Macterm must lock. The `smooth-scroll`, `smooth-cursor`, `cursor-
 
 The state of the UI of Macterm lives in `Preferences`. It never touches this pipeline.
 
-**Custom app icon**. Macterm honors `macos-icon = custom` and `macos-custom-icon` with the semantics of Ghostty.
-
-- `GhosttyApp.applyAppIcon` runs after every load and reload. It reads both keys from the *loaded* config, so a `config-file` include counts. It reads each key through `GhosttyConfigKey`, which pairs a key with the C shape that `ghostty_config_get` writes for it.
-- It passes the keys to the pure function `GhosttyAppIcon.resolve` (`.bundled` or `.custom(URL)`). With no path, it uses `~/.config/ghostty/Ghostty.icns` of Ghostty. A path that is still relative after the expansion of `~` is invalid, because the cwd of a GUI app is not predictable.
-- The one AppKit write is `AppIconPresenter.apply`. It sets `NSApp.applicationIconImage`. For a file that is missing, that it cannot read or that it cannot decode, it assigns nil. This restores the icon of the bundle.
-- Every other `macos-icon` value is artwork of the Ghostty brand that we do not ship. We deliberately do not mirror the Dock-tile plugin of Ghostty.
-- Hermetic caveat: `loadConfig` disables the user layer under `MACTERM_BENCHMARK=1`. To verify, use a throwaway `HOME`, `XDG_CONFIG_HOME` and `MACTERM_RUNTIME_DIR` plus `MACTERM_BENCHMARK_DATA_DIR`, and **no** `MACTERM_BENCHMARK`.
+**Macterm does not read `macos-icon` or `macos-custom-icon`**. The Dock shows the adaptive icon or the bundled icon for every value, `custom` too, with no message (`IconRenderer/AGENTS.md`). The other values name artwork of the Ghostty brand that we do not ship.
 
 **`macos-hidden`**. `never` and `always` of ghostty map to `.regular` and `.accessory` through `MacosHidden`. This is a pure function with tests. The raw values are the own tag names of ghostty, so a rename of a case breaks the wire.
 

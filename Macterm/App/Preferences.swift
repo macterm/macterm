@@ -777,9 +777,8 @@ final class Preferences {
 
     /// The adaptive icon: the Dock icon repainted in the terminal theme's
     /// colors (`AdaptiveIcon`, `AdaptiveIconController`). On by default — the
-    /// icon was designed to take the theme — and inert before macOS 26, under
-    /// a `macos-icon = custom` image, and while the system's icon style is
-    /// Clear or Tinted. Any render failure shows the bundled icon instead.
+    /// icon was designed to take the theme — and inert before macOS 26 and
+    /// while the system's icon style is Clear or Tinted. Any render failure shows the bundled icon instead.
     var adaptiveIcon: Bool {
         didSet {
             Keys.adaptiveIcon.write(adaptiveIcon, to: defaults)
