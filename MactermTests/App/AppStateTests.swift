@@ -150,7 +150,7 @@ struct AppStateTests {
     @Test
     func a_pane_leads_until_its_session_says_it_does_not() throws {
         // The session decides leadership. Before its first `lead` message a
-        // surface counts as the leader, so a new pane never dims.
+        // surface counts as the leader, so a new pane never blurs.
         let state = makeAppState()
         let p = seedProject(state)
         let tab = try #require(state.workspaces[p.id]?.activeTab)

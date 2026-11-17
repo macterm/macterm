@@ -1190,6 +1190,16 @@ private struct SidebarProjectRow: View {
 
     private var renameTarget: SidebarRenameTarget { .project(project.id) }
 
+    /// The host of a remote project whose panes are plain ssh shells: the
+    /// user declined the server, or the host has no build. The row shows it,
+    /// so the pane prints no line about it (`RemoteHosts.plainDestinations`).
+    private var plainHost: String? {
+        guard case let .remote(user, host, _) = ProjectPath.remote(from: project.path),
+              RemoteHosts.shared.plainDestinations.contains(HostCommands.destination(user: user, host: host))
+        else { return nil }
+        return host
+    }
+
     @ViewBuilder
     private var titleContent: some View {
         if isInteractive, presentation.isRenaming(renameTarget) {
@@ -1208,6 +1218,15 @@ private struct SidebarProjectRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .help(project.path)
+                }
+                if let host = plainHost {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help(String(
+                            localized: "Macterm has no server on \(host). Shells of this project stop when the connection stops.",
+                            comment: "Help of the sidebar mark on a remote project whose host has no Macterm server."
+                        ))
                 }
             }
             .inlineRenameClickTarget(onSelect: select, onBeginRename: beginRename)

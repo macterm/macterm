@@ -6,8 +6,9 @@
 # $1: the folder, hex-encoded (two hex digits for each byte), so that it is
 # one plain word on the command line and no shell parses it. A ~ or ~name at
 # the start becomes the home folder (the same text as
-# HostCommands.expandTilde). A folder that is not there gives a "macterm:"
-# line, and the shell starts in the home folder.
+# HostCommands.expandTilde). A folder that is not there gives one "macterm:"
+# line, and the shell starts in the home folder. The error of cd itself goes
+# to /dev/null: it is in the words of the host's shell.
 #
 # The text has no two backslashes in a row: fish reads them in single
 # quotes as one (HostCommands.command). printf makes the backslash of each
@@ -32,5 +33,5 @@ case $d in
     fi;
     ;;
 esac;
-cd "$d" || printf "macterm: cannot cd to %s\n" "$o" >&2;
+cd "$d" 2>/dev/null || printf "macterm: cannot cd to %s\n" "$o" >&2;
 if [ -n "$SHELL" ]; then exec "$SHELL" -l; else exec /bin/sh; fi;
