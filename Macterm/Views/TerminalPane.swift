@@ -130,7 +130,7 @@ struct TerminalPane: View {
                     // and a key connects at once.
                     if let badge = pane.remoteLinkBadge {
                         RemoteLinkPill(badge: badge)
-                            .transition(PaletteMotion.transition)
+                            .transition(.opacity)
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -139,6 +139,7 @@ struct TerminalPane: View {
                         SecureInputBadge()
                     }
                 }
+                .modifier(PanePillRow())
                 .padding(8)
                 // The row's place in the corner animates too, so that no
                 // badge jumps when the remote-link badge comes or goes.
@@ -174,6 +175,20 @@ private struct LinkHoverBanner: View {
             .frame(maxWidth: 480, alignment: .leading)
             .padding(6)
             .allowsHitTesting(false)
+    }
+}
+
+/// The glass pills of one badge row share one `GlassEffectContainer`, so
+/// that they sample what is behind them as one. With no container and a
+/// `blurReplace` exit, a pill that went away flashed a dark band behind the
+/// row (the ui-review of PR 870).
+private struct PanePillRow: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+            GlassEffectContainer(spacing: 0) { content }
+        } else {
+            content
+        }
     }
 }
 
