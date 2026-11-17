@@ -3,9 +3,9 @@ import Foundation
 import Sparkle
 import Testing
 
-/// `UpdatePolicy` against Sparkle's real settings store. Each test makes a
-/// bundle with its own identifier, so Sparkle writes to a defaults domain of
-/// its own and never to the domain of the test host.
+/// `UpdatePolicy` against a real `SPUUpdater` and Sparkle's settings store.
+/// Each test makes a bundle with its own identifier, so Sparkle writes to a
+/// defaults domain of its own and never to the domain of the test host.
 @MainActor
 struct UpdatePolicyTests {
     @Test
@@ -14,13 +14,18 @@ struct UpdatePolicyTests {
         defer { host.remove() }
 
         // A user who switched off "Update automatically" before the toggle
-        // was removed.
-        let before = SPUUpdaterSettings(hostBundle: host.bundle)
-        before.automaticallyDownloadsUpdates = false
-        before.automaticallyChecksForUpdates = false
+        // was removed. The updater is never started, so it checks nothing.
+        let updater = SPUUpdater(
+            hostBundle: host.bundle,
+            applicationBundle: host.bundle,
+            userDriver: SPUStandardUserDriver(hostBundle: host.bundle, delegate: nil),
+            delegate: nil
+        )
+        updater.automaticallyDownloadsUpdates = false
+        updater.automaticallyChecksForUpdates = false
         #expect(!SPUUpdaterSettings(hostBundle: host.bundle).automaticallyDownloadsUpdates)
 
-        UpdatePolicy.enforce(on: before)
+        UpdatePolicy.enforce(on: updater)
 
         // A fresh reader sees the forced values in the defaults.
         let after = SPUUpdaterSettings(hostBundle: host.bundle)

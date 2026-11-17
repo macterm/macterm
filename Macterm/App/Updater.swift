@@ -11,33 +11,22 @@ enum UpdaterAvailability {
     }
 }
 
-/// The two Sparkle settings that are not a user choice. Settings → Updates
-/// has no toggle for them.
-@MainActor
-protocol AutomaticUpdateSettings: AnyObject {
-    var automaticallyChecksForUpdates: Bool { get set }
-    var automaticallyDownloadsUpdates: Bool { get set }
-}
-
-extension SPUUpdater: AutomaticUpdateSettings {}
-extension SPUUpdaterSettings: AutomaticUpdateSettings {}
-
-/// Updates are always automatic (Ethan, 2026-11-16): Sparkle checks the
-/// appcast daily (`SUScheduledCheckInterval`), downloads a found update in the
-/// background and installs it when the app quits. The toolbar then offers
+/// Updates are always automatic: Sparkle checks the appcast daily
+/// (`SUScheduledCheckInterval`), downloads a found update in the background
+/// and installs it when the app quits. The toolbar then offers
 /// Restart to Update.
 ///
 /// Sparkle keeps both values in the user's defaults (`SUEnableAutomaticChecks`,
 /// `SUAutomaticallyUpdate`), and they win over `Info.plist`. A user who turned
 /// off an old toggle ("Check for updates automatically", "Update
 /// automatically") still has it off there. `Updater` therefore writes both
-/// values at launch and again before each scheduled check, which is before
-/// Sparkle reads `automaticallyDownloadsUpdates` for a found update.
+/// values when the updater starts and again each time Sparkle schedules a
+/// check. Sparkle reads `automaticallyDownloadsUpdates` when that check runs.
 enum UpdatePolicy {
     @MainActor
-    static func enforce(on settings: some AutomaticUpdateSettings) {
-        if !settings.automaticallyChecksForUpdates { settings.automaticallyChecksForUpdates = true }
-        if !settings.automaticallyDownloadsUpdates { settings.automaticallyDownloadsUpdates = true }
+    static func enforce(on updater: SPUUpdater) {
+        if !updater.automaticallyChecksForUpdates { updater.automaticallyChecksForUpdates = true }
+        if !updater.automaticallyDownloadsUpdates { updater.automaticallyDownloadsUpdates = true }
     }
 }
 
@@ -135,16 +124,14 @@ final class Updater {
             self?.installAndRelaunchHandler = handler
             self?.updateReadyToInstall = true
         }
+        updaterDelegate.onWillScheduleCheck = { [updater = controller.updater] in
+            UpdatePolicy.enforce(on: updater)
+        }
         userDriverDelegate.onUpdateFound = { [weak self] in self?.updateAvailable = true }
         userDriverDelegate.onUpdateCleared = { [weak self] in self?.updateAvailable = false }
 
         // Now that callbacks are wired, actually start the updater. Local,
         // Debug, and benchmark builds skip it (see `startUpdater` above).
-        updaterDelegate.onWillScheduleCheck = { [weak self] in
-            guard let self else { return }
-            UpdatePolicy.enforce(on: controller.updater)
-        }
-
         if startUpdater {
             UpdatePolicy.enforce(on: controller.updater)
             controller.startUpdater()
