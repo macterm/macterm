@@ -20,23 +20,23 @@ struct SettingsInfoPanelTests {
     ]
 
     @Test
-    func the_box_is_as_wide_as_the_widest_glyph() {
-        let widths = Self.symbols.map {
-            NSHostingView(rootView: Image(systemName: $0).font(.system(size: 14, weight: .semibold))).fittingSize.width
+    func every_glyph_fits_on_the_tile() {
+        for symbol in Self.symbols {
+            let glyph = NSHostingView(rootView: Image(systemName: symbol).font(.system(size: 14, weight: .semibold)))
+            #expect(glyph.fittingSize.width <= SettingsInfoTile.size, "\(symbol)")
+            #expect(glyph.fittingSize.height <= SettingsInfoTile.size, "\(symbol)")
         }
-        #expect(widths.max() == SettingsInfoTile.boxWidth, "\(widths)")
     }
 
-    @Test(arguments: [SettingsInfoIconStyle.box, .tile])
-    func the_text_starts_at_the_same_x_in_every_block(style: SettingsInfoIconStyle) {
-        let expectedIcon = style == .box ? SettingsInfoTile.boxWidth : SettingsInfoTile.tileSize
+    @Test
+    func the_text_starts_at_the_same_x_in_every_block() {
         var heights: Set<CGFloat> = []
         for symbol in Self.symbols {
-            let tile = NSHostingView(rootView: SettingsInfoTile(symbol: symbol, style: style))
-            #expect(tile.fittingSize.width == expectedIcon, "\(symbol)")
+            let tile = NSHostingView(rootView: SettingsInfoTile(symbol: symbol))
+            #expect(tile.fittingSize == CGSize(width: SettingsInfoTile.size, height: SettingsInfoTile.size), "\(symbol)")
 
             let marker = TextOriginMarker()
-            let block = NSHostingView(rootView: SettingsInfoBlock(symbol: symbol, style: style) {
+            let block = NSHostingView(rootView: SettingsInfoBlock(symbol: symbol) {
                 Text(verbatim: "Title")
                     .background(alignment: .topLeading) { marker }
                 Text(verbatim: "A caption that wraps onto a second line at this width, as a pane caption does.")
@@ -45,7 +45,7 @@ struct SettingsInfoPanelTests {
             block.frame.size = block.fittingSize
             block.layoutSubtreeIfNeeded()
             let x = marker.view.convert(NSPoint.zero, to: block).x
-            #expect(x == expectedIcon + 11, "\(symbol)")
+            #expect(x == SettingsInfoTile.size + 11, "\(symbol)")
             heights.insert(block.fittingSize.height)
         }
         #expect(heights.count == 1, "\(heights)")

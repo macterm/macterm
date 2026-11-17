@@ -36,17 +36,16 @@ struct SettingsInfoPanel: View {
 
 /// The layout of every block at the top of a pane: the info panels and the
 /// banners in General. Sizes measured in the header of the System Settings
-/// panes (Notifications, Accessibility): a 14 pt semibold glyph, an 11 pt gap
-/// to the text.
+/// panes (Notifications, Accessibility): a 14 pt semibold glyph on a 26 pt
+/// tile, an 11 pt gap to the text, the top of the tile at the top of the title.
 struct SettingsInfoBlock<Content: View>: View {
     let symbol: String
     var tint: Color = .accentColor
-    var style: SettingsInfoIconStyle = .current
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(alignment: style == .tile ? .top : .firstTextBaseline, spacing: 11) {
-            SettingsInfoTile(symbol: symbol, tint: tint, style: style)
+        HStack(alignment: .top, spacing: 11) {
+            SettingsInfoTile(symbol: symbol, tint: tint)
             VStack(alignment: .leading, spacing: 2) {
                 content
             }
@@ -56,58 +55,22 @@ struct SettingsInfoBlock<Content: View>: View {
     }
 }
 
-/// The two looks of the icon. Temporary: the merge keeps one look and removes
-/// this type.
-enum SettingsInfoIconStyle: String {
-    /// The glyph centered in a box as wide as the widest glyph, with no
-    /// background, so that the text starts at the same x in every pane.
-    case box
-    /// The glyph in white on a 26 pt tile of the tint, as in System Settings.
-    case tile
-
-    /// The defaults key `settingsInfoIconStyle` (`box` or `tile`) of a Debug
-    /// build. A Release build shows `box`.
-    static var current: Self {
-        #if DEBUG
-        Preferences.defaults.string(forKey: "settingsInfoIconStyle").flatMap(Self.init(rawValue:)) ?? .box
-        #else
-        .box
-        #endif
-    }
-}
-
-/// The icon of an info block. Every pane draws it at the same width, so the
-/// text column starts at the same x in every pane.
+/// The icon of an info block: the glyph in white, centered on a tile of the
+/// tint, as in System Settings. The tile is the same size in every pane, so
+/// the text column starts at the same x in every pane, whatever the width of
+/// the glyph.
 struct SettingsInfoTile: View {
-    /// The width of the widest glyph that a block uses at 14 pt semibold
-    /// (`puzzlepiece.extension` and `rectangle.bottomthird.inset.filled`).
-    /// `SettingsInfoPanelTests` measures each glyph against it.
-    static let boxWidth: CGFloat = 21
-    static let tileSize: CGFloat = 26
+    static let size: CGFloat = 26
 
     let symbol: String
     var tint: Color = .accentColor
-    var style: SettingsInfoIconStyle = .current
 
     var body: some View {
-        let glyph = Image(systemName: symbol)
+        Image(systemName: symbol)
             .font(.system(size: 14, weight: .semibold))
-        switch style {
-        case .box:
-            // A hidden line in the title's font gives the box the height and
-            // baseline of the title's first line. The glyph is centered on it,
-            // so a tall glyph (`key`) does not make its block taller.
-            Text(verbatim: " ")
-                .hidden()
-                .frame(width: Self.boxWidth)
-                .overlay { glyph.foregroundStyle(tint) }
-                .accessibilityHidden(true)
-        case .tile:
-            glyph
-                .foregroundStyle(.white)
-                .frame(width: Self.tileSize, height: Self.tileSize)
-                .background(tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityHidden(true)
-        }
+            .foregroundStyle(.white)
+            .frame(width: Self.size, height: Self.size)
+            .background(tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
