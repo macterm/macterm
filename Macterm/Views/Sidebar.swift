@@ -1200,6 +1200,38 @@ private struct SidebarProjectRow: View {
         return host
     }
 
+    /// The host of a remote project (#104): its panes run there over ssh.
+    private var remoteHost: String? {
+        guard case let .remote(_, host, _) = ProjectPath.remote(from: project.path) else { return nil }
+        return host
+    }
+
+    /// `network`, or `network.slash` while a pane of the project lost its
+    /// connection (`Workspace.hasLostRemoteLink`). Both symbols are always
+    /// in the layout and only one is visible, so that a change of state does
+    /// not move the mark after it.
+    private func remoteMark(host: String) -> some View {
+        let lost = appState.workspaces[project.id]?.hasLostRemoteLink ?? false
+        let help = lost
+            ? String(
+                localized: "Connection to \(host) lost",
+                comment: "Help of the sidebar mark on a remote project whose connection to its host stopped."
+            )
+            : String(
+                localized: "Remote project on \(host)",
+                comment: "Help of the sidebar mark on a remote project."
+            )
+        return ZStack {
+            Image(systemName: "network").opacity(lost ? 0 : 1)
+            Image(systemName: "network.slash").opacity(lost ? 1 : 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(help)
+    }
+
     @ViewBuilder
     private var titleContent: some View {
         if isInteractive, presentation.isRenaming(renameTarget) {
@@ -1212,12 +1244,8 @@ private struct SidebarProjectRow: View {
         } else {
             HStack(spacing: 4) {
                 FadingText(project.name)
-                if project.isRemote {
-                    // Remote project (#104): panes live on this host over ssh.
-                    Image(systemName: "network")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .help(project.path)
+                if let host = remoteHost {
+                    remoteMark(host: host)
                 }
                 if let host = plainHost {
                     Image(systemName: "exclamationmark.circle")

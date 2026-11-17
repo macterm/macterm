@@ -16,6 +16,27 @@ struct WorkspaceTests {
     }
 
     @Test
+    func a_remote_workspace_has_a_lost_link_while_any_of_its_panes_is_lost() {
+        let ws = Workspace(id: UUID(), projectPath: "box:/srv")
+        let second = ModelWriter.tabCreate(in: ws, projectPath: "box:/srv", focus: false)
+        let pane = second.splitRoot.allPanes()[0]
+        #expect(!ws.hasLostRemoteLink)
+        pane.isRemoteLinkLost = true
+        #expect(ws.hasLostRemoteLink)
+        pane.isRemoteReconnecting = true
+        #expect(ws.hasLostRemoteLink)
+        pane.isRemoteLinkLost = false
+        #expect(!ws.hasLostRemoteLink)
+    }
+
+    @Test
+    func a_local_workspace_never_has_a_lost_link() {
+        let ws = makeWorkspace()
+        ws.tabs[0].splitRoot.allPanes()[0].isRemoteLinkLost = true
+        #expect(!ws.hasLostRemoteLink)
+    }
+
+    @Test
     func init_creates_one_tab_and_selects_it() {
         let ws = makeWorkspace()
         #expect(ws.tabs.count == 1)
