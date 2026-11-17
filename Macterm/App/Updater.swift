@@ -412,13 +412,10 @@ struct CheckForUpdatesMenuItem: View {
 /// knows the size), then Restart to Update, which installs and relaunches.
 /// No button while idle.
 ///
-/// On macOS 26 the item hides the shared toolbar background
-/// (`MainWindow`), and the button draws its own glass capsule with the
-/// native insets of `.glass`. The shared background hugs a title-and-icon
-/// label with almost no inner padding.
-///
-/// Each state has its own view identity, so the toolbar measures the item
-/// again when the label changes (see `TabSwitcherToolbarItem`).
+/// On macOS 26 the item hides the shared toolbar background (`MainWindow`)
+/// and the button draws its own glass capsule with the native insets of
+/// `.glass`. The shared background hugs a title-and-icon label with almost
+/// no inner padding.
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
 
@@ -428,18 +425,26 @@ struct UpdateToolbarButton: View {
             EmptyView()
         case .downloading,
              .extracting:
-            // Not a control: the button style gives the same capsule as
-            // Restart to Update, and a click does nothing.
-            styled(Button {} label: { downloadingLabel })
-                .allowsHitTesting(false)
-                .accessibilityRemoveTraits(.isButton)
-                .accessibilityAddTraits(.updatesFrequently)
-                .id("downloading")
+            if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+                // A button only for the capsule of Restart to Update. It does nothing.
+                glass(Button {} label: { downloadingLabel })
+                    .allowsHitTesting(false)
+                    .focusable(false)
+                    .accessibilityRemoveTraits(.isButton)
+                    .accessibilityAddTraits(.updatesFrequently)
+            } else {
+                downloadingLabel
+                    .labelStyle(.titleAndIcon)
+            }
         case .readyToRestart:
-            styled(Button("Restart to Update", systemImage: "arrow.clockwise") {
+            let button = Button("Restart to Update", systemImage: "arrow.clockwise") {
                 updater.installAndRelaunch()
-            })
-            .id("restart")
+            }
+            if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+                glass(button)
+            } else {
+                button.labelStyle(.titleAndIcon)
+            }
         }
     }
 
@@ -447,28 +452,24 @@ struct UpdateToolbarButton: View {
         Label {
             Text("Downloading…")
         } icon: {
-            if let fraction = updater.status.fraction {
-                ProgressView(value: fraction)
-            } else {
-                ProgressView()
+            Group {
+                if let fraction = updater.status.fraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
             }
+            .progressViewStyle(.circular)
+            .controlSize(.small)
         }
-        .progressViewStyle(.circular)
     }
 
-    @ViewBuilder
-    private func styled(_ button: some View) -> some View {
-        if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-            button
-                .labelStyle(.titleAndIcon)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .controlSize(.large)
-                .fixedSize()
-        } else {
-            button
-                .labelStyle(.titleAndIcon)
-                .fixedSize()
-        }
+    @available(macOS 26.0, *)
+    private func glass(_ button: some View) -> some View {
+        button
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
     }
 }
