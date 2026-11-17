@@ -4971,6 +4971,23 @@
         }
       }
     },
+    "Macterm has no server on %@. Shells of this project stop when the connection stops." : {
+      "comment" : "Help of the sidebar mark on a remote project whose host has no Macterm server.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 Macterm 서버가 없습니다. 연결이 끊기면 이 프로젝트의 셸도 종료됩니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上没有 Macterm 服务器。连接断开时，此项目的 shell 也会结束。"
+          }
+        }
+      }
+    },
     "Macterm installed its server on %@" : {
       "localizations" : {
         "ko" : {
