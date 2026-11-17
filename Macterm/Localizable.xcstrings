@@ -4053,22 +4053,6 @@
     "ID" : {
       "shouldTranslate" : false
     },
-    "Icon size" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "아이콘 크기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "图标大小"
-          }
-        }
-      }
-    },
     "Idle" : {
       "localizations" : {
         "ko" : {
@@ -4485,23 +4469,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
-          }
-        }
-      }
-    },
-    "Large" : {
-      "comment" : "Sidebar icon size",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "크게"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "大"
           }
         }
       }
@@ -5214,23 +5181,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "管理密码"
-          }
-        }
-      }
-    },
-    "Medium" : {
-      "comment" : "Sidebar icon size",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "중간"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "中"
           }
         }
       }
@@ -7475,22 +7425,6 @@
         }
       }
     },
-    "Project icon" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 아이콘"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "项目图标"
-          }
-        }
-      }
-    },
     "Projects" : {
       "comment" : "Command category\nSettings pane",
       "localizations" : {
@@ -9696,23 +9630,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "大小"
-          }
-        }
-      }
-    },
-    "Small" : {
-      "comment" : "Sidebar icon size",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "작게"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "小"
           }
         }
       }

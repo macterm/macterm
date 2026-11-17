@@ -242,6 +242,7 @@ extension SidebarRowSize {
         case .small: 12.0 / 14.0
         case .medium: 1
         case .large: 18.0 / 14.0
+        @unknown default: 1
         }
     }
 }
