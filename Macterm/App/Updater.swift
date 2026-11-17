@@ -238,7 +238,7 @@ let betaUpdateChannel = UpdateChannel.beta.rawValue
 let tipUpdateChannel = UpdateChannel.tip.rawValue
 
 /// Receives Sparkle's updater callbacks: the channels, the schedule, and a
-/// download that Sparkle does in the background with no user driver.
+/// background download that is ready to install on quit.
 private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
     var onEvent: ((UpdateEvent) -> Void)?
     var onReadyToInstall: ((@escaping () -> Void) -> Void)?
@@ -271,22 +271,9 @@ private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
         onWillScheduleCheck?()
     }
 
-    /// A scheduled check downloads with no user driver. The toolbar shows an
-    /// indeterminate ring until the download is ready or fails.
-    func updater(_: SPUUpdater, willDownloadUpdate _: SUAppcastItem, with _: NSMutableURLRequest) {
-        onEvent?(.backgroundDownloadStarted)
-    }
-
-    func updater(_: SPUUpdater, willExtractUpdate _: SUAppcastItem) {
-        onEvent?(.extractionStarted)
-    }
-
-    func updater(_: SPUUpdater, failedToDownloadUpdate _: SUAppcastItem, error _: Error) {
-        onEvent?(.backgroundFailed)
-    }
-
-    func updater(_: SPUUpdater, didAbortWithError _: Error) {
-        onEvent?(.backgroundFailed)
+    /// Macterm shows no release notes, so Sparkle fetches none.
+    func updater(_: SPUUpdater, shouldDownloadReleaseNotesForUpdate _: SUAppcastItem) -> Bool {
+        false
     }
 
     /// Called on the main thread when a background download is ready to
@@ -337,7 +324,7 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
             stage: stage,
             userInitiated: state.userInitiated,
             informationOnly: appcastItem.isInformationOnlyUpdate,
-            needsConsent: appcastItem.isMajorUpgrade || appcastItem.signingValidationStatus == .failed,
+            untrusted: appcastItem.signingValidationStatus == .failed,
             version: appcastItem.displayVersionString
         )
         onFound?(found, reply)

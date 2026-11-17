@@ -7,13 +7,13 @@ struct UpdateStatusTests {
         _ stage: UpdateFound.Stage,
         userInitiated: Bool = true,
         informationOnly: Bool = false,
-        needsConsent: Bool = false
+        untrusted: Bool = false
     ) -> UpdateEvent {
         .found(UpdateFound(
             stage: stage,
             userInitiated: userInitiated,
             informationOnly: informationOnly,
-            needsConsent: needsConsent,
+            untrusted: untrusted,
             version: "2.1.0"
         ))
     }
@@ -49,9 +49,16 @@ struct UpdateStatusTests {
         #expect(machine.status == .readyToRestart)
     }
 
+    /// A machine in a check that the user started.
+    private func userCheck() -> UpdateMachine {
+        var machine = UpdateMachine()
+        machine.handle(.userCheckStarted)
+        return machine
+    }
+
     @Test
     func a_wrong_content_length_never_overfills_the_ring() {
-        var machine = UpdateMachine()
+        var machine = userCheck()
         machine.handle(.downloadStarted)
         machine.handle(.expectedLength(100))
         machine.handle(.receivedData(300))
@@ -60,75 +67,70 @@ struct UpdateStatusTests {
 
     @Test
     func a_zero_content_length_is_an_indeterminate_ring() {
-        var machine = UpdateMachine()
+        var machine = userCheck()
         machine.handle(.downloadStarted)
         machine.handle(.expectedLength(0))
         machine.handle(.receivedData(10))
         #expect(machine.status.fraction == nil)
     }
 
+    /// Sparkle downloads a scheduled update by itself. The toolbar shows
+    /// nothing until the update is ready.
     @Test
-    func a_background_download_shows_an_indeterminate_ring() {
+    func a_scheduled_download_shows_only_restart_when_ready() {
         var machine = UpdateMachine()
-        machine.handle(.backgroundDownloadStarted)
-        #expect(machine.status == .downloading(received: 0, expected: nil))
-        machine.handle(.extractionStarted)
-        #expect(machine.status == .extracting)
         machine.handle(.readyToInstall(onQuit: true))
         #expect(machine.status == .readyToRestart)
     }
 
+    /// A scheduled check that goes through the user driver (an update that
+    /// Sparkle cannot download by itself) is silent until it is ready.
     @Test
-    func a_failed_background_download_hides_the_button_with_no_toast() {
+    func a_scheduled_check_through_the_driver_shows_no_ring_and_no_toast() {
         var machine = UpdateMachine()
-        machine.handle(.backgroundDownloadStarted)
-        #expect(machine.handle(.backgroundFailed).toast == nil)
+        #expect(machine.handle(found(.notDownloaded, userInitiated: false)).reply == .install)
+        machine.handle(.downloadStarted)
+        machine.handle(.expectedLength(100))
+        machine.handle(.receivedData(50))
         #expect(machine.status == .idle)
+        machine.handle(.extractionStarted)
+        #expect(machine.status == .idle)
+        #expect(machine.handle(.failed).toast == nil)
+        #expect(machine.status == .idle)
+
+        var ready = UpdateMachine()
+        ready.handle(found(.notDownloaded, userInitiated: false))
+        ready.handle(.downloadStarted)
+        ready.handle(.readyToInstall(onQuit: false))
+        #expect(ready.status == .readyToRestart)
     }
 
     @Test
     func a_check_that_finds_nothing_says_up_to_date() {
-        var machine = UpdateMachine()
-        machine.handle(.userCheckStarted)
+        var machine = userCheck()
         #expect(machine.handle(.notFound(upToDate: true)).toast == .upToDate)
         machine.handle(.sessionEnded)
         #expect(machine.status == .idle)
+        #expect(!machine.userSession)
     }
 
     @Test
     func a_failed_check_and_a_failed_download_have_their_own_toast() {
-        var check = UpdateMachine()
-        check.handle(.userCheckStarted)
+        var check = userCheck()
         #expect(check.handle(.failed).toast == .checkFailed)
         #expect(check.status == .idle)
 
-        var download = UpdateMachine()
+        var download = userCheck()
+        download.handle(found(.notDownloaded))
         download.handle(.downloadStarted)
         download.handle(.receivedData(10))
+        #expect(download.status == .downloading(received: 10, expected: nil))
         #expect(download.handle(.failed).toast == .downloadFailed)
         #expect(download.status == .idle)
 
-        var extract = UpdateMachine()
+        var extract = userCheck()
         extract.handle(.extractionStarted)
         #expect(extract.handle(.failed).toast == .downloadFailed)
-    }
-
-    /// Sparkle's order for a download that fails: the delegate's
-    /// `failedToDownloadUpdate`, then the user driver's error.
-    @Test
-    func a_download_failure_in_sparkles_order_says_the_download_failed() {
-        var machine = UpdateMachine()
-        machine.handle(.userCheckStarted)
-        machine.handle(found(.notDownloaded))
-        machine.handle(.downloadStarted)
-        machine.handle(.backgroundDownloadStarted)
-        machine.handle(.receivedData(10))
-        machine.handle(.backgroundFailed)
-        #expect(machine.status == .downloading(received: 10, expected: nil))
-        #expect(machine.handle(.failed).toast == .downloadFailed)
-        machine.handle(.sessionEnded)
-        #expect(machine.status == .idle)
-        #expect(!machine.driverSession)
     }
 
     @Test
@@ -150,12 +152,12 @@ struct UpdateStatusTests {
     }
 
     @Test
-    func a_major_upgrade_is_not_installed() {
+    func an_appcast_that_failed_its_signing_check_is_not_installed() {
         var machine = UpdateMachine()
-        let shown = machine.handle(found(.notDownloaded, needsConsent: true))
+        let shown = machine.handle(found(.notDownloaded, untrusted: true))
         #expect(shown == .init(reply: .dismiss, toast: .availableOnWebsite(version: "2.1.0")))
         var scheduled = UpdateMachine()
-        #expect(scheduled.handle(found(.notDownloaded, userInitiated: false, needsConsent: true)) == .init(reply: .dismiss))
+        #expect(scheduled.handle(found(.notDownloaded, userInitiated: false, untrusted: true)) == .init(reply: .dismiss))
     }
 
     @Test
@@ -166,10 +168,8 @@ struct UpdateStatusTests {
             .sessionEnded,
             .failed,
             .notFound(upToDate: true),
-            .backgroundFailed,
             .downloadStarted,
             .extractionStarted,
-            .backgroundDownloadStarted,
         ] {
             machine.handle(event)
             #expect(machine.status == .readyToRestart, "after \(event)")
