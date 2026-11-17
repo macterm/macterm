@@ -1207,9 +1207,8 @@ private struct SidebarProjectRow: View {
     }
 
     /// `network`, or `network.slash` while a pane of the project lost its
-    /// connection (`Workspace.hasLostRemoteLink`). Both symbols are always
-    /// in the layout and only one is visible, so that a change of state does
-    /// not move the mark after it.
+    /// connection (`Workspace.hasLostRemoteLink`). Both symbols stay in the
+    /// layout and only one is visible. Thus the mark after it does not move.
     private func remoteMark(host: String) -> some View {
         let lost = appState.workspaces[project.id]?.hasLostRemoteLink ?? false
         let help = lost

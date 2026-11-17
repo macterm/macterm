@@ -560,9 +560,8 @@ final class Workspace: Identifiable {
     }
 
     /// Whether a remote pane of this workspace lost its connection
-    /// (`Pane.isDisconnected`): the sidebar row of a remote project then shows
-    /// `network.slash`. One lost pane is enough, because that shell does not
-    /// show live output. Derived, so the mark goes when the last pane attaches.
+    /// (`Pane.isDisconnected`). The sidebar row of a remote project then shows
+    /// `network.slash`. One lost pane is enough: its shell is not live.
     var hasLostRemoteLink: Bool {
         tabs.contains { $0.splitRoot.allPanes().contains(where: \.isDisconnected) }
     }
