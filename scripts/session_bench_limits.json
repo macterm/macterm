@@ -1,9 +1,10 @@
 {
   "runs": {
     "Darwin": {
-      "count": 20,
+      "count": 60,
       "commits": [
-        "6fe5737e1ff4512901a3648220e20023a9272992"
+        "6fe5737e1ff4512901a3648220e20023a9272992",
+        "81268a5f33a2e564e8ade712f124b571063532e2"
       ],
       "images": [
         "20261102.0473.1",
@@ -11,10 +12,11 @@
       ]
     },
     "Linux": {
-      "count": 23,
+      "count": 63,
       "commits": [
         "127cf5cb88a62578d746a8aa54d7ecea1fcf4af7",
         "369cc2a95e0bc6b8d575f00ed4a5371ff5efdd07",
+        "81268a5f33a2e564e8ade712f124b571063532e2",
         "e844f3d7d716468dc809747553fef8567a663a3e"
       ],
       "images": [
@@ -27,32 +29,32 @@
     "Darwin": {
       "Local echo p50": {
         "kind": "ratio",
-        "median": 1.198,
-        "noise": 0.307,
-        "limit": 1.308
+        "median": 1.196,
+        "noise": 0.482,
+        "limit": 1.483
       },
       "Local echo p95": {
         "kind": "ratio",
-        "median": 1.355,
-        "noise": 1.324,
-        "limit": 2.325
+        "median": 1.268,
+        "noise": 1.411,
+        "limit": 2.411
       },
       "Memory, idle panes: 1": {
         "kind": "ratio",
-        "median": 1.081,
-        "noise": 0.051,
-        "limit": 1.052
+        "median": 1.08,
+        "noise": 0.052,
+        "limit": 1.053
       },
       "Memory, idle panes: 9": {
         "kind": "ratio",
         "median": 0.753,
-        "noise": 0.007,
-        "limit": 0.761
+        "noise": 0.008,
+        "limit": 0.762
       },
       "Reattach p50": {
         "kind": "ratio",
         "median": 0.204,
-        "noise": 0.15,
+        "noise": 0.149,
         "limit": 0.354
       },
       "Wakeups/s per pane, idle panes: 1": {
@@ -71,9 +73,9 @@
     "Linux": {
       "Local echo p50": {
         "kind": "ratio",
-        "median": 1.14,
-        "noise": 0.39,
-        "limit": 1.391
+        "median": 1.119,
+        "noise": 0.369,
+        "limit": 1.37
       },
       "Local echo p95": {
         "kind": "ratio",
@@ -85,25 +87,25 @@
         "kind": "ratio",
         "median": 0.273,
         "noise": 0.007,
-        "limit": 0.281
+        "limit": 0.28
       },
       "Reattach p50": {
         "kind": "ratio",
-        "median": 0.482,
-        "noise": 0.068,
-        "limit": 0.551
+        "median": 0.487,
+        "noise": 0.079,
+        "limit": 0.567
       },
       "Remote echo p50": {
         "kind": "ratio",
-        "median": 0.842,
-        "noise": 0.024,
-        "limit": 0.867
+        "median": 0.843,
+        "noise": 0.029,
+        "limit": 0.872
       },
       "Remote echo p95": {
         "kind": "ratio",
-        "median": 0.806,
-        "noise": 0.035,
-        "limit": 0.841
+        "median": 0.802,
+        "noise": 0.049,
+        "limit": 0.851
       }
     }
   }
