@@ -318,7 +318,9 @@ struct ProjectMemoryTests {
         // A summary for another state, so that the reads take the quiet
         // wait: a project with no summary gets its first one with no wait.
         summarizer.loadStored = { _ in StoredSummary(key: "older", text: "Earlier work.", writtenAt: Date(), suggestions: nil) }
-        memory.gitReader = { _ in GitStatus(branch: "main") }
+        var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
+        memory.gitReader = { _ in git }
         let deadline = Date().addingTimeInterval(1)
         memory.refreshGit(project.id)
         while runs == 0 || summarizer.state(for: project.id).phase != .done, Date() < deadline {
@@ -335,6 +337,7 @@ struct ProjectMemoryTests {
         var runs = 0
         let (memory, summarizer, project) = makeBackgroundMemory { runs += 1 }
         var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
         memory.gitReader = { _ in git }
         // No command is recorded: the Git state alone earns the summary.
         #expect(memory.store.entries(for: project.id).isEmpty)
@@ -373,6 +376,7 @@ struct ProjectMemoryTests {
         // can arrive.
         memory.summaryQuietPeriod = .seconds(600)
         var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
         memory.gitReader = { _ in git }
 
         memory.refreshGit(project.id)

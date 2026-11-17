@@ -87,6 +87,7 @@ struct ProjectMemoryDigestTests {
     @Test
     func other_branches_are_not_in_the_digest_or_its_key() throws {
         var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "a1", subject: "Start", date: now)]
         git.branches = [
             GitStatus.Branch(name: "main", hash: "a1", subject: "Add the Makefile", lastCommit: now.addingTimeInterval(-86400)),
             GitStatus.Branch(
@@ -305,8 +306,10 @@ struct ProjectMemoryDigestTests {
 
     @Test
     func a_git_state_with_nothing_to_say_has_no_git_line() throws {
-        let digest = try #require(ProjectMemoryDigest(projectName: "x", entries: [], git: GitStatus(), now: now))
-        #expect(digest.text.isEmpty)
+        let digest = try #require(ProjectMemoryDigest(
+            projectName: "x", entries: [entry("ls", exit: 0, minutesAgo: 1)], git: GitStatus(), now: now
+        ))
+        #expect(!digest.text.contains("Git:"))
     }
 
     // MARK: - Diff
