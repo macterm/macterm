@@ -33,7 +33,9 @@ style              .swiftformat
 style              .swiftlint.yml
 style              .github/workflows/checks.yml
 
-# The session server and the protocol, and the session layer benchmark.
+# The session server and the protocol, and the session layer benchmark. The
+# benchmark runs the server and a socket client of its own, not the app, so a
+# change to Macterm/Server/ cannot change what it measures.
 app,server,bench   server/*
 server,bench       scripts/build-server.sh
 server             Macterm/Protocol/*
@@ -41,7 +43,6 @@ server             scripts/protocol.sh
 server             scripts/server-zig.sh
 server             .github/workflows/server.yml
 server             .github/actions/select-xcode/*
-bench              Macterm/Server/*
 bench              scripts/session_bench.py
 bench              scripts/session_bench_limits.json
 bench              .github/workflows/session-bench.yml

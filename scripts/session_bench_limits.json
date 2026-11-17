@@ -11,9 +11,11 @@
       ]
     },
     "Linux": {
-      "count": 20,
+      "count": 23,
       "commits": [
-        "999da683c9facd1d034dc82546ea495c691a32b6"
+        "127cf5cb88a62578d746a8aa54d7ecea1fcf4af7",
+        "369cc2a95e0bc6b8d575f00ed4a5371ff5efdd07",
+        "e844f3d7d716468dc809747553fef8567a663a3e"
       ],
       "images": [
         "20261111.196.1",
@@ -69,39 +71,39 @@
     "Linux": {
       "Local echo p50": {
         "kind": "ratio",
-        "median": 1.122,
-        "noise": 0.369,
-        "limit": 1.369
+        "median": 1.14,
+        "noise": 0.39,
+        "limit": 1.391
       },
       "Local echo p95": {
         "kind": "ratio",
-        "median": 1.203,
-        "noise": 1.608,
-        "limit": 2.608
+        "median": 1.217,
+        "noise": 3.19,
+        "limit": 4.191
       },
       "New remote pane p50": {
         "kind": "ratio",
-        "median": 0.272,
-        "noise": 0.006,
-        "limit": 0.279
+        "median": 0.273,
+        "noise": 0.007,
+        "limit": 0.281
       },
       "Reattach p50": {
         "kind": "ratio",
-        "median": 0.485,
-        "noise": 0.066,
-        "limit": 0.552
+        "median": 0.482,
+        "noise": 0.068,
+        "limit": 0.551
       },
       "Remote echo p50": {
         "kind": "ratio",
-        "median": 0.837,
-        "noise": 0.029,
-        "limit": 0.866
+        "median": 0.842,
+        "noise": 0.024,
+        "limit": 0.867
       },
       "Remote echo p95": {
         "kind": "ratio",
-        "median": 0.798,
-        "noise": 0.036,
-        "limit": 0.835
+        "median": 0.806,
+        "noise": 0.035,
+        "limit": 0.841
       }
     }
   }
