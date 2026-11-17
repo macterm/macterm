@@ -11,7 +11,7 @@ struct SplitTreeView: View {
     let isSplit: Bool
     /// Panes attached to a session another pane is currently driving — zmx
     /// non-leaders (#345). They render live output laid out for the leader's
-    /// geometry, so they are dimmed to say "not the live size".
+    /// geometry, so they are blurred to say "not the live size".
     let nonLeaderPaneIDs: Set<UUID>
     let onFocusPane: (UUID) -> Void
     let onSplit: (UUID, SplitDirection, SplitPosition) -> Void
@@ -170,9 +170,9 @@ struct SplitLeafView: View {
                 // garble legible. Neither split-dim gate applies: `isSplit` is
                 // false for a single-pane tab and for a zoomed pane, exactly
                 // the common mirrored case, and an adaptive background must
-                // not exempt it.
+                // not exempt it. The blur has no dim on top: a pane dims only
+                // when it is an unfocused split.
                 NonLeaderBlur()
-                    .overlay(MactermTheme.dimOverlay)
                     .allowsHitTesting(false)
             } else {
                 // Driven by the user's ghostty `unfocused-split-opacity` /

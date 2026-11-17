@@ -1988,7 +1988,7 @@ final class AppState {
     }
 
     /// The panes of `tab` whose surface in window `windowID` is not driving
-    /// its session's size, by the session's `lead`: the ones the UI dims in
+    /// its session's size, by the session's `lead`: the ones the UI blurs in
     /// that window. Without a window it reads each pane's first surface.
     func nonLeaderPaneIDs(in tab: TerminalTab, window windowID: UUID? = nil) -> Set<UUID> {
         let host = Self.host(windowID)

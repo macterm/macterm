@@ -81,7 +81,7 @@ struct MactermApp: App {
         // `open -a`) arrives as an open-documents Apple Event, and SwiftUI
         // answers one by opening a SECOND WindowGroup window — on top of the
         // project `application(_:open:)` has just selected, so both windows
-        // land on one tab and the user gets a dimmed mirror in front and
+        // land on one tab and the user gets a blurred mirror in front and
         // "Showing in another window" behind. That happens with our delegate
         // method removed too (measured), so it is SwiftUI's own handling of
         // the event, not ours. This is the native lever for it: the modifier

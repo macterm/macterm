@@ -1193,7 +1193,7 @@ struct WindowStateTests {
     }
 
     /// A client outside Macterm, or a mirror in the same window, is not
-    /// another window: the pane only dims.
+    /// another window: the pane only blurs.
     @Test
     func a_lead_outside_the_other_windows_is_not_led_from_another_window() throws {
         let state = makeAppState()
