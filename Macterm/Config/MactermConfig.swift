@@ -28,11 +28,15 @@ final class MactermConfig {
 
     let defaultsURL: URL
     let overridesURL: URL
+    /// The last layer of the config of a remote pane whose connection is
+    /// lost (`disabledCursorBody`).
+    let disabledCursorURL: URL
 
     private init() {
         let dir = FileStorage.appSupportDirectory()
         defaultsURL = dir.appendingPathComponent("macterm-defaults.conf")
         overridesURL = dir.appendingPathComponent("macterm-overrides.conf")
+        disabledCursorURL = dir.appendingPathComponent("macterm-disabled-cursor.conf")
         regenerate()
         // The user's own file, seeded here so it exists before the first
         // load, and added to the custom config files one time per install.
@@ -56,6 +60,15 @@ final class MactermConfig {
     var defaultsPath: String { defaultsURL.path }
     var overridesPath: String { overridesURL.path }
 
+    /// The cursor of a lost remote pane says that the pane takes no input:
+    /// a faint cursor that does not blink, in the user's own cursor color
+    /// and style. It differs from the hollow block of an unfocused pane.
+    static let disabledCursorBody = """
+    cursor-opacity = 0.3
+    cursor-style-blink = false
+
+    """
+
     /// Rewrite both wrapper config files. Cheap and idempotent; safe to call
     /// on launch and whenever Macterm-side state changes that's reflected in
     /// either file. The overrides also depend on the *user's* config content
@@ -63,6 +76,7 @@ final class MactermConfig {
     /// calls this before every load to pick up user edits.
     func regenerate() {
         write(Data(Self.defaultsBody.utf8), to: defaultsURL)
+        write(Data(Self.disabledCursorBody.utf8), to: disabledCursorURL)
 
         let userConfigText = userGhosttyConfigText()
         let body = Self.overridesBody(

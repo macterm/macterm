@@ -54,8 +54,10 @@ final class Pane: Identifiable {
     var hostSessionDirectory: String?
     /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
     /// app tries again by itself, and a key connects at once. Its frozen
-    /// screen is dimmed, and its badge row says `Connection lost`
-    /// (`TerminalPane`), so that it does not look live. Never persisted.
+    /// screen is not dimmed: its cursor says disabled
+    /// (`GhosttyTerminalNSView.isCursorDisabled`) and its badge row says
+    /// `Connection lost` (`TerminalPane`), so that it does not look live.
+    /// Never persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
     }
@@ -63,6 +65,19 @@ final class Pane: Identifiable {
     /// A lost pane for which a try runs now: its badge says `Reconnecting`.
     /// Never persisted.
     var isRemoteReconnecting = false
+
+    /// The badge of a remote pane whose connection is lost, or nil.
+    enum RemoteLinkBadge: Equatable {
+        /// A try runs now.
+        case reconnecting
+        /// No try runs now.
+        case lost
+    }
+
+    var remoteLinkBadge: RemoteLinkBadge? {
+        guard isRemoteLinkLost else { return nil }
+        return isRemoteReconnecting ? .reconnecting : .lost
+    }
 
     /// Process the pane launches on first surface creation, injected into the
     /// shell as `command + "\n"`. Set from a declarative layout; nil for an

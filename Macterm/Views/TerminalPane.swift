@@ -126,22 +126,23 @@ struct TerminalPane: View {
                     // badge for every reason, and a click does nothing. While
                     // a try runs it says so; the app tries again by itself,
                     // and a key connects at once.
-                    if pane.isRemoteLinkLost {
-                        if pane.isRemoteReconnecting {
-                            StatusPill(title: String(
-                                localized: "Reconnecting",
-                                comment: "The badge of a remote pane while a try to connect again runs"
-                            )) {
-                                ProgressView().controlSize(.mini)
-                            }
-                        } else {
-                            StatusPill(title: String(
-                                localized: "Connection lost",
-                                comment: "The badge of a remote pane whose connection stopped or failed"
-                            )) {
-                                Image(systemName: "network.slash")
-                            }
+                    switch pane.remoteLinkBadge {
+                    case .reconnecting:
+                        StatusPill(title: String(
+                            localized: "Reconnecting",
+                            comment: "The badge of a remote pane while a try to connect again runs"
+                        )) {
+                            ProgressView().controlSize(.mini)
                         }
+                    case .lost:
+                        StatusPill(title: String(
+                            localized: "Connection lost",
+                            comment: "The badge of a remote pane whose connection stopped or failed"
+                        )) {
+                            Image(systemName: "network.slash")
+                        }
+                    case nil:
+                        EmptyView()
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -327,6 +328,7 @@ private struct TerminalSurface: NSViewRepresentable {
         context.coordinator.wasFocused = focused
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
+        view.isCursorDisabled = pane.isRemoteLinkLost
         if focused, !wasFocused {
             AdaptiveTerminalChrome.shared.focusDidChange(to: view)
             view.notifySurfaceFocused()

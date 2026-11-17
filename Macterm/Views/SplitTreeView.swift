@@ -137,13 +137,12 @@ struct SplitLeafView: View {
     @Environment(\.paneHost)
     private var host
 
-    /// Whether the dim applies: an unfocused split, or a remote pane whose
-    /// connection stopped (`Pane.isRemoteLinkLost`, 0057). A zoomed or
-    /// single pane is not "a split", and a pane painting its own adaptive
-    /// background is left color-accurate.
+    /// Whether the dim applies: an unfocused split. A zoomed or single pane
+    /// is not "a split", and a pane painting its own adaptive background is
+    /// left color-accurate. A remote pane whose connection is lost does not
+    /// dim: its cursor and its badge say so (`Pane.isRemoteLinkLost`).
     private var isSplitDimmed: Bool {
-        pane.isRemoteLinkLost
-            || (!isFocused && isSplit && SurfaceRegistry.shared.surface(for: pane, in: host).adaptiveBackgroundColor == nil)
+        !isFocused && isSplit && SurfaceRegistry.shared.surface(for: pane, in: host).adaptiveBackgroundColor == nil
     }
 
     var body: some View {
@@ -161,8 +160,6 @@ struct SplitLeafView: View {
             onZoomRequest: onZoomRequest
         )
         .overlay {
-            // A remote pane whose connection stopped only dims
-            // (`isSplitDimmed`): its badge says why.
             if isNonLeaderMirror {
                 // A non-leader mirror (#345) is BLURRED, not dimmed. It is not
                 // about focus — it says the pane is not the one driving the

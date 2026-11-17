@@ -24,6 +24,10 @@ final class GhosttyApp {
     @ObservationIgnored
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    /// `config` with the disabled cursor last (`MactermConfig.
+    /// disabledCursorBody`), for a remote pane whose connection is lost.
+    /// Built at the first use after each load.
+    private var disabledCursorConfig: ghostty_config_t?
     private(set) var configVersion = 0
     @ObservationIgnored
     private var tickTimer: Timer?
@@ -284,9 +288,12 @@ final class GhosttyApp {
         let oldScheme = windowScheme
         ghostty_app_update_config(app, newConfig)
         // Also update each existing surface so changes take effect immediately
+        if let old = disabledCursorConfig { ghostty_config_free(old) }
+        disabledCursorConfig = nil
         for view in GhosttyTerminalNSView.allLiveViews() {
             if let surface = view.surface {
-                ghostty_surface_update_config(surface, newConfig)
+                let disabled = view.isCursorDisabled ? self.config(disabledCursor: true, base: newConfig) : nil
+                ghostty_surface_update_config(surface, disabled ?? newConfig)
             }
         }
         if let old = config { ghostty_config_free(old) }
@@ -348,9 +355,20 @@ final class GhosttyApp {
         ghostty_app_update_config(app, config)
         for view in GhosttyTerminalNSView.allLiveViews() {
             if let surface = view.surface {
-                ghostty_surface_update_config(surface, config)
+                let disabled = view.isCursorDisabled ? self.config(disabledCursor: true) : nil
+                ghostty_surface_update_config(surface, disabled ?? config)
             }
         }
+    }
+
+    /// The config for a surface: the app's, or the one with the disabled
+    /// cursor. `base` is the app's config when the caller holds a new one.
+    func config(disabledCursor: Bool, base: ghostty_config_t? = nil) -> ghostty_config_t? {
+        guard disabledCursor else { return base ?? config }
+        if disabledCursorConfig == nil {
+            disabledCursorConfig = loadConfig(extraPath: MactermConfig.shared.disabledCursorURL.path).0
+        }
+        return disabledCursorConfig ?? base ?? config
     }
 
     /// Reload and surface any user-visible errors (missing file, parse errors)
@@ -586,14 +604,17 @@ final class GhosttyApp {
         read(Keys.focusFollowsMouse) ?? false
     }
 
-    private func loadConfig() -> (ghostty_config_t?, ReloadResult) {
+    /// `extraPath`: one more file, loaded last (the disabled cursor). Such a
+    /// load is a variant of the current one: it does not write the wrapper
+    /// files again, report diagnostics, or read the raw-text values.
+    private func loadConfig(extraPath: String? = nil) -> (ghostty_config_t?, ReloadResult) {
         var result = ReloadResult(diagnostics: [])
         guard let cfg = ghostty_config_new() else { return (nil, result) }
 
         // Recompute the wrapper files against the user's config as it exists
         // right now: the overrides' shell-integration-features line merges the
         // user's own value (#75), which may have changed since the last load.
-        MactermConfig.shared.regenerate()
+        if extraPath == nil { MactermConfig.shared.regenerate() }
 
         // Three-layer ghostty config:
         //   1. Macterm defaults — tasteful first-launch values.
@@ -627,7 +648,9 @@ final class GhosttyApp {
         )
         MactermConfig.shared.overridesPath.withCString { ghostty_config_load_file(cfg, $0) }
         ghostty_config_load_recursive_files(cfg)
+        extraPath?.withCString { ghostty_config_load_file(cfg, $0) }
         ghostty_config_finalize(cfg)
+        if extraPath != nil { return (cfg, result) }
 
         // Collect ghostty's diagnostics (parse errors, unknown keys, bad
         // values). Log them and surface to the caller so the Settings reload

@@ -47,8 +47,9 @@ enum RemotePaneAnswer {
 ///   app posts the pane's Darwin notification (`wakeName`), and the client
 ///   asks again.
 /// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
-///   (`Pane.isRemoteLinkLost`): it dims, and its badge says `Reconnecting`
-///   while a try runs (`Pane.isRemoteReconnecting`), else `Connection lost`.
+///   (`Pane.isRemoteLinkLost`): its cursor says disabled, and its badge
+///   says `Reconnecting` while a try runs (`Pane.isRemoteReconnecting`),
+///   else `Connection lost`.
 ///   It connects again by itself (`AppState.reconnectDroppedRemotePanes`
 ///   with `RemoteReconnectPolicy`): such a try never asks the user anything
 ///   (`reconnect`, a quiet login). A key in the pane connects at once, and

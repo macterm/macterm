@@ -131,6 +131,13 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_slow_try_shows_reconnecting_until_the_pane_attaches() async throws {
+        try await withSSHDHost { host in
+            try await lostConnection(host, signal: "TERM", byKey: false, slowTry: true)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func an_automatic_try_asks_nothing_and_a_key_logs_in() async throws {
         try await withSSHDHost(passphrase: "open sesame") { host in
             try await lostConnection(host, signal: "TERM", byKey: false, needsLogin: true)
@@ -141,7 +148,13 @@ struct RemoteHostsTests {
     /// key, or the sweep with no key, brings both views back. `needsLogin`:
     /// the key has a passphrase, so the sweep's quiet try fails and asks
     /// nothing, and only a key logs in.
-    private func lostConnection(_ host: SSHDHost, signal: String, byKey: Bool, needsLogin: Bool = false) async throws {
+    private func lostConnection(
+        _ host: SSHDHost,
+        signal: String,
+        byKey: Bool,
+        needsLogin: Bool = false,
+        slowTry: Bool = false
+    ) async throws {
         let fixture = Fixture(host, wakes: true)
         let pane = fixture.pane()
         fixture.hosts.panes = { _ in [pane] }
@@ -164,8 +177,7 @@ struct RemoteHostsTests {
         while !pane.isRemoteLinkLost, Date() < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
-        #expect(pane.isRemoteLinkLost)
-        #expect(!pane.isRemoteReconnecting)
+        #expect(pane.remoteLinkBadge == .lost)
         #expect(fixture.panesLost.contains(pane.sessionName))
         // The badge shows it: no line goes into either view.
         #expect(!left.snapshot().screen.contains("onnection"))
@@ -187,13 +199,22 @@ struct RemoteHostsTests {
             drivers[0].sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
         } else {
             // The sweep, with no key.
+            if slowTry {
+                // The next login takes 3 s to reach the host.
+                try host.sshd.addToConfig("ProxyCommand /bin/sh -c 'sleep 3; exec /usr/bin/nc %h %p'")
+            }
             fixture.hosts.reconnect([pane.sessionName])
-            #expect(pane.isRemoteReconnecting)
+            #expect(pane.remoteLinkBadge == .reconnecting)
+            if slowTry {
+                try await Task.sleep(for: .seconds(1))
+                // Still trying: the badge says so, in every view of the pane.
+                #expect(pane.remoteLinkBadge == .reconnecting)
+            }
         }
         // Both views attach to the same session and replay its screen.
         try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
         try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
-        #expect(!pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
+        #expect(pane.remoteLinkBadge == nil)
         if needsLogin { #expect(host.askpassQuestions > questions) }
         drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
         try await left.waitFor { $0.screen.contains("after-key") }

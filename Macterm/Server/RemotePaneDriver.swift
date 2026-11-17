@@ -13,7 +13,7 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 ///   sweep) or a key asks again.
 ///
 /// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane dims, shows its badge and waits. The app's sweep
+/// `lost`: the pane shows its badge and its disabled cursor, and waits. The app's sweep
 /// (`AppState.reconnectDroppedRemotePanes`) owns the next quiet try, and a
 /// key connects at once. A session that is gone from the host closes the
 /// pane.
@@ -172,7 +172,7 @@ final class RemotePaneDriver: PaneInputRoute {
         hosts.sessionAttached(name, panes: hosts.panes?(name) ?? [])
     }
 
-    /// The connection stopped: the pane dims and waits for a trigger.
+    /// The connection stopped: the pane is lost and waits for a try.
     fileprivate func linkStopped() {
         if case .closed = state { return }
         logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
