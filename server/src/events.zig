@@ -477,14 +477,22 @@ pub const Watch = struct {
         fromHandler(h).programReport(r);
     }
 
-    /// Keeps every reply while no client leads (a shell waits for some: fish
-    /// waits 10 s for DA1). While a client leads, keeps only the OSC 7501
-    /// support reply: the leader's terminal answers every other query, and a
-    /// second answer would reach the program as input. That terminal does
-    /// not answer this one.
+    /// Keeps the replies to the queries. Some programs wait for a reply:
+    /// fish waits 10 s for DA1.
+    ///
+    /// - While a client leads, keeps only the OSC 7501 support reply. The
+    ///   leader's terminal answers every other query, and a second answer
+    ///   would reach the program as input. That terminal does not answer
+    ///   this one.
+    /// - While no client leads, keeps every reply but the OSC color reports
+    ///   and the kitty graphics replies. The session does not know the
+    ///   app's colors, and the images are not the session's.
     fn onWritePty(h: *Handler, data: []const u8) void {
         const w = fromHandler(h);
-        if (!w.answers_all and !std.mem.startsWith(u8, data, "\x1b]7501;")) return;
+        if (!std.mem.startsWith(u8, data, "\x1b]7501;")) {
+            if (!w.answers_all) return;
+            if (std.mem.startsWith(u8, data, "\x1b]") or std.mem.startsWith(u8, data, "\x1b_")) return;
+        }
         w.reply.appendSlice(w.gpa, data) catch {};
     }
 
@@ -1094,6 +1102,8 @@ test "events: with no leader, the session answers each query as Ghostty does" {
     try expectReply("\x1b[0c", "\x1b[?62;22c");
     try expectReply("\x1b[>c", "\x1b[>1;10;0c");
     try expectReply("\x1b[>0c", "\x1b[>1;10;0c");
+    // DA3.
+    try expectReply("\x1b[=c", "\x1bP!|00000000\x1b\\");
     // Device status: operating status, cursor position, extended position.
     try expectReply("\x1b[5n", "\x1b[0n");
     try expectReply("\x1b[6n", "\x1b[2;2R");
@@ -1107,6 +1117,12 @@ test "events: with no leader, the session answers each query as Ghostty does" {
     try expectReply("\x1b]7501;?\x07", "\x1b]7501;" ++ program_status.query_reply ++ "\x07");
     // A DA1 reply that a program echoes is not a query.
     try expectReply("\x1b[?62;22c", "");
+    // The session does not know the app's colors: no OSC 4, 10 or 11 report.
+    try expectReply("\x1b]4;1;?\x07", "");
+    try expectReply("\x1b]10;?\x07", "");
+    try expectReply("\x1b]11;?\x1b\\", "");
+    // The kitty graphics query: the images are not the session's.
+    try expectReply("\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\", "");
 }
 
 test "events: the session answers a query that comes in two reads" {

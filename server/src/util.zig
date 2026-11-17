@@ -86,21 +86,32 @@ pub fn rewritePromptRedraw(alloc: std.mem.Allocator, data: []const u8) ?[]const 
 /// The longest prompt mark that `promptStartTail` holds back.
 const held_max = 1024;
 
-/// The length of the end of `data` that may be the start of an OSC 133;A with
-/// no terminator yet, or 0. The caller holds those bytes back until the next
-/// read, so that `rewritePromptRedraw` sees whole marks.
+/// The length of the end of `data` that can be the start of an OSC 133;A
+/// with no terminator yet, or 0. The caller holds these bytes until the next
+/// read. Then `rewritePromptRedraw` sees each mark whole.
 pub fn promptStartTail(data: []const u8) usize {
     const esc = std.mem.lastIndexOfScalar(u8, data, '\x1b') orelse return 0;
     const tail = data[esc..];
     if (tail.len < OSC_133_A.len and std.mem.startsWith(u8, OSC_133_A, tail)) {
-        // The ESC of an ST can end a mark: `ESC ] 133;A ... ESC`.
-        const mark = std.mem.lastIndexOf(u8, data[0..esc], OSC_133_A) orelse return tail.len;
-        if (std.mem.indexOfScalarPos(u8, data[0..esc], mark, '\x07') != null) return tail.len;
-        return if (data.len - mark <= held_max) data.len - mark else 0;
+        // A last ESC can also be the first byte of the ST of an open mark.
+        if (tail.len == 1) if (openMark(data[0..esc])) |mark| {
+            return if (data.len - mark <= held_max) data.len - mark else 0;
+        };
+        return tail.len;
     }
     if (!std.mem.startsWith(u8, tail, OSC_133_A)) return 0;
     if (std.mem.indexOfScalar(u8, tail, '\x07') != null) return 0;
     return if (tail.len <= held_max) tail.len else 0;
+}
+
+/// The index of an OSC 133;A at the end of `data` that has no terminator
+/// (BEL, or `ESC \`), or null.
+fn openMark(data: []const u8) ?usize {
+    const mark = std.mem.lastIndexOf(u8, data, OSC_133_A) orelse return null;
+    const rest = data[mark + OSC_133_A.len ..];
+    if (std.mem.indexOfScalar(u8, rest, '\x07') != null) return null;
+    if (std.mem.indexOf(u8, rest, "\x1b\\") != null) return null;
+    return mark;
 }
 
 test "promptStartTail: holds the start of a prompt mark" {
@@ -112,6 +123,10 @@ test "promptStartTail: holds the start of a prompt mark" {
     try testing.expectEqual(7, promptStartTail("out\x1b]133;A"));
     try testing.expectEqual(13, promptStartTail("out\x1b]133;A;aid=1"));
     try testing.expectEqual(14, promptStartTail("out\x1b]133;A;aid=1\x1b"));
+    // A mark that ended holds nothing more than the last ESC or prefix.
+    try testing.expectEqual(1, promptStartTail("\x1b]133;A\x1b\\$ \x1b"));
+    try testing.expectEqual(4, promptStartTail("\x1b]133;A\x1b\\$ \x1b]13"));
+    try testing.expectEqual(1, promptStartTail("\x1b]133;A\x07$ \x1b"));
     // Another sequence, or a mark too long to be a prompt mark.
     try testing.expectEqual(0, promptStartTail("out\x1b]2;title"));
     var long: [held_max + 1]u8 = @splat('x');
