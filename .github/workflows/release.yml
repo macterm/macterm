@@ -71,6 +71,7 @@ jobs:
     needs: flag
     permissions:
       contents: write
+      pull-requests: read
     uses: ./.github/workflows/server-build.yml
     with:
       prebuilt: false
