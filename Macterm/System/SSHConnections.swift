@@ -152,9 +152,10 @@ final class SSHConnections {
         guard login else { return try await liveRoute(destination) }
         while let busy = connecting[destination] {
             if busy.prompts || !prompts { return try await busy.task.value }
-            // A quiet login cannot answer a caller that may ask: when it
-            // fails, that caller logs in itself.
-            if let route = try? await busy.task.value { return route }
+            // A quiet login cannot answer a caller that may ask (a key): it
+            // stops, and that caller logs in itself.
+            busy.task.cancel()
+            _ = try? await busy.task.value
             if connecting[destination]?.task == busy.task { connecting[destination] = nil }
         }
         let task = Task { try await self.open(destination, prompts: prompts) }
@@ -526,7 +527,8 @@ final class SSHConnections {
             if shown != nil { onLoginNotice?(destination, pid, nil) }
         }
         while !FileManager.default.fileExists(atPath: path) {
-            let line = notice.update(text: stderr.text, asking: asking[pid] != nil, now: .now)
+            // A quiet login shows nothing: the user may be away.
+            let line = prompts ? notice.update(text: stderr.text, asking: asking[pid] != nil, now: .now) : nil
             if line != shown {
                 shown = line
                 onLoginNotice?(destination, pid, line)

@@ -111,62 +111,94 @@ struct RemoteHostsTests {
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_killed_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
-        try await lostConnection(signal: "TERM", byKey: true)
+        try await withSSHDHost { host in
+            try await lostConnection(host, signal: "TERM", byKey: true)
+        }
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_hung_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
-        try await lostConnection(signal: "STOP", byKey: true)
+        try await withSSHDHost { host in
+            try await lostConnection(host, signal: "STOP", byKey: true)
+        }
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_killed_ssh_connection_connects_again_by_itself() async throws {
-        try await lostConnection(signal: "TERM", byKey: false)
+        try await withSSHDHost { host in
+            try await lostConnection(host, signal: "TERM", byKey: false)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func an_automatic_try_asks_nothing_and_a_key_logs_in() async throws {
+        try await withSSHDHost(passphrase: "open sesame") { host in
+            try await lostConnection(host, signal: "TERM", byKey: false, needsLogin: true)
+        }
     }
 
     /// Two windows show one pane. The link stops with nothing typed; then a
-    /// key, or the sweep with no key, brings both views back.
-    private func lostConnection(signal: String, byKey: Bool) async throws {
-        try await withSSHDHost { host in
-            let fixture = Fixture(host, wakes: true)
-            let pane = fixture.pane()
-            fixture.hosts.panes = { _ in [pane] }
-            let left = RecordingPaneHost()
-            let right = RecordingPaneHost()
-            let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
-            defer { drivers.forEach { $0.stop() } }
-            drivers.forEach { $0.start() }
-            try await Task.sleep(for: .seconds(1))
-            drivers[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
-            try await left.waitFor { $0.screen.contains("before-kill") }
-            try await right.waitFor { $0.screen.contains("before-kill") }
-            let resets = [left.snapshot().resets, right.snapshot().resets]
+    /// key, or the sweep with no key, brings both views back. `needsLogin`:
+    /// the key has a passphrase, so the sweep's quiet try fails and asks
+    /// nothing, and only a key logs in.
+    private func lostConnection(_ host: SSHDHost, signal: String, byKey: Bool, needsLogin: Bool = false) async throws {
+        let fixture = Fixture(host, wakes: true)
+        let pane = fixture.pane()
+        fixture.hosts.panes = { _ in [pane] }
+        let left = RecordingPaneHost()
+        let right = RecordingPaneHost()
+        let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
+        defer { drivers.forEach { $0.stop() } }
+        drivers.forEach { $0.start() }
+        try await left.waitFor { $0.resets > 0 }
+        drivers[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
+        try await left.waitFor { $0.screen.contains("before-kill") }
+        try await right.waitFor { $0.screen.contains("before-kill") }
+        // The first attach's lead message marks the folder: the session ran.
+        #expect(pane.hostSessionDirectory == fixture.directory)
+        let resets = [left.snapshot().resets, right.snapshot().resets]
+        let questions = host.askpassQuestions
 
-            try host.signalConnection(signal: signal)
-            let deadline = Date().addingTimeInterval(20)
-            while !pane.isRemoteLinkLost, Date() < deadline {
+        try host.signalConnection(signal: signal)
+        let deadline = Date().addingTimeInterval(20)
+        while !pane.isRemoteLinkLost, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(pane.isRemoteLinkLost)
+        #expect(!pane.isRemoteReconnecting)
+        #expect(fixture.panesLost.contains(pane.sessionName))
+        // The badge shows it: no line goes into either view.
+        #expect(!left.snapshot().screen.contains("onnection"))
+        #expect(!right.snapshot().screen.contains("onnection"))
+
+        if needsLogin {
+            // The sweep's try asks nothing, fails, and the badge says so.
+            fixture.hosts.reconnect([pane.sessionName])
+            #expect(pane.isRemoteReconnecting)
+            while pane.isRemoteReconnecting, Date() < deadline.addingTimeInterval(20) {
                 try await Task.sleep(for: .milliseconds(100))
             }
-            #expect(pane.isRemoteLinkLost)
-            // The badge shows it: no line goes into either view.
-            #expect(!left.snapshot().screen.contains("onnection"))
-            #expect(!right.snapshot().screen.contains("onnection"))
-
-            if byKey {
-                // A key logs in again, and both views attach to the session.
-                drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
-                try await left.waitFor { $0.screen.contains("after-key") }
-                try await right.waitFor { $0.screen.contains("after-key") }
-            } else {
-                // The sweep, with no key: both views attach and replay.
-                #expect(fixture.linksStopped.contains(pane.sessionName))
-                fixture.hosts.reconnect([pane.sessionName])
-                try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
-                try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
-            }
-            #expect(!pane.isRemoteLinkLost)
-            #expect(host.sshd.acceptedLogins() == 2)
+            #expect(pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
+            #expect(host.askpassQuestions == questions)
         }
+        if byKey || needsLogin {
+            // A key starts a try at once, and its bytes are dropped: they
+            // were typed at a stale screen.
+            drivers[0].sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
+        } else {
+            // The sweep, with no key.
+            fixture.hosts.reconnect([pane.sessionName])
+            #expect(pane.isRemoteReconnecting)
+        }
+        // Both views attach to the same session and replay its screen.
+        try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
+        try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
+        #expect(!pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
+        if needsLogin { #expect(host.askpassQuestions > questions) }
+        drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
+        try await left.waitFor { $0.screen.contains("after-key") }
+        #expect(!left.snapshot().screen.contains("dropped-key"))
+        #expect(host.sshd.acceptedLogins() == 2)
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
@@ -325,8 +357,8 @@ struct RemoteHostsTests {
         var connected: [String] { connections.value }
         private let readyHosts = LockedBox<[String]>([])
         private let stopped = LockedBox<[String]>([])
-        /// The sessions whose link stopped (`linkStopped`), in order.
-        var linksStopped: [String] { stopped.value }
+        /// The sessions that became lost (`paneLost`), in order.
+        var panesLost: [String] { stopped.value }
 
         /// The hosts whose link became ready, in order.
         var ready: [String] {
@@ -349,7 +381,7 @@ struct RemoteHostsTests {
             }
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
             configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
-            configuration.linkStopped = { [stopped] session in stopped.mutate { $0.append(session) } }
+            configuration.paneLost = { [stopped] session in stopped.mutate { $0.append(session) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)
         }
 
@@ -410,7 +442,7 @@ struct RemoteHostsTests {
             )
             session.start()
             try await host.waitFor { $0.resets > 0 }
-            // What the driver does at the attach's snapshot.
+            // What the driver does at the session's first lead message.
             hosts.sessionAttached(pane.sessionName, panes: [pane])
             return Running(session: session, host: host)
         }

@@ -47,18 +47,22 @@ final class Pane: Identifiable {
     /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
     /// the folder of its creation, then the shell's own (OSC 7) at each
     /// save. nil: the pane never had a v2 session there (a new pane, or one
-    /// from before v2), so a missing session starts with no question. When
-    /// it is set and the session is gone, the pane closes. It is persisted
+    /// from before v2), so a missing session is made. When it is set and
+    /// the session is gone, the pane closes. It is persisted
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
     /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
     /// app tries again by itself, and a key connects at once. Its frozen
-    /// screen is dimmed, and its badge row shows `Disconnected`
+    /// screen is dimmed, and its badge row says `Connection lost`
     /// (`TerminalPane`), so that it does not look live. Never persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
     }
+
+    /// A lost pane for which a try runs now: its badge says `Reconnecting`.
+    /// Never persisted.
+    var isRemoteReconnecting = false
 
     /// Process the pane launches on first surface creation, injected into the
     /// shell as `command + "\n"`. Set from a declarative layout; nil for an

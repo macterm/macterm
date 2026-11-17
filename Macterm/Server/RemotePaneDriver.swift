@@ -34,11 +34,14 @@ final class RemotePaneDriver: PaneInputRoute {
     /// Tells a late answer from a current one.
     private var generation = 0
     private var wakeToken: Int32 = NOTIFY_TOKEN_INVALID
-    /// Input that waits for a session: a layout's `initial_input`, and keys
-    /// typed while the pane waits. The next attach sends it. A pane that
-    /// runs plain drops it, because it was for another session.
+    /// Input that waits for the first session: a layout's `initial_input`,
+    /// and keys typed before the first connect ends. The next attach sends
+    /// it. A pane that runs plain drops it, because it was for another
+    /// session. Keys typed while the pane is lost are dropped, by decision
+    /// (Ethan, 2026-11-16, option C): they were typed at a stale screen.
     private var earlyInput = Data()
-    /// Input that a lost link refused, in order. It goes before `earlyInput`.
+    /// Input of a session that never attached, in order. It goes before
+    /// `earlyInput`.
     private var undelivered = Data()
     /// A key found the link down: connect at once after the `lost` answer.
     private var retryAfterLost = false
@@ -231,8 +234,9 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .running(session): session.sendInput(data)
         case let .plain(shell): shell.sendInput(data)
         case .waiting:
-            // The key waits for the new session.
-            keep(data)
+            // The key connects at once. Its bytes wait only for a first
+            // session, never in a lost pane.
+            if !isLost { keep(data) }
             step(.retry)
         case .idle:
             // The `initial_input` of a layout, written while the surface
@@ -242,18 +246,15 @@ final class RemotePaneDriver: PaneInputRoute {
         }
     }
 
-    /// A key that the running session could not send: the link is down, and
-    /// the key asks to connect, as a key in a pane that waits does.
-    fileprivate func keyFoundLinkDown(_ data: Data) {
-        keep(data)
+    /// A key that the running session could not send: the link is down. The
+    /// key is dropped, and asks to connect, as a key in a lost pane does.
+    fileprivate func keyFoundLinkDown() {
         retryAfterLost = true
         linkStopped()
     }
 
-    fileprivate func keepUndelivered(_ data: Data) {
-        // A pane that closed has no later attach.
-        if case .closed = state { return }
-        keep(data)
+    private var isLost: Bool {
+        hosts.panes?(name).contains { $0.isRemoteLinkLost } ?? false
     }
 
     private func keep(_ data: Data) {
@@ -298,8 +299,13 @@ final class RemotePaneDriver: PaneInputRoute {
 
         func paneSnapshot(started: Bool) {
             surface.paneSnapshot(started: started)
-            // Each attach starts with a snapshot: the session runs.
-            guard started else { return }
+        }
+
+        func paneLead(_ leader: Bool?) {
+            surface.paneLead(leader)
+            // The session tells each client that attached whether it leads:
+            // the session runs on the host.
+            guard leader != nil else { return }
             DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
                     guard let driver, isCurrent(driver) else { return }
@@ -316,10 +322,6 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneTtyMode(mode)
         }
 
-        func paneLead(_ leader: Bool?) {
-            surface.paneLead(leader)
-        }
-
         func paneExited(code: UInt8?, signal: UInt8?) {
             surface.paneExited(code: code, signal: signal)
         }
@@ -333,13 +335,11 @@ final class RemotePaneDriver: PaneInputRoute {
             }
         }
 
-        func paneInputUndelivered(_ data: Data) {
+        func paneInputUndelivered(_: Data) {
             DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
-                    guard let driver else { return }
-                    if isCurrent(driver) { return driver.keyFoundLinkDown(data) }
-                    // A late failure of an old session counts only while the pane waits.
-                    if case .waiting = driver.state { driver.keepUndelivered(data) }
+                    guard let driver, isCurrent(driver) else { return }
+                    driver.keyFoundLinkDown()
                 }
             }
         }

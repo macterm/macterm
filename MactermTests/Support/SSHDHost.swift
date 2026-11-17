@@ -14,10 +14,19 @@ final class SSHDHost {
     let answer: Bool
     private let builds: URL
     private(set) var asked: [String] = []
+    /// The questions that the askpass answered (`passphrase`).
+    var askpassLog: URL { home.deletingLastPathComponent().appendingPathComponent("askpass.log") }
+    /// How many questions the askpass answered.
+    var askpassQuestions: Int {
+        ((try? String(contentsOf: askpassLog, encoding: .utf8)) ?? "").split(separator: "\n").count
+    }
+
     var consents: [String: String] = [:]
     private(set) lazy var servers = makeServers(ServerBuilds.bundled)
 
-    init(answer: Bool) async throws {
+    /// `passphrase`: the client key has one, and an askpass answers it and
+    /// writes each question to `askpassLog`.
+    init(answer: Bool, passphrase: String = "") async throws {
         let key = try #require(ServerBuilds.bundled.key, "no bundled server: run mise run setup")
         _ = try #require(await ServerBuilds.bundled.build(for: .macOS))
         let root = URL(fileURLWithPath: "/tmp").appendingPathComponent("mt-host-\(UInt32.random(in: 0 ... .max))")
@@ -28,8 +37,19 @@ final class SSHDHost {
         try FileManager.default.createDirectory(at: builds, withIntermediateDirectories: true)
         // SHELL: the login shell of a session on the host, the same for
         // every user who runs the tests.
-        sshd = try LocalSSHD(sshdOptions: ["SetEnv HOME=\(home.path) MACTERM_RUNTIME_DIR=\(runtime.path) SHELL=/bin/sh"])
-        connections = SSHConnections(configuration: sshd.configuration)
+        sshd = try LocalSSHD(
+            passphrase: passphrase,
+            sshdOptions: ["SetEnv HOME=\(home.path) MACTERM_RUNTIME_DIR=\(runtime.path) SHELL=/bin/sh"]
+        )
+        var configuration = sshd.configuration
+        if !passphrase.isEmpty {
+            let askpass = root.appendingPathComponent("askpass")
+            try "#!/bin/sh\necho \"$1\" >> '\(root.appendingPathComponent("askpass.log").path)'\necho '\(passphrase)'\n"
+                .write(to: askpass, atomically: true, encoding: .utf8)
+            chmod(askpass.path, 0o700)
+            configuration.askpass = askpass.path
+        }
+        connections = SSHConnections(configuration: configuration)
         self.key = key
         self.answer = answer
     }
@@ -94,8 +114,8 @@ final class SSHDHost {
 }
 
 @MainActor
-func withSSHDHost(answer: Bool = true, _ body: (SSHDHost) async throws -> Void) async throws {
-    let host = try await SSHDHost(answer: answer)
+func withSSHDHost(answer: Bool = true, passphrase: String = "", _ body: (SSHDHost) async throws -> Void) async throws {
+    let host = try await SSHDHost(answer: answer, passphrase: passphrase)
     do {
         try await body(host)
     } catch {

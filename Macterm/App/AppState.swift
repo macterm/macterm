@@ -1700,7 +1700,8 @@ final class AppState {
         case network
         /// A login brought a host's link back (`.remoteHostDidConnect`).
         case hostConnected
-        /// A pane's link stopped (`.remoteLinkDidStop`).
+        /// A pane became lost: its link stopped, or a try failed
+        /// (`.remoteLinkDidStop`).
         case linkStopped
         /// The next sweep while lost panes remain (`reconnectRetryInterval`).
         case retry
@@ -1718,7 +1719,7 @@ final class AppState {
     /// key in the pane.
     ///
     /// The triggers (system wake, a network change, app activation, project
-    /// selection, a link that stopped) run a sweep, and while a lost pane
+    /// selection, a pane that became lost) run a sweep, and while a lost pane
     /// remains, the sweep runs again every `reconnectRetryInterval` while the
     /// app is active. `RemoteReconnectPolicy` gates each pane, so an
     /// unreachable host is tried at most once a minute. Active project only;
@@ -1743,7 +1744,8 @@ final class AppState {
                 continue
             }
             anyLost = true
-            guard reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
+            // A try runs now: the next sweep judges it.
+            guard !pane.isRemoteReconnecting, reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
             reconnectPolicy.recordAttempt(pane.id, now: now)
             sessions.insert(pane.sessionName)
         }

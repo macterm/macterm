@@ -162,7 +162,7 @@ struct SplitLeafView: View {
         )
         .overlay {
             // A remote pane whose connection stopped only dims
-            // (`isSplitDimmed`), so that the line of Macterm's on it stays legible.
+            // (`isSplitDimmed`): its badge says why.
             if isNonLeaderMirror {
                 // A non-leader mirror (#345) is BLURRED, not dimmed. It is not
                 // about focus — it says the pane is not the one driving the

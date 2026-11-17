@@ -9,8 +9,8 @@ extension Notification.Name {
     /// poll: tab switch, OSC title, user interaction, execution-state
     /// transition. Observed by `AppState.notePollEvent()`.
     static let terminalPollEvent = Notification.Name("MactermTerminalPollEvent")
-    /// A remote pane's link stopped: the reconnect sweep starts
-    /// (`AppState.reconnectDroppedRemotePanes`).
+    /// A remote pane became lost (its link stopped, or a try failed): the
+    /// reconnect sweep runs (`AppState.reconnectDroppedRemotePanes`).
     static let remoteLinkDidStop = Notification.Name("MactermRemoteLinkDidStop")
     /// A remote host's link came back after a login (`object` is the
     /// destination, `RemoteHosts`). The other lost panes of that host can

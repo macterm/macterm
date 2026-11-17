@@ -47,9 +47,10 @@ enum RemotePaneAnswer {
 ///   app posts the pane's Darwin notification (`wakeName`), and the client
 ///   asks again.
 /// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
-///   (`Pane.isRemoteLinkLost`): it dims and shows one badge. It connects
-///   again by itself (`AppState.reconnectDroppedRemotePanes` with
-///   `RemoteReconnectPolicy`): such a try never asks the user anything
+///   (`Pane.isRemoteLinkLost`): it dims, and its badge says `Reconnecting`
+///   while a try runs (`Pane.isRemoteReconnecting`), else `Connection lost`.
+///   It connects again by itself (`AppState.reconnectDroppedRemotePanes`
+///   with `RemoteReconnectPolicy`): such a try never asks the user anything
 ///   (`reconnect`, a quiet login). A key in the pane connects at once, and
 ///   may ask for the login. The attach replays the session's screen.
 /// - **Gone.** A pane whose session ran on the host
@@ -76,10 +77,10 @@ final class RemoteHosts {
             NotificationCenter.default.post(name: .remoteHostDidConnect, object: $0)
         }
 
-        /// A pane's link stopped: the reconnect sweep starts, after this
-        /// answer.
-        var linkStopped: @MainActor (String) -> Void = { _ in
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .remoteLinkDidStop, object: nil) }
+        /// A pane became lost (its link stopped, or a try failed): the
+        /// reconnect sweep runs now, so a try starts at once or is planned.
+        var paneLost: @MainActor (String) -> Void = { _ in
+            NotificationCenter.default.post(name: .remoteLinkDidStop, object: nil)
         }
 
         var declines: DeclineStore
@@ -206,13 +207,14 @@ final class RemoteHosts {
             if !isRoamingLink(target.destination) {
                 drop(target.destination)
             }
-            configuration.linkStopped(session)
+            configuration.paneLost(session)
             return .wait(message: nil)
         case .retry:
             lost.remove(session)
             quiet.remove(session)
+            markReconnecting(panes)
         }
-        return await resolve(session, panes: panes, target: target, prompts: quiet.remove(session) == nil)
+        return await resolve(session, panes: panes, target: target, prompts: !quiet.contains(session))
     }
 
     /// The session of these panes attached: it ran on the host, so from now
@@ -229,7 +231,9 @@ final class RemoteHosts {
     /// the backoff.
     func reconnect(_ sessions: Set<String>) {
         for session in sessions where lost.remove(session) != nil {
+            // Every view of the session asks quietly until one attaches.
             quiet.insert(session)
+            markReconnecting(panes?(session) ?? [])
             configuration.post(Self.wakeName(for: session))
         }
     }
@@ -369,6 +373,7 @@ final class RemoteHosts {
             if link.isRoaming, link.connection.isOpen, case let .ready(current) = hosts[destination], current === link {
                 lost.insert(session)
                 mark(panes, lost: true)
+                configuration.paneLost(session)
                 return .wait(message: nil)
             }
             // The link broke. Only a failure on the host's current link
@@ -384,6 +389,7 @@ final class RemoteHosts {
                 listFailures[destination] = nil
                 lost.insert(session)
                 mark(panes, lost: true)
+                configuration.paneLost(session)
                 return .wait(message: nil)
             }
             return await resolve(session, panes: panes, target: target, prompts: prompts)
@@ -524,6 +530,8 @@ final class RemoteHosts {
             hosts[destination] = nil
             for session in sessions {
                 lost.insert(session)
+                mark(panes?(session) ?? [], lost: true)
+                configuration.paneLost(session)
             }
         }
         for session in sessions {
@@ -626,10 +634,23 @@ final class RemoteHosts {
         }
     }
 
+    /// `lost`: no try runs now, and the badge says `Connection lost`. Not
+    /// lost: the session attaches. Either way a try ended.
     private func mark(_ panes: [Pane], lost: Bool) {
-        for pane in panes where pane.isRemoteLinkLost != lost {
-            logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
-            pane.isRemoteLinkLost = lost
+        for pane in panes {
+            if pane.isRemoteLinkLost != lost {
+                logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
+                pane.isRemoteLinkLost = lost
+            }
+            if pane.isRemoteReconnecting { pane.isRemoteReconnecting = false }
+            if !lost { quiet.remove(pane.sessionName) }
+        }
+    }
+
+    /// A try starts for these lost panes: the badge says `Reconnecting`.
+    private func markReconnecting(_ panes: [Pane]) {
+        for pane in panes where pane.isRemoteLinkLost && !pane.isRemoteReconnecting {
+            pane.isRemoteReconnecting = true
         }
     }
 
