@@ -168,7 +168,7 @@ extension AgentSkills {
         macterm project create devbox:~/dev/api --name api-devbox
         ```
 
-        `project create` connects to the host first and adds nothing when the directory is not there
+        `project create` connects to the host first and adds nothing when the folder is not there
         (`not_found`) or when the host does not answer (`internal`).
 
         Every pane of that project runs a zmx session on the host over ssh. You sign in interactively in the

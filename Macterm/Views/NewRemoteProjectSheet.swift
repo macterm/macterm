@@ -52,6 +52,8 @@ struct NewRemoteProjectSheet: View {
                 TextField("Directory", text: $directory, prompt: Text(verbatim: "~/dev/api"))
             }
             .textFieldStyle(.roundedBorder)
+            // The check adds the path that it checked.
+            .disabled(check != nil)
             if let message = reservedNameMessage ?? failure {
                 Text(message)
                     .font(.caption)

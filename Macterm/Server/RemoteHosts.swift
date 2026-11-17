@@ -323,7 +323,7 @@ final class RemoteHosts {
     /// is `unreachable`.
     func checkFolder(_ directory: String, destination: String) async -> FolderCheck {
         guard SSHConnections.isValidDestination(destination), let scripts = configuration.scripts else { return .unreachable }
-        // A link that broke since its last use gets one more connect.
+        // A link that closed since its last use gets one more connect.
         for _ in 0 ..< 2 {
             switch hosts[destination] {
             case nil:
@@ -336,7 +336,11 @@ final class RemoteHosts {
             if case let .preparing(_, task, _) = hosts[destination] { await task.value }
             switch hosts[destination] {
             case let .ready(link):
-                guard let result = await Self.run(scripts.folderArgv(directory: directory), timeout: .seconds(20), over: link) else {
+                // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
+                guard let result = await Self.run(scripts.folderArgv(directory: directory), timeout: .seconds(8), over: link) else {
+                    // Only a closed connection is dropped: a slow folder (a
+                    // network mount) on a good link must not end its panes.
+                    guard !link.connection.isOpen else { return .unreachable }
                     if case let .ready(current) = hosts[destination], current === link { drop(destination) }
                     continue
                 }

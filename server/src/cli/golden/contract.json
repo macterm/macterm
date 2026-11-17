@@ -188,7 +188,7 @@
         }
       ],
       "debug" : false,
-      "discussion" : "The directory must exist. For a remote spec, Macterm connects to the host to check the directory, as a new pane does. It can ask for the login.",
+      "discussion" : "The folder must exist. For a remote spec, Macterm connects to the host to check the folder, as a new pane does. It can ask for the login.",
       "hidden" : false,
       "options" : [
         {

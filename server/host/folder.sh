@@ -6,7 +6,8 @@
 # $1: the folder, hex-encoded, as for plain.sh. A ~ or ~name at the start
 # becomes the home folder (the same text as HostCommands.expandTilde).
 #
-# Exit 0: a shell can cd to the folder. Exit 3: it cannot. Any other
+# Exit 0: a shell can cd to the folder. Exit 3: it cannot (it is not
+# there, or the user may not enter it: a pane could not start there). Any other
 # status means that the check did not run to its end.
 b=$(printf "\134");
 f=;
@@ -27,5 +28,5 @@ case $d in
     fi;
     ;;
 esac;
-cd "$d" 2>/dev/null || exit 3;
+cd -- "$d" 2>/dev/null || exit 3;
 exit 0;

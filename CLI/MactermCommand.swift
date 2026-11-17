@@ -198,7 +198,7 @@ struct ProjectCommand: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Add a project for a local directory or a remote spec. Each run adds a new project.",
             discussion: """
-            The directory must exist. For a remote spec, Macterm connects to the host to check the directory, \
+            The folder must exist. For a remote spec, Macterm connects to the host to check the folder, \
             as a new pane does. It can ask for the login.
             """
         )
