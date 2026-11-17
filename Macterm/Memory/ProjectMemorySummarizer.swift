@@ -165,10 +165,9 @@ final class ProjectMemorySummarizer {
         MemoryRedaction.redact(text)
     }
 
-    /// `text` as one paragraph: each run of whitespace with a line break
-    /// in it becomes one space. With one sentence for each piece of work,
-    /// the model put a line break after a sentence in about one reply of
-    /// three.
+    /// `text` as one paragraph: the lines, trimmed and with no empty line,
+    /// joined with one space. The model put a line break after a sentence
+    /// in about one reply of three.
     static func oneParagraph(_ text: String) -> String {
         text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }

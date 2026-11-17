@@ -22,14 +22,10 @@ struct ProjectMemoryDigest: Equatable {
     /// The changed files that the digest names; the rest is a count.
     static let changedPathLimit = 12
 
-    /// The summary talks to the user as "you" (Ethan, 2026-11-17), and
-    /// every sentence has "you" as its subject. That rule, and not a rule
-    /// that names the filler, took out the sentences about "the current
-    /// state of the repository", the branch and what is absent: measured on
-    /// the on-device model over six digests, five runs each, they were in
-    /// 30 of 30 replies before and in 1 of 30 after (PR text). The old
-    /// sentence "say nothing about changes, staged files or the working
-    /// tree" made the model write "No new files were modified."
+    /// The summary talks to the user as "you" (Ethan, 2026-11-17). The rule
+    /// that "you" is the subject of every sentence keeps out sentences about
+    /// the repository state, the branch and what is absent. A rule that
+    /// names such a sentence made the model write it.
     static let instructions = """
     You tell a software developer what they have been working on in a project, from the state of its Git \
     repository and a log of the commands that ran there. \
