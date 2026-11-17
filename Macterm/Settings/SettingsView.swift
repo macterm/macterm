@@ -1355,11 +1355,15 @@ private struct AppearanceSettings: View {
             // The icon is Liquid Glass, which only macOS 26 and later draw.
             if AdaptiveIcon.systemDrawsGlassIcons {
                 Section("App Icon") {
+                    AdaptiveIconPreview()
+
                     Toggle(isOn: $preferences.adaptiveIcon) {
                         Text("Adaptive icon")
-                        Text("The Dock icon shows the colors of your terminal theme.")
+                        Text("The Dock icon shows the colors of your terminal theme. This has no effect in the Clear or Tinted icon style.")
                             .settingsDescription()
                     }
+
+                    AdaptiveIconPreview.Footnote()
                 }
             }
 
