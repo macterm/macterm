@@ -188,6 +188,7 @@
         }
       ],
       "debug" : false,
+      "discussion" : "The directory must exist. For a remote spec, Macterm connects to the host to check the directory, as a new pane does. It can ask for the login.",
       "hidden" : false,
       "options" : [
         {
@@ -207,6 +208,16 @@
           "hidden" : false,
           "names" : [
             "--select"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "[debug] Do not check the remote directory.",
+          "debug" : true,
+          "hidden" : false,
+          "names" : [
+            "--skip-folder-check"
           ],
           "optional" : true,
           "repeating" : false
@@ -251,7 +262,7 @@
       "subcommands" : [
 
       ],
-      "usage" : "macterm project create <path> [--name <name>] [--select] [--socket <socket>] [--json]"
+      "usage" : "macterm project create <path> [--name <name>] [--select] [--skip-folder-check] [--socket <socket>] [--json]"
     },
     {
       "abstract" : "Make a project active.",

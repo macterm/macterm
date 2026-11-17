@@ -121,16 +121,31 @@ struct DirectorySourceTests {
         #expect(items.contains { $0.subtitle?.contains("Add another project") == true })
     }
 
+    /// A source whose host check answers `refusal` (nil: the folder is there).
+    private func source(refusal: String? = nil) -> DirectorySource {
+        var source = DirectorySource()
+        source.remoteRefusal = { _ in refusal }
+        return source
+    }
+
+    /// The remote add runs after the host check: wait until `done`.
+    private func settle(_ done: @MainActor () -> Bool) async {
+        for _ in 0 ..< 200 where !done() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     @Test
-    func typed_remote_spec_offers_add_as_remote_project() throws {
+    func typed_remote_spec_offers_add_as_remote_project() async throws {
         let (ctx, state, store) = makeContext()
-        let items = DirectorySource().items(query: "devbox:~/dev/api", context: ctx)
+        let items = source().items(query: "devbox:~/dev/api", context: ctx)
         let item = try #require(items.first)
         #expect(items.count == 1)
         #expect(item.title == "api")
         #expect(item.subtitle?.contains("Add remote project") == true)
 
         item.action()
+        await settle { !store.projects.isEmpty }
         let added = try #require(store.projects.first)
         #expect(added.path == "devbox:~/dev/api")
         #expect(added.isRemote)
@@ -152,15 +167,34 @@ struct DirectorySourceTests {
     }
 
     @Test
-    func typed_remote_spec_backing_a_project_also_offers_adding_another() throws {
+    func a_remote_spec_whose_folder_the_host_refuses_adds_nothing_and_says_why() async throws {
+        // 0358: the palette is closed by then, so the line is a toast.
+        let (ctx, state, store) = makeContext()
+        let existing = Project(name: "api box", path: "devbox:~/dev/api", sortOrder: 0)
+        for query in ["devbox:~/none", "devbox:~/dev/api"] {
+            if query == "devbox:~/dev/api" { store.add(existing) }
+            let items = source(refusal: "There is no folder").items(query: query, context: ctx)
+            let add = try #require(items.first { $0.id.hasPrefix("remote-open:") || $0.id.hasPrefix("dir-new:") })
+            let before = state.activeToast?.id
+            add.action()
+            await settle { state.activeToast?.id != before }
+            #expect(state.activeToast?.id != before)
+            #expect(state.activeToast?.title == "There is no folder")
+        }
+        #expect(store.projects.map(\.id) == [existing.id])
+    }
+
+    @Test
+    func typed_remote_spec_backing_a_project_also_offers_adding_another() async throws {
         let (ctx, state, store) = makeContext()
         let existing = Project(name: "api box", path: "devbox:~/dev/api", sortOrder: 0)
         store.add(existing)
 
-        let items = DirectorySource().items(query: "devbox:~/dev/api", context: ctx)
+        let items = source().items(query: "devbox:~/dev/api", context: ctx)
         let addAnother = try #require(items.first { $0.subtitle?.contains("Add another project") == true })
         #expect(addAnother.title == "api")
         addAnother.action()
+        await settle { store.projects.count == 2 }
 
         #expect(store.projects.count == 2)
         let created = try #require(store.projects.last)

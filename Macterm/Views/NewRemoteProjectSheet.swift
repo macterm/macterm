@@ -89,33 +89,24 @@ struct NewRemoteProjectSheet: View {
     }
 
     private func add() {
-        guard let path = composedPath, reservedNameMessage == nil, check == nil,
-              case let .remote(user, remoteHost, remoteDirectory) = ProjectPath.parse(path)
-        else { return }
+        guard let path = composedPath, reservedNameMessage == nil, check == nil else { return }
         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        let trimmedDirectory = directory.trimmingCharacters(in: .whitespaces)
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         failure = nil
         check = Task {
-            let result = await RemoteHosts.shared.checkFolder(
-                remoteDirectory,
-                destination: HostCommands.destination(user: user, host: remoteHost)
-            )
+            let refusal = await RemoteHosts.shared.refusal(forNewProjectPath: path)
             check = nil
             guard !Task.isCancelled else { return }
-            switch result {
-            case .exists:
-                // Always create: a directory can back several projects, so a
-                // repeat host:dir here adds a distinct project rather than
-                // reusing the last.
-                let project = projectStore.create(name: trimmedName.isEmpty ? trimmedHost : trimmedName, path: path)
-                appState.selectProject(project)
-                dismiss()
-            case .missing:
-                failure = String(localized: "There is no folder \(trimmedDirectory) on \(trimmedHost).")
-            case .unreachable:
-                failure = String(localized: "Macterm cannot connect to \(trimmedHost).")
+            if let refusal {
+                failure = refusal
+                return
             }
+            // Always create: a directory can back several projects, so a
+            // repeat host:dir here adds a distinct project rather than
+            // reusing the last.
+            let project = projectStore.create(name: trimmedName.isEmpty ? trimmedHost : trimmedName, path: path)
+            appState.selectProject(project)
+            dismiss()
         }
     }
 }

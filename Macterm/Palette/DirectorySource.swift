@@ -12,6 +12,10 @@ struct DirectorySource: PaletteSource {
         String(localized: "Directories", comment: "Command palette: the section of folder rows in path mode")
     }
 
+    /// Why a new remote project is not added (`RemoteHosts.refusal`), nil
+    /// when its folder is on the host. Tests answer it with no host.
+    var remoteRefusal: @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) }
+
     func items(query: String, context: PaletteContext) -> [PaletteItem] {
         // A typed remote spec offers add/switch, mirroring local directories
         // (#104). No filesystem browsing — the host isn't consulted; the
@@ -139,13 +143,24 @@ struct DirectorySource: PaletteSource {
             category: Self.category,
             score: 0
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.findOrCreate(
-                name: name,
-                path: spec
-            )
-            appState.selectProject(project)
+            addRemote(spec, appState: appState) {
+                projectStore.findOrCreate(name: name, path: spec)
+            }
         }
         return [addItem]
+    }
+
+    /// Adds a remote project only when its folder is on the host (0358).
+    /// The palette is closed by then, so a refusal is a toast.
+    private func addRemote(_ spec: String, appState: AppState, create: @escaping @MainActor () -> Project) {
+        let remoteRefusal = remoteRefusal
+        Task { @MainActor in
+            if let refusal = await remoteRefusal(spec) {
+                appState.presentToast(refusal)
+                return
+            }
+            appState.selectProject(create())
+        }
     }
 
     private func directoryItem(
@@ -198,11 +213,13 @@ struct DirectorySource: PaletteSource {
             category: Self.category,
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.create(
-                name: name,
-                path: fullPath
-            )
-            appState.selectProject(project)
+            guard ProjectPath.isRemote(fullPath) else {
+                appState.selectProject(projectStore.create(name: name, path: fullPath))
+                return
+            }
+            addRemote(fullPath, appState: appState) {
+                projectStore.create(name: name, path: fullPath)
+            }
         }
     }
 }

@@ -354,6 +354,19 @@ final class RemoteHosts {
         return .unreachable
     }
 
+    /// `checkFolder` for the scp-style path of a new remote project in the
+    /// GUI (the sheet, the palette): nil when the folder is there, else the
+    /// line that says why nothing is added.
+    func refusal(forNewProjectPath path: String) async -> String? {
+        guard case let .remote(user, host, directory) = ProjectPath.parse(path) else { return nil }
+        let destination = HostCommands.destination(user: user, host: host)
+        switch await checkFolder(directory, destination: destination) {
+        case .exists: return nil
+        case .missing: return String(localized: "There is no folder \(directory) on \(destination).")
+        case .unreachable: return String(localized: "Macterm cannot connect to \(destination).")
+        }
+    }
+
     /// The answer for the exit status of `folder.sh`. Pure.
     nonisolated static func folderCheck(status: Int32?) -> FolderCheck {
         switch status {
