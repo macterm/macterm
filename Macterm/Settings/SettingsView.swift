@@ -1592,6 +1592,9 @@ private struct AnimationsSettings: View {
                 }
                 .disabled(!smoothScrolling)
                 .padding(.leading, 16)
+
+                AnimationPreview(kind: .scroll, height: 120)
+                    .accessibilityLabel(Text("Scroll preview"))
             } header: {
                 DocsSectionHeader("Scrolling", docs: .animations)
             }
@@ -1627,6 +1630,9 @@ private struct AnimationsSettings: View {
                 .onChange(of: cursorTrail) { _, v in
                     Preferences.shared.cursorTrail = v
                 }
+
+                AnimationPreview(kind: .cursor, height: 72)
+                    .accessibilityLabel(Text("Cursor preview"))
             } header: {
                 DocsSectionHeader("Cursor", docs: .animations)
             }
@@ -1641,6 +1647,19 @@ private struct AnimationsSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A row with a live preview: a real terminal surface (`PreviewSurfaceView`)
+/// that draws the animations as a pane draws them.
+private struct AnimationPreview: View {
+    let kind: PreviewSurfaceView.Kind
+    let height: CGFloat
+
+    var body: some View {
+        PreviewSurface(kind: kind)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
     }
 }
 

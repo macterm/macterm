@@ -232,6 +232,9 @@ final class GhosttyApp {
         for view in GhosttyTerminalNSView.allLiveViews() {
             view.syncColorScheme()
         }
+        for view in PreviewSurfaceView.allLiveViews() {
+            view.syncColorScheme()
+        }
         // Stale until those re-emits land (and no surface may be alive to
         // emit) — fall back to the theme file meanwhile.
         resolvedColors = nil
@@ -284,10 +287,8 @@ final class GhosttyApp {
         let oldScheme = windowScheme
         ghostty_app_update_config(app, newConfig)
         // Also update each existing surface so changes take effect immediately
-        for view in GhosttyTerminalNSView.allLiveViews() {
-            if let surface = view.surface {
-                ghostty_surface_update_config(surface, newConfig)
-            }
+        for surface in liveSurfaces() {
+            ghostty_surface_update_config(surface, newConfig)
         }
         if let old = config { ghostty_config_free(old) }
         config = newConfig
@@ -346,11 +347,16 @@ final class GhosttyApp {
     func softReloadConfig() {
         guard let app, let config else { return }
         ghostty_app_update_config(app, config)
-        for view in GhosttyTerminalNSView.allLiveViews() {
-            if let surface = view.surface {
-                ghostty_surface_update_config(surface, config)
-            }
+        for surface in liveSurfaces() {
+            ghostty_surface_update_config(surface, config)
         }
+    }
+
+    /// Every live surface: the panes, and the previews of Settings →
+    /// Animations (`PreviewSurfaceView`), which take each config too.
+    private func liveSurfaces() -> [ghostty_surface_t] {
+        GhosttyTerminalNSView.allLiveViews().compactMap(\.surface)
+            + PreviewSurfaceView.allLiveViews().compactMap(\.surface)
     }
 
     /// Reload and surface any user-visible errors (missing file, parse errors)

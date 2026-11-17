@@ -1694,7 +1694,7 @@ final class GhosttyTerminalNSView: NSView {
             y *= 2
         }
         noteScroll(y: y, precise: event.hasPreciseScrollingDeltas)
-        ghostty_surface_mouse_scroll(surface, x, y, scrollMods(for: event))
+        ghostty_surface_mouse_scroll(surface, x, y, Self.scrollMods(for: event))
     }
 
     // MARK: - Sub-row scroll offset (smooth scrolling)
@@ -1752,14 +1752,15 @@ final class GhosttyTerminalNSView: NSView {
         ghostty_surface_mouse_scroll(surface, 0, delta, 1)
     }
 
-    private func scrollMods(for event: NSEvent) -> ghostty_input_scroll_mods_t {
+    /// The scroll mods of libghostty for a wheel event: precision and momentum.
+    static func scrollMods(for event: NSEvent) -> ghostty_input_scroll_mods_t {
         var scrollMods: ghostty_input_scroll_mods_t = 0
         if event.hasPreciseScrollingDeltas { scrollMods |= 1 }
         scrollMods |= scrollMomentum(for: event.momentumPhase) << 1
         return scrollMods
     }
 
-    private func scrollMomentum(for phase: NSEvent.Phase) -> ghostty_input_scroll_mods_t {
+    private static func scrollMomentum(for phase: NSEvent.Phase) -> ghostty_input_scroll_mods_t {
         switch phase {
         case .began: 1
         case .stationary: 2
