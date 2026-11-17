@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # The v2 session process (src/session.zig): `zmx session` (through the
-# server), its socket in the runtime directory, and the frames on it. test/v2client.py is the client.
+# server), its socket in the runtime directory, and the frames on it.
+# test/v2client.py is the client.
 
 load test_helper
 
@@ -71,6 +72,31 @@ PY
   run lsof -p "$program"
   [ -n "$output" ]
   [[ "$output" != *"$MACTERM_RUNTIME_DIR/s1"* ]]
+}
+
+@test "session: --cwd is the shell's folder, also a relative one, and a bad folder leaves no socket" {
+  mkdir "$RT/work"
+  (cd "$RT" && "$ZMX" session --cwd work s1 -- /bin/sh -c "pwd -P > '$RT/pwd'; exec sleep 30")
+  local i=0
+  until [[ -s "$RT/pwd" ]]; do
+    (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
+    sleep 0.1
+  done
+  [ "$(< "$RT/pwd")" = "$(cd "$RT/work" && pwd -P)" ]
+
+  run "$ZMX" session --cwd "$RT/gone" s2 -- /bin/sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot open directory"* ]]
+  # root enters any folder.
+  [[ "$(id -u)" != 0 ]] || return 0
+  rmdir "$RT/work"
+  mkdir "$RT/work"
+  chmod 000 "$RT/work"
+  run "$ZMX" session --cwd "$RT/work" s3 -- /bin/sh
+  chmod 700 "$RT/work"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot enter directory"* ]]
+  [ ! -e "$MACTERM_RUNTIME_DIR/s3" ]
 }
 
 @test "session: no program in the session gets the fd of the spec" {

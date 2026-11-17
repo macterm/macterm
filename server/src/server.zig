@@ -903,7 +903,9 @@ const Server = struct {
         };
         for (s.spawns.items) |sp| if (t >= sp.started_at + spawn_ms and sp.started_at >= 0) {
             std.log.warn("server: session {s} start takes too long, SIGKILL", .{sp.id});
-            lib_posix.kill(sp.pid, lib_posix.SIG.KILL) catch {};
+            // Not a pid that was reaped: the system can give it to another process.
+            if (std.mem.findScalar(lib_posix.pid_t, s.children.items, sp.pid) != null)
+                lib_posix.kill(sp.pid, lib_posix.SIG.KILL) catch {};
             // Once: its end of the socket pair closes, and the create fails.
             sp.started_at = -1;
         };
@@ -968,8 +970,8 @@ const Server = struct {
         const spec = try msgpack.encodeAlloc(s.gpa, spec_args);
         errdefer s.gpa.free(spec);
 
-        // No SOCK_CLOEXEC: macOS's socketpair refuses it. The server is one
-        // thread, so no other spawn can take the fds before the flag is set.
+        // No SOCK_CLOEXEC: macOS's socketpair refuses it. The server has one
+        // thread, so no other spawn can start before `fcntl` sets the flag.
         var pair: [2]i32 = undefined;
         if (std.c.socketpair(lib_posix.AF.UNIX, lib_posix.SOCK.STREAM, 0, &pair) != 0) return error.SocketPair;
         errdefer lib_posix.close(pair[0]);
@@ -978,9 +980,10 @@ const Server = struct {
         const flags = try lib_posix.fcntl(pair[0], lib_posix.F.GETFL, 0);
         _ = try lib_posix.fcntl(pair[0], lib_posix.F.SETFL, flags | lib_posix.O_NONBLOCK);
 
+        // Before the spawn: a child that `children` does not hold is never reaped.
+        try s.children.ensureUnusedCapacity(s.gpa, 1);
         const pid = try spawnSession(s.exe, &argv, envp, pair[1]);
-        // From here the child runs: it is in `children` until it is reaped.
-        s.children.append(s.gpa, pid) catch {};
+        s.children.appendAssumeCapacity(pid);
         errdefer lib_posix.kill(pid, lib_posix.SIG.KILL) catch {};
 
         const sp = try s.gpa.create(Spawn);
@@ -1948,21 +1951,16 @@ const Server = struct {
     }
 };
 
-/// The absolute path of this binary, to start sessions with.
 extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *cross.posix_spawnattr_t, disclaim: c_int) c_int;
 
 /// The one `posix_spawn` of a session process (`Server.spawn`). `spec_fd` is
-/// the session's end of the socket pair; it becomes `session.spec_fd`.
+/// the session's end of the socket pair. It becomes `session.spec_fd`.
 ///
-/// The disclaim: macOS attributes privacy-gated work (Local Network, TCC) to
-/// a process's *responsible process*, which a process takes from its parent
-/// when it starts and which cannot change afterwards. Without the disclaim
-/// the session belongs to the server, and so to the app that started the
-/// server; once that app quits, each program in the session is judged by its
-/// own identity, and one that Apple did not sign gets EHOSTUNREACH on the
-/// local network with no prompt (macterm#419). The disclaim exists only as a
-/// spawn attribute: with it the session is its own responsible process for
-/// its whole life, and it has the app's signature, so a prompt names Macterm.
+/// The disclaim makes the session its own responsible process on macOS, for
+/// its whole life (macterm#419). Without it, the session belongs to the app
+/// that started the server. After that app quits, a program that Apple did
+/// not sign gets EHOSTUNREACH on the local network, with no prompt. The
+/// disclaim exists only as a spawn attribute (server/AGENTS.md).
 fn spawnSession(exe: [:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8, spec_fd: i32) !lib_posix.pid_t {
     var attr: cross.posix_spawnattr_t = undefined;
     if (cross.posix_spawnattr_init(&attr) != 0) return error.SpawnAttr;
@@ -1992,6 +1990,7 @@ fn spawnSession(exe: [:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:
     return pid;
 }
 
+/// The absolute path of this binary, to start sessions with.
 fn selfExe(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     if (comptime builtin.os.tag.isDarwin()) {
         // It can be relative to the folder at start.

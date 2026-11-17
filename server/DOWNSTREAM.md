@@ -39,6 +39,8 @@ the local network with no prompt (macterm#419).
   that has `responsibility_spawnattrs_setdisclaim`. Before, the session
   started itself again with `POSIX_SPAWN_SETEXEC`, and its state rode
   `ZMX_DAEMON_*` variables.
+- No process that keeps running calls `unsetenv`: zig 0.17's `std.Io` caches
+  the environment block and panics on a shortened one.
 - Code: `src/server.zig` (`spawnSession`), `src/main.zig`, `src/session.zig`.
 - Test: `test/daemon_responsibility.bats` (Darwin only).
 

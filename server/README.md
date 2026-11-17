@@ -26,9 +26,9 @@ gone (design/007 §6).
 
 `zmx session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`
 asks the server to start a v2 session process (`src/session.zig`), and
-returns when its socket accepts connections. It is the shell's parent, and it speaks the v2 frames
-(`src/protocol/`). The server (below)
-runs it; `help` does not list it.
+returns when its socket accepts connections. The session process is the
+shell's parent, and it speaks the v2 frames (`src/protocol/`). Tests run the
+verb; `help` does not list it.
 
 - **Socket.** `<dir>/<name>`, mode 0600. `<dir>` is `MACTERM_RUNTIME_DIR`,
   else `$XDG_RUNTIME_DIR/macterm`, else `$TMPDIR/macterm` on macOS, else

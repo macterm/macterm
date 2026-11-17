@@ -10,13 +10,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const cross = @import("cross");
-const Resize = pty_mod.Resize;
 const log = @import("log.zig");
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
 const pty_mod = @import("pty.zig");
+const Resize = pty_mod.Resize;
 const runtime = @import("runtime.zig");
 const terminal = @import("terminal.zig");
 const events = @import("events.zig");
@@ -90,9 +90,12 @@ pub const ready_answer = "ok";
 /// responsible process (server/AGENTS.md). It enters `cwd`, binds its socket
 /// and starts the shell, then writes `ready_answer` or the error on
 /// `answer_fd`, and serves until the session ends. It never returns.
+/// `dir` is absolute: the server sets the runtime directory.
 pub fn run(dir: []const u8, opts: Options, cwd: ?[]const u8, answer_fd: i32) noreturn {
     const gpa = std.heap.c_allocator;
     var text_buf: [512]u8 = undefined;
+    // Before the bind: a folder that fails leaves no socket behind.
+    if (cwd) |folder| if (enter(folder, &text_buf)) |text| fail(answer_fd, text);
     const listen_fd = bindAndCheck(gpa, dir, opts.name) catch |err| {
         const text = switch (err) {
             error.InvalidName => std.fmt.bufPrint(&text_buf, "invalid session name \"{s}\": use letters, digits, '-', '_' and '.', not first", .{opts.name}),
@@ -104,15 +107,13 @@ pub fn run(dir: []const u8, opts: Options, cwd: ?[]const u8, answer_fd: i32) nor
             },
             else => std.fmt.bufPrint(&text_buf, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }),
         } catch "the session did not start";
-        answer(answer_fd, text);
-        std.process.exit(1);
+        fail(answer_fd, text);
     };
-    var text: []const u8 = "";
-    const pty = startShell(opts, cwd, &text_buf, &text) orelse {
+    const cmd = pty_mod.createCmdZ(opts.shell, opts.command) catch fail(answer_fd, "out of memory");
+    const pty = pty_mod.spawnPty(opts.name, cmd, opts.size, runtime.session_env) catch |err| {
         lib_posix.close(listen_fd);
         unlinkSocket(dir, opts.name);
-        answer(answer_fd, text);
-        std.process.exit(1);
+        fail(answer_fd, std.fmt.bufPrint(&text_buf, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }) catch "the pty failed");
     };
     answer(answer_fd, ready_answer);
     serveAndExit(dir, opts, listen_fd, pty);
@@ -141,28 +142,18 @@ fn bindAndCheck(gpa: std.mem.Allocator, dir: []const u8, name: []const u8) !i32 
     return bindSocket(path);
 }
 
-/// Enters `cwd` and starts the shell in a new pty. Null on failure, with the
-/// text for the server in `text`.
-fn startShell(opts: Options, cwd: ?[]const u8, text_buf: []u8, text: *[]const u8) ?pty_mod.PtyInfo {
-    if (cwd) |dir| {
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const dir_z = std.fmt.bufPrintSentinel(&buf, "{s}", .{dir}, 0) catch {
-            text.* = "the folder is too long";
-            return null;
-        };
-        if (std.c.chdir(dir_z.ptr) != 0) {
-            text.* = std.fmt.bufPrint(text_buf, "cannot enter directory {s}: {s}", .{ dir, @tagName(std.c.errno(-1)) }) catch "cannot enter the directory";
-            return null;
-        }
-    }
-    const cmd = pty_mod.createCmdZ(opts.shell, opts.command) catch {
-        text.* = "out of memory";
-        return null;
-    };
-    return pty_mod.spawnPty(opts.name, cmd, opts.size, runtime.session_env) catch |err| {
-        text.* = std.fmt.bufPrint(text_buf, "cannot start session \"{s}\": {s}", .{ opts.name, @errorName(err) }) catch "the pty failed";
-        return null;
-    };
+/// Enters `folder`. Null when it worked, else the text for the server.
+fn enter(folder: []const u8, text_buf: []u8) ?[]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const folder_z = std.fmt.bufPrintSentinel(&buf, "{s}", .{folder}, 0) catch return "the folder is too long";
+    if (std.c.chdir(folder_z.ptr) == 0) return null;
+    return std.fmt.bufPrint(text_buf, "cannot enter directory {s}: {s}", .{ folder, @tagName(std.c.errno(-1)) }) catch "cannot enter the directory";
+}
+
+/// Answers `text` and exits 1.
+pub fn fail(fd: i32, text: []const u8) noreturn {
+    answer(fd, text);
+    std.process.exit(1);
 }
 
 /// Writes the answer and closes `fd`, so that the server reads EOF after it.

@@ -87,7 +87,10 @@ fn sessionCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.En
             if (n == 0) return printError(io, "{s}: not a size: {s}", .{ arg, value });
             if (arg[2] == 'c') size.cols = n else size.rows = n;
         } else if (std.mem.eql(u8, arg, "--cwd")) {
-            cwd = args.next() orelse return printError(io, "--cwd requires a directory", .{});
+            const folder = args.next() orelse return printError(io, "--cwd requires a directory", .{});
+            // The server takes an absolute folder only.
+            cwd = std.Io.Dir.cwd().realPathFileAlloc(io, folder, gpa) catch |err|
+                return printError(io, "cannot open directory {s}: {s}", .{ folder, @errorName(err) });
         } else if (std.mem.startsWith(u8, arg, "-")) {
             return printError(io, "unknown option \"{s}\"", .{arg});
         } else {
@@ -204,26 +207,27 @@ fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Envi
     // The shell must not get the server's end of the answer.
     _ = lib_posix.fcntl(fd, lib_posix.F.SETFD, std.c.FD_CLOEXEC) catch
         return printError(io, "{s}: no spec on fd {d}", .{ v2session.command_name, fd });
+    // From here, errors go on `fd`: stderr is /dev/null.
     var spec: std.ArrayList(u8) = .empty;
     var buf: [16 * 1024]u8 = undefined;
     while (true) {
-        const n = lib_posix.read(fd, &buf) catch |err| return printError(io, "{s}: cannot read the spec: {s}", .{ v2session.command_name, @errorName(err) });
+        const n = lib_posix.read(fd, &buf) catch v2session.fail(fd, "the session cannot read its spec");
         if (n == 0) break;
-        if (spec.items.len + n > spec_max) return printError(io, "{s}: the spec is too large", .{v2session.command_name});
-        try spec.appendSlice(gpa, buf[0..n]);
+        if (spec.items.len + n > spec_max) v2session.fail(fd, "the session's spec is too large");
+        spec.appendSlice(gpa, buf[0..n]) catch v2session.fail(fd, "out of memory");
     }
     var arena_state: std.heap.ArenaAllocator = .init(gpa);
     const arena = arena_state.allocator();
-    const create = protocol.msgpack.decodeSlice(protocol.messages.SessionCreate.Args, arena, spec.items) catch |err|
-        return printError(io, "{s}: the spec does not decode: {s}", .{ v2session.command_name, @errorName(err) });
-    if (!std.mem.eql(u8, create.id, name)) return printError(io, "{s}: the spec names another session", .{v2session.command_name});
+    const create = protocol.msgpack.decodeSlice(protocol.messages.SessionCreate.Args, arena, spec.items) catch
+        v2session.fail(fd, "the session's spec does not decode");
+    if (!std.mem.eql(u8, create.id, name)) v2session.fail(fd, "the session's spec names another session");
     var command: ?[]const []const u8 = null;
     if (create.command) |argv| {
-        const list = try arena.alloc([]const u8, argv.len);
+        const list = arena.alloc([]const u8, argv.len) catch v2session.fail(fd, "out of memory");
         for (argv, list) |arg, *item| item.* = arg.bytes;
         command = list;
     }
-    const dir = try runtime.resolveDir(gpa, env);
+    const dir = runtime.resolveDir(gpa, env) catch v2session.fail(fd, "the session has no runtime directory");
     v2session.run(dir, .{
         .name = name,
         .command = command,
