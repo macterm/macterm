@@ -146,8 +146,10 @@ A pane that asks for a password gets a native `NSPopover` at the cursor (`Passwo
 Sparkle shows no window. `Updater` drives Sparkle with its own user driver (`UpdateUserDriver`), and `UpdateMachine` (pure, `UpdateStatusTests`) turns each callback into the toolbar state.
 
 - **The toolbar shows the exception only** (`UpdateToolbarButton`). No button while idle. Downloading… with a progress ring while Sparkle downloads or extracts: determinate when Sparkle knows the size, indeterminate for a background download, because the updater delegate reports no bytes. Restart to Update when the update waits. A click installs and relaunches.
-- **A check that the user starts ends in a toast** (`UpdateToast`): up to date, a failed check, a failed download. Never a modal. A scheduled check that fails is silent.
-- **A waiting update is sticky** (`UpdateStatus.readyToRestart`). Sparkle installs it when the app quits, whatever a later check or error says. Sparkle asks nothing at quit.
+- **A check that the user starts ends in a toast** (`UpdateToast`): up to date, a failed check, a failed download. Never a modal. A download that showed the ring and failed also gets the toast. A background check or download that fails is silent. Sparkle reports a background download failure to the delegate before the user driver's error, so the delegate's failure changes nothing while the user driver has the session (`UpdateMachine.driverSession`).
+- **"Up to date" only when Sparkle says so** (`SPUNoUpdateFoundReason`). Any other reason (the newest build needs another macOS) shows nothing.
+- **Macterm installs no update that needs consent**: information only, a major upgrade, an appcast that failed its signing check. It dismisses it. A check that the user started says that the version is on the website.
+- **A background download that waits is sticky** (`UpdateMachine.installsOnQuit`). Sparkle installs it when the app quits, whatever a later check or error says. Sparkle asks nothing at quit. After a quit that the app cancelled, Restart to Update sends Sparkle's quit event again.
 - **The app menu item is the fallback with no window open.** While an update waits, Check for Updates… is Restart to Update (`CheckForUpdatesMenuItem`). An accessory app (`macos-hidden = always`) has no menu bar: its update installs at quit.
 - Release notes are not shown in the app. The changelog of the website has them.
 

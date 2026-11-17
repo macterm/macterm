@@ -2549,7 +2549,7 @@ private struct HotkeyCaptureView: NSViewRepresentable {
 
 private struct UpdatesSettings: View {
     /// `Updater` is `@Observable`; read the singleton directly (Observation
-    /// tracks `canCheckForUpdates`/`updateAvailable` reads in `body`).
+    /// tracks the `canCheckForUpdates` read in `body`).
     private var updater: Updater { .shared }
     @State
     private var updateChannel: String = Updater.shared.updateChannel.rawValue

@@ -4735,7 +4735,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Macterm %@을(를) 웹사이트에서 받을 수 있습니다"
+            "value" : "웹사이트에서 Macterm %@ 버전을 받을 수 있습니다"
           }
         },
         "zh-Hans" : {
@@ -5014,22 +5014,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 已在写入 %@。"
-          }
-        }
-      }
-    },
-    "Macterm is downloading an update." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Macterm이 업데이트를 다운로드하고 있습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Macterm 正在下载更新。"
           }
         }
       }
@@ -8371,22 +8355,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重启"
-          }
-        }
-      }
-    },
-    "Restart Macterm to install the update." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Macterm을 재시작하여 업데이트를 설치합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新启动 Macterm 以安装更新。"
           }
         }
       }

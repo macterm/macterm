@@ -6,9 +6,16 @@ struct UpdateStatusTests {
     private func found(
         _ stage: UpdateFound.Stage,
         userInitiated: Bool = true,
-        informationOnly: Bool = false
+        informationOnly: Bool = false,
+        needsConsent: Bool = false
     ) -> UpdateEvent {
-        .found(UpdateFound(stage: stage, userInitiated: userInitiated, informationOnly: informationOnly, version: "2.1.0"))
+        .found(UpdateFound(
+            stage: stage,
+            userInitiated: userInitiated,
+            informationOnly: informationOnly,
+            needsConsent: needsConsent,
+            version: "2.1.0"
+        ))
     }
 
     @Test
@@ -38,7 +45,7 @@ struct UpdateStatusTests {
         #expect(machine.status == .extracting)
         #expect(machine.status.fraction == nil)
 
-        machine.handle(.readyToInstall)
+        machine.handle(.readyToInstall(onQuit: false))
         #expect(machine.status == .readyToRestart)
     }
 
@@ -67,7 +74,7 @@ struct UpdateStatusTests {
         #expect(machine.status == .downloading(received: 0, expected: nil))
         machine.handle(.extractionStarted)
         #expect(machine.status == .extracting)
-        machine.handle(.readyToInstall)
+        machine.handle(.readyToInstall(onQuit: true))
         #expect(machine.status == .readyToRestart)
     }
 
@@ -83,7 +90,7 @@ struct UpdateStatusTests {
     func a_check_that_finds_nothing_says_up_to_date() {
         var machine = UpdateMachine()
         machine.handle(.userCheckStarted)
-        #expect(machine.handle(.notFound).toast == .upToDate)
+        #expect(machine.handle(.notFound(upToDate: true)).toast == .upToDate)
         machine.handle(.sessionEnded)
         #expect(machine.status == .idle)
     }
@@ -106,14 +113,59 @@ struct UpdateStatusTests {
         #expect(extract.handle(.failed).toast == .downloadFailed)
     }
 
+    /// Sparkle's order for a download that fails: the delegate's
+    /// `failedToDownloadUpdate`, then the user driver's error.
+    @Test
+    func a_download_failure_in_sparkles_order_says_the_download_failed() {
+        var machine = UpdateMachine()
+        machine.handle(.userCheckStarted)
+        machine.handle(found(.notDownloaded))
+        machine.handle(.downloadStarted)
+        machine.handle(.backgroundDownloadStarted)
+        machine.handle(.receivedData(10))
+        machine.handle(.backgroundFailed)
+        #expect(machine.status == .downloading(received: 10, expected: nil))
+        #expect(machine.handle(.failed).toast == .downloadFailed)
+        machine.handle(.sessionEnded)
+        #expect(machine.status == .idle)
+        #expect(!machine.driverSession)
+    }
+
+    @Test
+    func a_check_with_no_update_for_another_reason_says_nothing() {
+        var machine = UpdateMachine()
+        machine.handle(.userCheckStarted)
+        #expect(machine.handle(.notFound(upToDate: false)).toast == nil)
+        #expect(machine.status == .idle)
+    }
+
+    @Test
+    func an_error_after_the_drivers_ready_hides_the_button() {
+        var machine = UpdateMachine()
+        machine.handle(.downloadStarted)
+        machine.handle(.extractionStarted)
+        machine.handle(.readyToInstall(onQuit: false))
+        machine.handle(.failed)
+        #expect(machine.status == .idle)
+    }
+
+    @Test
+    func a_major_upgrade_is_not_installed() {
+        var machine = UpdateMachine()
+        let shown = machine.handle(found(.notDownloaded, needsConsent: true))
+        #expect(shown == .init(reply: .dismiss, toast: .availableOnWebsite(version: "2.1.0")))
+        var scheduled = UpdateMachine()
+        #expect(scheduled.handle(found(.notDownloaded, userInitiated: false, needsConsent: true)) == .init(reply: .dismiss))
+    }
+
     @Test
     func a_waiting_update_survives_later_events() {
         var machine = UpdateMachine()
-        machine.handle(.readyToInstall)
+        machine.handle(.readyToInstall(onQuit: true))
         for event: UpdateEvent in [
             .sessionEnded,
             .failed,
-            .notFound,
+            .notFound(upToDate: true),
             .backgroundFailed,
             .downloadStarted,
             .extractionStarted,
@@ -135,7 +187,7 @@ struct UpdateStatusTests {
     @Test
     func restart_with_no_reply_in_hand_installs_when_the_check_finds_it() {
         var machine = UpdateMachine()
-        machine.handle(.readyToInstall)
+        machine.handle(.readyToInstall(onQuit: true))
         machine.handle(.restartRequested)
         #expect(machine.restartPending)
         #expect(machine.handle(found(.installing)).reply == .install)

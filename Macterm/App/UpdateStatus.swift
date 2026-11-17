@@ -35,7 +35,10 @@ enum UpdateEvent: Equatable {
     /// The user started a check (menu, Settings, palette).
     case userCheckStarted
     case found(UpdateFound)
-    case notFound
+    /// `upToDate` is false when Sparkle found no update for another reason
+    /// (the newest build needs another macOS, an unknown reason). Macterm
+    /// then says nothing, because "up to date" would be wrong.
+    case notFound(upToDate: Bool)
     /// Sparkle reports an error to the user driver. The user knows that a
     /// check or download runs.
     case failed
@@ -43,11 +46,16 @@ enum UpdateEvent: Equatable {
     case expectedLength(UInt64)
     case receivedData(UInt64)
     case extractionStarted
-    case readyToInstall
+    /// The update waits to install. `onQuit` is true for a background
+    /// download that Sparkle installs when the app quits
+    /// (`willInstallUpdateOnQuit`).
+    case readyToInstall(onQuit: Bool)
     /// `SPUUpdaterDelegate`: a download that Sparkle does by itself, with no
     /// user driver.
     case backgroundDownloadStarted
-    /// `SPUUpdaterDelegate`: a background download or check stopped.
+    /// `SPUUpdaterDelegate`: a background download or check stopped. Sparkle
+    /// sends it before `failed` for a download that the user driver shows,
+    /// so it changes nothing while the user driver has the session.
     case backgroundFailed
     /// Sparkle ends the update session (`dismissUpdateInstallation`).
     case sessionEnded
@@ -61,6 +69,10 @@ struct UpdateFound: Equatable {
     var stage: Stage
     var userInitiated: Bool
     var informationOnly: Bool
+    /// A major upgrade, or an appcast that failed its signing check. Sparkle
+    /// does not download these by itself, and Macterm asks no question, so
+    /// it does not install them.
+    var needsConsent: Bool
     var version: String
 }
 
@@ -70,8 +82,8 @@ enum UpdateFoundReply: Equatable {
     case install
     /// Keep the reply. Restart to Update sends `install` later.
     case holdForRestart
-    /// Close the session. The update is information only: the app cannot
-    /// install it.
+    /// Close the session. Macterm cannot install the update with no question
+    /// (information only, a major upgrade).
     case dismiss
 }
 
@@ -95,10 +107,15 @@ enum UpdateToast: Equatable {
 /// The pure state machine from Sparkle's callbacks to the toolbar button.
 /// `Updater` owns one and does what each result asks.
 ///
-/// `readyToRestart` is sticky: Sparkle installs a waiting update when the
-/// app quits, whatever a later check or error says.
+/// `readyToRestart` from a background download is sticky: Sparkle installs
+/// it when the app quits, whatever a later check or error says.
 struct UpdateMachine: Equatable {
     private(set) var status: UpdateStatus = .idle
+    /// Sparkle installs the waiting update when the app quits.
+    private(set) var installsOnQuit = false
+    /// The user driver has the session (a check, a found update, a
+    /// download). Its own callbacks then report the outcome.
+    private(set) var driverSession = false
     /// The user clicked Restart to Update while Macterm had no reply to send.
     /// The next found update at the installing stage then installs at once.
     private(set) var restartPending = false
@@ -113,16 +130,21 @@ struct UpdateMachine: Equatable {
         var result = Result()
         switch event {
         case .userCheckStarted:
-            break
+            driverSession = true
         case let .found(found):
+            driverSession = true
             result = handleFound(found)
-        case .notFound:
-            result.toast = .upToDate
+        case let .notFound(upToDate):
+            result.toast = upToDate ? .upToDate : nil
             settle()
         case .failed:
             result.toast = status.isBusy ? .downloadFailed : .checkFailed
+            // An error after the user driver's ready ends that install. A
+            // background download that waits still installs on quit.
+            if status == .readyToRestart, !installsOnQuit { status = .idle }
             settle()
         case .downloadStarted:
+            driverSession = true
             if status != .readyToRestart { status = .downloading(received: 0, expected: nil) }
         case let .expectedLength(length):
             if case let .downloading(received, _) = status {
@@ -134,12 +156,13 @@ struct UpdateMachine: Equatable {
             }
         case .extractionStarted:
             if status != .readyToRestart { status = .extracting }
-        case .readyToInstall:
+        case let .readyToInstall(onQuit):
+            if onQuit { installsOnQuit = true }
             status = .readyToRestart
         case .backgroundDownloadStarted:
             if status == .idle { status = .downloading(received: 0, expected: nil) }
         case .backgroundFailed:
-            if status.isBusy { status = .idle }
+            if !driverSession, status.isBusy { status = .idle }
         case .sessionEnded:
             settle()
         case .restartRequested:
@@ -149,7 +172,7 @@ struct UpdateMachine: Equatable {
     }
 
     private mutating func handleFound(_ found: UpdateFound) -> Result {
-        if found.informationOnly {
+        if found.informationOnly || found.needsConsent {
             return Result(
                 reply: .dismiss,
                 toast: found.userInitiated ? .availableOnWebsite(version: found.version) : nil
@@ -175,6 +198,7 @@ struct UpdateMachine: Equatable {
     /// The session ended. A waiting update stays; anything else goes.
     private mutating func settle() {
         restartPending = false
+        driverSession = false
         if status != .readyToRestart { status = .idle }
     }
 }

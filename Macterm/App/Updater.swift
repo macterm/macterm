@@ -43,6 +43,8 @@ enum UpdatePolicy {
 /// downloads updates via its own networking path, so installed updates do
 /// not pick up the `com.apple.quarantine` attribute and launch cleanly
 /// without `xattr -cr`.
+/// `@Observable` (not `ObservableObject`/`@Published`) to match the project's
+/// Observation convention.
 @MainActor @Observable
 final class Updater {
     static let shared = Updater()
@@ -62,8 +64,10 @@ final class Updater {
 
     var status: UpdateStatus { machine.status }
 
-    /// `true` while Sparkle downloads or holds an update.
-    var updateAvailable: Bool { machine.status != .idle }
+    /// `true` while the toolbar shows the update button (`status` is not
+    /// idle). A stored copy, written only when it changes, so that the
+    /// window's toolbar does not rebuild for each byte of a download.
+    private(set) var updateAvailable = false
 
     /// `true` once an update waits to install. Sparkle installs it when the
     /// app quits; Restart to Update installs it at once. Never cleared: the
@@ -82,6 +86,10 @@ final class Updater {
     private var heldInstallReply: ((SPUUserUpdateChoice) -> Void)?
     @ObservationIgnored
     private var installOnQuitHandler: (() -> Void)?
+    /// Sparkle's handler that sends the quit event again, after a quit that
+    /// the app cancelled.
+    @ObservationIgnored
+    private var retryTermination: (() -> Void)?
 
     @ObservationIgnored
     private var cancellable: AnyCancellable?
@@ -122,12 +130,13 @@ final class Updater {
         userDriver.onFound = { [weak self] found, reply in self?.handleFound(found, reply: reply) }
         userDriver.onReadyToInstall = { [weak self] reply in
             self?.heldInstallReply = reply
-            self?.handle(.readyToInstall)
+            self?.handle(.readyToInstall(onQuit: false))
         }
+        userDriver.onInstalling = { [weak self] retry in self?.retryTermination = retry }
         updaterDelegate.onEvent = { [weak self] event in self?.handle(event) }
         updaterDelegate.onReadyToInstall = { [weak self] handler in
             self?.installOnQuitHandler = handler
-            self?.handle(.readyToInstall)
+            self?.handle(.readyToInstall(onQuit: true))
         }
         updaterDelegate.onWillScheduleCheck = { [sparkle] in
             UpdatePolicy.enforce(on: sparkle)
@@ -153,12 +162,16 @@ final class Updater {
     /// Install the waiting update and relaunch, with no further UI. Quit is a
     /// detach (sessions survive), so the relaunch reattaches every pane.
     ///
-    /// With no handler in hand, a check finds the waiting update again
-    /// (`SPUUserUpdateStage.installing`), and the machine installs it then.
+    /// After a quit that the app cancelled, a click sends the quit event
+    /// again. With no handler in hand, a check finds the waiting update
+    /// again (`SPUUserUpdateStage.installing`), and the machine installs it
+    /// then.
     func installAndRelaunch() {
         if let reply = heldInstallReply {
             heldInstallReply = nil
             reply(.install)
+        } else if let retryTermination {
+            retryTermination()
         } else if let installOnQuitHandler {
             installOnQuitHandler()
         } else {
@@ -169,15 +182,23 @@ final class Updater {
 
     private func handle(_ event: UpdateEvent) {
         let result = machine.handle(event)
-        if event == .sessionEnded || event == .failed || event == .notFound {
+        syncAvailability()
+        switch event {
+        case .sessionEnded,
+             .failed,
+             .notFound:
             // Sparkle's session ended: a held reply is no longer valid.
             heldInstallReply = nil
+            retryTermination = nil
+        default:
+            break
         }
         if let toast = result.toast { presentToast?(toast.title) }
     }
 
     private func handleFound(_ found: UpdateFound, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         let result = machine.handle(.found(found))
+        syncAvailability()
         switch result.reply {
         case .install: reply(.install)
         case .dismiss: reply(.dismiss)
@@ -185,6 +206,11 @@ final class Updater {
         case nil: reply(.dismiss)
         }
         if let toast = result.toast { presentToast?(toast.title) }
+    }
+
+    private func syncAvailability() {
+        let available = machine.status != .idle
+        if updateAvailable != available { updateAvailable = available }
     }
 
     /// The appcast channel updates are drawn from. Sparkle asks the delegate for
@@ -286,6 +312,7 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
     var onEvent: ((UpdateEvent) -> Void)?
     var onFound: ((UpdateFound, @escaping (SPUUserUpdateChoice) -> Void) -> Void)?
     var onReadyToInstall: ((@escaping (SPUUserUpdateChoice) -> Void) -> Void)?
+    var onInstalling: ((@escaping () -> Void) -> Void)?
 
     /// Updates are always automatic (`UpdatePolicy`), so the answer is fixed.
     func show(_: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
@@ -310,6 +337,7 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
             stage: stage,
             userInitiated: state.userInitiated,
             informationOnly: appcastItem.isInformationOnlyUpdate,
+            needsConsent: appcastItem.isMajorUpgrade || appcastItem.signingValidationStatus == .failed,
             version: appcastItem.displayVersionString
         )
         onFound?(found, reply)
@@ -320,8 +348,11 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
 
     func showUpdateReleaseNotesFailedToDownloadWithError(_: Error) {}
 
-    func showUpdateNotFoundWithError(_: Error, acknowledgement: @escaping () -> Void) {
-        onEvent?(.notFound)
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        let reason = ((error as NSError).userInfo[SPUNoUpdateFoundReasonKey] as? NSNumber)
+            .flatMap { SPUNoUpdateFoundReason(rawValue: $0.int32Value) }
+        let upToDate = reason == .onLatestVersion || reason == .onNewerThanLatestVersion
+        onEvent?(.notFound(upToDate: upToDate))
         acknowledgement()
     }
 
@@ -353,7 +384,10 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
         onReadyToInstall?(reply)
     }
 
-    func showInstallingUpdate(withApplicationTerminated _: Bool, retryTerminatingApplication _: @escaping () -> Void) {}
+    func showInstallingUpdate(withApplicationTerminated terminated: Bool, retryTerminatingApplication retry: @escaping () -> Void) {
+        // Sparkle says not to call the retry handler once the app terminated.
+        if !terminated { onInstalling?(retry) }
+    }
 
     func showUpdateInstalledAndRelaunched(_: Bool, acknowledgement: @escaping () -> Void) {
         acknowledgement()
@@ -399,30 +433,23 @@ struct UpdateToolbarButton: View {
             EmptyView()
         case .downloading,
              .extracting:
-            HStack(spacing: 6) {
+            Label {
+                Text("Downloading…")
+            } icon: {
                 if let fraction = updater.status.fraction {
                     ProgressView(value: fraction)
                 } else {
                     ProgressView()
                 }
-                Text("Downloading…")
             }
+            .labelStyle(.titleAndIcon)
             .progressViewStyle(.circular)
             .controlSize(.small)
-            .fixedSize()
-            .help(String(localized: "Macterm is downloading an update."))
         case .readyToRestart:
-            Button {
+            Button("Restart to Update", systemImage: "arrow.clockwise") {
                 updater.installAndRelaunch()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Restart to Update")
-                }
-                .foregroundStyle(.tint)
             }
-            .fixedSize()
-            .help(String(localized: "Restart Macterm to install the update."))
+            .labelStyle(.titleAndIcon)
         }
     }
 }
