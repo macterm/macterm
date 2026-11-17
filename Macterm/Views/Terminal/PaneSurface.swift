@@ -148,6 +148,21 @@ final class PaneSurface: Identifiable {
         }
     }
 
+    /// How long a destroyed surface keeps `closingSnapshot`. The layout reads
+    /// it in the SwiftUI update that follows the close, and the ghost then
+    /// holds its own reference for the slide. The time is only a margin for
+    /// that one update.
+    static let closingSnapshotLifetime: TimeInterval = 2
+
+    /// Drop `closingSnapshot`. The snapshot is a copy of the whole frame (68 MB
+    /// for a full-screen pane on a 6K display). The registry keeps a
+    /// destroyed surface until its next prune, which can be much later, so
+    /// `SurfaceRegistry.destroySurfaces` calls this after
+    /// `closingSnapshotLifetime`.
+    func releaseClosingSnapshot() {
+        closingSnapshot = nil
+    }
+
     /// The callbacks that belong to this view alone: search, copy mode, the
     /// hover link and read-only. Every surface of a pane gets them.
     private func connectUICallbacks(_ view: GhosttyTerminalNSView) {
@@ -206,10 +221,22 @@ final class PaneSurface: Identifiable {
         }
     }
 
+    /// True after `destroy`. A destroyed surface never gets a view again.
+    ///
+    /// SwiftUI updates the leaf of a pane one more time after the pane left
+    /// the tree. If that update made a new view, the callbacks of the view
+    /// (`TerminalSurface.configure`) would hold the pane, and the registry
+    /// holds the surface that holds the view. The pane, the surface and its
+    /// full-frame `closingSnapshot` then stayed in memory until the app quit.
+    /// `TerminalSurface` reads this flag and makes nothing.
+    @ObservationIgnored
+    private(set) var isDestroyed = false
+
     /// Tear down the ghostty surface and null out callbacks. Safe to call
     /// more than once.
     func destroy() {
         captureClosingSnapshot()
+        isDestroyed = true
         guard let view = _nsView else { return }
         // Null callbacks before destroy so any in-flight ghostty events
         // triggered by destroySurface() itself can't re-enter.
@@ -472,6 +499,16 @@ final class SurfaceRegistry {
             surface.destroy()
         }
         pruneReleasedPanes()
+        // The pane is usually still alive here, so the prune above keeps its
+        // entry. Come back when the ghost has its snapshot: free the frame
+        // copies and drop the entry of a pane that is gone.
+        guard !all.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + PaneSurface.closingSnapshotLifetime) { [weak self] in
+            for surface in all {
+                surface.releaseClosingSnapshot()
+            }
+            self?.pruneReleasedPanes()
+        }
     }
 
     /// Drop the entries of panes that are gone, with their surfaces and
