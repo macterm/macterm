@@ -54,7 +54,7 @@ enum RemotePaneAnswer {
 ///   the pane. The attach after it replays the session's screen.
 /// - **Gone.** A pane whose session ran on the host
 ///   (`Pane.hostSessionDirectory`) and is gone there (a host restart) closes:
-///   the pane exists only while its session exists (Ethan, 2026-11-16). A
+///   the pane exists only while its session exists. A
 ///   server is never started empty in silence for a pane that expects a
 ///   session. A pane from before v2 has no such folder: its first session
 ///   starts with no question, as local panes did at the cut-over.
@@ -157,6 +157,9 @@ final class RemoteHosts {
     /// channel can drop before the session starts: in this time a missing
     /// session is made, not reported as gone.
     @ObservationIgnored private var created: [String: Date] = [:]
+    /// The folder of a session that the app told a client to make, until
+    /// the session attaches.
+    @ObservationIgnored private var creating: [String: String] = [:]
 
     init(connections: SSHConnections, servers: RemoteServers, configuration: Configuration) {
         self.connections = connections
@@ -180,8 +183,9 @@ final class RemoteHosts {
         switch event {
         case .ask:
             if lost.contains(session) {
+                // A view that starts while the pane is lost gets the line too.
                 mark(panes, lost: true)
-                return .wait(message: messages.removeValue(forKey: session))
+                return .wait(message: messages.removeValue(forKey: session) ?? RemotePaneText.linkStopped(host: target.host))
             }
         case .lost:
             logger.info("remote pane: session=\(session, privacy: .public) host=\(target.destination, privacy: .public) lost")
@@ -201,6 +205,16 @@ final class RemoteHosts {
             lost.remove(session)
         }
         return await resolve(session, panes: panes, target: target)
+    }
+
+    /// The session of these panes attached: it ran on the host, so from now
+    /// on a missing session is gone and closes the pane.
+    func sessionAttached(_ session: String, panes: [Pane]) {
+        let directory = creating.removeValue(forKey: session)
+        for pane in panes where pane.hostSessionDirectory == nil {
+            guard let folder = directory ?? Target(pane)?.directory else { continue }
+            pane.hostSessionDirectory = folder
+        }
     }
 
     /// A trigger lets these lost panes connect again. The caller applies
@@ -372,7 +386,8 @@ final class RemoteHosts {
         if found?.isRunning == true { created[session] = nil }
         let step = Self.step(
             running: found?.isRunning == true,
-            sessionDirectory: known,
+            // A mirror makes the session in the folder of the first create.
+            sessionDirectory: justCreated ? known ?? creating[session] : known,
             justCreated: justCreated,
             projectDirectory: target.directory
         )
@@ -386,9 +401,10 @@ final class RemoteHosts {
         case let .create(directory):
             mark(panes, lost: false)
             created[session] = Date()
-            for pane in panes {
-                pane.hostSessionDirectory = directory
-            }
+            // The folder counts only when the session attaches
+            // (`sessionAttached`): a create that fails must not make the
+            // pane close later as gone.
+            creating[session] = directory
             if panes.count > 1 {
                 configuration.post(Self.wakeName(for: session))
             }
@@ -589,6 +605,7 @@ final class RemoteHosts {
 
     private func forget(_ session: String) {
         created[session] = nil
+        creating[session] = nil
         lost.remove(session)
         messages[session] = nil
         for destination in waiting.keys {

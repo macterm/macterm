@@ -44,11 +44,11 @@ final class Pane: Identifiable {
     @ObservationIgnored
     let remoteSpec: ProjectPath?
     /// For a remote pane, the host folder of its session, once its session
-    /// ran on the host's server (0057): the folder of its creation, then the
-    /// shell's own (OSC 7) at each save. nil: the pane never had a v2
-    /// session there (a new pane, or one from before v2), so a missing
-    /// session starts with no question. A pane with a folder whose session
-    /// is gone closes. Persisted
+    /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
+    /// the folder of its creation, then the shell's own (OSC 7) at each
+    /// save. nil: the pane never had a v2 session there (a new pane, or one
+    /// from before v2), so a missing session starts with no question. When
+    /// it is set and the session is gone, the pane closes. It is persisted
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?

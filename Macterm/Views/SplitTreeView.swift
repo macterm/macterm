@@ -146,13 +146,6 @@ struct SplitLeafView: View {
             || (!isFocused && isSplit && SurfaceRegistry.shared.surface(for: pane, in: host).adaptiveBackgroundColor == nil)
     }
 
-    /// Whether the pane is blurred and dimmed: a non-leader mirror. A remote
-    /// pane whose connection stopped only dims (`isSplitDimmed`), so that the
-    /// line of Macterm's on it stays legible.
-    private var isObscured: Bool {
-        isNonLeaderMirror
-    }
-
     var body: some View {
         TerminalPane(
             pane: pane,
@@ -168,7 +161,9 @@ struct SplitLeafView: View {
             onZoomRequest: onZoomRequest
         )
         .overlay {
-            if isObscured {
+            // A remote pane whose connection stopped only dims
+            // (`isSplitDimmed`), so that the line of Macterm's on it stays legible.
+            if isNonLeaderMirror {
                 // A non-leader mirror (#345) is BLURRED, not dimmed. It is not
                 // about focus — it says the pane is not the one driving the
                 // session's pty size, so it is rendering live output laid out

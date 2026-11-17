@@ -39,6 +39,8 @@ final class RemotePaneDriver: PaneInputRoute {
     private var earlyInput = Data()
     /// Input that a lost link refused, in order. It goes before `earlyInput`.
     private var undelivered = Data()
+    /// A key found the link down: connect at once after the `lost` answer.
+    private var retryAfterLost = false
 
     init(name: String, surface: any PaneSessionHost, hosts: RemoteHosts = .shared) {
         self.name = name
@@ -53,6 +55,7 @@ final class RemotePaneDriver: PaneInputRoute {
 
     func stop() {
         generation += 1
+        retryAfterLost = false
         teardown()
         state = .closed
         if wakeToken != NOTIFY_TOKEN_INVALID {
@@ -86,6 +89,10 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .wait(message):
             if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             state = .waiting
+            if retryAfterLost {
+                retryAfterLost = false
+                step(.retry)
+            }
         case .close:
             state = .closed
             surface.paneExited(code: nil, signal: nil)
@@ -155,6 +162,10 @@ final class RemotePaneDriver: PaneInputRoute {
             state = .closed
             surface.paneExited(code: UInt8(truncatingIfNeeded: code), signal: nil)
         }
+    }
+
+    fileprivate func sessionAttached() {
+        hosts.sessionAttached(name, panes: hosts.panes?(name) ?? [])
     }
 
     /// The connection stopped: the pane dims and waits for a trigger.
@@ -230,6 +241,14 @@ final class RemotePaneDriver: PaneInputRoute {
         }
     }
 
+    /// A key that the running session could not send: the link is down, and
+    /// the key asks to connect, as a key in a pane that waits does.
+    fileprivate func keyFoundLinkDown(_ data: Data) {
+        keep(data)
+        retryAfterLost = true
+        linkStopped()
+    }
+
     fileprivate func keepUndelivered(_ data: Data) {
         // A pane that closed has no later attach.
         if case .closed = state { return }
@@ -249,10 +268,8 @@ final class RemotePaneDriver: PaneInputRoute {
     // MARK: - The session's host
 
     /// What a session of this driver reports: everything goes to the
-    /// surface, and a lost link goes to the driver. A report counts only
-    /// while its session is the driver's running one: an old session's
-    /// report must not stop a new one, and the running one's report must
-    /// never be lost, or the pane freezes with no sign.
+    /// surface, and a lost link goes to the driver. A report counts only from
+    /// the driver's running session: an old session must not stop a new one.
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
         private let surface: any PaneSessionHost
@@ -280,6 +297,14 @@ final class RemotePaneDriver: PaneInputRoute {
 
         func paneSnapshot(started: Bool) {
             surface.paneSnapshot(started: started)
+            // Each attach starts with a snapshot: the session runs.
+            guard started else { return }
+            DispatchQueue.main.async { [weak driver, self] in
+                MainActor.assumeIsolated {
+                    guard let driver, isCurrent(driver) else { return }
+                    driver.sessionAttached()
+                }
+            }
         }
 
         func paneForeground(_ foreground: MactermProtocol.Foreground) {
@@ -311,9 +336,9 @@ final class RemotePaneDriver: PaneInputRoute {
             DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
                     guard let driver else { return }
+                    if isCurrent(driver) { return driver.keyFoundLinkDown(data) }
                     // A late failure of an old session counts only while the pane waits.
-                    let waits = if case .waiting = driver.state { true } else { false }
-                    if isCurrent(driver) || waits { driver.keepUndelivered(data) }
+                    if case .waiting = driver.state { driver.keepUndelivered(data) }
                 }
             }
         }

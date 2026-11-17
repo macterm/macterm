@@ -107,8 +107,9 @@ struct RemoteHostsTests {
             #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: line))
             #expect(pane.isRemoteLinkLost)
             #expect(pane.isDisconnected)
-            // No trigger yet: the pane keeps waiting.
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            // No trigger yet: the pane keeps waiting. A view that asks now
+            // gets the line too.
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: line))
 
             // A trigger wakes the pane; it logs in again and attaches to the
             // same session, which replays its screen.
@@ -217,6 +218,7 @@ struct RemoteHostsTests {
             first.type("printf 'up-%s\\n' 1\n")
             try await first.host.waitFor { $0.screen.contains("up-1") }
             first.stop()
+            #expect(pane.hostSessionDirectory == fixture.directory)
 
             // The host restarts: its server and sessions are gone, so the
             // pane closes. No new shell takes its place.
@@ -231,11 +233,27 @@ struct RemoteHostsTests {
             let fixture = Fixture(host)
             let pane = fixture.pane()
             _ = try await fixture.attach(pane)
-            #expect(pane.hostSessionDirectory == fixture.directory)
+            // No attach yet: the folder does not count.
+            #expect(pane.hostSessionDirectory == nil)
             // The first pane has not made its session yet: the host has no
             // session. A second window's view of the pane asks now.
             let (_, create) = try await fixture.attach(pane)
             #expect(create == fixture.directory)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_pane_whose_create_never_attached_is_made_again_and_not_closed() async throws {
+        try await withSSHDHost { host in
+            // The grace is over at once, as after a failed create.
+            let fixture = Fixture(host, creationGrace: 0)
+            let pane = fixture.pane()
+            _ = try await fixture.attach(pane)
+            // The create never ran: the pane asks again, and gets a new
+            // session, not a close.
+            let (_, create) = try await fixture.attach(pane)
+            #expect(create == fixture.directory)
+            #expect(pane.hostSessionDirectory == nil)
         }
     }
 
@@ -386,6 +404,9 @@ struct RemoteHostsTests {
                 host: host, connect: { link.connection }
             )
             session.start()
+            try await host.waitFor { $0.resets > 0 }
+            // What the driver does at the attach's snapshot.
+            hosts.sessionAttached(pane.sessionName, panes: [pane])
             return Running(session: session, host: host)
         }
 
