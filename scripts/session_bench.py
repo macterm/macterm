@@ -1175,8 +1175,8 @@ def gate_base(kind, median):
 
 def cmd_limits(args):
     """Each limit is the base (gate_base) plus the noise: the largest distance
-    of one run's statistic from the base. The base is the median or less, so
-    each run passes its own limit without the floor. The runs are of one
+    of one run's statistic from the base. The noise is measured from the base,
+    so each run passes its own limit without the floor. The runs are of one
     commit, or of commits that do not change the session layer."""
     by_system = {}
     for result in load_results(args.results):
