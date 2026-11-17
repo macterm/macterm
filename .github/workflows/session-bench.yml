@@ -119,7 +119,9 @@ jobs:
           name: session-results-macos-${{ matrix.runner }}
           path: session-macos-${{ matrix.runner }}.json
 
-  # The gate of the two macOS runners. Ubuntu, because it only reads JSON.
+  # The gate of the two macOS runners. A job of its own, because a matrix job
+  # adds its matrix values to its name, and the required check is
+  # "Session Layer (macOS)". Ubuntu, because it only reads JSON.
   macos-gate:
     name: Session Layer (macOS)
     needs: [changes, macos]
