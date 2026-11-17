@@ -345,6 +345,11 @@ struct RemoteHostsTests {
             #expect(host.asked == ["box"])
             #expect(fixture.hosts.declined == ["box"])
             #expect(fixture.hosts.plainDestinations == ["box"])
+            // A lost connection drops the host, and the host stays plain.
+            let lost = fixture.pane()
+            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, panes: [lost])
+            #expect(lost.isRemoteLinkLost)
+            #expect(fixture.hosts.plainDestinations == ["box"])
             // A second decline from Settings keeps the host plain.
             await #expect(throws: RemoteServers.Failure.self) { try await fixture.hosts.installServer("box") }
             #expect(fixture.hosts.plainDestinations == ["box"])

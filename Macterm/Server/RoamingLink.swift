@@ -23,14 +23,21 @@ enum RoamingLink {
         var transport: LinkTransport
     }
 
-    /// `onDead` runs when the link ends by itself (no packet for
-    /// `LinkTransport.deadAfter`).
+    /// What the transport reports, on its thread.
+    struct Events {
+        /// The link ended by itself (no packet for `LinkTransport.deadAfter`).
+        var dead: @Sendable () -> Void
+        /// The link became quiet, or hears the host again
+        /// (`LinkTransport.isQuiet`).
+        var quiet: @Sendable (Bool) -> Void
+    }
+
     static func open(
         destination: String,
         over ssh: RemoteServers.Link,
         connections: SSHConnections,
         enabled: Bool,
-        onDead: @escaping @Sendable () -> Void
+        events: Events
     ) async -> Opened? {
         guard enabled else { return nil }
         let hello = ssh.connection.serverHello
@@ -59,7 +66,7 @@ enum RoamingLink {
         do {
             let made = try LinkTransport(host: host, port: port, key: key, keyID: keyID)
             transport = made
-            try made.start(onDead: onDead)
+            try made.start(onDead: events.dead, onQuiet: events.quiet)
             handedOff = true
             let connection = try await Task.detached {
                 try ServerConnection.handshake(fd: made.connectionFD, peerPID: nil, timeout: 3)
