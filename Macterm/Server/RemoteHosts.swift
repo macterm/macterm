@@ -586,8 +586,8 @@ final class RemoteHosts {
                     dead: { [weak self] in
                         Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
                     },
-                    quiet: { [weak self] quiet in
-                        Task { @MainActor in self?.roamingQuiet(destination, generation: generation, quiet: quiet) }
+                    quiet: { [weak self] in
+                        Task { @MainActor in self?.roamingQuiet(destination, generation: generation) }
                     }
                 )
             )
@@ -608,13 +608,16 @@ final class RemoteHosts {
             transports[destination]?.stop()
             transports[destination] = opened.transport
             hosts[destination] = .ready(opened.link)
+            setQuiet(destination, opened.transport.isQuiet)
         }
     }
 
     /// The roaming link of this generation stopped or started to hear the
-    /// host.
-    private func roamingQuiet(_ destination: String, generation: Int, quiet: Bool) {
-        guard roamingGeneration[destination] == generation else { return }
+    /// host. The state comes from the transport, not from the event, so
+    /// events in a different order give the same result.
+    private func roamingQuiet(_ destination: String, generation: Int) {
+        guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
+        let quiet = transport.isQuiet
         logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
         setQuiet(destination, quiet)
     }

@@ -27,9 +27,9 @@ enum RoamingLink {
     struct Events {
         /// The link ended by itself (no packet for `LinkTransport.deadAfter`).
         var dead: @Sendable () -> Void
-        /// The link became quiet, or hears the host again
-        /// (`LinkTransport.isQuiet`).
-        var quiet: @Sendable (Bool) -> Void
+        /// The link became quiet, or hears the host again: read
+        /// `LinkTransport.isQuiet`.
+        var quiet: @Sendable () -> Void
     }
 
     static func open(

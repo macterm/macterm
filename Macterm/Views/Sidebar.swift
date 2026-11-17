@@ -1208,7 +1208,7 @@ private struct SidebarProjectRow: View {
     /// cannot be reached: a pane of the project lost its connection
     /// (`Workspace.hasLostRemoteLink`), or the host's roaming link hears
     /// nothing (`RemoteHosts.quietDestinations`). Both symbols stay in the
-    /// layout and only one is visible. Thus the mark after it does not move.
+    /// layout and only one is visible. So the mark after it does not move.
     private func remoteMark(host: String, destination: String) -> some View {
         let lost = appState.workspaces[project.id]?.hasLostRemoteLink == true
             || RemoteHosts.shared.quietDestinations.contains(destination)

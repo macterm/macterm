@@ -47,9 +47,17 @@ final class LinkTransport: @unchecked Sendable {
     private var started = false
     private var onDead: (@Sendable () -> Void)?
     /// Runs on the thread when the link becomes quiet, and when a packet
-    /// comes again (`isQuiet`).
-    private var onQuiet: (@Sendable (Bool) -> Void)?
+    /// comes again. It says only that the state changed: read `isQuiet`.
+    private var onQuiet: (@Sendable () -> Void)?
+    /// Under `lock`.
     private var quiet = false
+
+    /// The link hears nothing from the host now (`quietAfter`).
+    var isQuiet: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return quiet
+    }
 
     private var udp: Int32 = -1
     private var remote = sockaddr_storage()
@@ -97,7 +105,7 @@ final class LinkTransport: @unchecked Sendable {
     /// Starts the thread. `onDead` runs once, on the thread, when the link
     /// ends by itself. `onQuiet` runs on the thread when the quiet state of
     /// the link changes.
-    func start(onDead: @escaping @Sendable () -> Void, onQuiet: @escaping @Sendable (Bool) -> Void = { _ in }) throws {
+    func start(onDead: @escaping @Sendable () -> Void, onQuiet: @escaping @Sendable () -> Void = {}) throws {
         lock.lock()
         let wasStopped = stopped
         lock.unlock()
@@ -206,12 +214,15 @@ final class LinkTransport: @unchecked Sendable {
     }
 
     private func reportQuiet(_ now: Bool) {
-        guard now != quiet else { return }
-        quiet = now
         lock.lock()
+        guard now != quiet else {
+            lock.unlock()
+            return
+        }
+        quiet = now
         let callback = onQuiet
         lock.unlock()
-        callback?(now)
+        callback?()
     }
 
     private func transmit(now: Int64) {

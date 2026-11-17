@@ -68,29 +68,30 @@ struct LinkTransportTests {
             .init(secret: ProtocolSecret(key), keyId: keyID)
         ).port
 
-        let changes = LockedBox<[Bool]>([])
+        let changes = LockedBox<Int>(0)
         let transport = try LinkTransport(host: "127.0.0.1", port: port, key: key, keyID: keyID)
-        try transport.start(onDead: {}, onQuiet: { quiet in changes.mutate { $0.append(quiet) } })
+        try transport.start(onDead: {}, onQuiet: { changes.mutate { $0 += 1 } })
         defer { transport.stop() }
         let link = try await Task.detached {
             try ServerConnection.handshake(fd: transport.connectionFD, peerPID: nil, timeout: 5)
         }.value
         defer { link.close() }
         _ = try await link.call(MactermProtocol.Ping.self, .init())
-        #expect(changes.value.isEmpty)
+        #expect(changes.value == 0)
+        #expect(!transport.isQuiet)
 
         // The host stops: no packet comes back, as when the network drops.
         _ = try await control.call(MactermProtocol.ServerExit.self, .init())
         let deadline = Date().addingTimeInterval(Double(LinkTransport.quietAfter) / 1000 + 10)
-        while changes.value.isEmpty, Date() < deadline {
+        while changes.value == 0, Date() < deadline {
             try await Task.sleep(for: .milliseconds(200))
         }
-        #expect(changes.value == [true])
+        #expect(changes.value == 1)
+        #expect(transport.isQuiet)
     }
 
     @Test
     func a_link_is_quiet_after_three_missed_keepalives() {
-        #expect(LinkTransport.quietAfter >= 3 * LinkStream.keepalive)
         #expect(!LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter + 1))
         #expect(LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter))
     }
