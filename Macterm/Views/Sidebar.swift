@@ -248,8 +248,8 @@ struct SidebarContent: View {
                     }
                 }
             }
-            ForEach(Array(projectStore.projects.enumerated()), id: \.element.id) { projectIndex, project in
-                projectSection(index: projectIndex, project: project)
+            ForEach(projectStore.projects, id: \.id) { project in
+                projectSection(project: project)
             }
             // Scratch tabs (#665) live below every project as flat rows, the
             // mirror of the pinned rows above: no header, and no separator.
@@ -494,7 +494,7 @@ struct SidebarContent: View {
     /// Extracted from `body` so each drag/drop closure type-checks in its own
     /// scope — inlined, the whole `List` blew the solver's time budget.
     @ViewBuilder
-    private func projectSection(index projectIndex: Int, project: Project) -> some View {
+    private func projectSection(project: Project) -> some View {
         let ws = appState.workspaces[project.id]
         let tabs = ws?.tabs ?? []
         DisclosureGroup(isExpanded: Binding(
@@ -528,7 +528,7 @@ struct SidebarContent: View {
                 }
             }
         } label: {
-            projectHeader(index: projectIndex, project: project)
+            projectHeader(project: project)
         }
         .id(SidebarItem.project(project.id))
     }
@@ -571,10 +571,9 @@ struct SidebarContent: View {
         // it on a project header instead. The insertion line won.
     }
 
-    private func projectHeader(index projectIndex: Int, project: Project) -> some View {
+    private func projectHeader(project: Project) -> some View {
         SidebarProjectHeader(
             project: project,
-            index: projectIndex + 1,
             presentation: presentation,
             isInteractive: isInteractive,
             onRename: { appState.renameProject(project.id, to: $0, store: projectStore) },
@@ -1090,7 +1089,6 @@ extension View {
 /// invalidated the pinned section, every project, and every tab row.
 private struct SidebarProjectHeader: View {
     let project: Project
-    let index: Int
     @Bindable
     var presentation: SidebarPresentationState
     let isInteractive: Bool

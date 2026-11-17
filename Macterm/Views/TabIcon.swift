@@ -231,12 +231,9 @@ struct TabRowIcon: View {
 }
 
 extension SidebarRowSize {
-    /// Multiplier for the sidebar glyphs sized by hand rather than by the
-    /// row's font: the agent logo's frame, the plain-digit number glyph, the
-    /// running spinner, the completion dot. Taken from AppKit rather than
-    /// guessed so those glyphs track the SF Symbols beside them:
-    /// `NSImage.SymbolConfiguration` renders a 13pt symbol 12/14/18pt tall at
-    /// small/medium/large.
+    /// The scale of the glyphs that Macterm sizes by hand (agent logo, number
+    /// digits, spinner, done dot). The values are AppKit's heights of a 13 pt
+    /// symbol at small, medium and large: 12, 14 and 18 pt.
     var glyphScale: CGFloat {
         switch self {
         case .small: 12.0 / 14.0
