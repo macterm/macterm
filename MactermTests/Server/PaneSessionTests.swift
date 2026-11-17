@@ -118,8 +118,12 @@ struct PaneSessionTests {
             try await host.waitFor { $0.screen.contains("up-ok") }
             connections.current?.close()
             try await host.waitFor { $0.linkLost > 0 }
+            let reports = host.snapshot().linkLost
             session.sendInput(Data("k".utf8))
             try await host.waitFor { $0.undelivered == Data("k".utf8) }
+            // The key reports the lost link again: a pane whose first report
+            // went missing must not stay frozen.
+            #expect(host.snapshot().linkLost == reports + 1)
             session.stop()
         }
     }

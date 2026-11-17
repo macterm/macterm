@@ -113,11 +113,15 @@ final class RemotePaneDriver: PaneInputRoute {
                 launch = made.launch
                 if let note = made.note { surface.paneFeed(Data(Self.paneText(note).utf8)) }
             }
+            // A step that came after this answer owns the pane now.
+            guard mine == generation else { return }
+            let forward = Forward(driver: self, surface: surface)
             let session = PaneSession(
                 name: name, launch: launch, wantsForeground: true, wantsTty: true, reconnects: false,
-                host: Forward(driver: self, generation: mine, surface: surface),
+                host: forward,
                 connect: { link.connection }
             )
+            forward.session = session
             state = .running(session)
             session.start()
             let waiting = undelivered + earlyInput
@@ -245,16 +249,25 @@ final class RemotePaneDriver: PaneInputRoute {
     // MARK: - The session's host
 
     /// What a session of this driver reports: everything goes to the
-    /// surface, and a lost link goes to the driver.
+    /// surface, and a lost link goes to the driver. A report counts only
+    /// while its session is the driver's running one: an old session's
+    /// report must not stop a new one, and the running one's report must
+    /// never be lost, or the pane freezes with no sign.
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
-        private let generation: Int
         private let surface: any PaneSessionHost
+        /// Set once, on the main actor, before the session starts.
+        weak var session: PaneSession?
 
-        init(driver: RemotePaneDriver, generation: Int, surface: any PaneSessionHost) {
+        init(driver: RemotePaneDriver, surface: any PaneSessionHost) {
             self.driver = driver
-            self.generation = generation
             self.surface = surface
+        }
+
+        @MainActor
+        private func isCurrent(_ driver: RemotePaneDriver) -> Bool {
+            guard case let .running(running) = driver.state, let session else { return false }
+            return running === session
         }
 
         func paneFeed(_ data: Data) {
@@ -286,23 +299,21 @@ final class RemotePaneDriver: PaneInputRoute {
         }
 
         func paneLinkLost() {
-            let mine = generation
-            DispatchQueue.main.async { [weak driver] in
+            DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
-                    guard let driver, driver.generation == mine, case .running = driver.state else { return }
+                    guard let driver, isCurrent(driver) else { return }
                     driver.linkStopped()
                 }
             }
         }
 
         func paneInputUndelivered(_ data: Data) {
-            let mine = generation
-            DispatchQueue.main.async { [weak driver] in
+            DispatchQueue.main.async { [weak driver, self] in
                 MainActor.assumeIsolated {
                     guard let driver else { return }
                     // A late failure of an old session counts only while the pane waits.
                     let waits = if case .waiting = driver.state { true } else { false }
-                    if driver.generation == mine || waits { driver.keepUndelivered(data) }
+                    if isCurrent(driver) || waits { driver.keepUndelivered(data) }
                 }
             }
         }
