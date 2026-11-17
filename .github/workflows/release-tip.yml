@@ -192,7 +192,6 @@ jobs:
     if: needs.gate.outputs.build == 'true'
     permissions:
       contents: write
-      pull-requests: read
     uses: ./.github/workflows/server-build.yml
     with:
       prebuilt: false

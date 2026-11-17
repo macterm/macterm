@@ -46,7 +46,6 @@ jobs:
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.extensions == 'true'
     permissions:
       contents: write
-      pull-requests: read
     uses: ./.github/workflows/server-build.yml
 
   unit:

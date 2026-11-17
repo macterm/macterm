@@ -5,7 +5,8 @@
 #
 # It keeps these builds and removes all others:
 #   - the build of main's key,
-#   - the build of the key of the head commit of each open pull request,
+#   - the build of the key of the head commit of each open pull request, and
+#     of its merge commit (CI on a pull request builds the merge commit),
 #   - each build that has an asset from the last $KEEP_DAYS days.
 # Setup downloads the build of its key, and the Zig fallback cannot link on
 # macOS with Xcode 26.4 or later (zig#31658). Thus a checkout whose build is
@@ -37,7 +38,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
 GIT_DIR_ABS="$(git -C "$ROOT" rev-parse --absolute-git-dir)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/macterm-prune.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+# A ref of this run only, removed at the exit.
+REF="refs/prune-server-prebuilts/$$"
+trap 'git -C "$ROOT" update-ref -d "$REF" 2> /dev/null || true; rm -rf "$work"' EXIT
 
 # Prints the key of a commit, with the build-server.sh of that commit.
 key_of() {
@@ -49,14 +52,14 @@ key_of() {
 }
 
 # A shallow clone (CI) fetches one commit. A full clone stays full.
-depth=()
-[[ "$(git -C "$ROOT" rev-parse --is-shallow-repository)" == true ]] && depth=(--depth=1)
+depth=--no-tags
+[[ "$(git -C "$ROOT" rev-parse --is-shallow-repository)" == true ]] && depth=--depth=1
 
 # Fetches a ref from origin and prints the key of its commit.
 key_of_remote() {
   local ref="$1"
-  git -C "$ROOT" fetch -q "${depth[@]}" origin "+$ref:refs/prune-server-prebuilts/head" || return 1
-  key_of refs/prune-server-prebuilts/head
+  git -C "$ROOT" fetch -q "$depth" origin "+$ref:$REF" || return 1
+  key_of "$REF"
 }
 
 fail_closed() {
@@ -73,8 +76,11 @@ prs="$(gh pr list --repo "$REPO" --state open --limit 1000 --json number --jq '.
 for pr in $prs; do
   key="$(key_of_remote "refs/pull/$pr/head")" || fail_closed "Cannot find the key of pull request $pr"
   echo "$key #$pr" >> "$keep"
+  # A pull request with a conflict has no merge commit.
+  if key="$(key_of_remote "refs/pull/$pr/merge" 2> /dev/null)"; then
+    echo "$key #$pr-merge" >> "$keep"
+  fi
 done
-git -C "$ROOT" update-ref -d refs/prune-server-prebuilts/head 2> /dev/null || true
 
 # The cutoff as the API writes times, so that a string compare is a time compare.
 cutoff="$(date -u -d "-$KEEP_DAYS days" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null ||

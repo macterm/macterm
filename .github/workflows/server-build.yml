@@ -17,10 +17,8 @@ name: Server Build
 #
 # A build that this job made goes to the `server-prebuilt` release, so that
 # setup on a Mac without Zig can download it. An asset is never replaced. A
-# pull request from a fork has a read-only token and uploads nothing. After
-# each upload, scripts/prune-server-prebuilts.sh removes old builds: it keeps
-# the build of main's key, of each open pull request's head and of the last
-# 14 days.
+# pull request from a fork has a read-only token and uploads nothing.
+# server-prebuilt-prune.yml removes old builds.
 #
 # macos-26 with Xcode 26.3: lipo needs macOS, and zig cannot link with Xcode
 # 26.4 or later (zig#31658). The macOS 27 runner has nothing older.
@@ -103,7 +101,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-      pull-requests: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE: server-prebuilt
@@ -180,11 +177,6 @@ jobs:
             rm -rf build/server
             cp -R "$served" build/server
           fi
-
-      # Only after a good upload: a failed run removes nothing.
-      - name: Remove Old Prebuilts
-        if: steps.upload.outcome == 'success'
-        run: scripts/prune-server-prebuilts.sh
 
       - uses: actions/upload-artifact@v7
         with:

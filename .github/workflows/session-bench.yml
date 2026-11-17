@@ -52,7 +52,6 @@ jobs:
     if: needs.changes.outputs.bench == 'true'
     permissions:
       contents: write
-      pull-requests: read
     uses: ./.github/workflows/server-build.yml
 
   # v1's and v2's local panes side by side. The idle arm reads libproc, so it
