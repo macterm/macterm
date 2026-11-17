@@ -94,9 +94,14 @@ struct SettingsInfoTile: View {
             .font(.system(size: 14, weight: .semibold))
         switch style {
         case .box:
-            glyph
-                .foregroundStyle(tint)
+            // A hidden line in the title's font gives the box the height and
+            // the baseline of the title's first line, whatever the glyph's own
+            // height. The glyph is centered on that line, so a tall glyph
+            // (`key`) does not make its block taller than the others.
+            Text(verbatim: " ")
+                .hidden()
                 .frame(width: Self.boxWidth)
+                .overlay { glyph.foregroundStyle(tint) }
                 .accessibilityHidden(true)
         case .tile:
             glyph

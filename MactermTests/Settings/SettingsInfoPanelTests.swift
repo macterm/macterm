@@ -37,8 +37,8 @@ struct SettingsInfoPanelTests {
 
             let marker = TextOriginMarker()
             let block = NSHostingView(rootView: SettingsInfoBlock(symbol: symbol, style: style) {
-                marker
                 Text(verbatim: "Title")
+                    .background(alignment: .topLeading) { marker }
                 Text(verbatim: "A caption that wraps onto a second line at this width, as a pane caption does.")
             }
             .frame(width: 480))
