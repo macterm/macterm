@@ -412,12 +412,15 @@ struct CheckForUpdatesMenuItem: View {
 /// knows the size), then Restart to Update, which installs and relaunches.
 /// No button while idle.
 ///
-/// On macOS 26 the item hides the shared toolbar background (`MainWindow`)
-/// and the button draws its own glass capsule with the native insets of
-/// `.glass`. The shared background hugs a title-and-icon label with almost
-/// no inner padding.
+/// The item keeps the shared toolbar background, which gives it the height
+/// and the edge margin of the other toolbar items. On macOS 26 that capsule
+/// hugs a title-and-icon label (about 8 pt leading, 6 pt trailing), so the
+/// label adds `glassInset` on each side.
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
+
+    /// The extra inner padding of the label in the macOS 26 toolbar capsule.
+    static let glassInset: CGFloat = 8
 
     var body: some View {
         switch updater.status {
@@ -425,51 +428,36 @@ struct UpdateToolbarButton: View {
             EmptyView()
         case .downloading,
              .extracting:
-            if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                // A button only for the capsule of Restart to Update. It does nothing.
-                glass(Button {} label: { downloadingLabel })
-                    .allowsHitTesting(false)
-                    .focusable(false)
-                    .accessibilityRemoveTraits(.isButton)
-                    .accessibilityAddTraits(.updatesFrequently)
-            } else {
-                downloadingLabel
-                    .labelStyle(.titleAndIcon)
-            }
-        case .readyToRestart:
-            let button = Button("Restart to Update", systemImage: "arrow.clockwise") {
-                updater.installAndRelaunch()
-            }
-            if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                glass(button)
-            } else {
-                button.labelStyle(.titleAndIcon)
-            }
-        }
-    }
-
-    private var downloadingLabel: some View {
-        Label {
-            Text("Downloading…")
-        } icon: {
-            Group {
-                if let fraction = updater.status.fraction {
-                    ProgressView(value: fraction)
-                } else {
-                    ProgressView()
+            inset(Label {
+                Text("Downloading…")
+            } icon: {
+                Group {
+                    if let fraction = updater.status.fraction {
+                        ProgressView(value: fraction)
+                    } else {
+                        ProgressView()
+                    }
                 }
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+            })
+        case .readyToRestart:
+            Button {
+                updater.installAndRelaunch()
+            } label: {
+                inset(Label("Restart to Update", systemImage: "arrow.clockwise"))
             }
-            .progressViewStyle(.circular)
-            .controlSize(.small)
         }
     }
 
-    @available(macOS 26.0, *)
-    private func glass(_ button: some View) -> some View {
-        button
-            .labelStyle(.titleAndIcon)
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
+    @ViewBuilder
+    private func inset(_ label: some View) -> some View {
+        if WindowAppearance.glassSupported {
+            label
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, Self.glassInset)
+        } else {
+            label.labelStyle(.titleAndIcon)
+        }
     }
 }

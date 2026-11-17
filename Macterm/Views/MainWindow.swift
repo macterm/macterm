@@ -204,16 +204,8 @@ struct MainWindow: View {
                 // Only while an update downloads or waits: a structural branch,
                 // so that an idle toolbar has no empty item.
                 if Updater.shared.updateAvailable {
-                    if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                        // The button draws its own glass capsule.
-                        ToolbarItem(placement: .primaryAction) {
-                            UpdateToolbarButton()
-                        }
-                        .sharedBackgroundVisibility(.hidden)
-                    } else {
-                        ToolbarItem(placement: .primaryAction) {
-                            UpdateToolbarButton()
-                        }
+                    ToolbarItem(placement: .primaryAction) {
+                        UpdateToolbarButton()
                     }
                 }
                 // Only while Project Insights is on (Settings → Intelligence)
