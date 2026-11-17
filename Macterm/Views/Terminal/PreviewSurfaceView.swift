@@ -7,13 +7,13 @@ import SwiftUI
 /// so only a real surface shows their real look.
 ///
 /// The surface is manual (`manual_io`): no pty, no shell, no session. Macterm
-/// feeds the text with `ghostty_surface_feed`, and a write of the surface (a
-/// terminal reply) goes nowhere. Its userdata is nil, so every callback of
-/// `GhosttyCallbacks` drops its actions. It is not a `GhosttyTerminalNSView`:
-/// no tab, window, quit prompt or pane list counts it. `GhosttyApp` gives it
-/// each config reload (`allLiveViews`), so a toggle applies to it at once,
-/// and it takes the user's whole config (cursor style and blink included).
-/// The surface lives while the view is in a window.
+/// feeds the text with `ghostty_surface_feed`. A write of the surface (a
+/// terminal reply) goes nowhere. Its userdata is nil, so each action of
+/// `GhosttyCallbacks` that needs a view returns early. It is not a
+/// `GhosttyTerminalNSView`, so no tab, window, quit prompt or pane list counts
+/// it. `GhosttyApp` gives it each config reload (`liveSurfaces`). A toggle
+/// therefore applies to it at once. It takes the user's whole config, cursor
+/// style and blink included. The surface lives while the view is in a window.
 final class PreviewSurfaceView: NSView {
     enum Kind {
         /// Scrollback to scroll with the wheel or the trackpad. No cursor.
@@ -73,6 +73,12 @@ final class PreviewSurfaceView: NSView {
         let resize: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.updateSize() }
         }
+        let occlusion: @Sendable (Notification) -> Void = { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                if let window { WindowOcclusionReports.noteReport(from: window) }
+                self?.syncOcclusion()
+            }
+        }
         let center = NotificationCenter.default
         windowObservers = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main, using: sync),
@@ -80,7 +86,12 @@ final class PreviewSurfaceView: NSView {
             center.addObserver(
                 forName: NSWindow.didChangeBackingPropertiesNotification, object: window, queue: .main, using: resize
             ),
+            center.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main, using: resize),
+            center.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main, using: occlusion
+            ),
         ]
+        syncOcclusion()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -99,18 +110,22 @@ final class PreviewSurfaceView: NSView {
         config.userdata = nil
         config.scale_factor = Double(window?.backingScaleFactor ?? 2.0)
         config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
-        config.initial_width_px = UInt32(backing.width)
-        config.initial_height_px = UInt32(backing.height)
+        if SurfaceSizeGate.admits(
+            widthPx: UInt32(backing.width), heightPx: UInt32(backing.height),
+            cellWidthPx: GhosttyTerminalNSView.lastMeasuredCellSize.width,
+            cellHeightPx: GhosttyTerminalNSView.lastMeasuredCellSize.height
+        ) {
+            config.initial_width_px = UInt32(backing.width)
+            config.initial_height_px = UInt32(backing.height)
+        }
         Self.enableManualIO(&config)
         guard let surface = ghostty_surface_new(app, &config) else { return }
         self.surface = surface
 
         syncColorScheme()
-        if let displayID = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 {
-            ghostty_surface_set_display_id(surface, displayID)
-        }
         updateSize()
         syncFocus()
+        syncOcclusion()
         feedInitialText()
     }
 
@@ -136,9 +151,35 @@ final class PreviewSurfaceView: NSView {
         layer?.cornerRadius = Self.cornerRadius
         layer?.masksToBounds = true
         ghostty_surface_set_content_scale(surface, scale, scale)
+        // Gated as every pane resize is (`SurfaceSizeGate`): a sliver would
+        // reflow the rows into fragments.
         let backing = convertToBacking(bounds).size
-        guard backing.width > 0, backing.height > 0 else { return }
+        let cells = ghostty_surface_size(surface)
+        guard SurfaceSizeGate.admits(
+            widthPx: UInt32(backing.width), heightPx: UInt32(backing.height),
+            cellWidthPx: cells.cell_width_px, cellHeightPx: cells.cell_height_px
+        )
+        else { return }
         ghostty_surface_set_size(surface, UInt32(backing.width), UInt32(backing.height))
+        if let screen = window.screen,
+           let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32
+        {
+            ghostty_surface_set_display_id(surface, displayID)
+        }
+    }
+
+    /// The renderer sleeps while the Settings window is hidden or covered, as
+    /// a pane's renderer does (`SurfaceVisibility`).
+    private func syncOcclusion() {
+        guard let surface else { return }
+        let visible = SurfaceVisibility.isVisible(
+            rendersForPreview: false,
+            hiddenInLayout: false,
+            windowIsVisible: window?.isVisible ?? false,
+            windowReportsVisible: window?.occlusionState.contains(.visible) ?? false,
+            windowHasReportedOcclusion: window.map(WindowOcclusionReports.hasReported) ?? false
+        )
+        ghostty_surface_set_occlusion(surface, visible)
     }
 
     /// The cursor animates and blinks only on a focused surface, as in a pane
@@ -189,6 +230,11 @@ final class PreviewSurfaceView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard kind == .cursor, let surface else { return }
         let size = ghostty_surface_size(surface)
+        // Put the cursor on its known cell first. A wrap or a reflow can have
+        // moved it, and the IME point below must name that cell.
+        cursorCell.column = min(cursorCell.column, max(Int(size.columns) - 1, 0))
+        cursorCell.row = min(cursorCell.row, max(Int(size.rows) - 1, 0))
+        feed(PreviewSurfaceText.moveCursor(to: cursorCell))
         let scale = Double(window?.backingScaleFactor ?? 2.0)
         var x = 0.0, y = 0.0, w = 0.0, h = 0.0
         ghostty_surface_ime_point(surface, &x, &y, &w, &h)
@@ -213,8 +259,8 @@ final class PreviewSurfaceView: NSView {
             super.scrollWheel(with: event)
             return
         }
-        // As `GhosttyTerminalNSView.scrollWheel`: Ghostty.app's 2× on precise
-        // deltas, and the core does the scrolling.
+        // This is the same as `GhosttyTerminalNSView.scrollWheel`. Precise
+        // deltas get the 2× of Ghostty.app. The core does the scrolling.
         var x = event.scrollingDeltaX
         var y = event.scrollingDeltaY
         if event.hasPreciseScrollingDeltas {
@@ -288,7 +334,7 @@ enum PreviewSurfaceText {
             comment: "Text in the cursor preview of Settings → Animations"
         )
         let cursor = PreviewSurfaceGrid.Cell(column: 0, row: 1)
-        return (sentence + "\r\n", cursor)
+        return (sentence + moveCursor(to: cursor), cursor)
     }
 
     /// CUP to `cell` (1-based in the sequence).

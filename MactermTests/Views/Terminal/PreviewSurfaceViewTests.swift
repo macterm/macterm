@@ -62,7 +62,7 @@ struct PreviewSurfaceViewTests {
     @Test
     func cursorTextLeavesTheCursorOnTheNextRow() {
         let text = PreviewSurfaceText.cursor()
-        #expect(text.bytes.hasSuffix("\r\n"))
+        #expect(text.bytes.hasSuffix("\u{1B}[2;1H"))
         #expect(text.cursor == .init(column: 0, row: 1))
     }
 }

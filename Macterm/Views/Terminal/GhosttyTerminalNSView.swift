@@ -1057,7 +1057,7 @@ final class GhosttyTerminalNSView: NSView {
     /// `createSurface` judges a creation size by before that surface has a
     /// font of its own. Zero until the first push; the gate then admits any
     /// non-empty size.
-    private static var lastMeasuredCellSize: (width: UInt32, height: UInt32) = (0, 0)
+    private(set) static var lastMeasuredCellSize: (width: UInt32, height: UInt32) = (0, 0)
 
     private func applySurfaceSize(_ backingSize: CGSize) {
         guard let surface else { return }

@@ -2286,7 +2286,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "아무 곳이나 클릭하여 커서를 이동합니다."
+            "value" : "아무 곳이나 클릭하여 커서를 이동하십시오."
           }
         },
         "zh-Hans" : {
@@ -8692,7 +8692,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "휠이나 트랙패드로 여기를 스크롤합니다."
+            "value" : "휠이나 트랙패드로 여기를 스크롤하십시오."
           }
         },
         "zh-Hans" : {
