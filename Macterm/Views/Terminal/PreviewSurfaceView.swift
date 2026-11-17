@@ -24,7 +24,7 @@ final class PreviewSurfaceView: NSView {
 
     let kind: Kind
     private static let cornerRadius: CGFloat = 6
-    private(set) var surface: ghostty_surface_t?
+    nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
     /// The cell of the cursor (0-based), which the preview sets itself.
     private var cursorCell = PreviewSurfaceGrid.Cell(column: 0, row: 0)
 
