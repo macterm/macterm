@@ -412,15 +412,12 @@ struct CheckForUpdatesMenuItem: View {
 /// knows the size), then Restart to Update, which installs and relaunches.
 /// No button while idle.
 ///
-/// The item keeps the shared toolbar background, which gives it the height
-/// and the edge margin of the other toolbar items. On macOS 26 that capsule
-/// hugs a title-and-icon label (about 8 pt leading, 6 pt trailing), so the
-/// label adds `glassInset` on each side.
+/// Both states are toolbar buttons, so the toolbar gives each one the same
+/// native height, edge margin and inner padding. A plain view in a toolbar
+/// item gets no inner padding. Downloading… is disabled: there is nothing
+/// to click while Sparkle downloads.
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
-
-    /// The extra inner padding of the label in the macOS 26 toolbar capsule.
-    static let glassInset: CGFloat = 8
 
     var body: some View {
         switch updater.status {
@@ -428,36 +425,28 @@ struct UpdateToolbarButton: View {
             EmptyView()
         case .downloading,
              .extracting:
-            inset(Label {
-                Text("Downloading…")
-            } icon: {
-                Group {
-                    if let fraction = updater.status.fraction {
-                        ProgressView(value: fraction)
-                    } else {
-                        ProgressView()
+            Button {} label: {
+                Label {
+                    Text("Downloading…")
+                } icon: {
+                    Group {
+                        if let fraction = updater.status.fraction {
+                            ProgressView(value: fraction)
+                        } else {
+                            ProgressView()
+                        }
                     }
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
                 }
-                .progressViewStyle(.circular)
-                .controlSize(.small)
-            })
-        case .readyToRestart:
-            Button {
-                updater.installAndRelaunch()
-            } label: {
-                inset(Label("Restart to Update", systemImage: "arrow.clockwise"))
             }
-        }
-    }
-
-    @ViewBuilder
-    private func inset(_ label: some View) -> some View {
-        if WindowAppearance.glassSupported {
-            label
-                .labelStyle(.titleAndIcon)
-                .padding(.horizontal, Self.glassInset)
-        } else {
-            label.labelStyle(.titleAndIcon)
+            .labelStyle(.titleAndIcon)
+            .disabled(true)
+        case .readyToRestart:
+            Button("Restart to Update", systemImage: "arrow.clockwise") {
+                updater.installAndRelaunch()
+            }
+            .labelStyle(.titleAndIcon)
         }
     }
 }

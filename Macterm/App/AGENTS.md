@@ -147,7 +147,7 @@ Sparkle shows no window. `Updater` drives Sparkle with its own user driver (`Upd
 
 - **Sparkle checks at launch when the last check is a day old or more** (`SUScheduledCheckInterval`). Otherwise it checks when the rest of the day has passed.
 - **The toolbar shows the exception only** (`UpdateToolbarButton`). No button while idle. A scheduled check is silent until its update is ready: no ring and no toast. Then Restart to Update shows; a click installs and relaunches.
-- **The update item keeps the shared toolbar background**, for the height and edge margin of the other toolbar items. On macOS 26 its label adds `UpdateToolbarButton.glassInset` on each side.
+- **Both update states are toolbar buttons with no padding of their own** (`UpdateToolbarButton`). The toolbar gives a button its height, edge margin and inner padding. Downloading… is a disabled button.
 - **A check that the user starts shows its progress** (`UpdateMachine.userSession`): Downloading… with a progress ring (determinate when Sparkle knows the size), then Restart to Update. It ends in a toast (`UpdateToast`) when there is nothing to install: up to date, a failed check, a failed download. Never a modal.
 - **"Up to date" only when Sparkle says so** (`SPUNoUpdateFoundReason`). Any other reason (the newest build needs another macOS) shows nothing.
 - **A major upgrade installs as any other update.** Sparkle hands it to the user driver instead of downloading it by itself, and the driver replies install. Macterm dismisses only what it cannot install: an information-only item, and an appcast that failed its signing check (`UpdateFound.untrusted`). A check that the user started then says that the version is on the website.
