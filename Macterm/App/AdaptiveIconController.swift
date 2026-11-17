@@ -168,9 +168,6 @@ final class AdaptiveIconController {
     /// The Dock shows the configured icon: the preview shows the same image.
     private func showPreview(of standIn: AdaptiveIcon.StandIn) {
         previewOnly = nil
-        // A custom image that cannot be read leaves the bundled icon, and
-        // the line about the key would then be wrong.
-        let standIn = standIn == .customIcon && !AppIconPresenter.showsCustomImage ? .unavailable : standIn
         setPreview(Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn))
     }
 

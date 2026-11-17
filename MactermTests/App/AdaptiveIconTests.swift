@@ -273,7 +273,7 @@ struct AdaptiveIconTests {
     func thePreviewExplainsOnlyTheExceptions() {
         #expect(AdaptiveIcon.StandIn.disabled.previewLine == nil)
         #expect(AdaptiveIcon.StandIn.unavailable.previewLine == nil)
-        #expect(AdaptiveIcon.StandIn.customIcon.previewLine == "The macos-icon key in your Ghostty config sets the Dock icon.")
+        #expect(AdaptiveIcon.StandIn.customIcon.previewLine == nil)
         #expect(AdaptiveIcon.StandIn.iconStyle.previewLine == "macOS draws the Dock icon in your Clear or Tinted icon style.")
         #expect(AdaptiveIcon.StandIn.noLidGray.previewLine == "Your theme has no gray color to paint the icon with.")
     }

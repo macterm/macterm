@@ -10588,22 +10588,6 @@
         }
       }
     },
-    "The macos-icon key in your Ghostty config sets the Dock icon." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ghostty 설정의 macos-icon 키가 Dock 아이콘을 지정합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ghostty 配置中的 macos-icon 键设定了程序坞图标。"
-          }
-        }
-      }
-    },
     "The pane has no frame yet. Try again." : {
       "localizations" : {
         "ko" : {

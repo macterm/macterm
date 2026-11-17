@@ -175,14 +175,15 @@ enum AdaptiveIcon {
         /// The theme has no gray apart from its background (`paint` is nil).
         case noLidGray
 
-        /// The line under the preview in Settings, nil where none is needed:
-        /// the toggle above it says that the setting is off, and a run that
-        /// cannot render shows the bundled icon with no error text.
+        /// The last line of the App Icon section in Settings, nil where none is
+        /// needed: the toggle says that the setting is off, and a run that
+        /// cannot render shows the bundled icon with no error text. A custom
+        /// icon gets no line: Macterm stops reading `macos-icon` (issue 0350).
         var previewLine: String? {
             switch self {
             case .disabled,
-                 .unavailable: nil
-            case .customIcon: String(localized: "The macos-icon key in your Ghostty config sets the Dock icon.")
+                 .unavailable,
+                 .customIcon: nil
             case .iconStyle: String(localized: "macOS draws the Dock icon in your Clear or Tinted icon style.")
             case .noLidGray: String(localized: "Your theme has no gray color to paint the icon with.")
             }
