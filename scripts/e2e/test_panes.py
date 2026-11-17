@@ -180,51 +180,45 @@ def _app_log(app):
 
 
 BAD_HOST = "e2e-badhost.invalid"
-NO_HOST = f"No host is named {BAD_HOST}."
+FAILED_CONNECT = f"remote host {BAD_HOST}:"
 
 
-def _no_host_lines(app, pane_id):
-    """How many times the pane said that no host has that name. Each failed
-    connect prints the line again (0057)."""
-    return (app.pane_text(pane=pane_id, scrollback=True) or "").count(NO_HOST)
+def _failed_connects(app):
+    """How many connects to the bad host failed. A failed connect writes no
+    line into the pane (its badge shows it); the reason goes to the log."""
+    return _app_log(app).count(FAILED_CONNECT)
 
 
 def _unreachable_remote_pane(app, name):
     app.cli("project", "create", f"{BAD_HOST}:/tmp", "--name", name, "--select")
     pane = wait_for(lambda: app.panes(), timeout=30, message="the remote pane")[0]
     wait_for(
-        lambda: _no_host_lines(app, pane["id"]) >= 1,
+        lambda: _failed_connects(app) >= 1,
         timeout=60,
-        message="the pane's line about the failed connect",
+        message="the log line of the failed connect",
     )
-    assert "Press a key to try again." in app.pane_text(pane=pane["id"], scrollback=True)
+    text = app.pane_text(pane=pane["id"], scrollback=True) or ""
+    assert BAD_HOST not in text, "a failed connect writes no line into the pane"
     return pane
 
 
 def test_unreachable_remote_pane_tries_again_on_project_select(app):
-    """A remote pane that cannot connect says why, stays, and waits for a
-    trigger (#281, 0057). The project's selection is the one trigger that a
-    test can drive (wake, activation and a network change need real system
-    events; there is no reconnect verb). The name does not resolve, so the try
-    after the trigger fails again and the pane says so a second time, in the
-    same pane with the same session."""
+    """A remote pane that cannot connect stays, shows its badge, and tries
+    again (#281, 0057, 0304). The project's selection is a trigger that a test
+    can drive. The name does not resolve, so the try after the trigger fails
+    again, in the same pane with the same session."""
     projects = app.cli_json("project", "list")["projects"]
     original = next(p for p in projects if p.get("active"))
     try:
         pane = _unreachable_remote_pane(app, "deadremote")
-        before = _no_host_lines(app, pane["id"])
+        before = _failed_connects(app)
 
         app.cli("project", "select", original["name"])
         app.cli("project", "select", "deadremote")
 
         wait_for(
-            lambda: "reconnect(projectSelected): 1 lost remote pane(s)" in _app_log(app),
-            timeout=30,
-            message="the reconnect trigger's log line",
-        )
-        wait_for(
-            lambda: _no_host_lines(app, pane["id"]) > before,
-            timeout=60,
+            lambda: _failed_connects(app) > before,
+            timeout=90,
             message="the second failed connect",
         )
         panes = {p["id"]: p for p in app.panes()}
@@ -235,18 +229,18 @@ def test_unreachable_remote_pane_tries_again_on_project_select(app):
 
 
 def test_key_at_unreachable_remote_pane_tries_again(app):
-    """The pane says "Press a key to try again." A key connects again: the
-    pane stays, and it says why the connect failed a second time."""
+    """A key in a pane that cannot connect starts a try at once: the pane
+    stays, and the connect fails a second time. The key goes nowhere."""
     projects = app.cli_json("project", "list")["projects"]
     original = next(p for p in projects if p.get("active"))
     try:
         pane = _unreachable_remote_pane(app, "deadremotekey")
-        before = _no_host_lines(app, pane["id"])
+        before = _failed_connects(app)
 
         app.cli("pane", "key", "return", "--pane", pane["id"])
 
         wait_for(
-            lambda: _no_host_lines(app, pane["id"]) > before,
+            lambda: _failed_connects(app) > before,
             timeout=60,
             message="the failed connect after the key",
         )

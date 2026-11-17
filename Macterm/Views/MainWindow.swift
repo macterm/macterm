@@ -1197,18 +1197,7 @@ struct ModePill: View {
         } else {
             Button(action: action) {
                 label
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MactermTheme.fg)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(MactermTheme.surface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .stroke(MactermTheme.border, lineWidth: 1)
-                            )
-                    )
+                    .modifier(FlatPillChrome())
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1218,6 +1207,49 @@ struct ModePill: View {
 
     private var label: some View {
         Label(title, systemImage: systemImage)
+    }
+}
+
+/// A state of a pane that a click cannot change, as a pill in the same
+/// corner as `ModePill`, with no hit target: the glass capsule on macOS 26,
+/// below that the flat badge.
+struct StatusPill<Icon: View>: View {
+    let title: String
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        let label = Label { Text(title) } icon: { icon() }
+        Group {
+            if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+                label
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .glassEffect(.regular, in: .capsule)
+            } else {
+                label.modifier(FlatPillChrome())
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// The flat chrome of a pill below macOS 26, in the theme colors.
+private struct FlatPillChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(MactermTheme.fg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(MactermTheme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(MactermTheme.border, lineWidth: 1)
+                    )
+            )
     }
 }
 

@@ -736,8 +736,10 @@ private struct GeneralSettings: View {
             Section {
                 Toggle(isOn: $reconnectRemotePanes) {
                     Text("Reconnect panes after a dropped connection")
-                    Text("Connects a disconnected pane to its session again when you wake the Mac or return to the app.")
-                        .settingsDescription()
+                    Text(
+                        "Connects a disconnected pane again by itself. A login that needs an answer waits until you type in the pane."
+                    )
+                    .settingsDescription()
                 }
                 .onChange(of: reconnectRemotePanes) { _, v in
                     Preferences.shared.reconnectRemotePanes = v
@@ -1206,24 +1208,19 @@ extension View {
 private struct FullDiskAccessBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full Disk Access is off")
-                    Text("""
-                    macOS asks for each folder when a terminal command reads Documents, Downloads, \
-                    or other protected places. One Full Disk Access grant covers all of them.
-                    """)
-                    .settingsSecondaryText()
-                    if let url = FullDiskAccess.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Full Disk Access is off")
+                Text("""
+                macOS asks for each folder when a terminal command reads Documents, Downloads, \
+                or other protected places. One Full Disk Access grant covers all of them.
+                """)
+                .settingsSecondaryText()
+                if let url = FullDiskAccess.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }
@@ -1238,21 +1235,16 @@ private struct FullDiskAccessBanner: View {
 private struct NotificationPermissionBanner: View {
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline, spacing: 11) {
-                SettingsInfoTile(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Macterm has no notification permission")
-                    Text("Your Ghostty config asks for notifications.")
-                        .settingsSecondaryText()
-                    if let url = NotificationHandler.settingsURL {
-                        Button("Open System Settings…") {
-                            NSWorkspace.shared.open(url)
-                        }
+            SettingsInfoBlock(symbol: "exclamationmark.triangle.fill", tint: MactermTheme.warning) {
+                Text("Macterm has no notification permission")
+                Text("Your Ghostty config asks for notifications.")
+                    .settingsSecondaryText()
+                if let url = NotificationHandler.settingsURL {
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(url)
                     }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
         }
     }
 }
