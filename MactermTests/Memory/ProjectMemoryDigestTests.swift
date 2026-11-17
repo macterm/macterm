@@ -139,14 +139,20 @@ struct ProjectMemoryDigestTests {
     }
 
     @Test
-    func a_new_branch_says_it_has_no_commits_and_leaves_out_the_main_history() throws {
+    func a_new_branch_gets_no_commit_line_and_leaves_out_the_main_history() throws {
         var git = GitStatus(branch: "feature/tax")
         git.mainRefs = ["refs/remotes/origin/main"]
         git.branchCommits = []
         git.recentCommits = [GitStatus.Commit(hash: "m1", subject: "Release 2.0", date: now)]
-        let digest = try #require(ProjectMemoryDigest(projectName: "shop", entries: [], git: git, now: now))
-        #expect(digest.text.contains("`feature/tax` has no commits of its own yet."))
+        let digest = try #require(ProjectMemoryDigest(
+            projectName: "shop", entries: [entry("npm install", exit: 0, minutesAgo: 1)], git: git, now: now
+        ))
+        // The model retold "has no commits" as "no changes are present".
+        #expect(!digest.text.contains("commits"))
         #expect(!digest.text.contains("Release 2.0"))
+        #expect(digest.summaryText.contains("`npm install`"))
+        // With no command either, there is nothing to say.
+        #expect(ProjectMemoryDigest(projectName: "shop", entries: [], git: git, now: now) == nil)
     }
 
     @Test
@@ -217,7 +223,7 @@ struct ProjectMemoryDigestTests {
 
     @Test
     func the_instructions_put_git_first_and_cover_a_project_with_no_git_work() {
-        #expect(ProjectMemoryDigest.instructions.contains("Read the work from Git first"))
+        #expect(ProjectMemoryDigest.instructions.contains("Read the work from the commits"))
         #expect(ProjectMemoryDigest.instructions.contains("Do not state a goal"))
         // The summary reads the commands only without Git work
         // (`summaryText`), so the instructions name that case.
@@ -226,9 +232,25 @@ struct ProjectMemoryDigestTests {
     }
 
     @Test
-    func an_empty_log_with_no_git_state_has_nothing_to_say() {
+    func the_instructions_talk_to_the_user_and_name_no_filler() {
+        // Measured on the on-device model: a rule that names the filler
+        // ("say nothing about changes, staged files or the working tree")
+        // made the model write it. The positive rules took it out.
+        #expect(ProjectMemoryDigest.instructions.contains("Talk to the developer as \"you\""))
+        #expect(ProjectMemoryDigest.instructions.contains("Every sentence has \"you\" as its subject"))
+        #expect(ProjectMemoryDigest.instructions.contains("Start with the first piece of work"))
+        #expect(!ProjectMemoryDigest.instructions.contains("working tree"))
+        #expect(!ProjectMemoryDigest.instructions.contains("staged"))
+    }
+
+    @Test
+    func an_empty_log_with_no_git_work_has_nothing_to_say() {
         #expect(ProjectMemoryDigest(projectName: "x", entries: [], git: nil, now: now) == nil)
-        #expect(ProjectMemoryDigest(projectName: "x", entries: [], git: GitStatus(branch: "main"), now: now) != nil)
+        // A branch name alone made the model guess the work.
+        #expect(ProjectMemoryDigest(projectName: "x", entries: [], git: GitStatus(branch: "main"), now: now) == nil)
+        var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "m1", subject: "Release 2.0", date: now)]
+        #expect(ProjectMemoryDigest(projectName: "x", entries: [], git: git, now: now) != nil)
     }
 
     @Test

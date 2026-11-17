@@ -124,14 +124,14 @@ final class ProjectMemorySummarizer {
                     guard !Self.completeWords(partial).isEmpty else { continue }
                     states[projectID] = State(
                         phase: .streaming,
-                        text: Self.redacted(Self.completeWords(partial)),
+                        text: Self.redacted(Self.oneParagraph(Self.completeWords(partial))),
                         key: digest.key,
                         suggestions: states[projectID]?.suggestions ?? []
                     )
                 }
                 // A cancelled loop ends with no error.
                 guard !Task.isCancelled else { return }
-                let text = Self.redacted(reply)
+                let text = Self.redacted(Self.oneParagraph(reply))
                 guard !text.isEmpty else {
                     states[projectID] = State(phase: .failed, text: "", key: digest.key)
                     return
@@ -163,6 +163,17 @@ final class ProjectMemorySummarizer {
     /// the prompts is not redacted, so a secret in it could reach a reply.
     static func redacted(_ text: String) -> String {
         MemoryRedaction.redact(text)
+    }
+
+    /// `text` as one paragraph: each run of whitespace with a line break
+    /// in it becomes one space. With one sentence for each piece of work,
+    /// the model put a line break after a sentence in about one reply of
+    /// three.
+    static func oneParagraph(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     /// `partial` up to its last whitespace. A secret streams in a token at
