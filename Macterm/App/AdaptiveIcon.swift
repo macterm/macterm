@@ -175,25 +175,18 @@ enum AdaptiveIcon {
         /// The theme has no gray apart from its background (`paint` is nil).
         case noLidGray
 
-        /// Whether the preview can show the Dock's image. In a Clear or Tinted
-        /// icon style the Dock styles the icon itself, and the app can read
-        /// only the image without the style: the Dock showed a blue icon in
-        /// Tinted where that image is gray. The preview then shows no icon,
-        /// only its line.
-        var showsIcon: Bool {
-            self != .iconStyle
-        }
-
         /// The last line of the App Icon section in Settings, nil where none is
-        /// needed: the toggle says that the setting is off, and a run that
-        /// cannot render shows the bundled icon with no error text. A custom
-        /// icon gets no line: Macterm stops reading `macos-icon` (issue 0350).
+        /// needed: the toggle says that the setting is off, and its
+        /// description says that it has no effect in a Clear or Tinted icon
+        /// style. A run that cannot render shows the bundled icon with no
+        /// error text. A custom icon gets no line: Macterm stops reading
+        /// `macos-icon` (issue 0350).
         var previewLine: String? {
             switch self {
             case .disabled,
                  .unavailable,
-                 .customIcon: nil
-            case .iconStyle: String(localized: "macOS draws the Dock icon in your Clear or Tinted icon style.")
+                 .customIcon,
+                 .iconStyle: nil
             case .noLidGray: String(localized: "Your theme has no gray color to paint the icon with.")
             }
         }

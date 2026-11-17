@@ -1359,7 +1359,7 @@ private struct AppearanceSettings: View {
 
                     Toggle(isOn: $preferences.adaptiveIcon) {
                         Text("Adaptive icon")
-                        Text("The Dock icon shows the colors of your terminal theme.")
+                        Text("The Dock icon shows the colors of your terminal theme. This has no effect in the Clear or Tinted icon style.")
                             .settingsDescription()
                     }
 
