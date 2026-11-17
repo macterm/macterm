@@ -1368,6 +1368,8 @@ private struct AppearanceSettings: View {
                         Text("The Dock icon shows the colors of your terminal theme.")
                             .settingsDescription()
                     }
+
+                    AdaptiveIconPreview()
                 }
             }
 

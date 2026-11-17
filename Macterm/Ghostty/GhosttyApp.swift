@@ -724,15 +724,26 @@ final class GhosttyApp {
         return colors
     }
 
-    private func computeResolvedThemeColors() -> ThemeResolver.Colors? {
-        guard let resourcesDir else { return nil }
-        // Reconstruct the effective `theme` from the layers we control, matching
-        // libghostty's last-wins merge: our defaults, then the user's root files.
+    /// The effective `theme` value, from the layers we control, matching
+    /// libghostty's last-wins merge: our defaults, then the user's root files.
+    private func effectiveThemeValue() -> String? {
         var configText = (try? String(contentsOfFile: MactermConfig.shared.defaultsPath, encoding: .utf8)) ?? ""
         if let userText = MactermConfig.userGhosttyConfigText() {
             configText += "\n" + userText
         }
-        guard let themeValue = ThemeResolver.themeValue(inConfigText: configText),
+        return ThemeResolver.themeValue(inConfigText: configText)
+    }
+
+    /// Whether the theme is a `light:X,dark:Y` pair with two different sides.
+    /// The colors that the app reads are those of the side in use only.
+    var themeHasTwoSides: Bool {
+        guard let value = effectiveThemeValue() else { return false }
+        return ThemeResolver.resolve(themeValue: value, scheme: .light) != ThemeResolver.resolve(themeValue: value, scheme: .dark)
+    }
+
+    private func computeResolvedThemeColors() -> ThemeResolver.Colors? {
+        guard let resourcesDir else { return nil }
+        guard let themeValue = effectiveThemeValue(),
               let side = ThemeResolver.resolve(themeValue: themeValue, scheme: windowScheme)
         else { return nil }
 

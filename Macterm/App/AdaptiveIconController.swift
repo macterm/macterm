@@ -20,29 +20,82 @@ private let logger = Logger(subsystem: appBundleID, category: "AdaptiveIconContr
 /// off for the rest of the run: a failure there means the private renderer
 /// changed under this build, and it will not start working again until the
 /// next launch.
-@MainActor
+///
+/// It also keeps `preview`, the icons that Settings → Appearance shows: the
+/// image that the Dock gets, and the other appearance's while the preview is
+/// on screen (`previewShown`).
+@MainActor @Observable
 final class AdaptiveIconController {
     static let shared = AdaptiveIconController()
 
+    /// One icon of the preview in Settings.
+    struct PreviewIcon {
+        /// Nil for the configured icon, which has one image for both sides.
+        var appearance: AdaptiveIconRequest.Appearance?
+        /// Nil until the first image of this side exists: the tile stays
+        /// empty, with no spinner.
+        var image: NSImage?
+    }
+
+    /// What the preview in Settings shows: the Dock's icon for the current
+    /// state, and why it is not in the theme's colors (`StandIn.previewLine`).
+    struct Preview {
+        var icons: [PreviewIcon] = []
+        var standIn: AdaptiveIcon.StandIn?
+    }
+
+    private(set) var preview = Preview()
+
+    /// Whether the preview is on screen. Only then does the controller
+    /// render the appearance that the Dock does not show.
+    var previewShown = false {
+        didSet {
+            guard previewShown != oldValue else { return }
+            refresh()
+        }
+    }
+
+    @ObservationIgnored
     private var configured: GhosttyAppIcon = .bundled
     /// The request shown or in flight, nil while the Dock shows `configured`.
+    @ObservationIgnored
     private var current: AdaptiveIconRequest?
+    /// The renders for the Dock that run or wait. A render for the preview
+    /// starts only at zero, so that it never takes the Dock's place in the
+    /// queue.
+    @ObservationIgnored
+    private var dockRenders = 0
+    /// The render for the preview that runs or waits, so a refresh does not
+    /// queue the same request again.
+    @ObservationIgnored
+    private var previewRender: AdaptiveIconRequest?
+    /// The request for the appearance that only the preview shows, nil when
+    /// the preview shows no such side.
+    @ObservationIgnored
+    private var previewOnly: AdaptiveIconRequest?
     /// Bumped by every refresh that changes course, so a render that ends
     /// after a newer one began is dropped.
+    @ObservationIgnored
     private var generation = 0
     /// Why the adaptive icon is off for this run, once a render failed.
+    @ObservationIgnored
     private var suspension: AdaptiveIconRenderer.Failure?
     /// What the last refresh decided, for `note`.
+    @ObservationIgnored
     private var lastOutcome: String?
     /// The images of this run, one for each appearance, so a light/dark
     /// switch back to a seen request installs at once.
+    @ObservationIgnored
     private var rendered: [AdaptiveIconRequest.Appearance: (request: AdaptiveIconRequest, image: NSImage)] = [:]
+    @ObservationIgnored
     private let cache = AdaptiveIconCache(directory: FileStorage.appSupportDirectory().appendingPathComponent(
         "AdaptiveIcon",
         isDirectory: true
     ))
     /// One helper at a time: a burst of theme changes queues only the last.
+    @ObservationIgnored
     private let renders = AdaptiveIconRenderer.Queue()
+    @ObservationIgnored
     private var observers: [any NSObjectProtocol] = []
 
     private init() {
@@ -67,33 +120,99 @@ final class AdaptiveIconController {
     }
 
     func refresh() {
-        guard let request = adaptiveRequest() else {
+        switch adaptiveRequest() {
+        case let .failure(standIn):
             showConfigured()
-            return
+            showPreview(of: standIn)
+        case let .success((request, paint)):
+            note("on (\(request.appearance.rawValue))")
+            showDock(request)
+            showPreview(of: request, paint: paint)
         }
-        note("on (\(request.appearance.rawValue))")
+    }
+
+    private func showDock(_ request: AdaptiveIconRequest) {
         guard request != current else { return }
         current = request
         generation += 1
 
-        if let seen = rendered[request.appearance], seen.request == request {
-            AppIconPresenter.applyAdaptive(seen.image)
-            return
-        }
-        if let image = cache.image(for: request) {
-            remember(image, for: request)
+        if let image = knownImage(for: request) {
             AppIconPresenter.applyAdaptive(image)
-            logger.info("adaptive icon (\(request.appearance.rawValue, privacy: .public)) taken from the cache")
             return
         }
         logger.info("rendering the adaptive icon (\(request.appearance.rawValue, privacy: .public))")
         render(request, generation: generation)
     }
 
-    /// The request for the adaptive icon, or nil when the Dock shows the
-    /// configured icon. Each nil says why in the log.
-    private func adaptiveRequest() -> AdaptiveIconRequest? {
-        let iconStyle = CFPreferencesCopyAppValue(AdaptiveIcon.iconStyleKey as CFString, kCFPreferencesAnyApplication) as? String
+    /// The image of this request from this run or from the disk, nil when
+    /// it needs a render.
+    private func knownImage(for request: AdaptiveIconRequest) -> NSImage? {
+        if let seen = rendered[request.appearance], seen.request == request { return seen.image }
+        guard let image = cache.image(for: request) else { return nil }
+        remember(image, for: request)
+        logger.info("adaptive icon (\(request.appearance.rawValue, privacy: .public)) taken from the cache")
+        return image
+    }
+
+    // MARK: - Preview
+
+    /// The Dock shows the configured icon: the preview shows the same image.
+    private func showPreview(of standIn: AdaptiveIcon.StandIn) {
+        previewOnly = nil
+        preview = Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn)
+    }
+
+    /// The Dock shows the adaptive icon. While a side renders, its tile keeps
+    /// the last image of that side.
+    private func showPreview(of shown: AdaptiveIconRequest, paint: AdaptiveIcon.Paint) {
+        let iconStyle = Self.iconStyle()
+        let appearances = previewShown
+            ? AdaptiveIcon.previewAppearances(
+                shown: shown.appearance,
+                iconStyle: iconStyle,
+                themeHasTwoSides: GhosttyApp.shared.themeHasTwoSides
+            )
+            : [shown.appearance]
+        previewOnly = appearances.first { $0 != shown.appearance }.flatMap { request(for: $0, paint: paint) }
+        var icons: [PreviewIcon] = []
+        for appearance in appearances {
+            let request = appearance == shown.appearance ? shown : previewOnly
+            var image = request.flatMap { knownImage(for: $0) } ?? rendered[appearance]?.image
+            // The Dock keeps its icon while its new one renders.
+            if image == nil, appearance == shown.appearance { image = NSApp.applicationIconImage }
+            icons.append(PreviewIcon(appearance: appearance, image: image))
+        }
+        preview = Preview(icons: icons, standIn: nil)
+        renderPreviewOnlySide()
+    }
+
+    /// Renders the side that only the preview shows, after the Dock's render.
+    private func renderPreviewOnlySide() {
+        guard let request = previewOnly, dockRenders == 0, previewRender != request, knownImage(for: request) == nil else { return }
+        previewRender = request
+        renders.render(request) { [self] result in
+            if previewRender == request { previewRender = nil }
+            guard case let .success(png) = result else {
+                // A failure here is the helper's, and the Dock's next render
+                // meets it too. `.superseded` says nothing.
+                if case let .failure(failure) = result, failure != .superseded { fail(failure) }
+                return
+            }
+            guard request == previewOnly, let image = NSImage(data: png) else { return }
+            remember(image, for: request)
+            cache.store(png, for: request)
+            refresh()
+        }
+    }
+
+    private static func iconStyle() -> String? {
+        CFPreferencesCopyAppValue(AdaptiveIcon.iconStyleKey as CFString, kCFPreferencesAnyApplication) as? String
+    }
+
+    /// The request for the adaptive icon and its paint, or why the Dock shows
+    /// the configured icon. Each stand-in says why in the log.
+    private func adaptiveRequest() -> Result<(AdaptiveIconRequest, AdaptiveIcon.Paint), AdaptiveIcon.StandIn> {
+        let iconStyle = Self.iconStyle()
         let enabled = Preferences.shared.adaptiveIcon
         let supported = AdaptiveIcon.isSupported
         let decision = AdaptiveIcon.decide(
@@ -103,25 +222,29 @@ final class AdaptiveIconController {
             iconStyle: iconStyle,
             systemScheme: { GhosttyApp.shared.systemScheme }
         )
-        guard case let .adaptive(appearance) = decision else {
+        let appearance: AdaptiveIconRequest.Appearance
+        switch decision {
+        case let .configured(_, standIn):
             let suspended = suspension != nil
             let style = iconStyle ?? "none"
             note("off (enabled \(enabled), supported \(supported), suspended \(suspended), configured \(configured), icon style \(style))")
-            return nil
+            return .failure(standIn)
+        case let .adaptive(side):
+            appearance = side
         }
         guard let theme = themeColors() else {
             note("off (a theme color cannot be read)")
-            return nil
+            return .failure(.unavailable)
         }
         guard let paint = AdaptiveIcon.paint(for: theme) else {
             note("off (the theme has no gray for the lid)")
-            return nil
+            return .failure(.noLidGray)
         }
         guard let request = request(for: appearance, paint: paint) else {
             note("off (the bundle has no Assets.car)")
-            return nil
+            return .failure(.unavailable)
         }
-        return request
+        return .success((request, paint))
     }
 
     /// Logs what a refresh decided, once for each change: a refresh runs on
@@ -143,7 +266,10 @@ final class AdaptiveIconController {
 
     private func render(_ request: AdaptiveIconRequest, generation: Int) {
         let started = ContinuousClock.now
+        dockRenders += 1
         renders.render(request) { [self] result in
+            dockRenders -= 1
+            defer { renderPreviewOnlySide() }
             guard generation == self.generation else { return }
             switch result {
             case let .success(png):
@@ -151,6 +277,7 @@ final class AdaptiveIconController {
                 remember(image, for: request)
                 cache.store(png, for: request)
                 AppIconPresenter.applyAdaptive(image)
+                refresh()
                 let elapsed = started.duration(to: .now)
                 logger.info("adaptive icon (\(request.appearance.rawValue, privacy: .public)) rendered in \(elapsed, privacy: .public)")
             case .failure(.superseded):
@@ -166,7 +293,7 @@ final class AdaptiveIconController {
     private func fail(_ failure: AdaptiveIconRenderer.Failure) {
         suspension = failure
         logger.error("adaptive icon off for this run, keeping the bundled icon: \(failure.description, privacy: .public)")
-        showConfigured()
+        refresh()
     }
 
     private func remember(_ image: NSImage, for request: AdaptiveIconRequest) {
