@@ -411,6 +411,14 @@ struct CheckForUpdatesMenuItem: View {
 /// exception: Downloading… with a progress ring (determinate when Sparkle
 /// knows the size), then Restart to Update, which installs and relaunches.
 /// No button while idle.
+///
+/// On macOS 26 the item hides the shared toolbar background
+/// (`MainWindow`), and the button draws its own glass capsule with the
+/// native insets of `.glass`. The shared background hugs a title-and-icon
+/// label with almost no inner padding.
+///
+/// Each state has its own view identity, so the toolbar measures the item
+/// again when the label changes (see `TabSwitcherToolbarItem`).
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
 
@@ -420,23 +428,47 @@ struct UpdateToolbarButton: View {
             EmptyView()
         case .downloading,
              .extracting:
-            Label {
-                Text("Downloading…")
-            } icon: {
-                if let fraction = updater.status.fraction {
-                    ProgressView(value: fraction)
-                } else {
-                    ProgressView()
-                }
-            }
-            .labelStyle(.titleAndIcon)
-            .progressViewStyle(.circular)
-            .controlSize(.small)
+            // Not a control: the button style gives the same capsule as
+            // Restart to Update, and a click does nothing.
+            styled(Button {} label: { downloadingLabel })
+                .allowsHitTesting(false)
+                .accessibilityRemoveTraits(.isButton)
+                .accessibilityAddTraits(.updatesFrequently)
+                .id("downloading")
         case .readyToRestart:
-            Button("Restart to Update", systemImage: "arrow.clockwise") {
+            styled(Button("Restart to Update", systemImage: "arrow.clockwise") {
                 updater.installAndRelaunch()
+            })
+            .id("restart")
+        }
+    }
+
+    private var downloadingLabel: some View {
+        Label {
+            Text("Downloading…")
+        } icon: {
+            if let fraction = updater.status.fraction {
+                ProgressView(value: fraction)
+            } else {
+                ProgressView()
             }
-            .labelStyle(.titleAndIcon)
+        }
+        .progressViewStyle(.circular)
+    }
+
+    @ViewBuilder
+    private func styled(_ button: some View) -> some View {
+        if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+            button
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+                .fixedSize()
+        } else {
+            button
+                .labelStyle(.titleAndIcon)
+                .fixedSize()
         }
     }
 }
