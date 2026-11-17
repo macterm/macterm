@@ -197,12 +197,15 @@ struct HostCommandsTests {
     }
 
     @Test
-    func a_folder_that_the_host_reported_must_be_a_plain_path() {
+    func a_folder_that_the_host_reported_may_hold_a_quote_or_a_backslash() {
         #expect(HostCommands.isSafeHostFolder("/srv/app src"))
         #expect(HostCommands.isSafeHostFolder("~/dev"))
         #expect(!HostCommands.isSafeHostFolder("relative"))
-        #expect(!HostCommands.isSafeHostFolder("/srv\\x"))
-        #expect(!HostCommands.isSafeHostFolder("/srv/it's"))
+        #expect(HostCommands.isSafeHostFolder("/srv\\x"))
+        #expect(HostCommands.isSafeHostFolder("/srv/it's"))
+        #expect(HostCommands.isSafeHostFolder("~/\"q\" $(x)"))
+        #expect(HostCommands.isSafeHostFolder("/srv/semi;colon `x` ünï"))
+        #expect(!HostCommands.isSafeHostFolder("/srv\tx"))
         #expect(!HostCommands.isSafeHostFolder("/srv\nrm -rf ~"))
     }
 

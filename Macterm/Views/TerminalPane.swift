@@ -269,6 +269,8 @@ private struct TerminalSurface: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ScrollHostView {
         let host = ScrollHostView()
+        // The pane is gone (`PaneSurface.isDestroyed`): an empty container.
+        guard !surface.isDestroyed else { return host }
         let scroll = surface.ensureScrollView()
         attach(scroll, to: host)
         let view = scroll.surfaceView
@@ -313,6 +315,9 @@ private struct TerminalSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ host: ScrollHostView, context: Context) {
+        // SwiftUI updates the leaf of a closed pane one more time. Make no
+        // view for it (`PaneSurface.isDestroyed`).
+        guard !surface.isDestroyed else { return }
         let scroll = surface.ensureScrollView()
         attach(scroll, to: host)
         let view = scroll.surfaceView
