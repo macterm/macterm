@@ -8,7 +8,7 @@ When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each
 
 - The cards are **live**. `beginLivePreviews` sets `GhosttyTerminalNSView.rendersForPreview`. `syncOcclusion` then reports the pane as visible, and libghostty wakes its renderer. Macterm samples at 5 Hz until `commitTabCycle` runs `endLivePreviews`. Every exit from a cycle goes through it, so no renderer stays awake.
 - `PanePreview.frameID` skips a new sample of a pane whose IOSurface did not change. Macterm draws the thumbnail through a provider that does not copy. This keeps a hold at about 7% CPU, in place of 30%.
-- No card and no pane in a card is dimmed. The selected card has the selection fill behind its preview and a bold title. In the card of a split tab, the focused pane has a thin accent outline (`TabSwitcherMosaic.markedPaneID`).
+- No card and no pane in a card is dimmed or outlined. The selected card has the selection fill behind its preview and a bold title.
 - Hover never scrolls the rows (`HoverSelectionTracker`, shared with the palette).
 - Do not bring back a foreground copy-poll or a renderer that uses text as a stand-in. We removed both when we could sample panes that are off screen.
 
