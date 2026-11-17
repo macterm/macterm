@@ -214,7 +214,7 @@ struct RemoteHostsTests {
         // Both views attach to the same session and replay its screen.
         try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
         try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
-        #expect(pane.remoteLinkBadge == nil)
+        #expect(!pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
         if needsLogin { #expect(host.askpassQuestions > questions) }
         drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
         try await left.waitFor { $0.screen.contains("after-key") }

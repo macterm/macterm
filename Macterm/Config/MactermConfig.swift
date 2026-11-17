@@ -63,9 +63,14 @@ final class MactermConfig {
     /// The cursor of a lost remote pane says that the pane takes no input:
     /// a faint cursor that does not blink, in the user's own cursor color
     /// and style. It differs from the hollow block of an unfocused pane.
+    /// libghostty applies `cursor-opacity` to a focused surface only, and the
+    /// fork's smooth cursor draws its own rect at full opacity, so this layer
+    /// turns the smooth cursor and its trail off.
     static let disabledCursorBody = """
     cursor-opacity = 0.3
     cursor-style-blink = false
+    smooth-cursor = false
+    cursor-trail = false
 
     """
 

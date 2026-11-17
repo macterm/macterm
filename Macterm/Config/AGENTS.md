@@ -6,6 +6,8 @@ This file loads when you work in `Macterm/Config/`. The root `AGENTS.md` has the
 
 In automatic mode, Macterm delegates the user layer to `ghostty_config_load_default_files`. Settings can append custom files. `GhosttyApp.loadConfig` loads `macterm-defaults.conf`, then the user files, then `macterm-overrides.conf` (the last one wins). It regenerates both private files (`MactermConfig.regenerate()`) before every load, because the overrides depend on the content of the user. `GhosttyConfigSource` is the seam for raw text, for keys that the C API cannot expose.
 
+**A remote pane whose connection is lost takes a second config** (`GhosttyApp.config(disabledCursor:)`): the same layers, then `macterm-disabled-cursor.conf` (`MactermConfig.disabledCursorBody`: a faint cursor that does not blink, with the smooth cursor and its trail off). `loadConfig` builds both from the same files at the same moment, and a reload or a soft reload gives each surface its own (`GhosttyTerminalNSView.isCursorDisabled`). Only the app's config reports diagnostics.
+
 **`~/.config/macterm/config.ghostty` is a custom config file of the user that Macterm seeds and lists for them** (`MactermConfigFile`). Ghostty.app never reads it, so a key in it applies to Macterm alone.
 
 - Macterm seeds it at the first launch that finds it missing (`MactermConfig.init`), as a template: every line of `MactermConfig.defaults` commented out, each under its note. A commented line sets nothing. `MactermConfigFileTests` pins that no line of the template is bare. An uncommented default would override the Ghostty config in silence.

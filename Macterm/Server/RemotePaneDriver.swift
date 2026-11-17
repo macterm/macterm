@@ -13,10 +13,10 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 ///   sweep) or a key asks again.
 ///
 /// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane shows its badge and its disabled cursor, and waits. The app's sweep
-/// (`AppState.reconnectDroppedRemotePanes`) owns the next quiet try, and a
-/// key connects at once. A session that is gone from the host closes the
-/// pane.
+/// `lost`: the pane shows its badge and its disabled cursor, and waits.
+/// The app's sweep (`AppState.reconnectDroppedRemotePanes`) owns the next
+/// quiet try, and a key connects at once. A session that is gone from the
+/// host closes the pane.
 @MainActor
 final class RemotePaneDriver: PaneInputRoute {
     private enum State {

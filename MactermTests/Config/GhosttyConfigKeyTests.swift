@@ -37,11 +37,16 @@ struct GhosttyConfigKeyTests {
 
     @Test
     func the_disabled_cursor_layer_is_read_by_libghostty_with_no_diagnostic() throws {
-        let config = try makeConfig("cursor-style-blink = true\n" + MactermConfig.disabledCursorBody)
+        let config = try makeConfig(
+            "cursor-style-blink = true\nsmooth-cursor = true\ncursor-trail = true\n" + MactermConfig.disabledCursorBody
+        )
         defer { ghostty_config_free(config) }
         #expect(ghostty_config_diagnostics_count(config) == 0)
         #expect(GhosttyConfigKey.double("cursor-opacity").read(from: config) == 0.3)
         #expect(GhosttyConfigKey.bool("cursor-style-blink").read(from: config) == false)
+        // The smooth cursor draws at full opacity: the layer turns it off.
+        #expect(GhosttyConfigKey.bool("smooth-cursor").read(from: config) == false)
+        #expect(GhosttyConfigKey.bool("cursor-trail").read(from: config) == false)
     }
 
     @Test
