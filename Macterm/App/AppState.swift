@@ -191,7 +191,7 @@ final class AppState {
         first.activeProjectID = saved[0].activeProjectID ?? first.activeProjectID
         if let width = saved[0].sidebarWidth { first.sidebarWidth = width }
         if let visible = saved[0].sidebarVisible { first.sidebarVisible = visible }
-        adoptPanelVisibility(from: saved[0])
+        if let visible = saved[0].projectMemoryPanelVisible { first.projectMemoryPanelVisible = visible }
         // After the project: making a project active opens its section, and
         // the saved set must win over that.
         if let expanded = saved[0].expandedProjectIDs { first.expandedProjects = Set(expanded) }
@@ -381,7 +381,7 @@ final class AppState {
             }
             if let width = restoring.sidebarWidth { window.sidebarWidth = width }
             if let visible = restoring.sidebarVisible { window.sidebarVisible = visible }
-            adoptPanelVisibility(from: restoring)
+            if let visible = restoring.projectMemoryPanelVisible { window.projectMemoryPanelVisible = visible }
             if let expanded = restoring.expandedProjectIDs { window.expandedProjects = Set(expanded) }
             if let frame = restoring.frame { window.frame = frame }
         } else if hasRestoredWindows {
@@ -719,9 +719,9 @@ final class AppState {
         }
     }
 
-    /// A window's sidebar width or open sections changed; get it into the
-    /// snapshot.
-    func noteSidebarChanged() {
+    /// A window's sidebar width, open sections or Project Insights panel
+    /// changed; get it into the snapshot.
+    func noteWindowChanged() {
         persistWindows()
     }
 
@@ -736,19 +736,14 @@ final class AppState {
         set { keyOrFirstWindow?.sidebarVisible = newValue }
     }
 
-    /// The Project Insights panel (Toggle Project Insights). One toggle for
-    /// the app (`Preferences.projectMemoryPanelVisible`): every window shows
-    /// the panel of its own project.
+    /// The key window's Project Insights panel (Toggle Project Insights,
+    /// the CLI). Each window has its own (`WindowState.projectMemoryPanelVisible`).
     var projectMemoryPanelVisible: Bool {
-        get { Preferences.shared.projectMemoryPanelVisible }
-        set { Preferences.shared.projectMemoryPanelVisible = newValue }
-    }
-
-    /// A snapshot from before the panel was one toggle kept it per window.
-    /// A window that showed it turns the toggle on, once: the next save
-    /// writes no per-window value, so this never fires again.
-    private func adoptPanelVisibility(from snapshot: WindowSnapshot) {
-        if snapshot.projectMemoryPanelVisible == true { Preferences.shared.projectMemoryPanelVisible = true }
+        get { keyOrFirstWindow?.projectMemoryPanelVisible ?? false }
+        set {
+            keyOrFirstWindow?.projectMemoryPanelVisible = newValue
+            persistWindows()
+        }
     }
 
     var isCommandPaletteVisible: Bool {
@@ -1212,15 +1207,23 @@ final class AppState {
     /// The project layout files.
     @ObservationIgnored
     let layoutFiles: LayoutFileService
+
+    /// The retired app-wide panel value, read once at the restore
+    /// (`Preferences.takeLegacyProjectMemoryPanelVisible`). Injectable so a
+    /// test does not share the preference with tests that run beside it.
+    @ObservationIgnored
+    private let legacyPanelVisible: () -> Bool
     var projectFiles: ProjectFileStore { layoutFiles.projectFiles }
 
     init(
         workspaceStore: WorkspaceStore = WorkspaceStore(),
         projectFiles: ProjectFileStore = ProjectFileStore(),
         paletteHotkeys: PaletteHotkeys = .shared,
-        quickTerminal: QuickTerminalSplitState? = nil
+        quickTerminal: QuickTerminalSplitState? = nil,
+        legacyPanelVisible: @escaping () -> Bool = { Preferences.shared.takeLegacyProjectMemoryPanelVisible() }
     ) {
         self.workspaceStore = workspaceStore
+        self.legacyPanelVisible = legacyPanelVisible
         layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
@@ -1495,7 +1498,10 @@ final class AppState {
         // `pinned.yaml` (the file is authoritative for membership — see
         // AppState+PinnedTabs). Live tabs materialize async, after zmx says
         // which sessions actually survived.
-        savedWindowSnapshots = loaded.windows
+        savedWindowSnapshots = WindowSnapshot.adoptingLegacyPanelVisibility(
+            loaded.windows,
+            legacyVisible: legacyPanelVisible()
+        )
         restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
         reconcilePinnedLayoutAtLaunch(projects: projects)
         // The quick terminal's tab reattaches like any workspace tab. Before
@@ -1573,7 +1579,7 @@ final class AppState {
                         isKey: window.id == keyWindowID,
                         activeTabID: window.activeProjectID.flatMap { selectedTab(for: $0, in: window)?.id },
                         sidebarVisible: window.sidebarVisible,
-                        projectMemoryPanelVisible: nil,
+                        projectMemoryPanelVisible: window.projectMemoryPanelVisible,
                         frame: window.frame,
                         expandedProjectIDs: window.expandedProjects.sorted { $0.uuidString < $1.uuidString }
                     )

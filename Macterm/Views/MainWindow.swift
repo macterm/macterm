@@ -179,7 +179,7 @@ struct MainWindow: View {
             // Project memory: a floating glass panel over the terminal, on
             // the trailing side. It covers the panes; it never resizes them.
             .overlay(alignment: .trailing) {
-                if #available(macOS 26.0, *), ProjectMemory.showsPanel,
+                if #available(macOS 26.0, *), ProjectMemory.showsPanel(in: windowState),
                    let project = activeProject, ProjectMemory.covers(project.id)
                 {
                     ProjectMemoryPanel(project: project)
@@ -188,7 +188,7 @@ struct MainWindow: View {
             }
             .animation(
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.25),
-                value: ProjectMemory.showsPanel
+                value: ProjectMemory.showsPanel(in: windowState)
             )
             // Same safe-area reclaim as the sidebar: without it the terminal
             // keeps a blank strip where the hidden titlebar used to be.
@@ -211,9 +211,13 @@ struct MainWindow: View {
                         // Filled while the panel is up, as a toggle's state.
                         Button(
                             String(localized: "Project Insights"),
-                            systemImage: preferences.projectMemoryPanelVisible ? "info.circle.fill" : "info.circle"
+                            systemImage: windowState.projectMemoryPanelVisible ? "info.circle.fill" : "info.circle"
                         ) {
-                            preferences.projectMemoryPanelVisible.toggle()
+                            // This window's panel only. A click makes this
+                            // window the key window, so it is also what
+                            // Toggle Project Insights flips.
+                            windowState.projectMemoryPanelVisible.toggle()
+                            appState.noteWindowChanged()
                         }
                         .help(String(localized: "Show or hide the Project Insights panel"))
                     }
@@ -369,7 +373,7 @@ struct MainWindow: View {
             _ = sidebarWidthHandoff.adoptStoredWidth(CGFloat(width))
         }
         .onChange(of: windowState.expandedProjects) {
-            appState.noteSidebarChanged()
+            appState.noteWindowChanged()
         }
         .onChange(of: windowState.sidebarVisible) { _, visible in
             let isInitialReconciliation = initialSidebarVisibilityBeingApplied == visible
@@ -514,7 +518,7 @@ struct MainWindow: View {
         // the next window you open should match what you just set (#345).
         if abs(rounded - windowState.sidebarWidth) >= 0.5 {
             windowState.sidebarWidth = rounded
-            appState.noteSidebarChanged()
+            appState.noteWindowChanged()
         }
         guard abs(rounded - preferences.sidebarWidth) >= 0.5 else { return }
         preferences.sidebarWidth = rounded

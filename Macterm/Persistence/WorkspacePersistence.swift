@@ -108,10 +108,10 @@ struct WindowSnapshot: Codable {
     /// leaked one window's collapsed state into the next window at that slot.
     /// nil (an older snapshot) means shown.
     var sidebarVisible: Bool?
-    /// Whether the project memory panel was shown, from before the panel
-    /// was one toggle for the app (`Preferences.projectMemoryPanelVisible`).
-    /// Read once by the restore to carry a shown panel over; never written
-    /// since.
+    /// Whether the window showed the Project Insights panel
+    /// (`WindowState.projectMemoryPanelVisible`). nil (an older snapshot, or
+    /// one from the builds where the panel was one toggle for the app) takes
+    /// the retired app-wide value once (`adoptingLegacyPanelVisibility`).
     var projectMemoryPanelVisible: Bool?
     /// The window's frame, as AppKit's own `frameDescriptor` string (the frame
     /// plus the screen it was on, so `setFrame(from:)` can fit it to a display
@@ -125,6 +125,20 @@ struct WindowSnapshot: Codable {
     /// unchanged set writes the same file. nil (an older snapshot) opens only
     /// the active project, as before.
     var expandedProjectIDs: [UUID]?
+
+    /// The saved windows with the retired app-wide panel value
+    /// (`Preferences.takeLegacyProjectMemoryPanelVisible`) in each window
+    /// that saved no value of its own. A user who had the panel on sees it
+    /// again in each restored window, once; the next save writes each
+    /// window's own value.
+    static func adoptingLegacyPanelVisibility(_ snapshots: [WindowSnapshot], legacyVisible: Bool) -> [WindowSnapshot] {
+        guard legacyVisible else { return snapshots }
+        return snapshots.map { snapshot in
+            var snapshot = snapshot
+            if snapshot.projectMemoryPanelVisible == nil { snapshot.projectMemoryPanelVisible = true }
+            return snapshot
+        }
+    }
 }
 
 // MARK: - Snapshot types

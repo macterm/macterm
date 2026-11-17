@@ -81,6 +81,14 @@ final class WindowState: Identifiable {
     /// commands, the CLI) that mean "the window the user is in".
     var sidebarVisible = true
 
+    /// Whether this window shows the Project Insights panel
+    /// (`ProjectMemoryPanel`). Per window, saved as
+    /// `WindowSnapshot.projectMemoryPanelVisible`: each window keeps the
+    /// panel open or closed on its own (feedback 2026-11-17). Toggle Project
+    /// Insights flips the key window's copy through
+    /// `AppState.projectMemoryPanelVisible`.
+    var projectMemoryPanelVisible = false
+
     /// This window's frame, as AppKit's `frameDescriptor` — what the next
     /// launch reopens it at (`WindowSnapshot.frame`). Written on every move
     /// and resize outside full screen, so it holds the windowed frame while

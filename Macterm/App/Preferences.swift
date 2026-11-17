@@ -453,13 +453,15 @@ final class Preferences {
         didSet { Keys.projectMemory.write(projectMemory, to: defaults) }
     }
 
-    /// Whether the Project Insights panel (`ProjectMemoryPanel`) is shown.
-    /// One toggle for the app: every window shows the panel of its own
-    /// project, or none does. It was per window before, kept in each
-    /// window's snapshot; a window that opened without the panel, or a
-    /// second window, then had to be toggled on its own.
-    var projectMemoryPanelVisible: Bool {
-        didSet { Keys.projectMemoryPanelVisible.write(projectMemoryPanelVisible, to: defaults) }
+    /// The retired app-wide value of the Project Insights panel
+    /// (`macterm.memory.panelVisible`), read once and removed. The panel's
+    /// state is per window now (`WindowState.projectMemoryPanelVisible`);
+    /// the restore gives this value to each saved window that has no value
+    /// of its own (`WindowSnapshot.adoptingLegacyPanelVisibility`).
+    func takeLegacyProjectMemoryPanelVisible() -> Bool {
+        let visible = Keys.projectMemoryPanelVisible.read(defaults)
+        defaults.removeObject(forKey: Keys.projectMemoryPanelVisible.name)
+        return visible
     }
 
     var showNewProjectButton: Bool {
@@ -1062,7 +1064,6 @@ final class Preferences {
         autoAssignProjectColors = Keys.autoAssignProjectColors.read(defaults)
         autoUpdateExtensions = Keys.autoUpdateExtensions.read(defaults)
         projectMemory = Keys.projectMemory.read(defaults)
-        projectMemoryPanelVisible = Keys.projectMemoryPanelVisible.read(defaults)
         showNewProjectButton = Keys.showNewProjectButton.read(defaults)
         showProjectNewTabButton = Keys.showProjectNewTabButton.read(defaults)
         reconnectRemotePanes = Keys.reconnectRemotePanes.read(defaults)

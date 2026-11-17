@@ -35,25 +35,26 @@ struct ProjectMemoryTests {
         let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(fileURL: base.appendingPathComponent("p.json")))
         let preferences = Preferences.shared
         let memory = ProjectMemory.shared
-        let (wasOn, wasVisible, wasReader) = (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader)
+        let (wasOn, wasReader) = (preferences.projectMemory, memory.modelReader)
         defer {
-            (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader) = (wasOn, wasVisible, wasReader)
+            (preferences.projectMemory, memory.modelReader) = (wasOn, wasReader)
             memory.refreshModelAvailability()
         }
         memory.modelReader = { .available }
         memory.refreshModelAvailability()
 
-        preferences.projectMemoryPanelVisible = true
+        let window = WindowState()
+        window.projectMemoryPanelVisible = true
         preferences.projectMemory = false
         #expect(AppCommand.toggleProjectMemory.action(in: ctx) == nil)
         #expect(!ProjectMemory.isEnabled)
-        #expect(!ProjectMemory.showsPanel)
+        #expect(!ProjectMemory.showsPanel(in: window))
 
         preferences.projectMemory = true
         #expect(AppCommand.toggleProjectMemory.action(in: ctx) != nil)
-        #expect(ProjectMemory.showsPanel)
-        preferences.projectMemoryPanelVisible = false
-        #expect(!ProjectMemory.showsPanel)
+        #expect(ProjectMemory.showsPanel(in: window))
+        window.projectMemoryPanelVisible = false
+        #expect(!ProjectMemory.showsPanel(in: window))
     }
 
     /// Project Insights needs Apple Intelligence: without the model, the
@@ -63,19 +64,20 @@ struct ProjectMemoryTests {
     func the_feature_is_off_while_apple_intelligence_is_off() {
         let preferences = Preferences.shared
         let memory = ProjectMemory.shared
-        let (wasOn, wasVisible, wasReader) = (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader)
+        let (wasOn, wasReader) = (preferences.projectMemory, memory.modelReader)
         defer {
-            (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader) = (wasOn, wasVisible, wasReader)
+            (preferences.projectMemory, memory.modelReader) = (wasOn, wasReader)
             memory.refreshModelAvailability()
         }
         preferences.projectMemory = true
-        preferences.projectMemoryPanelVisible = true
+        let window = WindowState()
+        window.projectMemoryPanelVisible = true
 
         for availability in [OnDeviceModel.Availability.notReady, .unsupported] {
             memory.modelReader = { availability }
             memory.refreshModelAvailability()
             #expect(!ProjectMemory.isEnabled)
-            #expect(!ProjectMemory.showsPanel)
+            #expect(!ProjectMemory.showsPanel(in: window))
             #expect(!ProjectMemorySummarizer.isEnabled)
             #expect(preferences.projectMemory)
         }

@@ -892,8 +892,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After the restore, so that the project list is the user's.
         appState.performWhenRestored { [weak appState] in
             ProjectMemory.shared.attach(projectStore: projectStore) { [weak appState] projectID in
-                ProjectMemory.showsPanel
-                    && (appState?.windows.contains { $0.activeProjectID == projectID } ?? false)
+                appState?.windows.contains {
+                    $0.activeProjectID == projectID && ProjectMemory.showsPanel(in: $0)
+                } ?? false
             }
         }
         ProjectSpotlightIndex.shared.attach(projectStore: projectStore)

@@ -93,10 +93,10 @@ final class ProjectMemory {
         isSupported && Preferences.shared.projectMemory && shared.modelAvailability == .available
     }
 
-    /// Whether a window shows the panel: the feature is on and the panel's
-    /// toggle is on.
-    static var showsPanel: Bool {
-        isEnabled && Preferences.shared.projectMemoryPanelVisible
+    /// Whether a window shows the panel: the feature is on and that
+    /// window's panel is open (`WindowState.projectMemoryPanelVisible`).
+    static func showsPanel(in window: WindowState) -> Bool {
+        isEnabled && window.projectMemoryPanelVisible
     }
 
     /// Whether a workspace is a project that memory covers.

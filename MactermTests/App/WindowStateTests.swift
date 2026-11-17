@@ -629,12 +629,53 @@ struct WindowStateTests {
     }
 
     @Test
-    func a_snapshot_that_showed_the_panel_in_a_window_turns_the_one_toggle_on() throws {
-        // The panel was per window before it became one toggle for the app.
-        // A saved window that showed it turns the toggle on at the restore;
-        // the next save writes no per-window value.
-        Preferences.shared.projectMemoryPanelVisible = false
-        defer { Preferences.shared.projectMemoryPanelVisible = false }
+    func each_window_keeps_its_own_insights_panel_across_a_restart() {
+        // Feedback 2026-11-17: the panel is open or closed per window. The
+        // toggle acts on the key window only, and a restore gives each
+        // window its own value back.
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
+        let projects = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
+        let files = ProjectFileStore(directoryURL: projects)
+        let p = Project(name: "p", path: "/tmp", sortOrder: 0)
+        let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
+
+        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { false })
+        writer.restoreSelection(projects: [p, q])
+        writer.selectProject(p)
+        writer.selectProject(q)
+        let w1 = WindowState(activeProjectID: p.id)
+        let w2 = WindowState(activeProjectID: q.id)
+        writer.registerWindow(w1)
+        writer.registerWindow(w2)
+        writer.noteKeyWindow(w1)
+        writer.projectMemoryPanelVisible.toggle()
+        #expect(w1.projectMemoryPanelVisible)
+        #expect(!w2.projectMemoryPanelVisible, "the toggle acts on the key window only")
+        writer.saveWorkspaces()
+
+        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { true })
+        reader.restoreSelection(projects: [p, q])
+        let first = WindowState()
+        reader.registerWindow(first)
+        reader.noteKeyWindow(first)
+        reader.restoreWindows(adopting: first)
+        let second = WindowState()
+        reader.registerWindow(second)
+
+        #expect(first.projectMemoryPanelVisible)
+        #expect(!second.projectMemoryPanelVisible, "a saved value wins over the retired app-wide one")
+        let third = WindowState()
+        reader.registerWindow(third)
+        #expect(!third.projectMemoryPanelVisible, "a new window opens with the panel closed")
+    }
+
+    @Test
+    func the_retired_app_wide_panel_value_opens_the_panel_in_windows_with_no_value_once() throws {
+        // A file from a build where the panel was one toggle for the app has
+        // no per-window value. With that toggle on, each restored window
+        // shows the panel; the reader is asked once.
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
         let projects = FileManager.default.temporaryDirectory
@@ -642,30 +683,50 @@ struct WindowStateTests {
         let files = ProjectFileStore(directoryURL: projects)
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { false })
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         let w1 = WindowState(activeProjectID: p.id)
+        let w2 = WindowState(activeProjectID: p.id)
         writer.registerWindow(w1)
+        writer.registerWindow(w2)
         writer.noteKeyWindow(w1)
         writer.saveWorkspaces()
-        // The field as an older build wrote it.
+        // The file as the app-wide builds wrote it.
         var file = try JSONSerialization.jsonObject(with: Data(contentsOf: tmp)) as? [String: Any] ?? [:]
         var windows = file["windows"] as? [[String: Any]] ?? []
-        #expect(windows.count == 1)
-        #expect(windows.first?["projectMemoryPanelVisible"] == nil, "a current build writes no per-window value")
-        windows[0]["projectMemoryPanelVisible"] = true
+        #expect(windows.count == 2)
+        #expect(windows.allSatisfy { $0["projectMemoryPanelVisible"] as? Bool == false }, "each window writes its own value")
+        for index in windows.indices {
+            windows[index]["projectMemoryPanelVisible"] = nil
+        }
         file["windows"] = windows
         try JSONSerialization.data(withJSONObject: file).write(to: tmp)
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        var reads = 0
+        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: {
+            reads += 1
+            return true
+        })
         reader.restoreSelection(projects: [p])
         let first = WindowState()
         reader.registerWindow(first)
         reader.noteKeyWindow(first)
         reader.restoreWindows(adopting: first)
-        #expect(Preferences.shared.projectMemoryPanelVisible)
-        #expect(reader.projectMemoryPanelVisible)
+        let second = WindowState()
+        reader.registerWindow(second)
+        #expect(first.projectMemoryPanelVisible)
+        #expect(second.projectMemoryPanelVisible)
+        #expect(reads == 1)
+    }
+
+    @Test
+    func the_retired_app_wide_panel_value_is_read_once_and_removed() {
+        let preferences = Preferences.shared
+        Preferences.defaults.set(true, forKey: "macterm.memory.panelVisible")
+        #expect(preferences.takeLegacyProjectMemoryPanelVisible())
+        #expect(Preferences.defaults.object(forKey: "macterm.memory.panelVisible") == nil)
+        #expect(!preferences.takeLegacyProjectMemoryPanelVisible())
     }
 
     @Test
