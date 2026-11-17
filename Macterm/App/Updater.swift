@@ -1,4 +1,5 @@
 import Combine
+import os
 import Sparkle
 import SwiftUI
 
@@ -30,8 +31,11 @@ enum UpdatePolicy {
     }
 }
 
-/// Thin wrapper around `SPUStandardUpdaterController` that exposes the
-/// observable bits SwiftUI views need.
+/// The updater and its own user interface. Macterm drives Sparkle with its own
+/// user driver (`UpdateUserDriver`), so Sparkle shows no dialog. The toolbar
+/// shows the exception: Downloading… with a progress ring, then Restart to
+/// Update. A check that the user started ends in a toast. Release notes are
+/// not shown in the app: they are on the changelog of the website.
 ///
 /// We ship Sparkle with an EdDSA public key baked into `Info.plist`; updates
 /// are verified against that key regardless of macOS code-signing state, so
@@ -39,53 +43,55 @@ enum UpdatePolicy {
 /// downloads updates via its own networking path, so installed updates do
 /// not pick up the `com.apple.quarantine` attribute and launch cleanly
 /// without `xattr -cr`.
-/// `@Observable` (not `ObservableObject`/`@Published`) to match the project's
-/// Observation convention. The Sparkle KVO/delegate bridge below writes into
-/// plain observable `var`s, so nothing forces the legacy stack here.
 @MainActor @Observable
 final class Updater {
     static let shared = Updater()
 
     @ObservationIgnored
-    private let controller: SPUStandardUpdaterController
+    private let sparkle: SPUUpdater
     @ObservationIgnored
     private let updaterDelegate = UpdaterDelegate()
     @ObservationIgnored
-    private let userDriverDelegate = UserDriverDelegate()
+    private let userDriver = UpdateUserDriver()
 
     /// Exposes `canCheckForUpdates` for menu/UI disabled state.
     var canCheckForUpdates = false
 
-    /// `true` once Sparkle has found a valid update for the current version.
-    /// Flips back to `false` after the user installs, skips, or dismisses it.
-    var updateAvailable = false
+    /// The pure state machine from Sparkle's callbacks to the toolbar button.
+    private(set) var machine = UpdateMachine()
 
-    /// `true` once Sparkle has downloaded an update in the background
-    /// (`UpdatePolicy`) and holds it for install on quit. The toolbar
-    /// then offers Restart to Update. Without it, a user who keeps Macterm open
-    /// for weeks never learns that an update waits: Sparkle downloads silently
-    /// and never shows a scheduled reminder for it.
-    ///
-    /// Never cleared: the update installs when the app quits, whatever the
-    /// channel or a later check says.
-    var updateReadyToInstall = false
+    var status: UpdateStatus { machine.status }
 
-    /// Sparkle's handler that installs the downloaded update and relaunches.
+    /// `true` while Sparkle downloads or holds an update.
+    var updateAvailable: Bool { machine.status != .idle }
+
+    /// `true` once an update waits to install. Sparkle installs it when the
+    /// app quits; Restart to Update installs it at once. Never cleared: the
+    /// update installs when the app quits, whatever a later check says.
+    var updateReadyToInstall: Bool { machine.status == .readyToRestart }
+
+    /// Shows a toast in the windows. `MactermApp` sets it. With no window
+    /// open, the toast has nowhere to show, and the menu item is the
+    /// fallback.
     @ObservationIgnored
-    private var installAndRelaunchHandler: (() -> Void)?
+    var presentToast: ((String) -> Void)?
+
+    /// What Restart to Update sends: the reply that `UpdateUserDriver` holds,
+    /// or the handler of a background download (`willInstallUpdateOnQuit`).
+    @ObservationIgnored
+    private var heldInstallReply: ((SPUUserUpdateChoice) -> Void)?
+    @ObservationIgnored
+    private var installOnQuitHandler: (() -> Void)?
 
     @ObservationIgnored
     private var cancellable: AnyCancellable?
 
     private init() {
         // Debug and local Release builds have no production EdDSA key, so
-        // Sparkle would show "Unable to Check For Updates" on launch. Only a
-        // distributed release with a real embedded key starts the updater.
-        //
-        // A scripted run (MACTERM_BENCHMARK=1) of a local Release build has
-        // the placeholder key (no SPARKLE_ED_PUBLIC_KEY at build time), so the
-        // updater fails to start and its app-modal alert blocks the run
-        // loop at launch — in a scripted run nobody can click OK.
+        // Sparkle would fail to check on launch. Only a distributed release
+        // with a real embedded key starts the updater. A scripted run
+        // (MACTERM_BENCHMARK=1) of a local Release build has the placeholder
+        // key too.
         let isDebug: Bool = {
             #if DEBUG
             true
@@ -100,79 +106,97 @@ final class Updater {
             publicKey: publicKey
         )
 
-        // Construct the controller WITHOUT starting the updater, so we can wire
-        // the delegate callbacks before any check can fire. Referencing `self`
-        // in a closure requires all stored properties initialized first, so the
-        // controller must exist before the closures — but `startingUpdater:
-        // false` means it won't invoke a delegate yet. We start it explicitly
-        // below, after the closures are set, so a scheduled check on a release
-        // build can't fire an update-found signal before its closure exists.
-        controller = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: updaterDelegate,
-            userDriverDelegate: userDriverDelegate
+        sparkle = SPUUpdater(
+            hostBundle: Bundle.main,
+            applicationBundle: Bundle.main,
+            userDriver: userDriver,
+            delegate: updaterDelegate
         )
-        cancellable = controller.updater.publisher(for: \.canCheckForUpdates)
+        cancellable = sparkle.publisher(for: \.canCheckForUpdates)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.canCheckForUpdates = $0 }
 
-        // `didFindValidUpdate` only fires for *user-initiated* checks; scheduled
-        // background checks route through the user-driver delegate — wire both.
-        updaterDelegate.onUpdateFound = { [weak self] in self?.updateAvailable = true }
-        updaterDelegate.onUpdateCleared = { [weak self] in self?.updateAvailable = false }
+        // Wire the callbacks before the updater starts, so that no check can
+        // fire before they exist.
+        userDriver.onEvent = { [weak self] event in self?.handle(event) }
+        userDriver.onFound = { [weak self] found, reply in self?.handleFound(found, reply: reply) }
+        userDriver.onReadyToInstall = { [weak self] reply in
+            self?.heldInstallReply = reply
+            self?.handle(.readyToInstall)
+        }
+        updaterDelegate.onEvent = { [weak self] event in self?.handle(event) }
         updaterDelegate.onReadyToInstall = { [weak self] handler in
-            self?.installAndRelaunchHandler = handler
-            self?.updateReadyToInstall = true
+            self?.installOnQuitHandler = handler
+            self?.handle(.readyToInstall)
         }
-        updaterDelegate.onWillScheduleCheck = { [updater = controller.updater] in
-            UpdatePolicy.enforce(on: updater)
+        updaterDelegate.onWillScheduleCheck = { [sparkle] in
+            UpdatePolicy.enforce(on: sparkle)
         }
-        userDriverDelegate.onUpdateFound = { [weak self] in self?.updateAvailable = true }
-        userDriverDelegate.onUpdateCleared = { [weak self] in self?.updateAvailable = false }
 
-        // Now that callbacks are wired, actually start the updater. Local,
-        // Debug, and benchmark builds skip it (see `startUpdater` above).
         if startUpdater {
-            UpdatePolicy.enforce(on: controller.updater)
-            controller.startUpdater()
+            UpdatePolicy.enforce(on: sparkle)
+            do {
+                try sparkle.start()
+            } catch {
+                logger.error("Updater did not start: \(EnglishErrorText.describe(error), privacy: .public)")
+            }
         }
     }
 
-    var updater: SPUUpdater { controller.updater }
+    var updater: SPUUpdater { sparkle }
 
     func checkForUpdates() {
-        controller.checkForUpdates(nil)
+        guard sparkle.canCheckForUpdates else { return }
+        sparkle.checkForUpdates()
     }
 
-    /// Install the update that Sparkle downloaded in the background and
-    /// relaunch, with no further UI. Quit is a detach (sessions survive), so
-    /// the relaunch reattaches every pane.
+    /// Install the waiting update and relaunch, with no further UI. Quit is a
+    /// detach (sessions survive), so the relaunch reattaches every pane.
+    ///
+    /// With no handler in hand, a check finds the waiting update again
+    /// (`SPUUserUpdateStage.installing`), and the machine installs it then.
     func installAndRelaunch() {
-        guard let installAndRelaunchHandler else {
+        if let reply = heldInstallReply {
+            heldInstallReply = nil
+            reply(.install)
+        } else if let installOnQuitHandler {
+            installOnQuitHandler()
+        } else {
+            handle(.restartRequested)
             checkForUpdates()
-            return
         }
-        installAndRelaunchHandler()
+    }
+
+    private func handle(_ event: UpdateEvent) {
+        let result = machine.handle(event)
+        if event == .sessionEnded || event == .failed || event == .notFound {
+            // Sparkle's session ended: a held reply is no longer valid.
+            heldInstallReply = nil
+        }
+        if let toast = result.toast { presentToast?(toast.title) }
+    }
+
+    private func handleFound(_ found: UpdateFound, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        let result = machine.handle(.found(found))
+        switch result.reply {
+        case .install: reply(.install)
+        case .dismiss: reply(.dismiss)
+        case .holdForRestart: heldInstallReply = reply
+        case nil: reply(.dismiss)
+        }
+        if let toast = result.toast { presentToast?(toast.title) }
     }
 
     /// The appcast channel updates are drawn from. Sparkle asks the delegate for
     /// `allowedChannels` on each check, so a change here lands on the next check
     /// without restarting.
-    ///
-    /// Writing the pref is enough — except that an update already *found* may be
-    /// invisible on the new channel, so the toolbar flag has to be reconsidered.
-    /// Widening from `.stable` can never hide one (Sparkle always admits the
-    /// default channel on top of `allowedChannels`), so that transition keeps
-    /// the flag; every other change clears it and the next check decides again.
     var updateChannel: UpdateChannel {
         get { Preferences.shared.updateChannel }
-        set {
-            let previous = Preferences.shared.updateChannel
-            Preferences.shared.updateChannel = newValue
-            if previous != .stable, previous != newValue { updateAvailable = false }
-        }
+        set { Preferences.shared.updateChannel = newValue }
     }
 }
+
+private let logger = Logger(subsystem: appBundleID, category: "Updater")
 
 /// Sparkle's channel name for beta builds. Must match the `<sparkle:channel>`
 /// value written by `scripts/publish-appcast.sh`; the two are a wire contract,
@@ -187,11 +211,12 @@ let betaUpdateChannel = UpdateChannel.beta.rawValue
 /// `publish-appcast.sh`'s `CHANNEL`.
 let tipUpdateChannel = UpdateChannel.tip.rawValue
 
-/// Receives callbacks for *user-initiated* checks (the "Check for Updates…"
-/// menu item / Settings button).
+/// Receives Sparkle's updater callbacks: the channels, the schedule, and a
+/// download that Sparkle does in the background with no user driver.
 private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
-    var onUpdateFound: (() -> Void)?
-    var onUpdateCleared: (() -> Void)?
+    var onEvent: ((UpdateEvent) -> Void)?
+    var onReadyToInstall: ((@escaping () -> Void) -> Void)?
+    var onWillScheduleCheck: (() -> Void)?
 
     /// Gates the prerelease channels on the user's selection. Sparkle calls
     /// this on every check (scheduled and user-initiated alike), so the picker
@@ -214,21 +239,36 @@ private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
         }
     }
 
-    var onReadyToInstall: ((@escaping () -> Void) -> Void)?
-    var onWillScheduleCheck: (() -> Void)?
-
     /// Sparkle calls this on the main thread each time it schedules the next
     /// background check. `Updater` writes `UpdatePolicy` again here.
     func updater(_: SPUUpdater, willScheduleUpdateCheckAfterDelay _: TimeInterval) {
         onWillScheduleCheck?()
     }
 
+    /// A scheduled check downloads with no user driver. The toolbar shows an
+    /// indeterminate ring until the download is ready or fails.
+    func updater(_: SPUUpdater, willDownloadUpdate _: SUAppcastItem, with _: NSMutableURLRequest) {
+        onEvent?(.backgroundDownloadStarted)
+    }
+
+    func updater(_: SPUUpdater, willExtractUpdate _: SUAppcastItem) {
+        onEvent?(.extractionStarted)
+    }
+
+    func updater(_: SPUUpdater, failedToDownloadUpdate _: SUAppcastItem, error _: Error) {
+        onEvent?(.backgroundFailed)
+    }
+
+    func updater(_: SPUUpdater, didAbortWithError _: Error) {
+        onEvent?(.backgroundFailed)
+    }
+
     /// Called on the main thread when a background download is ready to
     /// install on quit. Returning `true` takes control of the install: Sparkle
     /// still installs on quit, but it stops its own update cycles, so it never
-    /// shows its "impatient" alert after `SUScheduledImpatientCheckInterval`.
-    /// The toolbar's Restart to Update is the reminder instead. Sparkle 2.3
-    /// and later accepts the handler again after a cancelled termination.
+    /// asks after `SUScheduledImpatientCheckInterval`. The toolbar's Restart to
+    /// Update is the reminder instead. Sparkle 2.3 and later accepts the
+    /// handler again after a cancelled termination.
     func updater(
         _: SPUUpdater,
         willInstallUpdateOnQuit _: SUAppcastItem,
@@ -237,87 +277,152 @@ private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
         onReadyToInstall?(immediateInstallHandler)
         return true
     }
-
-    func updater(_: SPUUpdater, didFindValidUpdate _: SUAppcastItem) {
-        DispatchQueue.main.async { self.onUpdateFound?() }
-    }
-
-    func updaterDidNotFindUpdate(_: SPUUpdater) {
-        DispatchQueue.main.async { self.onUpdateCleared?() }
-    }
-
-    func updater(_: SPUUpdater, didAbortWithError _: Error) {
-        DispatchQueue.main.async { self.onUpdateCleared?() }
-    }
 }
 
-/// Receives callbacks for *scheduled* (background) checks. Sparkle's daily
-/// auto-check runs through this path; without it, the toolbar icon would never
-/// appear unless the user manually triggered a check. We opt into "gentle
-/// reminders" so Sparkle defers UI to us, and we surface the update by
-/// flipping the toolbar flag instead of showing a modal alert.
-private final class UserDriverDelegate: NSObject, SPUStandardUserDriverDelegate, @unchecked Sendable {
-    nonisolated(unsafe) var onUpdateFound: (() -> Void)?
-    nonisolated(unsafe) var onUpdateCleared: (() -> Void)?
+/// Macterm's own `SPUUserDriver`: it shows no window. Each callback becomes an
+/// `UpdateEvent` for `UpdateMachine`, and `Updater` answers Sparkle.
+/// Sparkle calls every method on the main thread.
+private final class UpdateUserDriver: NSObject, SPUUserDriver {
+    var onEvent: ((UpdateEvent) -> Void)?
+    var onFound: ((UpdateFound, @escaping (SPUUserUpdateChoice) -> Void) -> Void)?
+    var onReadyToInstall: ((@escaping (SPUUserUpdateChoice) -> Void) -> Void)?
 
-    /// Tells Sparkle we'll handle showing the update ourselves rather than
-    /// letting the standard alert pop up unprompted. The `state` flag tells
-    /// us when Sparkle would otherwise show its alert; the toolbar icon is
-    /// our equivalent surface.
-    var supportsGentleScheduledUpdateReminders: Bool { true }
+    /// Updates are always automatic (`UpdatePolicy`), so the answer is fixed.
+    func show(_: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false))
+    }
 
-    func standardUserDriverWillHandleShowingUpdate(
-        _: Bool,
-        forUpdate _: SUAppcastItem,
-        state: SPUUserUpdateState
+    func showUserInitiatedUpdateCheck(cancellation _: @escaping () -> Void) {
+        onEvent?(.userCheckStarted)
+    }
+
+    func showUpdateFound(
+        with appcastItem: SUAppcastItem,
+        state: SPUUserUpdateState,
+        reply: @escaping (SPUUserUpdateChoice) -> Void
     ) {
-        guard state.stage == .notDownloaded || state.stage == .downloaded else { return }
-        Task { @MainActor [weak self] in self?.onUpdateFound?() }
-    }
-
-    func standardUserDriverWillFinishUpdateSession() {
-        Task { @MainActor [weak self] in self?.onUpdateCleared?() }
-    }
-}
-
-/// Menu item that stays disabled while an update check is already in flight.
-struct CheckForUpdatesMenuItem: View {
-    /// `@Observable` singleton read directly — Observation tracks the
-    /// `canCheckForUpdates` read in `body`, no `@ObservedObject` needed.
-    private var updater: Updater { .shared }
-
-    var body: some View {
-        Button("Check for Updates…") {
-            updater.checkForUpdates()
+        let stage: UpdateFound.Stage = switch state.stage {
+        case .downloaded: .downloaded
+        case .installing: .installing
+        default: .notDownloaded
         }
-        .disabled(!updater.canCheckForUpdates)
+        let found = UpdateFound(
+            stage: stage,
+            userInitiated: state.userInitiated,
+            informationOnly: appcastItem.isInformationOnlyUpdate,
+            version: appcastItem.displayVersionString
+        )
+        onFound?(found, reply)
+    }
+
+    /// Release notes are not shown in the app.
+    func showUpdateReleaseNotes(with _: SPUDownloadData) {}
+
+    func showUpdateReleaseNotesFailedToDownloadWithError(_: Error) {}
+
+    func showUpdateNotFoundWithError(_: Error, acknowledgement: @escaping () -> Void) {
+        onEvent?(.notFound)
+        acknowledgement()
+    }
+
+    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        logger.error("Update failed: \(EnglishErrorText.describe(error), privacy: .public)")
+        onEvent?(.failed)
+        acknowledgement()
+    }
+
+    func showDownloadInitiated(cancellation _: @escaping () -> Void) {
+        onEvent?(.downloadStarted)
+    }
+
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        onEvent?(.expectedLength(expectedContentLength))
+    }
+
+    func showDownloadDidReceiveData(ofLength length: UInt64) {
+        onEvent?(.receivedData(length))
+    }
+
+    func showDownloadDidStartExtractingUpdate() {
+        onEvent?(.extractionStarted)
+    }
+
+    func showExtractionReceivedProgress(_: Double) {}
+
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        onReadyToInstall?(reply)
+    }
+
+    func showInstallingUpdate(withApplicationTerminated _: Bool, retryTerminatingApplication _: @escaping () -> Void) {}
+
+    func showUpdateInstalledAndRelaunched(_: Bool, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+    }
+
+    func dismissUpdateInstallation() {
+        onEvent?(.sessionEnded)
     }
 }
 
-/// Toolbar button shown in the main window's title bar only when Sparkle has
-/// found a valid update. Clicking surfaces the standard Sparkle prompt. When
-/// the update is already downloaded, it is Restart to Update instead, and a
-/// click installs and relaunches.
-struct UpdateAvailableToolbarButton: View {
+/// The app menu's update item. While an update waits, it is Restart to Update,
+/// the fallback when no window, and so no toolbar, is open.
+/// Otherwise it is Check for Updates…, disabled while a check runs.
+struct CheckForUpdatesMenuItem: View {
+    /// `@Observable` singleton read directly — Observation tracks the reads
+    /// in `body`, no `@ObservedObject` needed.
     private var updater: Updater { .shared }
 
     var body: some View {
         if updater.updateReadyToInstall {
+            Button("Restart to Update") {
+                updater.installAndRelaunch()
+            }
+        } else {
+            Button("Check for Updates…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.canCheckForUpdates)
+        }
+    }
+}
+
+/// The update button of the main window's toolbar. It shows only for the
+/// exception: Downloading… with a progress ring (determinate when Sparkle
+/// knows the size), then Restart to Update, which installs and relaunches.
+/// No button while idle.
+struct UpdateToolbarButton: View {
+    private var updater: Updater { .shared }
+
+    var body: some View {
+        switch updater.status {
+        case .idle:
+            EmptyView()
+        case .downloading,
+             .extracting:
+            HStack(spacing: 6) {
+                if let fraction = updater.status.fraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
+                Text("Downloading…")
+            }
+            .progressViewStyle(.circular)
+            .controlSize(.small)
+            .fixedSize()
+            .help(String(localized: "Macterm is downloading an update."))
+        case .readyToRestart:
             Button {
                 updater.installAndRelaunch()
             } label: {
-                Label("Restart to Update", systemImage: "arrow.clockwise.circle.fill")
-                    .foregroundStyle(.tint)
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Restart to Update")
+                }
+                .foregroundStyle(.tint)
             }
-            .help("An update is ready. Click to restart Macterm and install it.")
-        } else if updater.updateAvailable {
-            Button {
-                updater.checkForUpdates()
-            } label: {
-                Label("Update Available", systemImage: "arrow.down.circle.fill")
-                    .foregroundStyle(.tint)
-            }
-            .help("An update is available. Click to install.")
+            .fixedSize()
+            .help(String(localized: "Restart Macterm to install the update."))
         }
     }
 }

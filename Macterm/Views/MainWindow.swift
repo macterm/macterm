@@ -202,7 +202,7 @@ struct MainWindow: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    UpdateAvailableToolbarButton()
+                    UpdateToolbarButton()
                 }
                 // Only while Project Insights is on (Settings → Intelligence)
                 // and the button is not hidden (Settings → Appearance → Toolbar).

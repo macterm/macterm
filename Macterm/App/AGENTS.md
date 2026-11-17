@@ -141,6 +141,16 @@ A pane that asks for a password gets a native `NSPopover` at the cursor (`Passwo
 - **A host entry has a scope** (`PasswordEntryID.host`): the ssh destination as `ssh -G` resolves it (`RemotePasswordScope`, read again after 60 s). With no scope yet, or after a failure, the asker is `.unknown`: nothing is filled or offered.
 - **Nothing a host reports is protected.** There is no shared `sudo` entry and no shared key passphrase entry on a host: each is filed under the host's command line. A process on a host can print any prompt and rewrite its own argv, so the host's word is a hint only.
 
+## Updates
+
+Sparkle shows no window. `Updater` drives Sparkle with its own user driver (`UpdateUserDriver`), and `UpdateMachine` (pure, `UpdateStatusTests`) turns each callback into the toolbar state.
+
+- **The toolbar shows the exception only** (`UpdateToolbarButton`). No button while idle. Downloading… with a progress ring while Sparkle downloads or extracts: determinate when Sparkle knows the size, indeterminate for a background download, because the updater delegate reports no bytes. Restart to Update when the update waits. A click installs and relaunches.
+- **A check that the user starts ends in a toast** (`UpdateToast`): up to date, a failed check, a failed download. Never a modal. A scheduled check that fails is silent.
+- **A waiting update is sticky** (`UpdateStatus.readyToRestart`). Sparkle installs it when the app quits, whatever a later check or error says. Sparkle asks nothing at quit.
+- **The app menu item is the fallback with no window open.** While an update waits, Check for Updates… is Restart to Update (`CheckForUpdatesMenuItem`). An accessory app (`macos-hidden = always`) has no menu bar: its update installs at quit.
+- Release notes are not shown in the app. The changelog of the website has them.
+
 ## Pinned Tabs
 
 Pinned tabs belong to no project. The sidebar shows them above the projects. They are a **sentinel workspace** (`workspaces[PinnedTabs.workspaceID]`, `Workspace.kind == .pinned`). Its ID is a fixed UUID that is not a `ProjectStore` row, so the iteration over projects never sees it. Each pinned tab is a `PinnedTabRecord`: a durable declaration (`LayoutTab`) and, while it is loaded, a live `TerminalTab`. All the logic is in `AppState+PinnedTabs.swift`.
