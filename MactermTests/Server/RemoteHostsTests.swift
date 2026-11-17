@@ -336,15 +336,15 @@ struct RemoteHostsTests {
             for _ in 0 ..< 2 {
                 let pane = fixture.pane()
                 let answer = await fixture.settle(pane)
-                guard case let .plain(arguments, message) = answer else {
+                guard case let .plain(arguments) = answer else {
                     Issue.record("no plain shell: \(answer)")
                     return
                 }
-                #expect(message == RemotePaneText.plainShell(host: "box"))
                 #expect(arguments.last?.contains("connect") == false)
             }
             #expect(host.asked == ["box"])
             #expect(fixture.hosts.declined == ["box"])
+            #expect(fixture.hosts.plainDestinations == ["box"])
         }
     }
 

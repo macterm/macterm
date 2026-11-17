@@ -23,8 +23,9 @@ enum RemotePaneAnswer {
     /// session does not run: make it in this folder first.
     case attach(link: RemoteServers.Link, create: String?)
     /// No server on the host: a plain ssh shell over the master (`ssh`
-    /// arguments), after `message`.
-    case plain(arguments: [String], message: String?)
+    /// arguments). The pane shows no line about it: the sidebar's project row
+    /// does (`plainDestinations`).
+    case plain(arguments: [String])
     /// The pane ends: no pane has the session any more, or the session is
     /// gone from the host.
     case close
@@ -144,7 +145,19 @@ final class RemoteHosts {
     /// the folder come from the user's own panes.
     @ObservationIgnored var panes: (@MainActor (String) -> [Pane])?
 
-    @ObservationIgnored private var hosts: [String: Host] = [:]
+    @ObservationIgnored private var hosts: [String: Host] = [:] {
+        didSet {
+            let plain = Set(hosts.compactMap { destination, host in
+                if case .plain = host { destination } else { nil }
+            })
+            if plain != plainDestinations { plainDestinations = plain }
+        }
+    }
+
+    /// The destinations whose panes are plain ssh shells now: the user
+    /// declined the server, or the host has no build. Derived from `hosts`.
+    /// The sidebar's project row shows it, so the pane prints no line.
+    private(set) var plainDestinations: Set<String> = []
     /// The roaming link of a host (design/009), and the ssh link that it
     /// replaced as the host's link. Panes that attached over the ssh link
     /// stay on it until it ends.
@@ -349,10 +362,7 @@ final class RemoteHosts {
             guard let command = configuration.scripts?.plainCommand(directory: target.directory) else {
                 return .wait(message: RemotePaneText.noPlainShell)
             }
-            return .plain(
-                arguments: connections.ttyArguments(route, destination, command),
-                message: RemotePaneText.plainShell(host: target.host)
-            )
+            return .plain(arguments: connections.ttyArguments(route, destination, command))
         case let .ready(link):
             return await decide(session, panes: panes, target: target, link: link, prompts: prompts)
         }
@@ -752,8 +762,4 @@ enum RemotePaneText {
     /// The bundle has no host scripts, or the folder is too long for one
     /// argument.
     static let noPlainShell = "Macterm cannot start a shell in this folder."
-
-    static func plainShell(host: String) -> String {
-        "Macterm has no server on \(host). This shell stops when the connection stops."
-    }
 }
