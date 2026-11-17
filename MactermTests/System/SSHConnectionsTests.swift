@@ -615,4 +615,14 @@ struct SSHConnectionsTests {
         #expect(connections.logins["box"] == nil)
         #expect(sshd.acceptedLogins() == 0)
     }
+
+    @Test
+    func a_direct_host_name_comes_from_the_config_unless_a_jump_or_a_proxy_is_set() {
+        let plain = "user bob\nhostname box.example\nport 22\nproxyjump none\nproxycommand none\n"
+        #expect(SSHControlPath.directHostname(fromConfig: plain) == "box.example")
+        #expect(SSHControlPath.directHostname(fromConfig: "hostname box\n") == "box")
+        #expect(SSHControlPath.directHostname(fromConfig: "hostname box\nproxyjump bastion\n") == nil)
+        #expect(SSHControlPath.directHostname(fromConfig: "hostname box\nproxycommand nc %h %p\n") == nil)
+        #expect(SSHControlPath.directHostname(fromConfig: "user bob\nport 22\n") == nil)
+    }
 }
