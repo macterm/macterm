@@ -1477,11 +1477,13 @@ final class AppState {
     func restoreSelection(projects: [Project]) {
         logger.info("restoreSelection: \(projects.count, privacy: .public) projects")
         hasRestoredSelection = true
-        let loaded = workspaceStore.load()
         // The scratch workspace restores like a project's (#665): its only
         // record is the snapshot, and its sessions must be claims before the
         // orphan sweep below.
         let valid = Set(projects.map(\.id)).union([ScratchTabs.workspaceID])
+        // One pane is one session, across workspaces, pinned tabs, the quick
+        // terminal and widgets.
+        let loaded = WorkspaceSerializer.withoutRepeatedSessions(workspaceStore.load(), validIDs: valid)
         // Restore every project's snapshot — including layout-file projects.
         // The snapshot carries each pane's persisted zmx session identity, so
         // panes REATTACH their still-running shells; applying the project

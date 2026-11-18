@@ -587,6 +587,70 @@ enum WorkspaceSerializer {
         }
     }
 
+    /// The loaded file with each session on its first pane only, across every
+    /// section, in restore order: project workspaces, pinned tabs, the quick
+    /// terminal, desktop widgets. A file from a build with `pane mirror` can
+    /// put one session on a project pane and a pinned or widget pane, and a
+    /// close of one pane then kills the session under the other.
+    /// - A workspace whose project is not in `validIDs` does not restore, so
+    ///   its sessions do not count.
+    /// - A pinned tab with no pane left has no live snapshot: it starts from
+    ///   its declaration.
+    /// - A quick terminal tab with no pane left is dropped: the panel keeps
+    ///   its fresh tab.
+    /// - A widget with no pane left gets a fresh session, and
+    ///   `materializeRestoredDesktopWidgets` starts it from its recipe.
+    static func withoutRepeatedSessions(_ loaded: WorkspaceStore.Loaded, validIDs: Set<UUID>) -> WorkspaceStore.Loaded {
+        var seen: Set<String> = []
+        var result = loaded
+        result.workspaces = loaded.workspaces.map { snap in
+            guard validIDs.contains(snap.projectID) else { return snap }
+            return WorkspaceSnapshot(
+                projectID: snap.projectID,
+                activeTabID: snap.activeTabID,
+                tabs: snap.tabs.compactMap { withoutRepeatedSessions($0, seen: &seen) }
+            )
+        }
+        result.pinned = loaded.pinned.map { snap in
+            PinnedTabSnapshot(
+                id: snap.id,
+                declaration: snap.declaration,
+                originProjectID: snap.originProjectID,
+                live: snap.live.flatMap { withoutRepeatedSessions($0, seen: &seen) }
+            )
+        }
+        result.quickTerminal = loaded.quickTerminal.flatMap { withoutRepeatedSessions($0, seen: &seen) }
+        result.desktopWidgets = loaded.desktopWidgets.map { widget in
+            var widget = widget
+            widget.tab = withoutRepeatedSessions(widget.tab, seen: &seen) ?? withFreshSessions(widget.tab)
+            return widget
+        }
+        return result
+    }
+
+    /// The tab with each pane whose session `seen` holds left out. Nil when
+    /// no pane is left.
+    static func withoutRepeatedSessions(_ t: TabSnapshot, seen: inout Set<String>) -> TabSnapshot? {
+        guard let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) else { return nil }
+        return TabSnapshot(id: t.id, customTitle: t.customTitle, focusedPaneID: t.focusedPaneID, splitRoot: kept)
+    }
+
+    /// The tab with no session identity, so each pane restores in a new
+    /// session.
+    private static func withFreshSessions(_ t: TabSnapshot) -> TabSnapshot {
+        func fresh(_ node: SplitNodeSnapshot) -> SplitNodeSnapshot {
+            switch node {
+            case var .pane(p):
+                p.sessionID = nil
+                p.sessionName = nil
+                return .pane(p)
+            case let .split(b):
+                return .split(SplitBranchSnapshot(direction: b.direction, ratio: b.ratio, first: fresh(b.first), second: fresh(b.second)))
+            }
+        }
+        return TabSnapshot(id: t.id, customTitle: t.customTitle, focusedPaneID: t.focusedPaneID, splitRoot: fresh(t.splitRoot))
+    }
+
     private static func restoreNode(_ snap: SplitNodeSnapshot, projectID: UUID) -> SplitNode {
         switch snap {
         case let .pane(p):

@@ -540,6 +540,74 @@ struct WorkspaceSerializerTests {
         #expect(restored.tabs.map(\.id) == [firstTab.id])
         #expect(restored.tabs[0].splitRoot.allPanes().map(\.sessionName) == [first.sessionName])
     }
+
+    @Test
+    func a_session_of_a_project_tab_restores_on_no_pinned_quick_or_widget_pane() throws {
+        // A file from a build with `pane mirror` can name one session on a
+        // project pane and on a pinned, quick terminal or widget pane. Only
+        // the project pane keeps it.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let session = try #require(ws.tabs[0].focusedPane).sessionName
+        func tab(_ panes: [String?]) -> TabSnapshot {
+            let nodes = panes.map { name in
+                SplitNodeSnapshot.pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionID: UUID(), sessionName: name))
+            }
+            let root = nodes.dropFirst().reduce(nodes[0]) { first, second in
+                .split(SplitBranchSnapshot(direction: .horizontal, ratio: 0.5, first: first, second: second))
+            }
+            return TabSnapshot(id: UUID(), customTitle: nil, focusedPaneID: nil, splitRoot: root)
+        }
+        let declaration = LayoutTab(layout: .pane(LayoutPane()))
+        let pinnedAlone = PinnedTabSnapshot(id: UUID(), declaration: declaration, originProjectID: nil, live: tab([session]))
+        let pinnedSplit = PinnedTabSnapshot(id: UUID(), declaration: declaration, originProjectID: nil, live: tab([session, "pinned-own"]))
+        let widget = DesktopWidgetSnapshot(id: UUID(), tab: tab([session]), columns: 2, rows: 2, topLeftX: 0, topLeftY: 0)
+        var loaded = WorkspaceStore.Loaded()
+        loaded.workspaces = WorkspaceSerializer.snapshot([ws.id: ws])
+        loaded.pinned = [pinnedAlone, pinnedSplit]
+        loaded.quickTerminal = tab([session])
+        loaded.desktopWidgets = [widget]
+
+        let kept = WorkspaceSerializer.withoutRepeatedSessions(loaded, validIDs: [ws.id])
+
+        func names(_ t: TabSnapshot?) -> [String?] {
+            guard let t else { return [] }
+            func walk(_ node: SplitNodeSnapshot) -> [String?] {
+                switch node {
+                case let .pane(p): [p.sessionName]
+                case let .split(b): walk(b.first) + walk(b.second)
+                }
+            }
+            return walk(t.splitRoot)
+        }
+        #expect(kept.workspaces.flatMap { $0.tabs.flatMap { names($0) } } == [session])
+        #expect(kept.pinned[0].live == nil)
+        #expect(names(kept.pinned[1].live) == ["pinned-own"])
+        #expect(kept.quickTerminal == nil)
+        #expect(names(kept.desktopWidgets[0].tab) == [nil])
+    }
+
+    @Test
+    func a_session_of_a_project_that_does_not_restore_stays_on_a_pinned_pane() throws {
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let session = try #require(ws.tabs[0].focusedPane).sessionName
+        var loaded = WorkspaceStore.Loaded()
+        loaded.workspaces = WorkspaceSerializer.snapshot([ws.id: ws])
+        loaded.pinned = [PinnedTabSnapshot(
+            id: UUID(),
+            declaration: LayoutTab(layout: .pane(LayoutPane())),
+            originProjectID: nil,
+            live: TabSnapshot(
+                id: UUID(), customTitle: nil, focusedPaneID: nil,
+                splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionName: session))
+            )
+        )]
+
+        let kept = WorkspaceSerializer.withoutRepeatedSessions(loaded, validIDs: [])
+
+        let live = try #require(kept.pinned[0].live)
+        guard case let .pane(pane) = live.splitRoot else { return Issue.record("expected leaf") }
+        #expect(pane.sessionName == session)
+    }
 }
 
 @MainActor
