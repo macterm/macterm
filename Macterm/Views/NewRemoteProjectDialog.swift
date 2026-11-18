@@ -31,13 +31,15 @@ struct NewRemoteProjectDraft: Equatable {
 /// - Add connects to the host as a pane does and adds the project only when
 ///   the folder is there (`RemoteHosts.checkFolder`, 0358). The buttons have
 ///   their own actions, so the dialog stays up during the check. A line under
-///   the fields says that it connects, or why nothing was added. The line has
-///   a fixed height, so the dialog does not move when it changes.
+///   the fields says that it connects, or why nothing was added. The line
+///   takes room only while it shows, so the buttons sit under the fields
+///   when it is empty (0393). After a refusal, Add stays off until an edit.
 /// - The install question of the host is the dialog's next step, in the same
 ///   window (`askInstall`): the content dissolves into the new text and
 ///   buttons (`crossfade`), and the window resizes with its native animation
-///   (`relayout`). A login question shows on top
-///   (`SSHLoginPrompts.sheetParent`).
+///   (`relayout`). In this dialog Escape means Cancel, so the question has
+///   no Escape key: Continue Without Server is a click only (0393). A login
+///   question shows on top (`SSHLoginPrompts.sheetParent`).
 /// - The palette opens it with a `NewRemoteProjectDraft`: the check starts at
 ///   once, so the next step is the install question, the login or the
 ///   project.
@@ -68,6 +70,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     let statusLine = NSTextField(wrappingLabelWithString: "")
     private let spinner = NSProgressIndicator()
     private let form: NSView
+    private let grid: NSGridView
     /// The status line starts after the spinner while it turns, else at the
     /// edge.
     private var afterSpinner: NSLayoutConstraint?
@@ -91,8 +94,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     /// Asks the install question on its own sheet, after the dialog closed.
     private let askAlone: @MainActor (String) async -> Bool
 
-    /// The status line has room for two lines at all times.
-    private static let statusHeight: CGFloat = 32
+    /// The space between the fields and a shown status line.
+    private static let statusGap: CGFloat = 10
 
     init(
         draft: NewRemoteProjectDraft? = nil,
@@ -104,6 +107,9 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         self.create = create
         self.askAlone = askAlone
         form = NSView()
+        let labels = [String(localized: "Name"), String(localized: "Host"), String(localized: "Directory")]
+            .map { NSTextField(labelWithString: $0) }
+        grid = NSGridView(views: zip(labels, [nameField, hostField, directoryField]).map { [$0, $1] })
         super.init()
         hostField.stringValue = draft?.host ?? ""
         directoryField.stringValue = draft?.directory ?? "~"
@@ -281,6 +287,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
             form.removeFromSuperview()
             primaryButton.title = RemoteServerConsent.installButton
             secondaryButton.title = RemoteServerConsent.withoutServerButton
+            secondaryButton.keyEquivalent = ""
             primaryButton.isEnabled = true
             relayout()
             return
@@ -290,6 +297,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         alert.accessoryView = form
         primaryButton.title = String(localized: "Add")
         secondaryButton.title = String(localized: "Cancel")
+        secondaryButton.keyEquivalent = "\u{1b}"
         for field in [nameField, hostField, directoryField] {
             field.isEnabled = !isChecking
         }
@@ -310,6 +318,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
             atEdge?.isActive = false
             afterSpinner?.isActive = true
             alert.buttons[0].isEnabled = false
+            fitForm()
             return
         }
         spinner.stopAnimation(nil)
@@ -321,12 +330,16 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         // The line has room for two lines; the whole text is in the tooltip.
         statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
-        alert.buttons[0].isEnabled = composedPath != nil && reservedNameMessage == nil
+        // A refused path stays refused until an edit: Add and Return do nothing.
+        alert.buttons[0].isEnabled = composedPath != nil && reservedNameMessage == nil && failure == nil
+        fitForm()
     }
 
     func controlTextDidChange(_: Notification) {
+        let height = form.frame.height
         failure = nil
         refresh()
+        if form.frame.height != height { relayout() }
     }
 
     /// The step change between the fields and the install question: the
@@ -342,16 +355,15 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         view.layer?.add(fade, forKey: "step")
     }
 
-    /// Lays the alert out again. A visible window moves to its new size with
-    /// the native animation (`NSWindow.setFrame(_:display:animate:)`), from
-    /// its top edge, unless Reduce Motion is on.
+    /// Lays the alert out again. A visible window moves to the frame that
+    /// the alert gives it with the native animation
+    /// (`NSWindow.setFrame(_:display:animate:)`), unless Reduce Motion is on.
     private func relayout() {
         let window = alert.window
         let old = window.frame
         alert.layout()
         guard window.isVisible else { return }
-        var new = window.frame
-        new.origin.y = old.maxY - new.height
+        let new = window.frame
         guard new != old else { return }
         let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         window.setFrame(old, display: false)
@@ -362,9 +374,6 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     /// row of buttons: a wider accessory makes the alert wider than its
     /// buttons (0384).
     private func buildForm() {
-        let labels = [String(localized: "Name"), String(localized: "Host"), String(localized: "Directory")]
-            .map { NSTextField(labelWithString: $0) }
-        let grid = NSGridView(views: zip(labels, [nameField, hostField, directoryField]).map { [$0, $1] })
         grid.rowSpacing = 8
         grid.columnSpacing = 8
         grid.column(at: 0).xPlacement = .trailing
@@ -393,14 +402,25 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
             grid.trailingAnchor.constraint(equalTo: form.trailingAnchor),
             spinner.leadingAnchor.constraint(equalTo: form.leadingAnchor),
             spinner.topAnchor.constraint(equalTo: statusLine.topAnchor),
-            statusLine.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 10),
+            statusLine.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: Self.statusGap),
             statusLine.trailingAnchor.constraint(equalTo: form.trailingAnchor),
-            statusLine.heightAnchor.constraint(equalToConstant: Self.statusHeight),
         ])
         afterSpinner = statusLine.leadingAnchor.constraint(equalTo: spinner.trailingAnchor, constant: 6)
         atEdge = statusLine.leadingAnchor.constraint(equalTo: form.leadingAnchor)
         atEdge?.isActive = true
-        // A fixed frame: NSAlert places its accessory by frame.
-        form.setFrameSize(NSSize(width: width, height: grid.fittingSize.height + 10 + Self.statusHeight))
+    }
+
+    /// Gives the form its height: the fields, and the status line only when
+    /// it has text. The line wraps at the width of the form, not at its own
+    /// text (0393). A fixed frame: NSAlert places its accessory by frame.
+    private func fitForm() {
+        let width = form.frame.width
+        var height = grid.fittingSize.height
+        if !statusLine.stringValue.isEmpty {
+            let indent = isChecking ? spinner.fittingSize.width + 6 : 0
+            statusLine.preferredMaxLayoutWidth = width - indent
+            height += Self.statusGap + statusLine.fittingSize.height
+        }
+        form.setFrameSize(NSSize(width: width, height: height))
     }
 }

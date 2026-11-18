@@ -10927,28 +10927,6 @@
         }
       }
     },
-    "There is no folder %@ on %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "There is no folder %1$@ on %2$@."
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@에 %1$@ 폴더가 없습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@ 上没有文件夹 %1$@。"
-          }
-        }
-      }
-    },
     "There is no folder at %@." : {
       "localizations" : {
         "ko" : {
@@ -10977,6 +10955,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可解释的输出。"
+          }
+        }
+      }
+    },
+    "There is no path %@ on %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "There is no path %1$@ on %2$@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@에 %1$@ 경로가 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上没有路径 %1$@。"
           }
         }
       }

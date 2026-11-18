@@ -108,20 +108,27 @@ struct NewRemoteProjectDialogTests {
         let created = Created()
         let draft = try #require(NewRemoteProjectDraft(path: "devbox:~/none"))
         let dialog = dialog(draft, check: check, created: created)
+        // With no line, the form is only the fields: no gap above the buttons.
+        let bare = try #require(dialog.alert.accessoryView).frame.height
         // The palette's draft checks at once.
         dialog.present(on: nil, startCheck: true)
         #expect(dialog.isChecking)
         await settle { check.isWaiting }
-        check.answer("There is no folder ~/none on devbox.")
+        check.answer("There is no path ~/none on devbox.")
         await settle { !dialog.isChecking }
 
         #expect(created.projects.isEmpty)
-        #expect(dialog.statusText == "There is no folder ~/none on devbox.")
+        #expect(dialog.statusText == "There is no path ~/none on devbox.")
         #expect(dialog.hostField.isEnabled)
         #expect(NewRemoteProjectDialog.checking("devbox") == nil)
+        // The refused path stays refused: Add is off until an edit.
+        #expect(!dialog.alert.buttons[0].isEnabled)
+        #expect(try #require(dialog.alert.accessoryView).frame.height > bare)
         // The name follows the corrected folder.
         type("~/dev/api", in: dialog.directoryField, of: dialog)
         #expect(dialog.statusText.isEmpty)
+        #expect(dialog.alert.buttons[0].isEnabled)
+        #expect(try #require(dialog.alert.accessoryView).frame.height == bare)
         #expect(dialog.nameField.placeholderString == "api")
         dialog.close()
     }
@@ -141,12 +148,15 @@ struct NewRemoteProjectDialogTests {
             #expect(dialog.alert.messageText == RemoteServerConsent.title("devbox"))
             #expect(dialog.alert.buttons.map(\.title) == [RemoteServerConsent.installButton, RemoteServerConsent.withoutServerButton])
             #expect(dialog.alert.accessoryView == nil)
+            // Escape is Cancel in this dialog: the question has no Escape.
+            #expect(dialog.alert.buttons[1].keyEquivalent.isEmpty)
             dialog.alert.buttons[button].performClick(nil)
             #expect(await answer.value == expected)
             // Back to the check, in the same dialog.
             #expect(dialog.isChecking)
             #expect(dialog.alert.messageText == "New Remote Project")
             #expect(dialog.alert.buttons.map(\.title) == ["Add", "Cancel"])
+            #expect(dialog.alert.buttons[1].keyEquivalent == "\u{1b}")
         }
         check.answer(nil)
         await settle { !created.projects.isEmpty }

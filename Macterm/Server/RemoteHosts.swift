@@ -415,7 +415,7 @@ final class RemoteHosts {
         let destination = HostCommands.destination(user: user, host: host)
         switch await checkFolder(directory, destination: destination) {
         case .exists: return nil
-        case .missing: return String(localized: "There is no folder \(directory) on \(destination).")
+        case .missing: return String(localized: "There is no path \(directory) on \(destination).")
         case .unreachable: return String(localized: "Macterm cannot connect to \(destination).")
         }
     }
