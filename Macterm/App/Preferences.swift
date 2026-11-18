@@ -152,6 +152,41 @@ enum UpdateChannel: String, CaseIterable, Identifiable {
     }
 }
 
+/// How large the leading glyph on a sidebar project/tab row draws, relative to
+/// the row's text. `medium` is the system default: the SF Symbols take
+/// whatever size the row's ambient font gives them, exactly as they did before
+/// this preference existed, so it is the one case that applies no sizing at
+/// all. The raw values are persisted.
+enum SidebarIconSize: String, CaseIterable, Identifiable {
+    case small
+    case medium
+    case large
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .small: String(localized: "Small", comment: "Sidebar icon size")
+        case .medium: String(localized: "Medium", comment: "Sidebar icon size")
+        case .large: String(localized: "Large", comment: "Sidebar icon size")
+        }
+    }
+
+    /// Multiplier for the sidebar glyphs sized by hand rather than by SwiftUI's
+    /// `imageScale` — the agent logo's frame, the plain-digit number glyph, the
+    /// running spinner, the completion dot. Taken from AppKit rather than
+    /// guessed so those glyphs track the SF Symbols beside them instead of
+    /// drifting: `NSImage.SymbolConfiguration` renders a 13pt symbol 12/14/18pt
+    /// tall at small/medium/large.
+    var glyphScale: CGFloat {
+        switch self {
+        case .small: 12.0 / 14.0
+        case .medium: 1
+        case .large: 18.0 / 14.0
+        }
+    }
+}
+
 /// Whether a quick-terminal geometry axis (position or size) comes from the
 /// Settings sliders (`fixed`) or is remembered from the user's own
 /// manipulation of the panel — dragging the grab handle, resizing from the
@@ -334,6 +369,11 @@ final class Preferences {
 
     var tabIconSymbol: String {
         didSet { Keys.tabIconSymbol.write(tabIconSymbol, to: defaults) }
+    }
+
+    /// How large the leading glyph on project and tab rows draws.
+    var sidebarIconSize: SidebarIconSize {
+        didSet { Keys.sidebarIconSize.write(sidebarIconSize, to: defaults) }
     }
 
     /// Replace a tab's icon with the running AI agent's logo (Claude Code,
@@ -994,6 +1034,7 @@ final class Preferences {
         }
         activeProjectID = Keys.activeProjectID.readStored(defaults).flatMap(UUID.init)
         tabIconSymbol = Keys.tabIconSymbol.read(defaults)
+        sidebarIconSize = Keys.sidebarIconSize.read(defaults)
         showAgentIcons = Keys.showAgentIcons.read(defaults)
         showTabStatusIndicator = Keys.showTabStatusIndicator.read(defaults)
         showTabSwitcherOverlay = Keys.showTabSwitcherOverlay.read(defaults)
@@ -1187,6 +1228,7 @@ final class Preferences {
         /// Stored as the UUID string; absent means no selection.
         static let activeProjectID = PreferenceStorageKey("macterm.activeProjectID", default: "")
         static let tabIconSymbol = PreferenceStorageKey("macterm.sidebar.tabIcon", default: "terminal")
+        static let sidebarIconSize = PreferenceStorageKey("macterm.sidebar.iconSize", default: SidebarIconSize.medium)
         static let showAgentIcons = PreferenceStorageKey("macterm.sidebar.showAgentIcons", default: true)
         static let showTabStatusIndicator = PreferenceStorageKey("macterm.sidebar.showTabStatusIndicator", default: false)
         static let showTabSwitcherOverlay = PreferenceStorageKey("macterm.tabSwitcher.overlay", default: true)
@@ -1250,6 +1292,7 @@ final class Preferences {
 extension SidebarPeekStyle: PreferenceValue {}
 extension WindowGlassStyle: PreferenceValue {}
 extension QuickTerminalAdjustMode: PreferenceValue {}
+extension SidebarIconSize: PreferenceValue {}
 extension UpdateChannel: PreferenceValue {}
 extension PasswordAutofillAuthentication: PreferenceValue {}
 extension TabSwitcherVisibility: PreferenceValue {}

@@ -1265,10 +1265,10 @@ private struct SidebarProjectRow: View {
             // Only when tagged: forcing a color on an untagged row
             // would flatten the styling AppKit gives a selected row.
             if let color = project.color {
-                Image(systemName: "folder")
+                TabRowIcon(symbol: "folder", index: 1)
                     .foregroundStyle(MactermTheme.color(for: color))
             } else {
-                Image(systemName: "folder")
+                TabRowIcon(symbol: "folder", index: 1)
             }
         }
         .task(id: appState.renamingProjectID) {

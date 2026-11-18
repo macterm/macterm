@@ -91,9 +91,10 @@ struct ProjectMemoryPanel: View {
         }
     }
 
-    /// The project's row icon in the sidebar: the folder, in the color tag.
+    /// The project's row icon in the sidebar: the folder, in the color tag,
+    /// at the sidebar's icon size.
     private var projectIcon: some View {
-        Image(systemName: "folder")
+        TabRowIcon(symbol: "folder", index: 1)
             .foregroundStyle(project.color.map { MactermTheme.color(for: $0) } ?? MactermTheme.fgMuted)
     }
 
