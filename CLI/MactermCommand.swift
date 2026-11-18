@@ -196,7 +196,11 @@ struct ProjectCommand: ParsableCommand {
 
     struct Create: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Add a project for a local directory or a remote spec. Each run adds a new project."
+            abstract: "Add a project for a local directory or a remote spec. Each run adds a new project.",
+            discussion: """
+            The folder must exist. For a remote spec, Macterm connects to the host to check the folder, \
+            as a new pane does. It can ask for the login.
+            """
         )
 
         @Argument(help: "Project directory (absolute or ~-prefixed), or a remote [user@]host:dir.")
@@ -208,14 +212,30 @@ struct ProjectCommand: ParsableCommand {
         @Flag(help: "Select the project too.")
         var select = false
 
+        #if DEBUG
+        /// DEBUG-only: add a remote project with no check on the host, so
+        /// that the e2e suite can have a project on a host that never answers.
+        @Flag(help: "[debug] Do not check the remote directory.")
+        var skipFolderCheck = false
+        #else
+        private let skipFolderCheck = false
+        #endif
+
         @OptionGroup var options: ConnectionOptions
 
         func run() throws {
             try runControlCommand(
                 command: "project.create",
-                args: ControlArgs(path: path, name: name, select: select),
-                options: options
+                args: ControlArgs(path: path, name: name, select: select, force: skipFolderCheck ? true : nil),
+                options: options,
+                // A remote spec waits for the login and the check on the host.
+                readTimeout: isRemote ? AskpassCommand.answerTimeout : 10
             )
+        }
+
+        /// A local path starts with `/` or `~`. The app parses the spec.
+        private var isRemote: Bool {
+            !path.hasPrefix("/") && !path.hasPrefix("~")
         }
     }
 

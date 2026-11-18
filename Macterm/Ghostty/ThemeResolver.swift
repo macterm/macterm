@@ -78,6 +78,14 @@ enum ThemeResolver {
         }
     }
 
+    /// The last layer of a config that reads one side of a split: a plain
+    /// `theme` replaces the split. libghostty loads the theme first and puts
+    /// every other key of the config over it, as it does for the side in use
+    /// (`GhosttyApp.splitThemeColors`).
+    static func sideLayer(_ side: String) -> String {
+        "theme = \(side)\n"
+    }
+
     /// Extract the effective `theme` value from ghostty config text, honoring
     /// last-wins like libghostty's own merge. Returns nil when no `theme =`
     /// line is present. Comments (`#`) and blank lines are ignored.

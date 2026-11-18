@@ -25,10 +25,10 @@ struct RemoteHostsTests {
     @Test
     func a_pane_that_closed_gets_close() async {
         let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
-        #expect(await hosts.answer(.ask, session: "macterm-x-1", panes: []).isClose)
+        #expect(await hosts.answer(.ask, session: "macterm-x-1", pane: nil).isClose)
         // A local pane has no host.
         let local = Pane(projectPath: "/tmp", projectID: UUID())
-        #expect(await hosts.answer(.ask, session: local.sessionName, panes: [local]).isClose)
+        #expect(await hosts.answer(.ask, session: local.sessionName, pane: local).isClose)
     }
 
     // MARK: - Against a local sshd
@@ -90,11 +90,11 @@ struct RemoteHostsTests {
             host.sshd.dropConnections()
             try await first.host.waitFor { $0.linkLost > 0 }
             // No line goes into the pane: its badge shows the state.
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
             #expect(pane.isRemoteLinkLost)
             #expect(pane.isDisconnected)
             // No sweep yet: the pane keeps waiting.
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, pane: pane).isWait(message: nil))
 
             // The sweep wakes the pane; it logs in again with no question and
             // attaches to the same session, which replays its screen.
@@ -159,7 +159,7 @@ struct RemoteHostsTests {
         try await withSSHDHost { host in
             let fixture = Fixture(host, roaming: true)
             let pane = fixture.pane()
-            fixture.hosts.panes = { _ in [pane] }
+            fixture.hosts.pane = { _ in pane }
             let first = try await fixture.start(pane)
             defer { first.stop() }
             first.type("printf 'before-%s\\n' freeze\n")
@@ -175,7 +175,7 @@ struct RemoteHostsTests {
             let server = try host.serverPID()
             #expect(kill(server, SIGSTOP) == 0)
             defer { kill(server, SIGCONT) }
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
             deadline = Date().addingTimeInterval(20)
             while !fixture.hosts.quietDestinations.contains("box"), Date() < deadline {
                 try await Task.sleep(for: .milliseconds(200))
@@ -185,7 +185,7 @@ struct RemoteHostsTests {
             // A sweep's try while the host is down fails, and asks nothing.
             fixture.hosts.reconnect([pane.sessionName])
             #expect(pane.isRemoteReconnecting)
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, pane: pane).isWait(message: nil))
             #expect(pane.isRemoteLinkLost)
             #expect(fixture.answered.isEmpty)
 
@@ -208,6 +208,59 @@ struct RemoteHostsTests {
             try await second.host.waitFor { $0.screen.contains("before-freeze") }
             #expect(!pane.isRemoteLinkLost)
             #expect(Date().timeIntervalSince(healed) < 10)
+            #expect(fixture.answered == ["box"])
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_pane_lost_in_a_short_freeze_attaches_with_no_key_soon_after_the_host_answers() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host, roaming: true)
+            let pane = fixture.pane()
+            fixture.hosts.pane = { _ in pane }
+            let first = try await fixture.start(pane)
+            defer { first.stop() }
+            first.type("printf 'before-%s\\n' pause\n")
+            try await first.host.waitFor { $0.screen.contains("before-pause") }
+            var deadline = Date().addingTimeInterval(20)
+            while try await !fixture.attach(pane).link.isRoaming, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            #expect(fixture.answered.isEmpty)
+
+            // The host's server stops for less than `quietAfter`. The pane
+            // reports its link lost, as a driver does when the ping of the
+            // ssh standby fails (after about 6 s). The link never becomes
+            // quiet.
+            let server = try host.serverPID()
+            #expect(kill(server, SIGSTOP) == 0)
+            defer { kill(server, SIGCONT) }
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
+            try await Task.sleep(for: .milliseconds(LinkTransport.answersAfter + 500))
+            #expect(fixture.hosts.quietDestinations.isEmpty)
+            #expect(pane.isRemoteLinkLost)
+            #expect(fixture.answered.isEmpty)
+
+            // The server goes on. The host answers once, within about one
+            // keepalive.
+            #expect(kill(server, SIGCONT) == 0)
+            let resumed = Date()
+            deadline = resumed.addingTimeInterval(10)
+            while fixture.answered.isEmpty, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(fixture.answered == ["box"])
+            let answered = Date()
+            #expect(answered.timeIntervalSince(resumed) < 5)
+
+            // What the sweep does then: a try with no key. The pane attaches
+            // within about 5 s, and its session replays its screen.
+            fixture.hosts.reconnect([pane.sessionName])
+            let second = try await fixture.start(pane)
+            defer { second.stop() }
+            try await second.host.waitFor { $0.screen.contains("before-pause") }
+            #expect(!pane.isRemoteLinkLost)
+            #expect(Date().timeIntervalSince(answered) < 5)
             #expect(fixture.answered == ["box"])
         }
     }
@@ -260,7 +313,7 @@ struct RemoteHostsTests {
     ) async throws {
         let fixture = Fixture(host, wakes: true)
         let pane = fixture.pane()
-        fixture.hosts.panes = { _ in [pane] }
+        fixture.hosts.pane = { _ in pane }
         let left = RecordingPaneHost()
         let right = RecordingPaneHost()
         let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
@@ -342,7 +395,7 @@ struct RemoteHostsTests {
             try await first.host.waitFor { $0.linkLost > 0 }
             try await second.host.waitFor { $0.linkLost > 0 }
             for pane in [left, right] {
-                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
                 #expect(pane.isRemoteLinkLost)
             }
 
@@ -450,13 +503,70 @@ struct RemoteHostsTests {
             #expect(fixture.hosts.plainDestinations == ["box"])
             // A lost connection drops the host, and the host stays plain.
             let lost = fixture.pane()
-            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, panes: [lost])
+            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, pane: lost)
             #expect(lost.isRemoteLinkLost)
             #expect(fixture.hosts.plainDestinations == ["box"])
             // A second decline from Settings keeps the host plain.
             await #expect(throws: RemoteServers.Failure.self) { try await fixture.hosts.installServer("box") }
             #expect(fixture.hosts.plainDestinations == ["box"])
         }
+    }
+
+    // MARK: - The folder check of a new project (0358)
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_new_project_finds_its_folder_over_ssh_then_on_the_hosts_server_and_the_login_stays_for_its_panes() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~", destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(fixture.ready == ["box"])
+            // The project's first pane uses the same login.
+            _ = try await fixture.attach(fixture.pane())
+            #expect(host.sshd.acceptedLogins() == 1)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_new_project_finds_its_folder_over_ssh_when_the_host_has_no_server() async throws {
+        try await withSSHDHost(answer: false) { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(fixture.hosts.plainDestinations == ["box"])
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_missing_folder_is_told_before_the_install_question() async throws {
+        // 0384: a wrong folder must not cost a server install first.
+        try await withSSHDHost { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(host.asked.isEmpty)
+            #expect(fixture.ready.isEmpty)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(host.asked == ["box"])
+            #expect(fixture.ready == ["box"])
+            #expect(host.sshd.acceptedLogins() == 1)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func the_folder_check_needs_no_host_script_of_the_bundle() async throws {
+        // 0358: a bundle with no host scripts refused every host at once.
+        try await withSSHDHost(answer: false) { host in
+            let fixture = Fixture(host, scripts: nil)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+        }
+    }
+
+    @Test
+    func a_host_name_that_is_not_valid_is_unreachable() async {
+        let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
+        #expect(await hosts.checkFolder("/tmp", destination: "-oProxyCommand=x") == .unreachable)
     }
 
     // MARK: - The probe of a new session
@@ -509,10 +619,19 @@ struct RemoteHostsTests {
 
         /// `wakes`: the posts reach a pane's driver too, as in the app.
         /// `roaming`: a roaming link (UDP) opens after the ssh connect.
-        init(_ host: SSHDHost, creationGrace: TimeInterval = 30, wakes: Bool = false, roaming: Bool = false) {
+        /// `scripts`: the host scripts of the bundle; nil as in a bundle
+        /// without them.
+        init(
+            _ host: SSHDHost,
+            creationGrace: TimeInterval = 30,
+            wakes: Bool = false,
+            roaming: Bool = false,
+            scripts: HostCommands.Scripts? = .bundled
+        ) {
             directory = host.home.path
             var configuration = RemoteHosts.Configuration(key: host.key, declines: .memory(), creationGrace: creationGrace)
             configuration.roamingEnabled = { roaming }
+            configuration.scripts = scripts
             configuration.post = { [posted] name in
                 posted.mutate { $0.append(name) }
                 if wakes { notify_post(name) }
@@ -530,11 +649,11 @@ struct RemoteHostsTests {
 
         /// The answer after the waits that a login or an install cause.
         func settle(_ pane: Pane, event: RemotePaneEvent = .ask) async -> RemotePaneAnswer {
-            var answer = await hosts.answer(event, session: pane.sessionName, panes: [pane])
+            var answer = await hosts.answer(event, session: pane.sessionName, pane: pane)
             let deadline = Date().addingTimeInterval(60)
             while answer.isWait(message: nil), Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(100))
-                answer = await hosts.answer(.ask, session: pane.sessionName, panes: [pane])
+                answer = await hosts.answer(.ask, session: pane.sessionName, pane: pane)
             }
             return answer
         }
@@ -582,7 +701,7 @@ struct RemoteHostsTests {
             session.start()
             try await host.waitFor { $0.resets > 0 }
             // What the driver does at the session's first lead message.
-            hosts.sessionAttached(pane.sessionName, panes: [pane])
+            hosts.sessionAttached(pane.sessionName, pane: pane)
             return Running(session: session, host: host)
         }
 

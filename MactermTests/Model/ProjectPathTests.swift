@@ -178,6 +178,15 @@ struct ProjectPathTests {
     }
 
     @Test
+    func a_remote_project_with_no_name_is_named_after_its_folder_or_host() {
+        #expect(ProjectPath.remoteDisplayName(host: "devbox", directory: "~/dev/api") == "api")
+        #expect(ProjectPath.remoteDisplayName(host: "devbox", directory: "/srv/api/") == "api")
+        for directory in ["~", "~/", "/", " / "] {
+            #expect(ProjectPath.remoteDisplayName(host: "devbox", directory: directory) == "devbox", "\(directory)")
+        }
+    }
+
+    @Test
     func local_never_matches_remote_or_invalid() {
         #expect(!ProjectPath.matches("/a/b", "host:/a/b"))
         #expect(!ProjectPath.matches("foo/bar", "foo/bar"))

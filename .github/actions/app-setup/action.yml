@@ -4,7 +4,7 @@ description: >-
   bundled ghostty resources (from the cache or from setup), and the session
   server (from the `server` artifact of server-build.yml, or from setup).
 
-# One setup for every job that builds the app: the Unit and End-to-end jobs of
+# One setup for every job that builds the app: the Unit and End-to-End jobs of
 # test.yml, docs-tests.yml, and build-release (release.yml, release-tip.yml and
 # the Release Build of test.yml). The caller checks out the commit first.
 

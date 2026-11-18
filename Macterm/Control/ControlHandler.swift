@@ -17,9 +17,20 @@ final class ControlHandler {
     /// AppStateTests pattern) drive this handler too.
     private var sessionClient: SessionClient { appState.sessionClient }
 
-    init(appState: AppState, projectStore: ProjectStore) {
+    /// Whether a folder is on a host, for `project.create` of a remote spec:
+    /// (folder, ssh destination). Tests answer it with no host.
+    private let checkRemoteFolder: @MainActor (String, String) async -> RemoteHosts.FolderCheck
+
+    init(
+        appState: AppState,
+        projectStore: ProjectStore,
+        checkRemoteFolder: @escaping @MainActor (String, String) async -> RemoteHosts.FolderCheck = {
+            await RemoteHosts.shared.checkFolder($0, destination: $1)
+        }
+    ) {
         self.appState = appState
         self.projectStore = projectStore
+        self.checkRemoteFolder = checkRemoteFolder
     }
 
     /// Data-level entry point for `ControlSocketServer`: decode, dispatch,
@@ -72,7 +83,7 @@ final class ControlHandler {
         switch request.command {
         case "status": return status()
         case "project.list": return projectList()
-        case "project.create": return try projectCreate(args)
+        case "project.create": return try await projectCreate(args)
         case "project.select": return try projectSelect(args)
         case "project.rename": return try projectRename(args)
         case "project.remove": return try projectRemove(args)
@@ -494,17 +505,15 @@ final class ControlHandler {
                 action: "check Settings → session persistence for details"
             )
         }
-        let panesBySession = paneIDsBySessionName()
+        let paneBySession = paneIDBySessionName()
         // A session whose shell exited is ended at once (`LocalSessions`):
         // only running sessions are listed, as `zmx ls` listed live daemons.
         let infos = sessions.filter(\.isRunning).map { session in
-            let bound = panesBySession[session.name] ?? []
-            return ControlSessionInfo(
+            ControlSessionInfo(
                 name: session.name,
                 clients: session.clients,
                 leaderPID: session.shellPID,
-                paneID: bound.first,
-                paneIDs: bound.isEmpty ? nil : bound
+                paneID: paneBySession[session.name]
             )
         }
         return ControlData(sessions: infos)
@@ -532,17 +541,19 @@ final class ControlHandler {
     /// rules: trimmed, then refused when empty or reserved by the pinned
     /// workspace. Leaving the flag out takes the directory's own name, which
     /// nobody typed, so that one is `ProjectStore.create`'s to disambiguate.
-    private func projectCreate(_ args: ControlArgs) throws -> ControlData {
+    /// A remote spec is created only when its folder is on the host
+    /// (`RemoteHosts.checkFolder`, 0358), after the other checks, so a bad
+    /// name never connects.
+    private func projectCreate(_ args: ControlArgs) async throws -> ControlData {
         guard let rawPath = args.path, !rawPath.isEmpty else {
             throw ControlError(code: .badRequest, message: "project.create requires a path")
         }
         guard let parsed = ProjectPath.parse(rawPath) else {
             throw ControlError(code: .badRequest, message: "\"\(rawPath)\" is not an absolute or ~-prefixed path")
         }
-        // A remote spec ([user@]host:dir, #104) is stored verbatim — there is
-        // no local directory to canonicalize or existence-check; a wrong host
-        // or dir surfaces in the pane itself (ssh's error / the cd
-        // diagnostic), same as a sheet-created remote project.
+        // A remote spec ([user@]host:dir, #104) is stored verbatim: there is
+        // no local directory to canonicalize. Its folder is checked on the
+        // host below.
         let canonical: String
         switch parsed {
         case .local:
@@ -563,6 +574,23 @@ final class ControlHandler {
         if let name {
             guard !name.isEmpty else { throw Self.emptyNameError }
             try Self.checkReservedName(name)
+        }
+        #if DEBUG
+        // `--skip-folder-check`: the e2e suite's project on a host that never answers.
+        let checksFolder = args.force != true
+        #else
+        let checksFolder = true
+        #endif
+        if checksFolder, case let .remote(user, host, directory) = parsed {
+            let destination = HostCommands.destination(user: user, host: host)
+            switch await checkRemoteFolder(directory, destination) {
+            case .exists:
+                break
+            case .missing:
+                throw ControlError(code: .notFound, message: "no path at \(canonical)")
+            case .unreachable:
+                throw ControlError(code: .internalError, message: "cannot connect to \(destination)")
+            }
         }
 
         // Always create — `project create` is not idempotent: re-running adds a
@@ -1591,23 +1619,11 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "pass either --session or --pane, not both")
         }
         if let session = args.session, !session.isEmpty {
-            // A mirrored session has several panes, so resolve to the LEADER —
-            // the one driving the pty size, and so the one the user is
-            // interacting with. It is also the only defensible answer for a
-            // bare `$MACTERM_SESSION` self-target: that variable lives in the
-            // session's single shared shell, which cannot know which of its
-            // views the user is looking at. Callers that need a specific
-            // mirror pass `--pane`.
-            var candidates: [(tab: TerminalTab, pane: Pane)] = []
             for tab in workspace.tabs {
-                for pane in tab.splitRoot.allPanes() where pane.sessionName == session {
-                    candidates.append((tab, pane))
+                if let pane = tab.splitRoot.allPanes().first(where: { $0.sessionName == session }) {
+                    return (tab, pane)
                 }
             }
-            if let leading = candidates.first(where: { appState.isLeader($0.pane) }) {
-                return leading
-            }
-            if let first = candidates.first { return first }
             throw ControlError(
                 code: .notFound,
                 message: "no pane in this project runs session \"\(session)\"",
@@ -1714,26 +1730,13 @@ final class ControlHandler {
         }
     }
 
-    /// Every live pane bound to each session name, leader first.
-    ///
-    /// This used to be a `[String: String]`, one pane per session — which a
-    /// mirrored session silently collapsed, last writer winning in Dictionary
-    /// iteration order, so `session list` reported an arbitrary one of the
-    /// panes and dropped the rest (#345).
-    private func paneIDsBySessionName() -> [String: [String]] {
-        // A stable partition, not `sorted`: "leader first" is not a strict
-        // weak ordering, and Swift's sort is undefined for one.
-        var table = appState.sessionAttachments().mapValues { clients in
-            let leading = clients.filter(\.isLeader)
-            let following = clients.filter { !$0.isLeader }
-            // A pane shown in two windows has two clients and one id.
-            var seen: Set<UUID> = []
-            return (leading + following).map(\.pane.id).filter { seen.insert($0).inserted }.map(\.uuidString)
-        }
+    /// The live pane bound to each session name.
+    private func paneIDBySessionName() -> [String: String] {
+        var table = appState.sessionAttachments().compactMapValues { $0.first?.pane.id.uuidString }
         // Desktop widget panes live outside every workspace; their sessions
         // are bound all the same, never orphans.
         for pane in appState.desktopWidgets.compactMap(\.pane) {
-            table[pane.sessionName, default: []].append(pane.id.uuidString)
+            table[pane.sessionName] = pane.id.uuidString
         }
         return table
     }

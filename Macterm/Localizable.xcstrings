@@ -2650,7 +2650,23 @@
         }
       }
     },
-    "Connection lost" : {
+    "Connecting to %@…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 연결하는 중…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在连接到 %@…"
+          }
+        }
+      }
+    },
+    "Connection Lost" : {
       "comment" : "The badge of a remote pane whose connection stopped or failed",
       "localizations" : {
         "ko" : {
@@ -3122,22 +3138,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "动态"
-          }
-        }
-      }
-    },
-    "Each pane is a session on the host, over one ssh connection. At the first connection, Macterm asks to install its server on the host. Port, identity, and ControlMaster come from ~/.ssh/config." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "각 창은 하나의 ssh 연결을 통한 호스트의 세션입니다. 처음 연결할 때 Macterm은 호스트에 서버를 설치할지 묻습니다. 포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每个窗格都是主机上的会话，通过一个 ssh 连接。第一次连接时，Macterm 会询问是否在主机上安装其服务器。端口、身份和 ControlMaster 来自 ~/.ssh/config。"
           }
         }
       }
@@ -4874,6 +4874,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 无法检查更新"
+          }
+        }
+      }
+    },
+    "Macterm cannot connect to %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 %@에 연결할 수 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法连接到 %@。"
           }
         }
       }
@@ -7331,6 +7347,22 @@
         }
       }
     },
+    "Port, identity, and ControlMaster come from ~/.ssh/config." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口、身份和 ControlMaster 来自 ~/.ssh/config。"
+          }
+        }
+      }
+    },
     "Position" : {
       "comment" : "Heading of the tab switcher position options in the toolbar menu",
       "localizations" : {
@@ -9058,6 +9090,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索已存储的密码"
+          }
+        }
+      }
+    },
+    "Secure Input" : {
+      "comment" : "The title of the lock badge of a pane while secure keyboard input is on",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보안 입력"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全输入"
           }
         }
       }
@@ -10907,6 +10956,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可解释的输出。"
+          }
+        }
+      }
+    },
+    "There is no path %@ on %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "There is no path %1$@ on %2$@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@에 %1$@ 경로가 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上没有路径 %1$@。"
           }
         }
       }

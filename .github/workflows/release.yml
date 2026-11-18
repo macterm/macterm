@@ -31,6 +31,7 @@ jobs:
   # an edit-to-promote at all — the guess that "the event surely reflects the
   # release" is what caused this bug, so don't re-make it in a new spot.
   flag:
+    name: Read Prerelease Flag
     # The rolling `tip` tag is not a release tag (release-tip.yml owns it), so
     # skip this whole workflow for it — every other job `needs: flag`, and a
     # skipped dependency skips them all. Belt-and-braces: release-tip.yml
@@ -68,6 +69,7 @@ jobs:
   # The session server, built from the tagged commit, never taken from a
   # prebuilt (server-build.yml).
   server:
+    name: Bundled Server
     needs: flag
     permissions:
       contents: write
@@ -76,6 +78,7 @@ jobs:
       prebuilt: false
 
   build:
+    name: Build
     needs: [flag, server]
     runs-on: xcode-27
     permissions:
@@ -129,6 +132,7 @@ jobs:
           path: build/*.dmg
 
   release:
+    name: Release
     needs: [flag, build]
     runs-on: xcode-27
     permissions:
@@ -220,6 +224,7 @@ jobs:
         run: scripts/publish-appcast.sh dmgs
 
   bump-cask:
+    name: Bump Cask
     needs: [flag, release]
     # Prereleases never bump the Homebrew tap — stable installs stay stable.
     #

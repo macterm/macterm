@@ -16,7 +16,7 @@ Conventions:
 - Type commands as `/bin/sh -c "…"` with no single quotes (the login shell of CI is bash 3.2).
 - Target panes explicitly.
 - Prove that something ran with markers that you assemble at run time (`printf started-%s <nonce>`). No signal for idle or running is independent of the environment.
-- CI runs it as `Test / End-to-end`. A failure uploads `e2e-diagnostics`.
+- CI runs it as `Test / End-to-End`, only on a push to main. A failure uploads `e2e-diagnostics`.
 
 ## Release build and older macOS (`scripts/older-macos-smoke.sh`)
 

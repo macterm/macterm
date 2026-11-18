@@ -10,10 +10,12 @@
 //! are dropped, and the session sends the screen again. The session's other
 //! messages are never dropped. Input is never dropped.
 //!
-//! This file has the queues and the order. `server.zig` has the sockets.
+//! This file has the order and the flow of a channel. `conn.zig` has the
+//! queue, and `peers.zig` the sockets.
 
 const std = @import("std");
 const frame = @import("protocol/protocol.zig").frame;
+const conn = @import("conn.zig");
 
 /// Output older than this is skipped ahead (design/003 §6: start at 1 s).
 /// Measured (scripts/session_bench.py, relay flood, 50 ms round trip and
@@ -34,137 +36,8 @@ pub const quantum = 8 * 1024;
 /// behind this much output, plus what the buffers on the way hold.
 pub const wire_budget = 32 * 1024;
 
-/// What a frame from the session is to the relay.
-pub const Class = enum {
-    /// Pane output.
-    output,
-    /// A message other than the two snapshot markers. Never dropped.
-    message,
-    snapshot_start,
-    /// Snapshot data.
-    snapshot,
-    snapshot_end,
-};
-
-/// Whole frames that wait for one client, in order.
-pub const Queue = struct {
-    items: std.ArrayList(Item) = .empty,
-    head: usize = 0,
-    /// The bytes of every frame, headers included.
-    bytes: usize = 0,
-    /// The start of a snapshot went out, and its end did not.
-    sending_snapshot: bool = false,
-
-    pub const Item = struct {
-        /// The frame, header included.
-        data: []u8,
-        /// When it came, in ms.
-        at: i64,
-        class: Class,
-    };
-
-    pub fn deinit(q: *Queue, gpa: std.mem.Allocator) void {
-        for (q.items.items[q.head..]) |it| gpa.free(it.data);
-        q.items.deinit(gpa);
-        q.* = .{};
-    }
-
-    pub fn empty(q: *const Queue) bool {
-        return q.head == q.items.items.len;
-    }
-
-    pub fn push(q: *Queue, gpa: std.mem.Allocator, channel: u32, kind: frame.Kind, body: []const u8, at: i64, class: Class) !void {
-        const data = try gpa.alloc(u8, frame.header_len + body.len);
-        errdefer gpa.free(data);
-        try frame.writeHeader(data[0..frame.header_len], channel, kind, body.len);
-        @memcpy(data[frame.header_len..], body);
-        try q.items.append(gpa, .{ .data = data, .at = at, .class = class });
-        q.bytes += data.len;
-    }
-
-    /// The first frame. The caller frees its `data`.
-    pub fn pop(q: *Queue) ?Item {
-        if (q.empty()) return null;
-        const it = q.items.items[q.head];
-        q.head += 1;
-        q.bytes -= it.data.len;
-        switch (it.class) {
-            .snapshot_start => q.sending_snapshot = true,
-            .snapshot_end => q.sending_snapshot = false,
-            else => {},
-        }
-        if (q.empty()) {
-            q.items.clearRetainingCapacity();
-            q.head = 0;
-        }
-        return it;
-    }
-
-    pub fn peek(q: *const Queue) ?Item {
-        if (q.empty()) return null;
-        return q.items.items[q.head];
-    }
-
-    /// What a skip would drop: every output frame, and every snapshot whose
-    /// start did not go out. The rest of a snapshot that started to go out
-    /// stays, so that the client gets its end.
-    pub const Stale = struct {
-        bytes: usize = 0,
-        /// When the oldest of them came.
-        oldest: ?i64 = null,
-    };
-
-    pub fn stale(q: *const Queue) Stale {
-        var out: Stale = .{};
-        var keep_snapshot = q.sending_snapshot;
-        for (q.items.items[q.head..]) |it| {
-            if (!q.dropped(it.class, &keep_snapshot)) continue;
-            out.bytes += it.data.len;
-            if (out.oldest == null) out.oldest = it.at;
-        }
-        return out;
-    }
-
-    /// Drops what `stale` names. Returns true when a snapshot that started
-    /// to go out has not ended in the queue: the rest of it, which the
-    /// session still sends, must go out too.
-    pub fn dropStale(q: *Queue, gpa: std.mem.Allocator) bool {
-        var keep_snapshot = q.sending_snapshot;
-        var kept: usize = q.head;
-        for (q.items.items[q.head..]) |it| {
-            if (q.dropped(it.class, &keep_snapshot)) {
-                gpa.free(it.data);
-                q.bytes -= it.data.len;
-                continue;
-            }
-            q.items.items[kept] = it;
-            kept += 1;
-        }
-        q.items.shrinkRetainingCapacity(kept);
-        if (q.empty()) {
-            q.items.clearRetainingCapacity();
-            q.head = 0;
-        }
-        return keep_snapshot;
-    }
-
-    /// `keep_snapshot` is true while the frames belong to a snapshot whose
-    /// start went out.
-    fn dropped(q: *const Queue, class: Class, keep_snapshot: *bool) bool {
-        _ = q;
-        return switch (class) {
-            .output => true,
-            .message => false,
-            .snapshot_start => true,
-            .snapshot => !keep_snapshot.*,
-            .snapshot_end => {
-                const keep = keep_snapshot.*;
-                keep_snapshot.* = false;
-                return !keep;
-            },
-        };
-    }
-};
+const Class = conn.Class;
+const FrameQueue = conn.FrameQueue;
 
 /// What a channel does with one frame from its session's pane channel.
 pub const Inbound = enum { send, drop };
@@ -207,7 +80,7 @@ pub const Flow = struct {
     }
 
     /// After a skip dropped the queue's stale frames. `open_kept` is what
-    /// `Queue.dropStale` returned.
+    /// `FrameQueue.dropStale` returned.
     pub fn skipped(f: *Flow, open_kept: bool, now: i64) void {
         f.discard_snapshot = f.in_snapshot and !open_kept;
         f.want_snapshot = true;
@@ -215,7 +88,7 @@ pub const Flow = struct {
     }
 
     /// True when the channel must skip ahead.
-    pub fn mustSkip(f: *const Flow, st: Queue.Stale, now: i64) bool {
+    pub fn mustSkip(f: *const Flow, st: FrameQueue.Stale, now: i64) bool {
         if (f.paused or f.want_snapshot) return false;
         if (st.bytes > skip_bytes) return true;
         const oldest = st.oldest orelse return false;
@@ -229,7 +102,7 @@ pub const Flow = struct {
     }
 
     /// The next time that `mustSkip` or `mustAskAgain` can change.
-    pub fn deadline(f: *const Flow, st: Queue.Stale) ?i64 {
+    pub fn deadline(f: *const Flow, st: FrameQueue.Stale) ?i64 {
         if (f.paused) return null;
         if (f.want_snapshot) return f.asked_at + skip_ms;
         const oldest = st.oldest orelse return null;
@@ -244,12 +117,12 @@ pub const Flow = struct {
 /// every time. The frames stay whole.
 pub fn fill(
     gpa: std.mem.Allocator,
-    wire: *std.ArrayList(u8),
-    control: *Queue,
-    channels: []const *Queue,
+    wire: *FrameQueue,
+    control: *FrameQueue,
+    channels: []const *FrameQueue,
     next: *usize,
 ) !void {
-    while (wire.items.len < wire_budget) {
+    while (wire.bytes < wire_budget) {
         if (!control.empty()) {
             try take(gpa, wire, control, std.math.maxInt(usize));
             continue;
@@ -265,13 +138,12 @@ pub fn fill(
     }
 }
 
-fn take(gpa: std.mem.Allocator, wire: *std.ArrayList(u8), q: *Queue, limit: usize) !void {
+fn take(gpa: std.mem.Allocator, wire: *FrameQueue, q: *FrameQueue, limit: usize) !void {
     var sent: usize = 0;
     while (q.peek()) |it| {
         if (sent > 0 and sent + it.data.len > limit) return;
-        try wire.appendSlice(gpa, it.data);
         sent += it.data.len;
-        gpa.free(q.pop().?.data);
+        try wire.put(gpa, q.pop().?);
     }
 }
 
@@ -280,59 +152,58 @@ fn take(gpa: std.mem.Allocator, wire: *std.ArrayList(u8), q: *Queue, limit: usiz
 const testing = std.testing;
 
 /// The channels of the frames in `wire`, in order.
-fn channelsIn(gpa: std.mem.Allocator, wire: []const u8) ![]u32 {
+fn channelsIn(gpa: std.mem.Allocator, wire: *const FrameQueue) ![]u32 {
     var out: std.ArrayList(u32) = .empty;
-    var rest = wire;
-    while ((try frame.parse(rest))) |p| {
+    for (wire.items.items[wire.head..]) |it| {
+        const p = (try frame.parse(it.data)).?;
+        try testing.expectEqual(it.data.len, p.len);
         try out.append(gpa, p.frame.channel);
-        rest = rest[p.len..];
     }
-    try testing.expectEqual(0, rest.len);
     return out.toOwnedSlice(gpa);
 }
 
 test "channel 0 goes before any output, also behind a flood" {
     const gpa = testing.allocator;
-    var control: Queue = .{};
+    var control: FrameQueue = .{};
     defer control.deinit(gpa);
-    var flood: Queue = .{};
+    var flood: FrameQueue = .{};
     defer flood.deinit(gpa);
     const big: [4096]u8 = @splat('x');
     for (0..100) |_| try flood.push(gpa, 1, .bytes, &big, 0, .output);
-    var wire: std.ArrayList(u8) = .empty;
+    var wire: FrameQueue = .{};
     defer wire.deinit(gpa);
     var next: usize = 0;
 
     try fill(gpa, &wire, &control, &.{&flood}, &next);
     // One fill sends at most the budget and one frame.
-    try testing.expect(wire.items.len <= wire_budget + big.len + frame.header_len);
+    try testing.expect(wire.bytes <= wire_budget + big.len + frame.header_len);
 
     // A reply comes while the flood waits: it goes first in the next fill.
     try control.push(gpa, 0, .msg, &.{0x80}, 0, .message);
-    wire.clearRetainingCapacity();
+    wire.deinit(gpa);
     try fill(gpa, &wire, &control, &.{&flood}, &next);
-    const chans = try channelsIn(gpa, wire.items);
+    const chans = try channelsIn(gpa, &wire);
     defer gpa.free(chans);
     try testing.expectEqual(0, chans[0]);
 }
 
 test "a flooding channel sends one turn, then the other channel's output goes" {
     const gpa = testing.allocator;
-    var control: Queue = .{};
+    var control: FrameQueue = .{};
     defer control.deinit(gpa);
-    var flood: Queue = .{};
+    var flood: FrameQueue = .{};
     defer flood.deinit(gpa);
-    var quiet: Queue = .{};
+    var quiet: FrameQueue = .{};
     defer quiet.deinit(gpa);
     const big: [4096]u8 = @splat('x');
     for (0..200) |_| try flood.push(gpa, 1, .bytes, &big, 0, .output);
     try quiet.push(gpa, 2, .bytes, "k", 0, .output);
-    var wire: std.ArrayList(u8) = .empty;
+    var wire: FrameQueue = .{};
     defer wire.deinit(gpa);
     // The flood's turn comes first.
     var next: usize = 0;
     try fill(gpa, &wire, &control, &.{ &flood, &quiet }, &next);
-    const chans = try channelsIn(gpa, wire.items);
+    const chans = try channelsIn(gpa, &wire);
     defer gpa.free(chans);
     try testing.expectEqual(1, chans[0]);
     var before: usize = 0;
@@ -346,71 +217,24 @@ test "a flooding channel sends one turn, then the other channel's output goes" {
 
 test "frames stay whole and in order" {
     const gpa = testing.allocator;
-    var control: Queue = .{};
+    var control: FrameQueue = .{};
     defer control.deinit(gpa);
-    var a: Queue = .{};
+    var a: FrameQueue = .{};
     defer a.deinit(gpa);
     for (0..5) |i| try a.push(gpa, 1, .bytes, &.{@intCast(i)}, 0, .output);
-    var wire: std.ArrayList(u8) = .empty;
+    var wire: FrameQueue = .{};
     defer wire.deinit(gpa);
     var next: usize = 0;
     try fill(gpa, &wire, &control, &.{&a}, &next);
-    var rest: []const u8 = wire.items;
     var i: u8 = 0;
-    while (try frame.parse(rest)) |p| : (i += 1) {
+    while (wire.pop()) |it| : (i += 1) {
+        defer gpa.free(it.data);
+        const p = (try frame.parse(it.data)).?;
+        try testing.expectEqual(it.data.len, p.len);
         try testing.expectEqualSlices(u8, &.{i}, p.frame.body);
-        rest = rest[p.len..];
     }
     try testing.expectEqual(5, i);
     try testing.expect(a.empty());
-}
-
-fn expectBodies(gpa: std.mem.Allocator, q: *Queue, want: []const []const u8) !void {
-    for (want) |w| {
-        const it = q.pop().?;
-        defer gpa.free(it.data);
-        try testing.expectEqualStrings(w, it.data[frame.header_len..]);
-    }
-    try testing.expect(q.empty());
-}
-
-test "a skip drops output and unsent snapshots, and keeps messages in order" {
-    const gpa = testing.allocator;
-    var q: Queue = .{};
-    defer q.deinit(gpa);
-    try q.push(gpa, 1, .bytes, "out1", 0, .output);
-    try q.push(gpa, 1, .msg, "lead", 0, .message);
-    try q.push(gpa, 1, .msg, "start", 0, .snapshot_start);
-    try q.push(gpa, 1, .bytes, "snap", 0, .snapshot);
-    try q.push(gpa, 1, .msg, "end", 0, .snapshot_end);
-    try q.push(gpa, 1, .bytes, "out2", 0, .output);
-    try q.push(gpa, 1, .msg, "exit", 0, .message);
-    try testing.expect(!q.dropStale(gpa));
-    try expectBodies(gpa, &q, &.{ "lead", "exit" });
-    try testing.expectEqual(0, q.bytes);
-}
-
-test "a skip keeps the rest of a snapshot that started to go out" {
-    const gpa = testing.allocator;
-    var q: Queue = .{};
-    defer q.deinit(gpa);
-    try q.push(gpa, 1, .msg, "start", 0, .snapshot_start);
-    try q.push(gpa, 1, .bytes, "snap1", 0, .snapshot);
-    gpa.free(q.pop().?.data);
-    try q.push(gpa, 1, .bytes, "snap2", 0, .snapshot);
-    try q.push(gpa, 1, .msg, "end", 0, .snapshot_end);
-    try q.push(gpa, 1, .msg, "start2", 0, .snapshot_start);
-    try q.push(gpa, 1, .bytes, "snap3", 0, .snapshot);
-    // Its end is in the queue: nothing of it comes later.
-    try testing.expect(!q.dropStale(gpa));
-    try expectBodies(gpa, &q, &.{ "snap1", "snap2", "end" });
-
-    // A snapshot that started to go out and whose end did not come yet.
-    try q.push(gpa, 1, .msg, "start", 0, .snapshot_start);
-    gpa.free(q.pop().?.data);
-    try q.push(gpa, 1, .bytes, "snap", 0, .snapshot);
-    try testing.expect(q.dropStale(gpa));
-    try expectBodies(gpa, &q, &.{"snap"});
 }
 
 test "a skip during an incoming snapshot drops the rest of it, then waits for the next one" {
@@ -436,7 +260,7 @@ test "a skip during an incoming snapshot drops the rest of it, then waits for th
 
 test "a channel skips ahead when its output or a snapshot is too old or too large" {
     const gpa = testing.allocator;
-    var q: Queue = .{};
+    var q: FrameQueue = .{};
     defer q.deinit(gpa);
     var f: Flow = .{};
     try testing.expect(!f.mustSkip(q.stale(), 10_000));
@@ -448,7 +272,7 @@ test "a channel skips ahead when its output or a snapshot is too old or too larg
     try testing.expectEqual(100 + skip_ms, f.deadline(q.stale()).?);
 
     // A queue of snapshots alone, which a slow link let pile up.
-    var snaps: Queue = .{};
+    var snaps: FrameQueue = .{};
     defer snaps.deinit(gpa);
     const chunk: [64 * 1024]u8 = @splat('y');
     try snaps.push(gpa, 1, .msg, "start", 0, .snapshot_start);

@@ -190,9 +190,9 @@ struct PaneSnapshot: Codable {
     /// No `needsAttention` or `completionFailed`: the session keeps a pane's
     /// attention flags across a quit (`Pane.attention`). An older file's keys
     /// are ignored on decode.
-    /// Stable zmx session id (`Pane.sessionID`). On restore the rebuilt pane
-    /// reuses it, so its shell reattaches to the still-running daemon instead
-    /// of spawning fresh. Optional: older snapshots decode nil → fresh id.
+    /// The pane's session id, which the restored pane takes as its id. An
+    /// older build saved a different `id`; this key wins. Nil in a very old
+    /// file: the pane then takes `id`.
     var sessionID: UUID?
     /// The pane's zmx session name, persisted VERBATIM — never re-derived. The
     /// name embeds the project slug at creation time, so re-deriving it after
@@ -234,6 +234,9 @@ struct PaneSnapshot: Codable {
 }
 
 struct SplitBranchSnapshot: Codable {
+    /// `SplitBranch.id`, so a restored branch keeps its id. Optional: an
+    /// older file decodes nil, and the branch gets a new id.
+    var id: UUID?
     let direction: SplitDirection
     let ratio: Double
     let first: SplitNodeSnapshot
@@ -422,8 +425,18 @@ enum WorkspaceSerializer {
     }
 
     private static func build(_ t: TabSnapshot, root: SplitNode) -> TerminalTab {
-        let focused = t.focusedPaneID.flatMap { root.findPane(id: $0)?.id } ?? root.allPanes().first?.id
+        // An older build saved the focused pane's runtime id: find its
+        // snapshot and take the id that the pane restores with.
+        let savedFocus = t.focusedPaneID.flatMap { paneSnapshot(id: $0, in: t.splitRoot) }
+        let focused = savedFocus.flatMap { root.findPane(id: $0.sessionID ?? $0.id)?.id } ?? root.allPanes().first?.id
         return TerminalTab(id: t.id, splitRoot: root, focusedPaneID: focused, customTitle: t.customTitle)
+    }
+
+    private static func paneSnapshot(id: UUID, in node: SplitNodeSnapshot) -> PaneSnapshot? {
+        switch node {
+        case let .pane(p): p.id == id ? p : nil
+        case let .split(b): paneSnapshot(id: id, in: b.first) ?? paneSnapshot(id: id, in: b.second)
+        }
     }
 
     /// Serialize one live tab — the pinned counterpart of the per-workspace
@@ -474,7 +487,7 @@ enum WorkspaceSerializer {
             return .pane(PaneSnapshot(
                 id: p.id,
                 projectPath: p.projectPath,
-                sessionID: p.sessionID,
+                sessionID: p.id,
                 sessionName: p.sessionName,
                 workingDirectory: liveCwd,
                 hostSessionDirectory: p.isRemote ? p.hostSessionDirectory.map { known in
@@ -483,6 +496,7 @@ enum WorkspaceSerializer {
             ))
         case let .split(b):
             return .split(SplitBranchSnapshot(
+                id: b.id,
                 direction: b.direction,
                 ratio: Double(b.ratio),
                 first: snapshotNode(b.first),
@@ -498,21 +512,97 @@ enum WorkspaceSerializer {
     static func withoutRepeatedSessions(_ node: SplitNodeSnapshot, seen: inout Set<String>) -> SplitNodeSnapshot? {
         switch node {
         case let .pane(p):
-            guard let name = p.sessionName else { return node }
-            return seen.insert(name).inserted ? node : nil
+            // The restored pane id must be new too: two panes never share one.
+            let newID = seen.insert((p.sessionID ?? p.id).uuidString).inserted
+            guard let name = p.sessionName else { return newID ? node : nil }
+            return seen.insert(name).inserted && newID ? node : nil
         case let .split(b):
             let first = withoutRepeatedSessions(b.first, seen: &seen)
             let second = withoutRepeatedSessions(b.second, seen: &seen)
             guard let first else { return second }
             guard let second else { return first }
-            return .split(SplitBranchSnapshot(direction: b.direction, ratio: b.ratio, first: first, second: second))
+            return .split(SplitBranchSnapshot(id: b.id, direction: b.direction, ratio: b.ratio, first: first, second: second))
         }
+    }
+
+    /// The loaded file with each session on its first pane only, across every
+    /// section, in restore order: project workspaces, pinned tabs, the quick
+    /// terminal, desktop widgets. A file from a build with `pane mirror` can
+    /// put one session on a project pane and a pinned or widget pane, and a
+    /// close of one pane then kills the session under the other.
+    /// - A workspace whose project is not in `validIDs` does not restore, so
+    ///   its sessions do not count.
+    /// - A pinned tab with no pane left has no live snapshot: it starts from
+    ///   its declaration.
+    /// - A quick terminal tab with no pane left is dropped: the panel keeps
+    ///   its fresh tab.
+    /// - A widget with no pane left gets a fresh session, and
+    ///   `materializeRestoredDesktopWidgets` starts it from its recipe.
+    static func withoutRepeatedSessions(_ loaded: WorkspaceStore.Loaded, validIDs: Set<UUID>) -> WorkspaceStore.Loaded {
+        var seen: Set<String> = []
+        var result = loaded
+        result.workspaces = loaded.workspaces.map { snap in
+            guard validIDs.contains(snap.projectID) else { return snap }
+            return WorkspaceSnapshot(
+                projectID: snap.projectID,
+                activeTabID: snap.activeTabID,
+                tabs: snap.tabs.compactMap { withoutRepeatedSessions($0, seen: &seen) }
+            )
+        }
+        result.pinned = loaded.pinned.map { snap in
+            PinnedTabSnapshot(
+                id: snap.id,
+                declaration: snap.declaration,
+                originProjectID: snap.originProjectID,
+                live: snap.live.flatMap { withoutRepeatedSessions($0, seen: &seen) }
+            )
+        }
+        result.quickTerminal = loaded.quickTerminal.flatMap { withoutRepeatedSessions($0, seen: &seen) }
+        result.desktopWidgets = loaded.desktopWidgets.map { widget in
+            var widget = widget
+            widget.tab = withoutRepeatedSessions(widget.tab, seen: &seen) ?? withFreshSessions(widget.tab)
+            return widget
+        }
+        return result
+    }
+
+    /// The tab with each pane whose session `seen` holds left out. Nil when
+    /// no pane is left.
+    static func withoutRepeatedSessions(_ t: TabSnapshot, seen: inout Set<String>) -> TabSnapshot? {
+        guard let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) else { return nil }
+        return TabSnapshot(id: t.id, customTitle: t.customTitle, focusedPaneID: t.focusedPaneID, splitRoot: kept)
+    }
+
+    /// The tab with no session identity, so each pane restores in a new
+    /// session.
+    private static func withFreshSessions(_ t: TabSnapshot) -> TabSnapshot {
+        func fresh(_ node: SplitNodeSnapshot) -> SplitNodeSnapshot {
+            switch node {
+            case let .pane(p):
+                // A new id too: the pane id is the session id.
+                .pane(PaneSnapshot(
+                    id: UUID(),
+                    projectPath: p.projectPath,
+                    workingDirectory: p.workingDirectory,
+                    hostSessionDirectory: p.hostSessionDirectory
+                ))
+            case let .split(b):
+                .split(SplitBranchSnapshot(
+                    id: b.id,
+                    direction: b.direction,
+                    ratio: b.ratio,
+                    first: fresh(b.first),
+                    second: fresh(b.second)
+                ))
+            }
+        }
+        return TabSnapshot(id: t.id, customTitle: t.customTitle, focusedPaneID: t.focusedPaneID, splitRoot: fresh(t.splitRoot))
     }
 
     private static func restoreNode(_ snap: SplitNodeSnapshot, projectID: UUID) -> SplitNode {
         switch snap {
         case let .pane(p):
-            // Reuse the persisted session identity so the restored pane
+            // Reuse the persisted session identity (the pane id) so the restored pane
             // reattaches to its still-running zmx daemon: `zmx attach` is an
             // upsert, so a session that died while the app was closed just
             // becomes a fresh shell in the saved working directory — no
@@ -526,13 +616,14 @@ enum WorkspaceSerializer {
             let pane = Pane(
                 projectPath: p.workingDirectory ?? p.projectPath,
                 projectID: projectID,
-                sessionID: p.sessionID ?? UUID(),
+                id: p.sessionID ?? p.id,
                 sessionName: p.sessionName
             )
             if pane.isRemote { pane.hostSessionDirectory = p.hostSessionDirectory }
             return .pane(pane)
         case let .split(b):
             return .split(SplitBranch(
+                id: b.id ?? UUID(),
                 direction: b.direction,
                 ratio: CGFloat(b.ratio),
                 first: restoreNode(b.first, projectID: projectID),

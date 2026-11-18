@@ -55,7 +55,7 @@ struct RemoteReconnectPolicy {
         }
     }
 
-    /// The pane's host answers again (its quiet roaming link heard it): the
+    /// The pane's host answers again (its roaming link heard it after a gap): the
     /// next sweep may try the pane at once. The streak starts again, so a
     /// try that still fails backs off from the start.
     mutating func hostAnswered(_ paneID: UUID) {

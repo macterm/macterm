@@ -168,68 +168,86 @@ struct AppStateTests {
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
 
-    @Test
-    func a_mirror_that_the_session_does_not_make_leader_is_dimmed() throws {
-        let state = makeAppState()
-        let session = FakeSessionLeads(state)
-        let p = seedProject(state)
+    /// One pane that two windows draw. Window `a` is key, but the session
+    /// made `b`'s surface lead, as when the user typed there.
+    private struct TwoWindows {
+        let project: Project
+        let tab: TerminalTab
+        let pane: Pane
+        let a: WindowState
+        let b: WindowState
+        let forA: PaneSurface
+        let forB: PaneSurface
+    }
+
+    private func paneInTwoWindows(
+        _ state: AppState,
+        _ session: FakeSessionLeads,
+        path: String = "/tmp"
+    ) throws -> TwoWindows {
+        let p = seedProject(state, name: "proj", path: path)
         let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
-
-        #expect(state.isMirrored(source))
-        #expect(state.isLeader(source))
-        #expect(!state.isLeader(mirrored))
-        #expect(state.nonLeaderPaneIDs(in: tab) == [mirrorID])
+        let pane = try #require(tab.splitRoot.allPanes().first)
+        let a = WindowState(activeProjectID: p.id)
+        let b = WindowState(activeProjectID: p.id)
+        state.registerWindow(a)
+        state.registerWindow(b)
+        state.noteKeyWindow(a)
+        let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
+        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
+        session.attach([forB, forA])
+        session.claimed = []
+        return TwoWindows(project: p, tab: tab, pane: pane, a: a, b: b, forA: forA, forB: forB)
     }
 
     @Test
-    func focusing_a_mirror_claims_leadership_for_it() throws {
+    func a_surface_that_the_session_does_not_make_leader_is_blurred_in_its_window() throws {
+        let state = makeAppState()
+        let session = FakeSessionLeads(state)
+        let two = try paneInTwoWindows(state, session)
+
+        #expect(state.isMirrored(two.pane))
+        #expect(two.forB.isLeader)
+        #expect(!state.isLeader(two.pane), "the reference surface is the first window's")
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.a.id) == [two.pane.id])
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.b.id).isEmpty)
+    }
+
+    @Test
+    func focusing_a_pane_claims_leadership_for_its_surface_in_that_window() throws {
         // Focus is how the user says "drive the size from here".
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session)
 
-        state.focusPane(mirrorID, projectID: p.id)
+        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.a.id)
 
-        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
-        #expect(state.isLeader(mirrored))
-        #expect(!state.isLeader(source))
-        #expect(state.nonLeaderPaneIDs(in: tab) == [source.id])
+        #expect(session.claimed == [two.forA.id])
+        #expect(two.forA.isLeader)
+        #expect(!two.forB.isLeader)
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.b.id) == [two.pane.id])
 
-        // And back again: leadership follows focus, it does not latch.
-        state.focusPane(source.id, projectID: p.id)
-        #expect(state.isLeader(source))
-        #expect(!state.isLeader(mirrored))
+        // And back again in the other window: leadership does not latch.
+        state.noteKeyWindow(two.b)
+        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.b.id)
+        #expect(two.forB.isLeader)
+        #expect(!two.forA.isLeader)
     }
 
     @Test
     func an_undelivered_claim_leaves_leadership_where_the_session_has_it() throws {
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session)
 
         session.deliverable = false
-        state.claimSessionLeadership(mirrored)
-        #expect(state.isLeader(source))
-        #expect(!state.isLeader(mirrored))
+        state.claimSessionLeadership(two.forA)
+        #expect(two.forB.isLeader)
+        #expect(!two.forA.isLeader)
 
         session.deliverable = true
-        state.claimSessionLeadership(mirrored)
-        #expect(state.isLeader(mirrored))
+        state.claimSessionLeadership(two.forA)
+        #expect(two.forA.isLeader)
     }
 
     @Test
@@ -238,23 +256,15 @@ struct AppStateTests {
         // retries across run-loop ticks: a surface that leads sends nothing.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session)
 
-        state.claimSessionLeadership(source)
+        state.claimSessionLeadership(two.forB)
         #expect(session.claimed.isEmpty)
 
-        state.claimSessionLeadership(mirrored)
-        state.claimSessionLeadership(mirrored)
-        state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
-
-        state.claimSessionLeadership(source)
-        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id, SurfaceRegistry.shared.surfaces(of: source)[0].id])
+        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id])
     }
 
     @Test
@@ -263,127 +273,52 @@ struct AppStateTests {
         // meantime send nothing more.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session)
         session.answers = false
 
-        state.claimSessionLeadership(mirrored)
-        state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
+        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id])
 
         // The channel ended before the answer: the claim may be lost, so the
         // next focus sends it again.
-        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(nil)
-        state.claimSessionLeadership(mirrored)
-        #expect(session.claimed == [
-            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
-            SurfaceRegistry.shared.surfaces(of: mirrored)[0].id,
-        ])
+        two.forA.receiveLead(nil)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id, two.forA.id])
     }
 
     @Test
-    func focusing_a_remote_mirror_claims_as_a_local_one_does() throws {
+    func focusing_a_remote_pane_claims_as_a_local_one_does() throws {
         // A remote pane is a session of the host's server, and the claim is a
         // message on its channel, never input. So it claims as a local pane.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state, name: "box", path: "me@box:/srv")
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        #expect(source.isRemote)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session, path: "me@box:/srv")
+        #expect(two.pane.isRemote)
 
-        state.focusPane(mirrorID, projectID: p.id)
+        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.a.id)
 
-        #expect(session.claimed == [SurfaceRegistry.shared.surfaces(of: mirrored)[0].id])
-        #expect(state.isLeader(mirrored))
-        #expect(!state.isLeader(source))
+        #expect(session.claimed == [two.forA.id])
+        #expect(two.forA.isLeader)
+        #expect(!two.forB.isLeader)
     }
 
     @Test
-    func closing_a_mirror_sends_no_claim() throws {
+    func closing_the_window_whose_surface_leads_sends_no_claim() throws {
         // When the leader leaves, the session makes the next client lead and
-        // tells it. The app sends nothing on a close.
+        // tells it. A closed window that was not key makes the app send
+        // nothing.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([SurfaceRegistry.shared.surfaces(of: source)[0], SurfaceRegistry.shared.surfaces(of: mirrored)[0]])
+        let two = try paneInTwoWindows(state, session)
 
-        state.closePane(source.id, projectID: p.id)
+        state.unregisterWindow(two.b)
         #expect(session.claimed.isEmpty)
 
         // The session makes the client that remains lead, and says so.
-        SurfaceRegistry.shared.surfaces(of: mirrored)[0].receiveLead(true)
-        #expect(state.isLeader(mirrored))
-        #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
-    }
-
-    @Test
-    func closeNeedsConfirmation_is_false_for_a_pane_whose_session_survives() throws {
-        // The busy-close guard says "closing kills its session". For a mirror
-        // that is simply false — the other view keeps the program running —
-        // so a busy mirror must not raise it.
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-
-        // Closing either one alone leaves the other holding the session.
-        #expect(!state.closeNeedsConfirmation([mirrored]))
-        #expect(!state.closeNeedsConfirmation([source]))
-        // Closing BOTH ends it, so the guard applies again — whatever the
-        // panes' own busy verdict is, the retention half must not veto it.
-        #expect(
-            state.closeNeedsConfirmation([source, mirrored])
-                == [source, mirrored].contains(where: \.needsConfirmClose)
-        )
-    }
-
-    @Test
-    func closing_a_tab_that_only_mirrors_another_tabs_session_needs_no_confirmation() throws {
-        // A tab whose every pane is a mirror of a session another tab still
-        // holds kills nothing when it closes, however busy those programs
-        // are. The tab-level guard must say so — the raw
-        // `allPanes().contains(where: \.needsConfirmClose)` would not.
-        let state = makeAppState()
-        state.paneNeedsConfirmClose = { _ in true }
-        let p = seedProject(state)
-        let sourceTab = try #require(state.workspaces[p.id]?.activeTab)
-        let source = try #require(sourceTab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: p.id, in: state)
-        state.separatePane(mirrorID, toProject: p.id, destPath: p.path)
-        let mirrorTab = try #require(state.workspaces[p.id]?.tabs.first { $0.splitRoot.contains(paneID: mirrorID) })
-        #expect(mirrorTab.id != sourceTab.id)
-
-        #expect(!state.closeNeedsConfirmation(tab: mirrorTab))
-        #expect(!state.closeNeedsConfirmation(tab: sourceTab))
-        // The whole project goes — nothing retains the session.
-        #expect(state.closeNeedsConfirmation(projectID: p.id))
-        // Both tabs selected for a bulk remove is the same joint verdict.
-        #expect(state.closeNeedsConfirmation(
-            projectIDs: [],
-            tabs: [(mirrorTab.id, p.id), (sourceTab.id, p.id)]
-        ))
-        #expect(!state.closeNeedsConfirmation(projectIDs: [], tabs: [(mirrorTab.id, p.id)]))
-
-        // And the UI request paths read that verdict rather than their own.
-        state.requestCloseTab(mirrorTab.id, projectID: p.id)
-        #expect(state.pendingDialog == nil)
-        #expect(state.workspaces[p.id]?.tabs.count == 1)
-        state.requestCloseTab(sourceTab.id, projectID: p.id)
-        #expect(state.pendingDialog?.kind == .closeTab(tabID: sourceTab.id, projectID: p.id))
+        two.forA.receiveLead(true)
+        #expect(state.isLeader(two.pane))
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.a.id).isEmpty)
     }
 
     @Test
@@ -2033,72 +1968,28 @@ struct AppStateTests {
     }
 
     @Test
-    func closing_one_of_two_mirrors_spares_the_shared_session() async throws {
-        // Two panes may attach one zmx session (the same session shown in
-        // another window). Closing one is a release, not a kill — the daemon
-        // has to outlive it, or the work still on screen elsewhere dies.
+    func a_session_that_a_pending_pinned_record_names_is_not_killed_and_needs_no_confirmation() async throws {
+        // A pinned record that waits to load reattaches its session later:
+        // a close that releases a pane on that session must leave it.
         let killed = KilledSessions()
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed)
+        state.paneNeedsConfirmClose = { _ in true }
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
-        let tab = try #require(ws.activeTab)
-        let shared = try #require(tab.splitRoot.allPanes().first).sessionName
+        let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
+        #expect(state.closeNeedsConfirmation([pane]))
 
-        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
+        state.pendingPinnedLiveRestores[UUID()] = TabSnapshot(
+            id: UUID(),
+            customTitle: nil,
+            focusedPaneID: nil,
+            splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionName: pane.sessionName))
+        )
 
-        state.closeTab(mirrorTab.id, projectID: p.id)
-
+        #expect(!state.closeNeedsConfirmation([pane]))
+        state.releaseSessions([pane])
         await killed.settleExpectingNone()
         #expect(await killed.names.isEmpty)
-    }
-
-    @Test
-    func closing_the_last_mirror_kills_the_shared_session() async throws {
-        // The refcount must actually reach zero: with no pane left attached,
-        // the daemon has to die or it lingers as a clients==0 orphan.
-        let killed = KilledSessions()
-        let state = makeAppState()
-        state.sessionClient = recordingClient(into: killed)
-        let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
-        let tab = try #require(ws.activeTab)
-        let shared = try #require(tab.splitRoot.allPanes().first).sessionName
-
-        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
-        // A third tab so closing both mirror-holding tabs leaves a valid
-        // workspace behind.
-        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-
-        state.closeTab(mirrorTab.id, projectID: p.id)
-        state.closeTab(tab.id, projectID: p.id)
-
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [shared])
-    }
-
-    @Test
-    func releasing_two_mirrors_in_one_batch_still_kills_the_session() async throws {
-        // The batch case: asked one at a time, two mirrors inside the SAME
-        // batch would each see the other still in the tree, both decline, and
-        // leak the session. This is why releaseSessions takes the whole batch.
-        let killed = KilledSessions()
-        let state = makeAppState()
-        state.sessionClient = recordingClient(into: killed)
-        let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
-        let tab = try #require(ws.activeTab)
-        let shared = try #require(tab.splitRoot.allPanes().first).sessionName
-
-        let mirrorTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-        ModelWriter.tabSetTree(mirrorTab, root: .pane(mirrorPane(of: shared, projectID: p.id)), focusedPaneID: mirrorTab.focusedPaneID)
-
-        state.removeProject(p.id)
-
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [shared])
     }
 
     @Test
@@ -2712,23 +2603,4 @@ private actor KilledSessions {
     func settleExpectingNone() async {
         try? await Task.sleep(for: .milliseconds(200))
     }
-}
-
-/// A pane attached to `name`. The app makes no second pane on a session, but
-/// the session code still handles one until issue 0282 removes it.
-@MainActor
-func mirrorPane(of name: String, projectID: UUID, projectPath: String = "/tmp") -> Pane {
-    Pane(projectPath: projectPath, projectID: projectID, sessionName: name)
-}
-
-/// Put a second pane on `source`'s session beside it, in the same tab, and
-/// return its id. The pane does not take focus.
-@MainActor
-@discardableResult
-func addPane(sharing source: Pane, projectID: UUID, in state: AppState) -> UUID {
-    let tab = state.workspaces[projectID]!.tabs.first { $0.splitRoot.contains(paneID: source.id) }!
-    let pane = mirrorPane(of: source.sessionName, projectID: projectID, projectPath: source.projectPath)
-    let (root, _) = tab.splitRoot.inserting(pane: pane, at: source.id, direction: .horizontal, position: .second)
-    ModelWriter.tabSetTree(tab, root: root, focusedPaneID: tab.focusedPaneID)
-    return pane.id
 }

@@ -33,6 +33,16 @@ final class LinkTransport: @unchecked Sendable {
         now - lastRx >= quietAfter
     }
 
+    /// A packet after this long (awake) with no packet says that the host
+    /// answers again. It is one keepalive (`LinkStream.keepalive`) and 2 s
+    /// for delay, shorter than `quietAfter`. One lost keepalive also gives
+    /// the sign. The host answers then, so a try of a lost pane can work.
+    static let answersAfter: Int64 = LinkStream.keepalive + 2000
+
+    static func answersAgain(now: Int64, lastRx: Int64) -> Bool {
+        now - lastRx >= answersAfter
+    }
+
     private let pump: Int32
     private let host: String
     private let port: UInt16
@@ -49,6 +59,9 @@ final class LinkTransport: @unchecked Sendable {
     /// Runs on the thread when the link becomes quiet, and when a packet
     /// comes again. It says only that the state changed: read `isQuiet`.
     private var onQuiet: (@Sendable () -> Void)?
+    /// Runs on the thread when a packet comes after `answersAfter` with no
+    /// packet.
+    private var onAnswered: (@Sendable () -> Void)?
     /// Under `lock`.
     private var quiet = false
 
@@ -104,8 +117,13 @@ final class LinkTransport: @unchecked Sendable {
 
     /// Starts the thread. `onDead` runs once, on the thread, when the link
     /// ends by itself. `onQuiet` runs on the thread when the quiet state of
-    /// the link changes.
-    func start(onDead: @escaping @Sendable () -> Void, onQuiet: @escaping @Sendable () -> Void = {}) throws {
+    /// the link changes. `onAnswered` runs on the thread when the host
+    /// answers after a gap (`answersAfter`).
+    func start(
+        onDead: @escaping @Sendable () -> Void,
+        onQuiet: @escaping @Sendable () -> Void = {},
+        onAnswered: @escaping @Sendable () -> Void = {}
+    ) throws {
         lock.lock()
         let wasStopped = stopped
         lock.unlock()
@@ -115,6 +133,7 @@ final class LinkTransport: @unchecked Sendable {
         lock.lock()
         self.onDead = onDead
         self.onQuiet = onQuiet
+        self.onAnswered = onAnswered
         started = true
         lock.unlock()
         let thread = Thread { [self] in run() }
@@ -130,6 +149,7 @@ final class LinkTransport: @unchecked Sendable {
         stopped = true
         onDead = nil
         onQuiet = nil
+        onAnswered = nil
         lock.unlock()
         if already { return }
         if wasStarted {
@@ -193,8 +213,10 @@ final class LinkTransport: @unchecked Sendable {
                 _ = Darwin.read(wake.read, &drain, drain.count)
             }
             if fds[1].revents & Int16(POLLIN) != 0 {
-                readUDP(&buffer, now: after)
+                let answered = readUDP(&buffer, now: after)
+                // Quiet first, so the host is not quiet when it answers.
                 reportQuiet(Self.isQuiet(now: after, lastRx: lastRx))
+                if answered { reportAnswered() }
             }
             if fds[2].revents & Int16(POLLIN) != 0, !readPump() {
                 break
@@ -207,6 +229,7 @@ final class LinkTransport: @unchecked Sendable {
         callback = dead ? onDead : nil
         onDead = nil
         onQuiet = nil
+        onAnswered = nil
         stopped = true
         lock.unlock()
         teardown()
@@ -221,6 +244,13 @@ final class LinkTransport: @unchecked Sendable {
         }
         quiet = now
         let callback = onQuiet
+        lock.unlock()
+        callback?()
+    }
+
+    private func reportAnswered() {
+        lock.lock()
+        let callback = onAnswered
         lock.unlock()
         callback?()
     }
@@ -245,17 +275,21 @@ final class LinkTransport: @unchecked Sendable {
         }
     }
 
-    private func readUDP(_ buffer: inout [UInt8], now: Int64) {
+    /// True when an authenticated packet ended a gap (`answersAgain`).
+    private func readUDP(_ buffer: inout [UInt8], now: Int64) -> Bool {
+        var answered = false
         for _ in 0 ..< 64 {
             let got = recv(udp, &buffer, buffer.count, 0)
-            if got < 0 { return }
+            if got < 0 { break }
             guard got >= LinkPacketCodec.overhead, got <= LinkPacketCodec.maxPacket else { continue }
             guard let opened = try? codec.open(Data(buffer[0 ..< got])) else { continue }
+            if Self.answersAgain(now: now, lastRx: lastRx) { answered = true }
             lastRx = now
             if let bytes = stream.receive(now: now, opened.payload), !bytes.isEmpty {
                 toPump.append(bytes)
             }
         }
+        return answered
     }
 
     /// False when the socket pair ended.

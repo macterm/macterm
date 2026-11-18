@@ -5,8 +5,8 @@ This file loads when you work in `Macterm/Persistence/`. The root `AGENTS.md` ha
 ## Persistence
 
 - Workspaces are in `~/Library/Application Support/<display name>/workspaces_v3.json` (schema v6, written as v7 only while desktop widgets exist). Projects are in `projects.json`. The wrapper configs are next to them. Debug builds use `Macterm Debug/`, and the Debug bundle is `Macterm Debug.app` (`PRODUCT_MODULE_NAME` stays `Macterm`). Write the space wherever you name the bundle by path.
-- `Pane` IDs are new at every restore. The session identity (`sessionID` and `sessionName`, stored exactly as given) is what connects a pane to its session again.
-  - One pane is one session. A saved tab from a build with `pane mirror` (now removed) can hold two panes on one session: it restores the first pane alone (`WorkspaceSerializer.withoutRepeatedSessions`).
+- A `Pane` ID is its session ID, and a `SplitBranch` ID is stored too. Both stay the same across a restore. The session identity (`PaneSnapshot.sessionID` and `sessionName`, stored exactly as given) is what connects a pane to its session again.
+  - One pane is one session. A saved tab from a build with `pane mirror` (now removed) can hold two panes on one session: it restores the first pane alone (`WorkspaceSerializer.withoutRepeatedSessions`). The check covers the whole file before any section restores: project workspaces first, then pinned tabs, the quick terminal and desktop widgets.
   - Only an explicit Apply Layout applies a declared layout (palette, menu, Settings row, `layout apply`). When you select a project or start Macterm again, Macterm never reads it. The snapshot restores, and a project without a snapshot gets the default workspace.
 - **A directory is not an identity**. `ProjectStore.create` always appends a new project. `findOrCreate` exists only for callers that must be idempotent (the `open-project` hook of `BenchmarkControl`, and the folder rows of the palette).
 - Project declarations are YAML in `~/.config/macterm/projects/`. All build flavors share them. They look at the `$HOME` env first, through `ProjectPath.currentHome`.

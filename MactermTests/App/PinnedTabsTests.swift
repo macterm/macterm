@@ -418,6 +418,48 @@ struct PinnedTabsTests {
         #expect(state2.isPinnedTabLoaded(tab.id))
     }
 
+    @Test
+    func a_launch_restores_a_session_of_a_project_tab_on_no_pinned_pane() async throws {
+        // A file from a build with `pane mirror` can name one session on a
+        // project pane and a pinned pane. Only the project pane keeps it, so
+        // a close of the pinned pane cannot kill the project's shell.
+        let fx = makeFixture()
+        let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
+        let ws = Workspace(id: project.id, projectPath: "/tmp")
+        let session = try #require(ws.tabs[0].focusedPane).sessionName
+        let pinnedTabID = UUID()
+        WorkspaceStore(fileURL: fx.storeURL).save(
+            WorkspaceSerializer.snapshot([ws.id: ws]),
+            pinned: [PinnedTabSnapshot(
+                id: pinnedTabID,
+                declaration: LayoutTab(layout: .pane(LayoutPane())),
+                originProjectID: project.id,
+                live: TabSnapshot(
+                    id: pinnedTabID, customTitle: nil, focusedPaneID: nil,
+                    splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionID: UUID(), sessionName: session))
+                )
+            )]
+        )
+
+        // The session is alive, so a pinned snapshot that kept it would
+        // reattach to it.
+        var alive = SessionClient.noop
+        alive.isBundled = { true }
+        alive.listSessions = { [LocalSession(name: session)] }
+        fx.state.sessionClient = alive
+
+        fx.state.restoreSelection(projects: [project])
+        await fx.state.materializeRestoredPinnedTabs()
+
+        let projectSessions = fx.state.workspaces[project.id]?.tabs.flatMap { $0.splitRoot.allPanes().map(\.sessionName) }
+        #expect(projectSessions == [session])
+        #expect(fx.state.pinnedRecords.map(\.id) == [pinnedTabID])
+        let pinnedPanes = fx.state.pinnedWorkspace?.tabs.flatMap { $0.splitRoot.allPanes() } ?? []
+        #expect(!pinnedPanes.isEmpty)
+        #expect(!pinnedPanes.contains { $0.sessionName == session })
+        #expect(!fx.state.pendingPinnedSessionNames().contains(session))
+    }
+
     // MARK: - Declaration freshness
 
     @Test

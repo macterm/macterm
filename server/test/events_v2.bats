@@ -11,7 +11,7 @@ setup_file() {
 }
 
 @test "events: title, cwd, bell, progress and the heartbeat" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 import time
 from v2client import Client
@@ -48,7 +48,7 @@ PY
 }
 
 @test "events: marks carry the command and the exit code, and the status follows them" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -70,7 +70,7 @@ PY
 }
 
 @test "events: a title flood coalesces, and the newest title arrives" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 import time
 from v2client import Client
@@ -91,7 +91,7 @@ PY
 }
 
 @test "events: the foreground follows the program that holds the pty" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -110,7 +110,7 @@ PY
 }
 
 @test "events: a client that connects later gets the current state" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -132,7 +132,7 @@ PY
 }
 
 @test "events: only a client that asks gets the foreground" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -161,7 +161,7 @@ PY
 # (`proc_pid_rusage`, as scripts/_harness.py reads it), Linux as a voluntary
 # context switch.
 @test "events: an idle session wakes only for a client that wants the foreground" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   SESSION_PID=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid s1) python3 - <<'PY'
 import ctypes, os, struct, sys, time
 from v2client import Client
@@ -195,7 +195,7 @@ PY
 }
 
 @test "events: connect writes the foreground as v1's APC only when asked" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 import os, time
 from ptyrun import Pty
@@ -223,7 +223,7 @@ PY
 }
 
 @test "events: connect marks the snapshot with APCs only when asked" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 import os
 from ptyrun import Pty
@@ -258,7 +258,7 @@ PY
     'termios.tcsetattr(0, termios.TCSANOW, old)' \
     'print("reply=" + got[1:-1].decode())' >"$query_py"
   export query_py
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 import os
 from v2client import Client
@@ -291,7 +291,7 @@ PY
 }
 
 @test "tty_mode: a client that asks gets the pty's line modes when they change" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")

@@ -491,8 +491,7 @@ final class QuickTerminalSplitState {
         // than by oversight: quick-terminal panes carry
         // `ZmxSessionName.quickTerminalSlug`, so their session names can never
         // equal a workspace pane's, and this state owns no AppState reference
-        // to consult. Nothing can mirror one, so there is never another
-        // claimant to refcount against.
+        // to consult.
         tab.splitRoot.findPane(id: paneID)?.killPersistentSession(using: .live)
         switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:

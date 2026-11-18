@@ -672,20 +672,12 @@ final class AppState {
         claimLeadership(forPanesIn: tab, in: key.id)
     }
 
-    /// Claim for a tab's surfaces in window `windowID`, one per session. A
-    /// session already led by a surface of this tab is left as it is;
-    /// otherwise the tab's focused pane on that session claims, else the
-    /// first.
+    /// Claim for each pane's surface of a tab in window `windowID`. Each
+    /// surface claims its own session.
     private func claimLeadership(forPanesIn tab: TerminalTab, in windowID: UUID?) {
         let host = Self.host(windowID)
-        let panes = tab.splitRoot.allPanes()
-        var handled: Set<String> = []
-        for pane in panes where !handled.contains(pane.sessionName) {
-            handled.insert(pane.sessionName)
-            let siblings = panes.filter { $0.sessionName == pane.sessionName }
-            if siblings.contains(where: { SurfaceRegistry.shared.surface(for: $0, in: host).lead == true }) { continue }
-            let claimant = siblings.first { $0.id == tab.focusedPaneID } ?? pane
-            claimSessionLeadership(SurfaceRegistry.shared.surface(for: claimant, in: host))
+        for pane in tab.splitRoot.allPanes() {
+            claimSessionLeadership(SurfaceRegistry.shared.surface(for: pane, in: host))
         }
     }
 
@@ -795,6 +787,13 @@ final class AppState {
     var isNewRemoteProjectSheetPresented: Bool {
         get { keyOrFirstWindow?.isNewRemoteProjectSheetPresented ?? false }
         set { keyOrFirstWindow?.isNewRemoteProjectSheetPresented = newValue }
+    }
+
+    /// Presents the sheet with a host and a folder that the palette parsed
+    /// (0358): the sheet checks the folder at once.
+    func presentNewRemoteProject(_ draft: NewRemoteProjectDraft) {
+        keyOrFirstWindow?.newRemoteProjectDraft = draft
+        keyOrFirstWindow?.isNewRemoteProjectSheetPresented = true
     }
 
     private var windowPersistTask: Task<Void, Never>?
@@ -1487,11 +1486,13 @@ final class AppState {
     func restoreSelection(projects: [Project]) {
         logger.info("restoreSelection: \(projects.count, privacy: .public) projects")
         hasRestoredSelection = true
-        let loaded = workspaceStore.load()
         // The scratch workspace restores like a project's (#665): its only
         // record is the snapshot, and its sessions must be claims before the
         // orphan sweep below.
         let valid = Set(projects.map(\.id)).union([ScratchTabs.workspaceID])
+        // One pane is one session, across workspaces, pinned tabs, the quick
+        // terminal and widgets.
+        let loaded = WorkspaceSerializer.withoutRepeatedSessions(workspaceStore.load(), validIDs: valid)
         // Restore every project's snapshot — including layout-file projects.
         // The snapshot carries each pane's persisted zmx session identity, so
         // panes REATTACH their still-running shells; applying the project
@@ -1714,7 +1715,7 @@ final class AppState {
         case network
         /// A login brought a host's link back (`.remoteHostDidConnect`).
         case hostConnected
-        /// A quiet roaming link heard its host again
+        /// A roaming link heard its host after a gap
         /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
         /// backoff (`RemoteReconnectPolicy.hostAnswered`).
         case hostAnswered
@@ -1753,7 +1754,7 @@ final class AppState {
         // A login may ask, and its sheet brings the app to the front. A wake
         // or a network change while the user is in another app waits for the
         // activation, which is a trigger too.
-        // A host's own event (a login, a quiet link that hears the host) is
+        // A host's own event (a login, a roaming link that hears the host after a gap) is
         // about that host and asks nothing more: it runs at once.
         let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
         guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }
@@ -1890,51 +1891,41 @@ final class AppState {
     }
 
     /// Every pane attached to a session, across ALL workspaces (pinned
-    /// included) — the shared traversal behind `claimedSessionNames` and
-    /// `releaseSessions`. Workspace panes only: these are the panes that KEEP
-    /// a session alive. A window's extra surfaces never do.
+    /// included). Workspace panes only: a window's extra surfaces are not
+    /// panes.
     private func allLivePanes() -> [Pane] {
         workspaces.values
             .flatMap(\.tabs)
             .flatMap { $0.splitRoot.allPanes() }
     }
 
-    /// The remote panes that show `session` (`RemoteHosts`, 0057). One entry
-    /// for each pane: its surfaces are its clients.
-    func remotePanes(session: String) -> [Pane] {
-        allLivePanes().filter { $0.isRemote && $0.sessionName == session }
+    /// The remote pane that shows `session` (`RemoteHosts`, 0057). Its
+    /// surfaces are its clients.
+    func remotePane(session: String) -> Pane? {
+        allLivePanes().first { $0.isRemote && $0.sessionName == session }
     }
 
     /// Every client of a session that Macterm knows of: the surfaces of the
-    /// live panes. A second window's surface is a real client, but NOT one
-    /// that retains a session: only a pane keeps one. The first surfaces come
-    /// first. A count of what the model knows, never of what the session has.
+    /// live panes, a second window's surfaces included. The first surfaces
+    /// come first. A count of what the model knows, never of what the session has.
     private func allClients() -> [PaneSurface] {
         let panes = allLivePanes()
         let all = panes.map { SurfaceRegistry.shared.surfaces(of: $0) }
         return all.map { $0[0] } + all.flatMap { $0.dropFirst() }
     }
 
-    /// Give up these panes' claims on their sessions, killing a session
-    /// only when no OTHER pane still attaches it, or a pinned record that
-    /// waits to load names it. One pane is one session, so the pane check
-    /// only fails closed (issue 0282 removes it).
-    ///
-    /// Takes the whole batch at once, because the callers that remove a
-    /// project, close a tab, or drop a layout's panes release many panes
-    /// together — asked one at a time, two panes inside one batch would each
-    /// see the other still in the tree, both decline to kill, and leak the
-    /// session as a clients==0 daemon.
+    /// Kill these panes' sessions, except a session that a pinned record that
+    /// waits to load names.
     ///
     /// Callers still destroy the surfaces (`SurfaceRegistry.destroySurfaces`) themselves; this decides only the kill.
     func releaseSessions(_ panes: [Pane]) {
-        let retained = retainedSessionNames(excluding: panes)
+        let retained = pendingPinnedSessionNames()
         for pane in panes where !retained.contains(pane.sessionName) {
             pane.killPersistentSession(using: sessionClient)
         }
     }
 
-    // MARK: - Mirrored sessions and leadership (#345)
+    // MARK: - Clients of a session and leadership (#345)
 
     /// Every client of `sessionName`, first surfaces first.
     func clients(of sessionName: String) -> [PaneSurface] {
@@ -1948,7 +1939,7 @@ final class AppState {
 
     /// Whether another window of Macterm leads `pane`'s session while this
     /// window's surface does not: the pane is in use there, at its size. A
-    /// client outside Macterm, or a mirror in the same window, does not count.
+    /// client outside Macterm does not count.
     /// A pane that this window never drew has no surface here, and a check
     /// for the notice must not make one.
     func isLedFromAnotherWindow(_ pane: Pane, window windowID: UUID) -> Bool {
@@ -2037,38 +2028,19 @@ final class AppState {
         return Set(tab.splitRoot.allPanes().filter { !SurfaceRegistry.shared.surface(for: $0, in: host).isLeader }.map(\.id))
     }
 
-    /// The session names still claimed once `releasing` is gone. Shared by
-    /// `releaseSessions` and `closeNeedsConfirmation` so the kill decision and
-    /// the warning about it can never disagree.
-    private func retainedSessionNames(excluding releasing: [Pane]) -> Set<String> {
-        let ids = Set(releasing.map(\.id))
-        return Set(
-            allLivePanes()
-                .filter { !ids.contains($0.id) }
-                .map(\.sessionName)
-        ).union(pendingPinnedSessionNames())
-    }
-
-    /// Whether closing `closing` is worth stopping the user over.
-    ///
-    /// The busy-close guard exists because closing a pane kills its session
-    /// and whatever is running in it. That is no longer true for every pane:
-    /// a pane whose session ANOTHER pane still attaches is only a view going
-    /// away — nothing is killed, and the program keeps running in the other
-    /// view — so warning "closing kills its session" there would be false.
-    ///
-    /// Uses the same retention rule as `releaseSessions`, because what the
-    /// user stands to lose is exactly what that function decides to kill.
+    /// Whether closing `closing` is worth stopping the user over: a pane
+    /// that closes kills its session and whatever runs in it. It uses the
+    /// retention rule of `releaseSessions`, so the warning and the kill
+    /// agree.
     ///
     /// This is the ONE busy-close predicate. Every path that ends sessions —
     /// pane close, tab close, project remove, the sidebar's bulk
     /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
-    /// of the overloads below rather than spelling
-    /// `allPanes().contains(where: \.needsConfirmClose)` itself: that raw
-    /// form ignores retention, so it would warn about killing a session that
-    /// the close does not kill.
+    /// of the overloads below. The raw `allPanes().contains(where:
+    /// \.needsConfirmClose)` ignores the retention, so it would warn about a
+    /// kill that the close does not do.
     func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
-        let retained = retainedSessionNames(excluding: closing)
+        let retained = pendingPinnedSessionNames()
         return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
     }
 
@@ -2084,9 +2056,7 @@ final class AppState {
         closeNeedsConfirmation(panes(inProject: projectID))
     }
 
-    /// Every pane of the given projects (removed whole) and tabs, judged
-    /// TOGETHER: a mirror in one selected tab whose source sits in another
-    /// selected tab is killed by the removal, and only the joint set knows.
+    /// Every pane of the given projects (removed whole) and tabs.
     func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {
@@ -2206,8 +2176,7 @@ final class AppState {
         guard !Project.isSynthetic(projectID) else { return }
         logger.debug("removeProject: \(projectID, privacy: .public)")
         if let ws = workspaces[projectID] {
-            // Project removed for good → its sessions die with it, unless a
-            // session is mirrored by a pane outside this project.
+            // Project removed for good → its sessions die with it.
             let removing = ws.tabs.flatMap { $0.splitRoot.allPanes() }
             releaseSessions(removing)
             for pane in removing {
@@ -2396,8 +2365,7 @@ final class AppState {
               let tab = ws.tabs.first(where: { $0.id == tabID })
         else { return }
         logger.debug("closeTab: \(tabID, privacy: .public) project=\(projectID, privacy: .public)")
-        // Tab closed for good → its panes' zmx sessions die with it, unless a
-        // session is mirrored by a pane in another tab or window.
+        // Tab closed for good → its panes' zmx sessions die with it.
         let closing = tab.splitRoot.allPanes()
         releaseSessions(closing)
         for pane in closing {
@@ -3015,11 +2983,9 @@ final class AppState {
             return
         }
         logger.debug("closePane: \(paneID, privacy: .public) project=\(projectID, privacy: .public)")
-        // Pane closed for good → its session dies with it, unless something
-        // else retains it. (The onlyPaneLeft path below re-releases
-        // via closeTab; killSession is a no-op on a missing session, so the
-        // overlap is harmless.) The pane is still in the tree here, which is
-        // why releaseSessions excludes the batch it is given.
+        // Pane closed for good → its session dies with it. (The onlyPaneLeft
+        // path below re-releases via closeTab; killSession is a no-op on a
+        // missing session, so the overlap is harmless.)
         if let closing = tab.splitRoot.findPane(id: paneID) {
             releaseSessions([closing])
         }
@@ -3245,9 +3211,7 @@ final class AppState {
         // Destroy surfaces only AFTER the new trees no longer reference them.
         // A layout-dropped pane is gone for good (no declared node claims it),
         // so its zmx session dies too — otherwise it would linger as a
-        // clients==0 daemon. Unless a pane elsewhere mirrors that session: a
-        // reconcile that drops one of two identical leaves must not kill the
-        // session the surviving one was just matched to.
+        // clients==0 daemon.
         releaseSessions(plan.panesToDestroy)
         for pane in plan.panesToDestroy {
             SurfaceRegistry.shared.destroySurfaces(of: pane)

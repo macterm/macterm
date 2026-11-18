@@ -105,18 +105,10 @@ struct DirectorySource: PaletteSource {
     /// existing project matching the spec (structurally, via
     /// `ProjectPath.matches`) switches, with an add-another item below;
     /// otherwise a single item creates the remote project. The display name
-    /// is the remote directory's basename, falling back to the host for
-    /// `host:~` / `host:/` (with or without a trailing slash). Taken from the
-    /// parsed directory, never the spec: `lastPathComponent` of `devbox:/` is
-    /// `devbox:`.
+    /// is `ProjectPath.remoteDisplayName`.
     private func remoteItems(spec: String, context: PaletteContext) -> [PaletteItem] {
         let name: String = if case let .remote(_, host, directory)? = ProjectPath.remote(from: spec) {
-            switch (directory as NSString).lastPathComponent {
-            case "",
-                 "~",
-                 "/": host
-            case let base: base
-            }
+            ProjectPath.remoteDisplayName(host: host, directory: directory)
         } else {
             spec
         }
@@ -138,14 +130,20 @@ struct DirectorySource: PaletteSource {
             subtitle: String(localized: "Add remote project: \(spec)"),
             category: Self.category,
             score: 0
-        ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.findOrCreate(
-                name: name,
-                path: spec
-            )
-            appState.selectProject(project)
+        ) { [appState = context.appState] in
+            Self.addRemote(spec, appState: appState)
         }
         return [addItem]
+    }
+
+    /// A new remote project goes through the New Remote Project dialog,
+    /// filled in, which checks the folder on the host at once (0358): the
+    /// login, the install question and a refusal show there, and the user
+    /// can correct a field. The name follows the folder
+    /// (`ProjectPath.remoteDisplayName`) until the user types one.
+    private static func addRemote(_ spec: String, appState: AppState) {
+        guard let draft = NewRemoteProjectDraft(path: spec) else { return }
+        appState.presentNewRemoteProject(draft)
     }
 
     private func directoryItem(
@@ -198,11 +196,11 @@ struct DirectorySource: PaletteSource {
             category: Self.category,
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.create(
-                name: name,
-                path: fullPath
-            )
-            appState.selectProject(project)
+            guard ProjectPath.isRemote(fullPath) else {
+                appState.selectProject(projectStore.create(name: name, path: fullPath))
+                return
+            }
+            Self.addRemote(fullPath, appState: appState)
         }
     }
 }

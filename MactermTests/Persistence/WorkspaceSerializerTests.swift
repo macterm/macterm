@@ -404,6 +404,88 @@ struct WorkspaceSerializerTests {
         #expect(restored.tabs.map(\.id) == [firstTab.id])
         #expect(restored.tabs[0].splitRoot.allPanes().map(\.sessionName) == [first.sessionName])
     }
+
+    @Test
+    func a_session_of_a_project_tab_restores_on_no_pinned_quick_or_widget_pane() throws {
+        // A file from a build with `pane mirror` can name one session on a
+        // project pane and on a pinned, quick terminal or widget pane. Only
+        // the project pane keeps it.
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let session = try #require(ws.tabs[0].focusedPane).sessionName
+        func tab(_ panes: [String?]) -> TabSnapshot {
+            let nodes = panes.map { name in
+                SplitNodeSnapshot.pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionID: UUID(), sessionName: name))
+            }
+            let root = nodes.dropFirst().reduce(nodes[0]) { first, second in
+                .split(SplitBranchSnapshot(direction: .horizontal, ratio: 0.5, first: first, second: second))
+            }
+            return TabSnapshot(id: UUID(), customTitle: nil, focusedPaneID: nil, splitRoot: root)
+        }
+        let declaration = LayoutTab(layout: .pane(LayoutPane()))
+        let pinnedAlone = PinnedTabSnapshot(id: UUID(), declaration: declaration, originProjectID: nil, live: tab([session]))
+        let pinnedSplit = PinnedTabSnapshot(id: UUID(), declaration: declaration, originProjectID: nil, live: tab([session, "pinned-own"]))
+        let widget = DesktopWidgetSnapshot(id: UUID(), tab: tab([session]), columns: 2, rows: 2, topLeftX: 0, topLeftY: 0)
+        var loaded = WorkspaceStore.Loaded()
+        loaded.workspaces = WorkspaceSerializer.snapshot([ws.id: ws])
+        loaded.pinned = [pinnedAlone, pinnedSplit]
+        loaded.quickTerminal = tab([session])
+        loaded.desktopWidgets = [widget]
+
+        let kept = WorkspaceSerializer.withoutRepeatedSessions(loaded, validIDs: [ws.id])
+
+        func names(_ t: TabSnapshot?) -> [String?] {
+            guard let t else { return [] }
+            func walk(_ node: SplitNodeSnapshot) -> [String?] {
+                switch node {
+                case let .pane(p): [p.sessionName]
+                case let .split(b): walk(b.first) + walk(b.second)
+                }
+            }
+            return walk(t.splitRoot)
+        }
+        #expect(kept.workspaces.flatMap { $0.tabs.flatMap { names($0) } } == [session])
+        #expect(kept.pinned[0].live == nil)
+        #expect(names(kept.pinned[1].live) == ["pinned-own"])
+        #expect(kept.quickTerminal == nil)
+        #expect(names(kept.desktopWidgets[0].tab) == [nil])
+        guard case let .pane(widgetPane) = kept.desktopWidgets[0].tab.splitRoot else {
+            Issue.record("expected leaf")
+            return
+        }
+        #expect(widgetPane.sessionID == nil)
+        // The pane id is the session id, so the fresh pane gets a new one.
+        guard case let .pane(widgetBefore) = widget.tab.splitRoot else {
+            Issue.record("expected leaf")
+            return
+        }
+        #expect(widgetPane.id != widgetBefore.id)
+    }
+
+    @Test
+    func a_session_of_a_project_that_does_not_restore_stays_on_a_pinned_pane() throws {
+        let ws = Workspace(id: UUID(), projectPath: "/tmp")
+        let session = try #require(ws.tabs[0].focusedPane).sessionName
+        var loaded = WorkspaceStore.Loaded()
+        loaded.workspaces = WorkspaceSerializer.snapshot([ws.id: ws])
+        loaded.pinned = [PinnedTabSnapshot(
+            id: UUID(),
+            declaration: LayoutTab(layout: .pane(LayoutPane())),
+            originProjectID: nil,
+            live: TabSnapshot(
+                id: UUID(), customTitle: nil, focusedPaneID: nil,
+                splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionName: session))
+            )
+        )]
+
+        let kept = WorkspaceSerializer.withoutRepeatedSessions(loaded, validIDs: [])
+
+        let live = try #require(kept.pinned[0].live)
+        guard case let .pane(pane) = live.splitRoot else {
+            Issue.record("expected leaf")
+            return
+        }
+        #expect(pane.sessionName == session)
+    }
 }
 
 @MainActor
@@ -421,10 +503,9 @@ struct WorkspaceSerializerSessionIdentityTests {
         )
         let restoredPane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
 
-        // Session identity survives verbatim; the runtime pane id does not.
-        #expect(restoredPane.sessionID == pane.sessionID)
+        // Session identity survives verbatim, and the pane id is that identity.
+        #expect(restoredPane.id == pane.id)
         #expect(restoredPane.sessionName == pane.sessionName)
-        #expect(restoredPane.id != pane.id)
         // With no live surface the cwd falls back to the project path.
         #expect(restoredPane.projectPath == "/tmp/proj")
     }
@@ -448,6 +529,85 @@ struct WorkspaceSerializerSessionIdentityTests {
         let pane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
         #expect(pane.sessionName.hasPrefix(ZmxSessionName.prefix))
         #expect(pane.projectPath == "/tmp/old")
+    }
+
+    @Test
+    func pane_and_branch_ids_and_focus_survive_a_restore() throws {
+        let projectID = UUID()
+        let left = Pane(projectPath: "/tmp/proj", projectID: projectID)
+        let right = Pane(projectPath: "/tmp/proj", projectID: projectID)
+        let branch = SplitBranch(direction: .horizontal, ratio: 0.3, first: .pane(left), second: .pane(right))
+        let tab = TerminalTab(id: UUID(), splitRoot: .split(branch), focusedPaneID: right.id)
+        let ws = Workspace(id: projectID, tabs: [tab], activeTabID: tab.id)
+
+        let snapshots = WorkspaceSerializer.snapshot([projectID: ws])
+        let restoredWorkspace = try #require(
+            WorkspaceSerializer.restore(from: snapshots, validIDs: [projectID]).first
+        )
+        let restored = try #require(restoredWorkspace.tabs.first)
+        guard case let .split(restoredBranch) = restored.splitRoot else {
+            Issue.record("expected a split root")
+            return
+        }
+        #expect(restoredBranch.id == branch.id)
+        #expect(restored.splitRoot.allPanes().map(\.id) == [left.id, right.id])
+        #expect(restored.focusedPaneID == right.id)
+        // A save after the restore writes the same snapshot.
+        let again = WorkspaceSerializer.snapshot([projectID: restoredWorkspace])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        #expect(try encoder.encode(again) == encoder.encode(snapshots))
+    }
+
+    @Test
+    func a_repeated_session_id_restores_one_pane() throws {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let keep = PaneSnapshot(id: UUID(), projectPath: "/tmp/a", sessionID: sessionID)
+        let second = PaneSnapshot(id: UUID(), projectPath: "/tmp/b", sessionID: sessionID)
+        let snap = WorkspaceSnapshot(
+            projectID: projectID,
+            activeTabID: nil,
+            tabs: [TabSnapshot(
+                id: UUID(),
+                customTitle: nil,
+                focusedPaneID: nil,
+                splitRoot: .split(SplitBranchSnapshot(direction: .vertical, ratio: 0.5, first: .pane(keep), second: .pane(second)))
+            )]
+        )
+        let tab = try #require(
+            WorkspaceSerializer.restore(from: [snap], validIDs: [projectID]).first?.tabs.first
+        )
+        #expect(tab.splitRoot.allPanes().map(\.projectPath) == ["/tmp/a"])
+    }
+
+    @Test
+    func old_file_restores_its_focused_pane_under_the_session_id() throws {
+        // An older build saved a runtime `id` apart from `sessionID`, and the
+        // tab's focus named the runtime id.
+        let projectID = UUID()
+        let runtimeID = UUID()
+        let sessionID = UUID()
+        let snap = WorkspaceSnapshot(
+            projectID: projectID,
+            activeTabID: nil,
+            tabs: [TabSnapshot(
+                id: UUID(),
+                customTitle: nil,
+                focusedPaneID: runtimeID,
+                splitRoot: .split(SplitBranchSnapshot(
+                    direction: .horizontal,
+                    ratio: 0.5,
+                    first: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp/a", sessionID: UUID())),
+                    second: .pane(PaneSnapshot(id: runtimeID, projectPath: "/tmp/b", sessionID: sessionID))
+                ))
+            )]
+        )
+        let tab = try #require(
+            WorkspaceSerializer.restore(from: [snap], validIDs: [projectID]).first?.tabs.first
+        )
+        #expect(tab.focusedPaneID == sessionID)
+        #expect(tab.splitRoot.findPane(id: sessionID)?.projectPath == "/tmp/b")
     }
 
     @Test
@@ -477,7 +637,7 @@ struct WorkspaceSerializerSessionIdentityTests {
         )
         let pane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
         #expect(pane.sessionName == "macterm-oldname-aaaaaaaabbbb")
-        #expect(pane.sessionID == sessionID)
+        #expect(pane.id == sessionID)
         #expect(pane.sessionSlug == "oldname")
         #expect(pane.projectPath == "/tmp/renamed-project/src")
     }

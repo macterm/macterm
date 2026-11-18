@@ -31,12 +31,16 @@ final class MactermConfig {
     /// The last layer of the config of a remote pane whose connection is
     /// lost (`disabledCursorBody`).
     let disabledCursorURL: URL
+    /// The last layer of the config that reads one side of a
+    /// `theme = light:X,dark:Y` pair (`ThemeResolver.sideLayer`).
+    let themeSideURL: URL
 
     private init() {
         let dir = FileStorage.appSupportDirectory()
         defaultsURL = dir.appendingPathComponent("macterm-defaults.conf")
         overridesURL = dir.appendingPathComponent("macterm-overrides.conf")
         disabledCursorURL = dir.appendingPathComponent("macterm-disabled-cursor.conf")
+        themeSideURL = dir.appendingPathComponent("macterm-theme-side.conf")
         regenerate()
         // The user's own file, seeded here so it exists before the first
         // load, and added to the custom config files one time per install.

@@ -161,17 +161,12 @@ enum IntentTargets {
 
     /// A pane by zmx session name — the restart-stable identity (`Pane.id` is
     /// regenerated on every restore, so a shortcut keyed on it would break at
-    /// the first relaunch).
-    ///
-    /// A mirrored session has more than one pane; this resolves to the LEADER,
-    /// the one whose size drives the pty and so the one the user is working
-    /// in — the same rule `ControlHandler.resolvePane` applies to
-    /// `--session`.
+    /// the first relaunch). One pane is one session.
     static func pane(session: String, in ctx: AppCommandContext) throws -> PaneLocation {
-        let candidates = allPanes(in: ctx).filter { $0.pane.sessionName == session }
-        if let leading = candidates.first(where: { ctx.appState.isLeader($0.pane) }) { return leading }
-        guard let first = candidates.first else { throw MactermIntentError.notFound }
-        return first
+        guard let match = allPanes(in: ctx).first(where: { $0.pane.sessionName == session }) else {
+            throw MactermIntentError.notFound
+        }
+        return match
     }
 
     /// Every live pane, for the entity queries and the lookup above.

@@ -194,6 +194,53 @@ struct HostCommandsTests {
     @Test
     func the_tilde_text_is_the_same_in_the_plain_script() throws {
         #expect(try scripts().plain.contains(HostCommands.expandTilde))
+        #expect(try scripts().plain.contains(HostCommands.hexFolder))
+    }
+
+    // MARK: - The folder check of a new project (0358)
+
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_folder_check_finds_each_folder_under_a_login_shell(_ loginShell: String) throws {
+        // With no server, sshd gives the command line to the login shell.
+        let home = try Home()
+        for (sent, _) in Self.folders {
+            let command = try #require(HostCommands.folderCheckCommand(directory: sent))
+            #expect(try Self.run([loginShell, "-c", command], environment: home.environment, in: home.url).status == 0, "\(sent)")
+        }
+        for sent in ["~/none", "/nonexistent;touch pwned", "~$(touch pwned)/x", "~a b/c"] {
+            let command = try #require(HostCommands.folderCheckCommand(directory: sent))
+            #expect(try Self.run([loginShell, "-c", command], environment: home.environment, in: home.url).status == 3, "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func the_folder_check_runs_as_argv_with_a_server() throws {
+        // With a server, `command.run` runs the argv with no login shell.
+        let home = try Home()
+        for (sent, _) in Self.folders {
+            #expect(
+                try Self.run(HostCommands.folderCheckArgv(directory: sent), environment: home.environment, in: home.url).status == 0,
+                "\(sent)"
+            )
+        }
+        for sent in ["~/none", "/nonexistent;touch pwned", "~$(touch pwned)/x"] {
+            #expect(
+                try Self.run(HostCommands.folderCheckArgv(directory: sent), environment: home.environment, in: home.url).status == 3,
+                "\(sent)"
+            )
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func only_the_scripts_own_answers_count() {
+        #expect(RemoteHosts.folderCheck(status: 0) == .exists)
+        #expect(RemoteHosts.folderCheck(status: 3) == .missing)
+        // A shell that failed to parse the script, a lost connection, a signal.
+        for status: Int32? in [1, 2, 127, 255, nil] {
+            #expect(RemoteHosts.folderCheck(status: status) == .unreachable)
+        }
     }
 
     @Test
@@ -294,7 +341,7 @@ struct HostCommandsTests {
         // hosts (exec hijack of our fds, tty-stdin read-block, profile
         // exec-loop spin). PATH comes from the fallback dir list.
         let probe = HostCommands.gitProbeScript
-        for wire in try [create(), plain("~"), probe] {
+        for wire in try [create(), plain("~"), probe, HostCommands.folderCheckScript, HostCommands.hexFolder] {
             #expect(!wire.contains(".profile"))
             #expect(!wire.contains("/etc/profile"))
         }

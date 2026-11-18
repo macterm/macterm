@@ -250,4 +250,240 @@ struct ProjectStoreTests {
         // The corrupt file is preserved, not clobbered with the empty/new state.
         #expect(try Data(contentsOf: fileURL) == garbage)
     }
+
+    // MARK: - Tree (design 013: groups hold projects; a project never has children)
+
+    private func tempURL(_ label: String) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-project-store-\(label)-\(UUID().uuidString).json")
+    }
+
+    @Test
+    func a_file_from_before_groups_decodes_and_saves_without_the_new_keys() throws {
+        let fileURL = tempURL("old")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let old = """
+        [
+          {"createdAt": 0, "id": "11111111-1111-1111-1111-111111111111", "name": "b", "path": "/tmp/b", "sortOrder": 1},
+          {"colorName": "blue", "createdAt": 0, "id": "22222222-2222-2222-2222-222222222222", "name": "a", "path": "/tmp/a", "sortOrder": 0}
+        ]
+        """
+        try Data(old.utf8).write(to: fileURL)
+
+        let store = makeStore(fileURL: fileURL)
+        #expect(store.projects.map(\.name) == ["a", "b"])
+        #expect(store.projects.allSatisfy { $0.kind == .project && $0.parent == nil })
+        #expect(store.children(of: nil).map(\.name) == ["a", "b"])
+
+        store.rename(id: store.projects[0].id, to: "a2")
+        let written = try #require(String(data: Data(contentsOf: fileURL), encoding: .utf8))
+        #expect(!written.contains("\"parent\""))
+        #expect(!written.contains("\"kind\""))
+    }
+
+    @Test
+    func groups_and_parents_round_trip_through_the_file() {
+        let fileURL = tempURL("tree")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let writer = makeStore(fileURL: fileURL)
+        let work = writer.add(.group(name: "work"))
+        let client = writer.add(.group(name: "client", parent: work.id))
+        let api = writer.add(Project(name: "api", path: "/tmp/api", parent: client.id))
+        writer.setColor(id: work.id, to: .green)
+
+        let reader = makeStore(fileURL: fileURL)
+        #expect(reader.children(of: nil).map(\.id) == [work.id])
+        #expect(reader.children(of: nil).first?.kind == .group)
+        #expect(reader.children(of: nil).first?.color == .green)
+        #expect(reader.children(of: work.id).map(\.id) == [client.id])
+        #expect(reader.children(of: client.id).map(\.id) == [api.id])
+        #expect(reader.projects.map(\.id) == [api.id])
+    }
+
+    @Test
+    func projects_lists_only_projects_in_tree_order() {
+        let store = makeStore()
+        let first = store.add(Project(name: "first", path: "/tmp/1"))
+        let group = store.add(.group(name: "group"))
+        let inner = store.add(Project(name: "inner", path: "/tmp/2", parent: group.id))
+        let nested = store.add(.group(name: "nested", parent: group.id))
+        let deep = store.add(Project(name: "deep", path: "/tmp/3", parent: nested.id))
+        let last = store.add(Project(name: "last", path: "/tmp/4"))
+
+        #expect(store.projects.map(\.id) == [first.id, inner.id, deep.id, last.id])
+        #expect(store.children(of: nil).map(\.id) == [first.id, group.id, last.id])
+        #expect(store.children(of: group.id).map(\.id) == [inner.id, nested.id])
+    }
+
+    @Test
+    func a_group_has_no_path() {
+        let store = makeStore()
+        var group = Project.group(name: "group")
+        group.path = "/tmp/group"
+        let stored = store.add(group)
+        #expect(stored.path.isEmpty)
+        store.setPath(id: stored.id, to: "/tmp/other")
+        #expect(store.children(of: nil).first?.path.isEmpty == true)
+        #expect(store.project(matchingPath: "/tmp/group") == nil)
+    }
+
+    @Test
+    func an_unknown_parent_reads_as_the_top_level() throws {
+        let fileURL = tempURL("orphan")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let project = Project(name: "orphan", path: "/tmp/o", parent: UUID())
+        let leaf = Project(name: "leaf", path: "/tmp/l")
+        var underProject = Project(name: "under", path: "/tmp/u", sortOrder: 1)
+        underProject.parent = leaf.id
+        try JSONEncoder().encode([leaf, project, underProject]).write(to: fileURL)
+
+        let store = makeStore(fileURL: fileURL)
+        #expect(!store.loadFailed)
+        #expect(store.projects.map(\.name) == ["leaf", "orphan", "under"])
+        #expect(store.children(of: nil).count == 3)
+        #expect(store.children(of: leaf.id).isEmpty)
+    }
+
+    @Test
+    func a_parent_loop_reads_as_the_top_level() throws {
+        let fileURL = tempURL("loop")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        var a = Project.group(name: "a")
+        var b = Project.group(name: "b")
+        a.parent = b.id
+        b.parent = a.id
+        let leaf = Project(name: "leaf", path: "/tmp/leaf", parent: b.id)
+        try JSONEncoder().encode([a, b, leaf]).write(to: fileURL)
+
+        let store = makeStore(fileURL: fileURL)
+        #expect(store.projects.map(\.id) == [leaf.id])
+        #expect(store.children(of: nil).count == 1)
+    }
+
+    @Test
+    func move_puts_a_row_at_the_end_of_a_group() {
+        let store = makeStore()
+        let group = store.add(.group(name: "group"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        let b = store.add(Project(name: "b", path: "/tmp/b"))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+
+        #expect(store.move(b.id, into: group.id))
+        #expect(store.children(of: group.id).map(\.id) == [a.id, b.id])
+        #expect(store.children(of: nil).map(\.id) == [group.id, c.id])
+        #expect(store.children(of: nil).map(\.sortOrder) == [0, 1])
+
+        #expect(store.move(a.id, into: nil))
+        #expect(store.children(of: nil).map(\.id) == [group.id, c.id, a.id])
+        #expect(store.children(of: group.id).map(\.sortOrder) == [0])
+    }
+
+    @Test
+    func move_refuses_a_project_or_a_loop_as_the_parent() {
+        let store = makeStore()
+        let outer = store.add(.group(name: "outer"))
+        let inner = store.add(.group(name: "inner", parent: outer.id))
+        let project = store.add(Project(name: "p", path: "/tmp/p"))
+        let other = store.add(Project(name: "o", path: "/tmp/o"))
+
+        #expect(!store.move(other.id, into: project.id))
+        #expect(!store.move(outer.id, into: outer.id))
+        #expect(!store.move(outer.id, into: inner.id))
+        #expect(!store.move(other.id, into: UUID()))
+        #expect(!store.move(UUID(), into: nil))
+        #expect(store.children(of: project.id).isEmpty)
+        #expect(store.children(of: nil).map(\.id) == [outer.id, project.id, other.id])
+    }
+
+    @Test
+    func reorder_orders_the_rows_of_one_parent() {
+        let store = makeStore()
+        let group = store.add(.group(name: "group"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c", parent: group.id))
+        let top = store.add(Project(name: "top", path: "/tmp/top"))
+
+        // `top` is not a row of the group: ignored. `b` is not named: last.
+        store.reorder(parent: group.id, ids: [c.id, top.id, a.id, c.id])
+        #expect(store.children(of: group.id).map(\.id) == [c.id, a.id, b.id])
+        #expect(store.children(of: group.id).map(\.sortOrder) == [0, 1, 2])
+        #expect(store.children(of: nil).map(\.id) == [group.id, top.id])
+        #expect(store.projects.map(\.id) == [c.id, a.id, b.id, top.id])
+    }
+
+    @Test
+    func reorder_by_offsets_keeps_projects_in_their_groups() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let group = store.add(.group(name: "group"))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+        // projects: a, b, c. Move c to the front: the group keeps its place
+        // and b stays in it.
+        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(store.children(of: nil).map(\.id) == [c.id, group.id, a.id])
+        #expect(store.children(of: group.id).map(\.id) == [b.id])
+        #expect(store.projects.map(\.id) == [c.id, b.id, a.id])
+    }
+
+    @Test
+    func removing_a_group_moves_its_rows_to_the_end_of_the_top_level() {
+        let store = makeStore()
+        let group = store.add(.group(name: "group"))
+        let top = store.add(Project(name: "top", path: "/tmp/top"))
+        let x = store.add(Project(name: "x", path: "/tmp/x", parent: group.id))
+        let y = store.add(Project(name: "y", path: "/tmp/y", parent: group.id))
+        store.remove(id: group.id)
+        #expect(store.children(of: nil).map(\.id) == [top.id, x.id, y.id])
+        #expect(store.children(of: nil).map(\.sortOrder) == [0, 1, 2])
+        #expect(store.projects.map(\.id) == [top.id, x.id, y.id])
+    }
+
+    @Test
+    func move_into_the_same_parent_keeps_the_place() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let b = store.add(Project(name: "b", path: "/tmp/b"))
+        #expect(store.move(a.id, into: nil))
+        #expect(store.children(of: nil).map(\.id) == [a.id, b.id])
+    }
+
+    @Test
+    func reorder_by_offsets_across_a_group_does_not_move_a_project() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let group = store.add(.group(name: "group"))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+        // projects: a, b, c. Moving c above b changes no parent's order.
+        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 1)
+        #expect(store.projects.map(\.id) == [a.id, b.id, c.id])
+        #expect(store.children(of: group.id).map(\.id) == [b.id])
+    }
+
+    @Test
+    func an_unknown_kind_fails_the_load_and_keeps_the_file() throws {
+        let fileURL = tempURL("kind")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let file = Data("""
+        [{"createdAt": 0, "id": "11111111-1111-1111-1111-111111111111", "kind": "board", "name": "b", "path": "", "sortOrder": 0}]
+        """.utf8)
+        try file.write(to: fileURL)
+
+        let store = makeStore(fileURL: fileURL)
+        #expect(store.loadFailed)
+        store.add(Project(name: "a", path: "/tmp/a"))
+        #expect(try Data(contentsOf: fileURL) == file)
+    }
+
+    @Test
+    func on_save_gets_only_projects() {
+        let store = makeStore()
+        var saved: [Project] = []
+        store.onSave = { saved = $0 }
+        let group = store.add(.group(name: "group"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        #expect(saved.map(\.id) == [a.id])
+    }
 }

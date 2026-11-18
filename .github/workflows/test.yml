@@ -1,7 +1,7 @@
 name: Test
 
 # All testing CI lives here so check names group in the PR UI as
-# "Test / Unit" and "Test / End-to-end" (the workflow name is the prefix;
+# "Test / Unit" and "Test / End-to-End" (the workflow name is the prefix;
 # the job name is the required-status-check context). Style gates stay in
 # checks.yml.
 
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   # The path areas of .github/path-areas that this commit changes.
   changes:
-    name: Detect changes
+    name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       app: ${{ steps.changes.outputs.app }}
@@ -41,7 +41,7 @@ jobs:
   # commit or taken from its prebuilt (server-build.yml). Every job that
   # builds the app downloads it into build/server before setup.
   server:
-    name: Server
+    name: Bundled Server
     needs: changes
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.extensions == 'true'
     permissions:
@@ -178,11 +178,18 @@ jobs:
   # control socket, asserting on libghostty's own state (`pane dump`/`list`).
   # A separate job from `unit` so the slower GUI run never delays the fast
   # unit signal and failures are attributable at a glance.
+  #
+  # Only on a push to main, not on a pull request, like Release Build and
+  # Smoke: a skipped job passes its required check. A failure here therefore
+  # shows after the merge, and release-tip.yml does not ship that commit.
   e2e:
-    name: End-to-end
+    name: End-to-End
     needs: [changes, server]
     # !cancelled(): see the unit job.
-    if: ${{ !cancelled() && needs.changes.outputs.app == 'true' }}
+    if: >-
+      !cancelled()
+      && github.event_name == 'push'
+      && needs.changes.outputs.app == 'true'
     runs-on: xcode-27
     timeout-minutes: 30
     steps:

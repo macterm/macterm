@@ -122,19 +122,25 @@ struct DirectorySourceTests {
     }
 
     @Test
-    func typed_remote_spec_offers_add_as_remote_project() throws {
+    func typed_remote_spec_opens_the_filled_sheet_that_checks_the_folder() throws {
+        // 0358: the sheet checks the folder on the host, so the palette adds
+        // nothing itself.
         let (ctx, state, store) = makeContext()
-        let items = DirectorySource().items(query: "devbox:~/dev/api", context: ctx)
+        let window = WindowState()
+        state.registerWindow(window)
+        let items = DirectorySource().items(query: "me@devbox:~/dev/api", context: ctx)
         let item = try #require(items.first)
         #expect(items.count == 1)
         #expect(item.title == "api")
         #expect(item.subtitle?.contains("Add remote project") == true)
 
         item.action()
-        let added = try #require(store.projects.first)
-        #expect(added.path == "devbox:~/dev/api")
-        #expect(added.isRemote)
-        #expect(state.activeProjectID == added.id)
+        #expect(store.projects.isEmpty)
+        #expect(window.isNewRemoteProjectSheetPresented)
+        let draft = try #require(window.newRemoteProjectDraft)
+        #expect(draft.host == "me@devbox")
+        #expect(draft.directory == "~/dev/api")
+        #expect(ProjectPath.composeRemote(host: draft.host, directory: draft.directory) == "me@devbox:~/dev/api")
     }
 
     @Test
@@ -154,6 +160,8 @@ struct DirectorySourceTests {
     @Test
     func typed_remote_spec_backing_a_project_also_offers_adding_another() throws {
         let (ctx, state, store) = makeContext()
+        let window = WindowState()
+        state.registerWindow(window)
         let existing = Project(name: "api box", path: "devbox:~/dev/api", sortOrder: 0)
         store.add(existing)
 
@@ -162,12 +170,11 @@ struct DirectorySourceTests {
         #expect(addAnother.title == "api")
         addAnother.action()
 
-        #expect(store.projects.count == 2)
-        let created = try #require(store.projects.last)
-        #expect(created.id != existing.id)
-        #expect(created.path == "devbox:~/dev/api")
-        #expect(created.isRemote)
-        #expect(state.activeProjectID == created.id)
+        // The sheet adds the second project after its check.
+        #expect(store.projects.map(\.id) == [existing.id])
+        #expect(window.newRemoteProjectDraft?.host == "devbox")
+        #expect(window.newRemoteProjectDraft?.directory == "~/dev/api")
+        #expect(window.isNewRemoteProjectSheetPresented)
     }
 
     @Test

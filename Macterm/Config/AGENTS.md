@@ -8,6 +8,8 @@ In automatic mode, Macterm delegates the user layer to `ghostty_config_load_defa
 
 **A remote pane whose connection is lost takes a second config** (`GhosttyApp.config(disabledCursor:)`): the same layers, then `macterm-disabled-cursor.conf` (`MactermConfig.disabledCursorBody`: a faint cursor that does not blink, with the smooth cursor and its trail off). `loadConfig` builds both from the same files at the same moment, and a reload or a soft reload gives each surface its own (`GhosttyTerminalNSView.isCursorDisabled`). Only the app's config reports diagnostics.
 
+**The other side of a `theme = light:X,dark:Y` pair is read from a third config** (`GhosttyApp.splitThemeColors`, for the App Icon preview): the same layers, then `macterm-theme-side.conf` (`ThemeResolver.sideLayer`, a plain `theme = <side>`). libghostty merges the user's color keys over that side as it does for the side in use. A diagnostic that the same config with no side layer does not have gives no colors (`GhosttyApp.readThemeSideColors`).
+
 **`~/.config/macterm/config.ghostty` is a custom config file of the user that Macterm seeds and lists for them** (`MactermConfigFile`). Ghostty.app never reads it, so a key in it applies to Macterm alone.
 
 - Macterm seeds it at the first launch that finds it missing (`MactermConfig.init`), as a template: every line of `MactermConfig.defaults` commented out, each under its note. A commented line sets nothing. `MactermConfigFileTests` pins that no line of the template is bare. An uncommented default would override the Ghostty config in silence.

@@ -41,7 +41,7 @@ the local network with no prompt (macterm#419).
   `ZMX_DAEMON_*` variables.
 - No process that keeps running calls `unsetenv`: zig 0.17's `std.Io` caches
   the environment block and panics on a shortened one.
-- Code: `src/server.zig` (`spawnSession`), `src/main.zig`, `src/session.zig`.
+- Code: `src/registry.zig` (`spawnSession`), `src/main.zig`, `src/session.zig`.
 - Test: `test/daemon_responsibility.bats` (Darwin only).
 
 ### 0005: attach creates a session quietly

@@ -410,29 +410,6 @@ struct WindowStateTests {
     }
 
     @Test
-    func a_tab_holding_one_session_twice_has_a_client_for_each_pane_and_window() throws {
-        let state = makeAppState()
-        let (project, ws) = try seedProject(state, tabs: 1)
-        let tab = try #require(ws.activeTab)
-        let a = WindowState(activeProjectID: project.id)
-        let b = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        state.registerWindow(b)
-        state.noteKeyWindow(a)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        _ = addPane(sharing: source, projectID: project.id, in: state)
-
-        let panes = tab.splitRoot.allPanes()
-        #expect(panes.count == 2)
-        for pane in panes {
-            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
-            _ = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
-        }
-        #expect(Set(panes.map(\.sessionName)) == [source.sessionName])
-        #expect(state.clients(of: source.sessionName).count == 4)
-    }
-
-    @Test
     func a_surface_is_retired_when_its_window_moves_on() throws {
         let state = makeAppState()
         let (project, ws) = try seedProject(state, tabs: 2)
@@ -1013,31 +990,6 @@ struct WindowStateTests {
     }
 
     @Test
-    func becoming_key_leaves_a_same_tab_mirror_pairs_leader_alone() throws {
-        // Two panes on one session in ONE tab (built by hand; issue 0282
-        // removes the case). The whole-tab claim must not hand the pty to
-        // whichever pane comes last in tree order.
-        let state = makeAppState()
-        let session = FakeSessionLeads(state)
-        let (project, ws) = try seedProject(state, tabs: 1)
-        let tab = try #require(ws.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
-        let mirrorID = addPane(sharing: source, projectID: project.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        let a = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        session.attach([
-            SurfaceRegistry.shared.surface(for: source, in: .window(a.id)),
-            SurfaceRegistry.shared.surface(for: mirrored, in: .window(a.id)),
-        ])
-
-        state.noteKeyWindow(a)
-
-        #expect(session.claimed.isEmpty, "the source already leads; nothing moves")
-        #expect(state.isLeader(source))
-    }
-
-    @Test
     func the_first_remaining_window_becomes_key_when_the_key_window_closes() {
         // AppKit reports the new key window only while the app is active; a
         // headless harness never sees it, and every window read as unfocused.
@@ -1252,28 +1204,16 @@ struct WindowStateTests {
         #expect(panes.filter { state.isLedFromAnotherWindow($0, window: a.id) }.map(\.id) == [panes[0].id])
     }
 
-    /// A client outside Macterm, or a mirror in the same window, is not
-    /// another window: the pane only blurs.
+    /// A client outside Macterm is not another window: the pane only blurs.
     @Test
     func a_lead_outside_the_other_windows_is_not_led_from_another_window() throws {
         let state = makeAppState()
-        let session = FakeSessionLeads(state)
         let (project, ws) = try seedProject(state, tabs: 1)
-        let tab = try #require(ws.activeTab)
-        let source = try #require(tab.splitRoot.allPanes().first)
+        let pane = try #require(ws.activeTab?.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
-        let mirrorID = addPane(sharing: source, projectID: project.id, in: state)
-        let mirrored = try #require(tab.splitRoot.findPane(id: mirrorID))
-        session.attach([
-            SurfaceRegistry.shared.surface(for: source, in: .window(a.id)),
-            SurfaceRegistry.shared.surface(for: mirrored, in: .window(a.id)),
-        ])
-        #expect(!state.isLedFromAnotherWindow(mirrored, window: a.id))
-
-        let other = try #require(ws.activeTab?.splitRoot.allPanes().first)
-        SurfaceRegistry.shared.surface(for: other, in: .window(a.id)).receiveLead(false)
-        #expect(!state.isLedFromAnotherWindow(other, window: a.id))
+        SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)).receiveLead(false)
+        #expect(!state.isLedFromAnotherWindow(pane, window: a.id))
     }
 
     /// A pane that comes up in a window that is NOT key claims nothing on
