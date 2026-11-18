@@ -472,7 +472,7 @@ pub fn fcntl(fd: fd_t, cmd: i32, arg: usize) FcntlError!usize {
     }
 }
 
-const WriteError = error{
+pub const WriteError = error{
     DiskQuota,
     FileTooBig,
     InputOutput,
@@ -564,6 +564,43 @@ pub fn write(fd: fd_t, bytes: []const u8) WriteError!usize {
             .MSGSIZE => return error.MessageTooBig,
             else => |err| return unexpectedErrno(err),
         }
+    }
+}
+
+pub const iovec_const = std.posix.iovec_const;
+
+/// `write` for a list of buffers, as one call.
+pub fn writev(fd: fd_t, iov: []const iovec_const) WriteError!usize {
+    if (iov.len == 0) return 0;
+    while (true) {
+        const rc = system.writev(fd, iov.ptr, @intCast(iov.len));
+        switch (errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .AGAIN => return error.WouldBlock,
+            .BADF => return error.NotOpenForWriting,
+            .IO => return error.InputOutput,
+            .PIPE => return error.BrokenPipe,
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .INVAL => return error.InvalidArgument,
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+}
+
+/// Writes all of `bytes`, and waits while `fd` is full.
+pub fn writeAll(fd: fd_t, bytes: []const u8) (WriteError || PollError)!void {
+    var rest = bytes;
+    while (rest.len > 0) {
+        const n = write(fd, rest) catch |err| switch (err) {
+            error.WouldBlock => {
+                var fds = [_]pollfd{.{ .fd = fd, .events = POLL.OUT, .revents = 0 }};
+                _ = try poll(&fds, -1);
+                continue;
+            },
+            else => return err,
+        };
+        rest = rest[n..];
     }
 }
 

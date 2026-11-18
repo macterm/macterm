@@ -347,9 +347,9 @@ const Client = struct {
         defer {
             if (is_tty) _ = cross.tcsetattr(stdin, cross.TCSAFLUSH, &orig);
             // Reset the terminal and its colors, as v1's attach does.
-            writeAll(stdout, "\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\") catch {};
+            lib_posix.writeAll(stdout, "\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\") catch {};
         }
-        writeAll(stdout, reset_screen) catch {};
+        lib_posix.writeAll(stdout, reset_screen) catch {};
 
         try c.sendAttach(stdout);
 
@@ -407,7 +407,7 @@ const Client = struct {
                     if (!c.in_snapshot) if (c.offset) |o| {
                         c.offset = o + f.body.len;
                     };
-                    writeAll(stdout, f.body) catch return .detached;
+                    lib_posix.writeAll(stdout, f.body) catch return .detached;
                 },
                 .msg => {
                     var arena_state: std.heap.ArenaAllocator = .init(c.gpa);
@@ -423,7 +423,7 @@ const Client = struct {
                         var buf: [apc_max]u8 = undefined;
                         // In the output stream, so it lands in front of the
                         // output that the session sent after it.
-                        writeAll(stdout, foregroundApc(&buf, fg)) catch return .detached;
+                        lib_posix.writeAll(stdout, foregroundApc(&buf, fg)) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.SnapshotStart.name)) {
                         const start = m.decodePane(m.SnapshotStart, arena, msg) catch return error.Protocol;
                         c.in_snapshot = true;
@@ -432,15 +432,15 @@ const Client = struct {
                             // The session could not resume: draw the pane
                             // again, as the first attach does.
                             c.reconnected = false;
-                            writeAll(stdout, reset_screen) catch return .detached;
+                            lib_posix.writeAll(stdout, reset_screen) catch return .detached;
                         }
                         // Around the snapshot, so the app can tell the
                         // replay from new output: a title in the replay is
                         // old, and nothing says who set it.
-                        if (c.foreground_events) writeAll(stdout, snapshot_start_apc) catch return .detached;
+                        if (c.foreground_events) lib_posix.writeAll(stdout, snapshot_start_apc) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.SnapshotEnd.name)) {
                         c.in_snapshot = false;
-                        if (c.foreground_events) writeAll(stdout, snapshot_end_apc) catch return .detached;
+                        if (c.foreground_events) lib_posix.writeAll(stdout, snapshot_end_apc) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.Resumed.name)) {
                         // The bytes after our offset follow, and nothing is
                         // drawn again.
@@ -499,7 +499,7 @@ const Client = struct {
             c.offset = null;
             // The screen shows another session's output: clear it now, as
             // a session with no output sends no snapshot to do it.
-            writeAll(stdout, reset_screen) catch return false;
+            lib_posix.writeAll(stdout, reset_screen) catch return false;
         }
         c.reconnected = true;
         try c.sendAttach(stdout);
@@ -548,8 +548,8 @@ const Client = struct {
     fn sendFrame(c: *Client, channel: u32, kind: frame.Kind, body: []const u8) (Error || error{OutOfMemory})!void {
         var header: [frame.header_len]u8 = undefined;
         frame.writeHeader(&header, channel, kind, body.len) catch return error.Protocol;
-        writeAll(c.fd, &header) catch return error.Protocol;
-        writeAll(c.fd, body) catch return error.Protocol;
+        lib_posix.writeAll(c.fd, &header) catch return error.Protocol;
+        lib_posix.writeAll(c.fd, body) catch return error.Protocol;
     }
 
     fn sendControl(c: *Client, value: anytype) (Error || error{OutOfMemory})!void {
@@ -596,22 +596,6 @@ fn attachMessage(size: Resize, foreground_events: bool) m.Attach {
 
 fn resizeOf(size: Resize) m.Resize {
     return .{ .cols = size.cols, .rows = size.rows, .xpixel = size.xpixel, .ypixel = size.ypixel };
-}
-
-/// Writes all of `bytes`, and waits when the fd is full.
-fn writeAll(fd: i32, bytes: []const u8) !void {
-    var rest = bytes;
-    while (rest.len > 0) {
-        const n = lib_posix.write(fd, rest) catch |err| switch (err) {
-            error.WouldBlock => {
-                var fds = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.OUT, .revents = 0 }};
-                _ = try lib_posix.poll(&fds, -1);
-                continue;
-            },
-            else => return err,
-        };
-        rest = rest[n..];
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

@@ -11,6 +11,10 @@ comptime {
     _ = @import("runtime.zig");
     _ = @import("session.zig");
     _ = @import("server.zig");
+    _ = @import("registry.zig");
+    _ = @import("peers.zig");
+    _ = @import("runs.zig");
+    _ = @import("conn.zig");
     _ = @import("attach.zig");
     _ = @import("events.zig");
     _ = @import("relay.zig");
