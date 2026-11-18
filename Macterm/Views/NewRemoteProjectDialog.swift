@@ -180,9 +180,15 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         return ProjectPath.remoteDisplayName(host: host, directory: directory)
     }
 
-    /// The line under the fields. Read by tests.
-    var statusText: String {
-        statusLine.stringValue
+    /// The line under the fields, as written. Read by tests.
+    private(set) var statusText = ""
+
+    /// Sets the line under the fields. A hyphen shows as a non-breaking
+    /// hyphen (U+2011, the same glyph), so a host such as
+    /// `no-such-host.invalid` or a folder stays on one line (0399).
+    private func setStatus(_ text: String) {
+        statusText = text
+        statusLine.stringValue = text.replacingOccurrences(of: "-", with: "\u{2011}")
     }
 
     var isChecking: Bool {
@@ -311,7 +317,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         nameField.placeholderString = automaticName
         if isChecking {
             let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
-            statusLine.stringValue = String(localized: "Connecting to \(host)…")
+            setStatus(String(localized: "Connecting to \(host)…"))
             statusLine.textColor = .secondaryLabelColor
             spinner.isHidden = false
             spinner.startAnimation(nil)
@@ -326,7 +332,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         afterSpinner?.isActive = false
         atEdge?.isActive = true
         let message = reservedNameMessage ?? failure
-        statusLine.stringValue = message ?? ""
+        setStatus(message ?? "")
         // The line shows two lines at most; the whole text is in the tooltip.
         statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
@@ -391,6 +397,9 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         statusLine.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLine.maximumNumberOfLines = 2
+        // Fill each line: the standard strategy moves words down so that
+        // the last line is not one word, and the line then looks narrow (0399).
+        statusLine.lineBreakStrategy = []
         statusLine.translatesAutoresizingMaskIntoConstraints = false
 
         alert.layout()

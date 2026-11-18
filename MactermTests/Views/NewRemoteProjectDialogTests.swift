@@ -140,6 +140,24 @@ struct NewRemoteProjectDialogTests {
     }
 
     @Test
+    func the_line_fills_the_width_and_keeps_a_hyphenated_host_whole() async throws {
+        let check = Check()
+        let created = Created()
+        let draft = try #require(NewRemoteProjectDraft(path: "no-such-host.invalid:~/dev/api"))
+        let dialog = dialog(draft, check: check, created: created)
+        dialog.present(on: nil, startCheck: true)
+        await settle { check.isWaiting }
+        check.answer("Macterm cannot connect to no-such-host.invalid.")
+        await settle { !dialog.isChecking }
+        #expect(dialog.statusText == "Macterm cannot connect to no-such-host.invalid.")
+        // The line shows non-breaking hyphens, and no strategy moves words down.
+        #expect(dialog.statusLine.stringValue == "Macterm cannot connect to no\u{2011}such\u{2011}host.invalid.")
+        #expect(dialog.statusLine.lineBreakStrategy.isEmpty)
+        #expect(dialog.statusLine.preferredMaxLayoutWidth == dialog.alert.accessoryView?.frame.width)
+        dialog.close()
+    }
+
+    @Test
     func the_install_question_is_the_next_step_of_the_same_dialog() async throws {
         let check = Check()
         let created = Created()
