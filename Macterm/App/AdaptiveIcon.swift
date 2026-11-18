@@ -161,11 +161,37 @@ enum AdaptiveIcon {
         }
     }
 
+    /// Why the Dock shows the bundled icon and not the adaptive icon.
+    enum StandIn: Equatable {
+        /// `Preferences.adaptiveIcon` is off.
+        case disabled
+        /// This run cannot render: before macOS 26, a hermetic run, a render
+        /// that failed, a theme color or a catalog that cannot be read.
+        case unavailable
+        /// The system's icon style is Clear, Tinted, or a value we do not know.
+        case iconStyle
+        /// The theme has no gray apart from its background (`paint` is nil).
+        case noLidGray
+
+        /// The last line of the App Icon section in Settings, nil where none is
+        /// needed: the toggle says that the setting is off, and its
+        /// description says that it has no effect in a Clear or Tinted icon
+        /// style. A run that cannot render shows the bundled icon with no
+        /// error text.
+        var previewLine: String? {
+            switch self {
+            case .disabled,
+                 .unavailable,
+                 .iconStyle: nil
+            case .noLidGray: String(localized: "Your theme has no gray color to paint the icon with.")
+            }
+        }
+    }
+
     /// What the Dock shows.
     enum Decision: Equatable {
-        /// The bundled icon or the user's `macos-icon = custom` image —
-        /// whatever the ghostty config asks for (`GhosttyAppIcon`).
-        case configured(GhosttyAppIcon)
+        /// The bundled icon, and why.
+        case bundled(StandIn)
         /// The bundled icon, repainted in the theme for this stack.
         case adaptive(AdaptiveIconRequest.Appearance)
     }
@@ -173,23 +199,39 @@ enum AdaptiveIcon {
     /// - Parameters:
     ///   - enabled: `Preferences.adaptiveIcon`.
     ///   - supported: whether this run can render at all (`isSupported`).
-    ///   - configured: what the ghostty config asks for. A custom image wins:
-    ///     the user named that file on purpose.
-    ///   - systemScheme: read only after the setting, the support and the
-    ///     configured icon all allow the adaptive icon. The caller reads it
+    ///   - systemScheme: read only after the setting and the support allow
+    ///     the adaptive icon. The caller reads it
     ///     from `GhosttyApp.shared`, and a run with the icon off (a unit test
     ///     that flips the setting) must not start libghostty for it.
     static func decide(
         enabled: Bool,
         supported: Bool,
-        configured: GhosttyAppIcon,
         iconStyle: String?,
         systemScheme: () -> ThemeResolver.Scheme
     ) -> Decision {
-        guard enabled, supported, configured == .bundled,
-              let appearance = appearance(iconStyle: iconStyle, systemScheme: systemScheme())
-        else { return .configured(configured) }
+        guard enabled else { return .bundled(.disabled) }
+        guard supported else { return .bundled(.unavailable) }
+        guard let appearance = appearance(iconStyle: iconStyle, systemScheme: systemScheme()) else {
+            return .bundled(.iconStyle)
+        }
         return .adaptive(appearance)
+    }
+
+    /// The stacks that the preview in Settings shows for an adaptive icon,
+    /// light first: the one the Dock shows, and the other one where the
+    /// system draws both. That is an icon style that follows the system
+    /// appearance, with a theme that has the same colors on both sides. The
+    /// app reads the colors of the side in use only, so the other side of a
+    /// `light:X,dark:Y` theme is not shown: a guess at it could be wrong.
+    static func previewAppearances(
+        shown: AdaptiveIconRequest.Appearance,
+        iconStyle: String?,
+        themeHasTwoSides: Bool
+    ) -> [AdaptiveIconRequest.Appearance] {
+        let followsSystem = appearance(iconStyle: iconStyle, systemScheme: .light) == .light
+            && appearance(iconStyle: iconStyle, systemScheme: .dark) == .dark
+        guard followsSystem, !themeHasTwoSides else { return [shown] }
+        return [.light, .dark]
     }
 
     /// The icon is Liquid Glass, which only macOS 26 and later draw. Hermetic

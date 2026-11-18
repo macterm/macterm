@@ -201,8 +201,12 @@ struct MainWindow: View {
                 detailWidth = width
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    UpdateAvailableToolbarButton()
+                // Only while an update downloads or waits: a structural branch,
+                // so that an idle toolbar has no empty item.
+                if Updater.shared.updateAvailable {
+                    ToolbarItem(placement: .primaryAction) {
+                        UpdateToolbarButton()
+                    }
                 }
                 // Only while Project Insights is on (Settings → Intelligence)
                 // and the button is not hidden (Settings → Appearance → Toolbar).
@@ -1059,7 +1063,7 @@ struct WorkspaceView: View {
     /// Whether this window should show the notice instead of the tab: it is
     /// not the key window, and another window leads a pane of the tab. That
     /// pane's pty has the other window's size, so its content would not fit
-    /// here. A pane that a client outside Macterm leads only dims. The KEY
+    /// here. A pane that a client outside Macterm leads only blurs. The KEY
     /// window always renders its panes even while they are non-leaders,
     /// because its claim can only land once the surfaces exist and have a
     /// size; hiding them would leave the claim refused and the notice up

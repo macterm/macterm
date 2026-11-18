@@ -100,11 +100,10 @@ final class RemotePaneDriver: PaneInputRoute {
         case .close:
             state = .closed
             surface.paneExited(code: nil, signal: nil)
-        case let .plain(arguments, message):
+        case let .plain(arguments):
             earlyInput = Data()
             undelivered = Data()
             surface.paneFeed(PaneSession.resetScreen)
-            if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
             runPlain(arguments)
         case let .attach(link, create):
             attach(link: link, create: create, generation: mine)

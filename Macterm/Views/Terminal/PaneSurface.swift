@@ -56,8 +56,8 @@ final class PaneSurface: Identifiable {
     private(set) var lead: Bool?
 
     /// Whether this surface's client drives its session's pty size. Only an
-    /// explicit false dims: a client that the session has not answered yet
-    /// counts as the leader, so a new pane never dims before its attach.
+    /// explicit false blurs: a client that the session has not answered yet
+    /// counts as the leader, so a new pane never blurs before its attach.
     var isLeader: Bool { lead != false }
 
     /// A claim went out and the session has not answered since. Stops the

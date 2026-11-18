@@ -47,4 +47,52 @@ struct LinkTransportTests {
         _ = try await control.call(MactermProtocol.ServerExit.self, .init())
         link.close()
     }
+
+    @Test
+    func a_link_that_hears_nothing_from_the_host_becomes_quiet() async throws {
+        let bundled = try #require(LocalServer.bundled, "zmx/zmx missing from the built bundle. Run `mise run setup`.")
+        let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appending(path: "mt-\(UInt32.random(in: 0 ... .max))", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var server = bundled
+        server.directory = root.appending(path: "run", directoryHint: .isDirectory)
+
+        let control = try await server.connect()
+        defer { control.close() }
+        var key = Data(count: 32)
+        _ = key.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 32, $0.baseAddress!) }
+        let keyID = UInt32.random(in: 1 ... .max)
+        let port = try await control.call(
+            MactermProtocol.LinkOpen.self,
+            .init(secret: ProtocolSecret(key), keyId: keyID)
+        ).port
+
+        let changes = LockedBox<Int>(0)
+        let transport = try LinkTransport(host: "127.0.0.1", port: port, key: key, keyID: keyID)
+        try transport.start(onDead: {}, onQuiet: { changes.mutate { $0 += 1 } })
+        defer { transport.stop() }
+        let link = try await Task.detached {
+            try ServerConnection.handshake(fd: transport.connectionFD, peerPID: nil, timeout: 5)
+        }.value
+        defer { link.close() }
+        _ = try await link.call(MactermProtocol.Ping.self, .init())
+        #expect(changes.value == 0)
+        #expect(!transport.isQuiet)
+
+        // The host stops: no packet comes back, as when the network drops.
+        _ = try await control.call(MactermProtocol.ServerExit.self, .init())
+        let deadline = Date().addingTimeInterval(Double(LinkTransport.quietAfter) / 1000 + 10)
+        while changes.value == 0, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(changes.value == 1)
+        #expect(transport.isQuiet)
+    }
+
+    @Test
+    func a_link_is_quiet_after_three_missed_keepalives() {
+        #expect(!LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter + 1))
+        #expect(LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter))
+    }
 }

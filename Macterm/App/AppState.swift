@@ -926,7 +926,9 @@ final class AppState {
     /// The transient confirmation showing in `ToastOverlay`, if any. Only for
     /// outcomes that leave no visible trace — a success, or a keybind that
     /// had nothing to act on (`AppCommand.unavailableNotice`) — failures
-    /// still raise a dialog, which a toast must never replace.
+    /// still raise a dialog, which a toast must never replace. The one
+    /// exception is the updater: a failed update check or download is a toast
+    /// (`UpdateToast`), because it asks for no decision.
     private(set) var activeToast: Toast?
 
     /// Settings → Projects → Install Server on Host…, after the user declined
@@ -1996,7 +1998,7 @@ final class AppState {
     }
 
     /// The panes of `tab` whose surface in window `windowID` is not driving
-    /// its session's size, by the session's `lead`: the ones the UI dims in
+    /// its session's size, by the session's `lead`: the ones the UI blurs in
     /// that window. Without a window it reads each pane's first surface.
     func nonLeaderPaneIDs(in tab: TerminalTab, window windowID: UUID? = nil) -> Set<UUID> {
         let host = Self.host(windowID)

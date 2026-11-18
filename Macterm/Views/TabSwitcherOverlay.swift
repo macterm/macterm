@@ -309,7 +309,7 @@ private struct TabSwitcherCard: View {
         // there is no surplus to center and the panel's padding reads the same
         // on every side at every window shape.
         VStack(alignment: .leading, spacing: 6) {
-            PaneMosaic(node: tab.splitRoot, focusedPaneID: tab.focusedPaneID)
+            PaneMosaic(node: tab.splitRoot)
                 // The mosaic gets the pane region's real proportions, so every
                 // leaf inside it gets its own pane's proportions and the
                 // captured frames drop in uncropped.
@@ -380,7 +380,6 @@ private struct TabSwitcherCard: View {
 /// preview with the pane's name over it.
 private struct PaneMosaic: View {
     let node: SplitNode
-    let focusedPaneID: UUID?
 
     /// Gap between panes — the miniature of the split divider. Enough to read
     /// as a division at this scale without eating the previews.
@@ -389,7 +388,7 @@ private struct PaneMosaic: View {
     var body: some View {
         switch node {
         case let .pane(pane):
-            PaneMosaicLeaf(pane: pane, isFocused: pane.id == focusedPaneID)
+            PaneMosaicLeaf(pane: pane)
         case let .split(branch):
             GeometryReader { geo in
                 let ratio = min(max(branch.ratio, 0.05), 0.95)
@@ -397,16 +396,16 @@ private struct PaneMosaic: View {
                 case .horizontal:
                     let first = max(0, (geo.size.width - Self.gap) * ratio)
                     HStack(spacing: Self.gap) {
-                        PaneMosaic(node: branch.first, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.first)
                             .frame(width: first)
-                        PaneMosaic(node: branch.second, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.second)
                     }
                 case .vertical:
                     let first = max(0, (geo.size.height - Self.gap) * ratio)
                     VStack(spacing: Self.gap) {
-                        PaneMosaic(node: branch.first, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.first)
                             .frame(height: first)
-                        PaneMosaic(node: branch.second, focusedPaneID: focusedPaneID)
+                        PaneMosaic(node: branch.second)
                     }
                 }
             }
@@ -416,7 +415,6 @@ private struct PaneMosaic: View {
 
 private struct PaneMosaicLeaf: View {
     let pane: Pane
-    let isFocused: Bool
 
     @Environment(AppState.self)
     private var appState
@@ -443,8 +441,5 @@ private struct PaneMosaicLeaf: View {
                 }
             }
             .clipped()
-            // The focused pane is marked the way the split view marks it: the
-            // others are dimmed rather than this one being highlighted.
-            .overlay(isFocused ? Color.clear : Color.black.opacity(0.22))
     }
 }

@@ -23,8 +23,9 @@ enum RemotePaneAnswer {
     /// session does not run: make it in this folder first.
     case attach(link: RemoteServers.Link, create: String?)
     /// No server on the host: a plain ssh shell over the master (`ssh`
-    /// arguments), after `message`.
-    case plain(arguments: [String], message: String?)
+    /// arguments). The pane shows no line about it: the sidebar's project row
+    /// does (`plainDestinations`).
+    case plain(arguments: [String])
     /// The pane ends: no pane has the session any more, or the session is
     /// gone from the host.
     case close
@@ -144,7 +145,31 @@ final class RemoteHosts {
     /// the folder come from the user's own panes.
     @ObservationIgnored var panes: (@MainActor (String) -> [Pane])?
 
-    @ObservationIgnored private var hosts: [String: Host] = [:]
+    @ObservationIgnored private var hosts: [String: Host] = [:] {
+        didSet {
+            var plain = plainDestinations
+            for (destination, host) in hosts {
+                switch host {
+                case .plain: plain.insert(destination)
+                case .ready: plain.remove(destination)
+                case .preparing: break
+                }
+            }
+            if plain != plainDestinations { plainDestinations = plain }
+        }
+    }
+
+    /// The destinations whose panes are plain ssh shells: the user declined
+    /// the server, or the host has no build. Derived from `hosts`. A host
+    /// stays in it while its connection is down, until a link to its server
+    /// is ready. The sidebar's project row shows it, so the pane prints no
+    /// line.
+    private(set) var plainDestinations: Set<String> = []
+    /// The destinations whose roaming link hears nothing from the host now
+    /// (`LinkTransport.isQuiet`). The link stays and its panes keep their
+    /// channels, but the host cannot be reached. The sidebar's project row
+    /// shows the host as lost.
+    private(set) var quietDestinations: Set<String> = []
     /// The roaming link of a host (design/009), and the ssh link that it
     /// replaced as the host's link. Panes that attached over the ssh link
     /// stay on it until it ends.
@@ -295,11 +320,12 @@ final class RemoteHosts {
 
     /// Install the server on a host where the user declined it, after the
     /// user's click. New panes then get sessions; a plain shell stays plain.
+    /// A second decline keeps the host plain, so its sidebar mark stays.
     func installServer(_ destination: String) async throws {
         undecline(destination)
         if case let .preparing(_, task, _) = hosts[destination] { await task.value }
         drop(destination)
-        _ = try await connections.connect(destination)
+        let route = try await connections.connect(destination)
         do {
             let link = try await servers.connect(destination)
             if case let .ready(old) = hosts[destination] { old.close() }
@@ -308,6 +334,7 @@ final class RemoteHosts {
             adoptRoaming(destination, over: link)
         } catch RemoteServers.Failure.declined {
             decline(destination)
+            hosts[destination] = .plain(route)
             throw RemoteServers.Failure.declined
         }
     }
@@ -349,10 +376,7 @@ final class RemoteHosts {
             guard let command = configuration.scripts?.plainCommand(directory: target.directory) else {
                 return .wait(message: RemotePaneText.noPlainShell)
             }
-            return .plain(
-                arguments: connections.ttyArguments(route, destination, command),
-                message: RemotePaneText.plainShell(host: target.host)
-            )
+            return .plain(arguments: connections.ttyArguments(route, destination, command))
         case let .ready(link):
             return await decide(session, panes: panes, target: target, link: link, prompts: prompts)
         }
@@ -551,15 +575,21 @@ final class RemoteHosts {
         let enabled = configuration.roamingEnabled()
         let generation = roamingGeneration[destination, default: 0] + 1
         roamingGeneration[destination] = generation
+        setQuiet(destination, false)
         Task { [weak self] in
             let opened = await RoamingLink.open(
                 destination: destination,
                 over: ssh,
                 connections: connections,
                 enabled: enabled,
-                onDead: { [weak self] in
-                    Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
-                }
+                events: .init(
+                    dead: { [weak self] in
+                        Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
+                    },
+                    quiet: { [weak self] in
+                        Task { @MainActor in self?.roamingQuiet(destination, generation: generation) }
+                    }
+                )
             )
             guard let self, let opened else { return }
             // The host may have changed while the link opened.
@@ -578,6 +608,25 @@ final class RemoteHosts {
             transports[destination]?.stop()
             transports[destination] = opened.transport
             hosts[destination] = .ready(opened.link)
+            setQuiet(destination, opened.transport.isQuiet)
+        }
+    }
+
+    /// The roaming link of this generation stopped or started to hear the
+    /// host. The state comes from the transport, not from the event, so
+    /// events in a different order give the same result.
+    private func roamingQuiet(_ destination: String, generation: Int) {
+        guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
+        let quiet = transport.isQuiet
+        logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
+        setQuiet(destination, quiet)
+    }
+
+    private func setQuiet(_ destination: String, _ quiet: Bool) {
+        if quiet {
+            if !quietDestinations.contains(destination) { quietDestinations.insert(destination) }
+        } else if quietDestinations.contains(destination) {
+            quietDestinations.remove(destination)
         }
     }
 
@@ -598,6 +647,7 @@ final class RemoteHosts {
 
     private func endRoaming(_ destination: String) {
         roamingGeneration[destination, default: 0] += 1
+        setQuiet(destination, false)
         transports.removeValue(forKey: destination)?.stop()
         standby.removeValue(forKey: destination)?.close()
     }
@@ -752,8 +802,4 @@ enum RemotePaneText {
     /// The bundle has no host scripts, or the folder is too long for one
     /// argument.
     static let noPlainShell = "Macterm cannot start a shell in this folder."
-
-    static func plainShell(host: String) -> String {
-        "Macterm has no server on \(host). This shell stops when the connection stops."
-    }
 }

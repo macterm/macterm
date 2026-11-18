@@ -24,6 +24,14 @@ final class LinkTransport: @unchecked Sendable {
 
     /// No authenticated packet for this long (awake) ends the link.
     static let deadAfter: Int64 = 5 * 60 * 1000
+    /// No authenticated packet for this long (awake) makes the link quiet:
+    /// the host misses three keepalives (`LinkStream.keepalive`). The link
+    /// stays, but the host cannot be reached now.
+    static let quietAfter: Int64 = 10 * 1000
+
+    static func isQuiet(now: Int64, lastRx: Int64) -> Bool {
+        now - lastRx >= quietAfter
+    }
 
     private let pump: Int32
     private let host: String
@@ -38,6 +46,18 @@ final class LinkTransport: @unchecked Sendable {
     private var rebindRequested = false
     private var started = false
     private var onDead: (@Sendable () -> Void)?
+    /// Runs on the thread when the link becomes quiet, and when a packet
+    /// comes again. It says only that the state changed: read `isQuiet`.
+    private var onQuiet: (@Sendable () -> Void)?
+    /// Under `lock`.
+    private var quiet = false
+
+    /// The link hears nothing from the host now (`quietAfter`).
+    var isQuiet: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return quiet
+    }
 
     private var udp: Int32 = -1
     private var remote = sockaddr_storage()
@@ -83,8 +103,9 @@ final class LinkTransport: @unchecked Sendable {
     }
 
     /// Starts the thread. `onDead` runs once, on the thread, when the link
-    /// ends by itself.
-    func start(onDead: @escaping @Sendable () -> Void) throws {
+    /// ends by itself. `onQuiet` runs on the thread when the quiet state of
+    /// the link changes.
+    func start(onDead: @escaping @Sendable () -> Void, onQuiet: @escaping @Sendable () -> Void = {}) throws {
         lock.lock()
         let wasStopped = stopped
         lock.unlock()
@@ -93,6 +114,7 @@ final class LinkTransport: @unchecked Sendable {
         try openSocket()
         lock.lock()
         self.onDead = onDead
+        self.onQuiet = onQuiet
         started = true
         lock.unlock()
         let thread = Thread { [self] in run() }
@@ -107,6 +129,7 @@ final class LinkTransport: @unchecked Sendable {
         let already = stopped
         stopped = true
         onDead = nil
+        onQuiet = nil
         lock.unlock()
         if already { return }
         if wasStarted {
@@ -154,6 +177,7 @@ final class LinkTransport: @unchecked Sendable {
                 dead = true
                 break
             }
+            reportQuiet(Self.isQuiet(now: now, lastRx: lastRx))
 
             var fds = [
                 pollfd(fd: wake.read, events: Int16(POLLIN), revents: 0),
@@ -168,7 +192,10 @@ final class LinkTransport: @unchecked Sendable {
                 var drain = [UInt8](repeating: 0, count: 64)
                 _ = Darwin.read(wake.read, &drain, drain.count)
             }
-            if fds[1].revents & Int16(POLLIN) != 0 { readUDP(&buffer, now: after) }
+            if fds[1].revents & Int16(POLLIN) != 0 {
+                readUDP(&buffer, now: after)
+                reportQuiet(Self.isQuiet(now: after, lastRx: lastRx))
+            }
             if fds[2].revents & Int16(POLLIN) != 0, !readPump() {
                 break
             }
@@ -179,9 +206,22 @@ final class LinkTransport: @unchecked Sendable {
         lock.lock()
         callback = dead ? onDead : nil
         onDead = nil
+        onQuiet = nil
         stopped = true
         lock.unlock()
         teardown()
+        callback?()
+    }
+
+    private func reportQuiet(_ now: Bool) {
+        lock.lock()
+        guard now != quiet else {
+            lock.unlock()
+            return
+        }
+        quiet = now
+        let callback = onQuiet
+        lock.unlock()
         callback?()
     }
 
