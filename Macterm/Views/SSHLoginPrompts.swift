@@ -239,11 +239,16 @@ final class SSHLoginPrompts {
     /// sheet closes, and the New Remote Project sheet stays open while its
     /// check waits for the login and the install question (0358).
     static func sheetParent() -> NSWindow? {
-        var window = terminalWindow()
-        while let sheet = window?.attachedSheet {
-            window = sheet
+        terminalWindow().map(sheetParent(of:))
+    }
+
+    /// `window`, or the last sheet that is open on it.
+    static func sheetParent(of window: NSWindow) -> NSWindow {
+        var parent = window
+        while let sheet = parent.attachedSheet {
+            parent = sheet
         }
-        return window
+        return parent
     }
 
     // MARK: - Sheets

@@ -312,11 +312,12 @@ struct MainWindow: View {
         .overlay {
             ToastOverlay()
         }
-        .sheet(
-            isPresented: $windowState.isNewRemoteProjectSheetPresented,
-            onDismiss: { windowState.newRemoteProjectDraft = nil },
-            content: { NewRemoteProjectSheet(draft: windowState.newRemoteProjectDraft) }
-        )
+        // The New Remote Project dialog is an NSAlert sheet, as the
+        // install question (`NewRemoteProjectDialog`). The flag asks for it.
+        .onChange(of: windowState.isNewRemoteProjectSheetPresented) { _, presented in
+            guard presented else { return }
+            presentNewRemoteProjectDialog()
+        }
         .sheet(
             item: $windowState.passwordEditor,
             onDismiss: { appState.restoreFocusToActivePane() },
@@ -754,6 +755,18 @@ struct MainWindow: View {
         activePeekStyle = nil
         peekCollapseSettleTime = Date().addingTimeInterval(peekAnimationDuration)
         withAnimation(peekTransitionAnimation) { columnVisibility = .detailOnly }
+    }
+
+    private func presentNewRemoteProjectDialog() {
+        let draft = windowState.newRemoteProjectDraft
+        windowState.isNewRemoteProjectSheetPresented = false
+        windowState.newRemoteProjectDraft = nil
+        let dialog = NewRemoteProjectDialog(draft: draft) { [appState, projectStore] name, path in
+            // Always create: a folder can back several projects, so a repeat
+            // host:dir adds a distinct project rather than reusing the last.
+            appState.selectProject(projectStore.create(name: name, path: path))
+        }
+        dialog.present(on: attachedWindow.flatMap { SSHLoginPrompts.sheetParent(of: $0) }, startCheck: draft != nil)
     }
 
     private func cancelDeferredPeek() {

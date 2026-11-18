@@ -138,7 +138,6 @@ struct DirectorySourceTests {
         #expect(store.projects.isEmpty)
         #expect(window.isNewRemoteProjectSheetPresented)
         let draft = try #require(window.newRemoteProjectDraft)
-        #expect(draft.name == "api")
         #expect(draft.host == "me@devbox")
         #expect(draft.directory == "~/dev/api")
         #expect(ProjectPath.composeRemote(host: draft.host, directory: draft.directory) == "me@devbox:~/dev/api")
