@@ -935,7 +935,9 @@ final class AppState {
     /// The transient confirmation showing in `ToastOverlay`, if any. Only for
     /// outcomes that leave no visible trace — a success, or a keybind that
     /// had nothing to act on (`AppCommand.unavailableNotice`) — failures
-    /// still raise a dialog, which a toast must never replace.
+    /// still raise a dialog, which a toast must never replace. The one
+    /// exception is the updater: a failed update check or download is a toast
+    /// (`UpdateToast`), because it asks for no decision.
     private(set) var activeToast: Toast?
 
     /// Settings → Projects → Install Server on Host…, after the user declined

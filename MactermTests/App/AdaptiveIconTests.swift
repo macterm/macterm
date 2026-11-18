@@ -258,10 +258,37 @@ struct AdaptiveIconTests {
         }
         let custom = GhosttyAppIcon.custom(URL(fileURLWithPath: "/tmp/mine.png"))
         #expect(decide() == .adaptive(.dark))
-        #expect(decide(enabled: false) == .configured(.bundled))
-        #expect(decide(supported: false) == .configured(.bundled))
-        #expect(decide(configured: custom) == .configured(custom))
-        #expect(decide(style: "TintedDark") == .configured(.bundled))
+        #expect(decide(enabled: false) == .configured(.bundled, .disabled))
+        #expect(decide(supported: false) == .configured(.bundled, .unavailable))
+        #expect(decide(configured: custom) == .configured(custom, .customIcon))
+        #expect(decide(style: "TintedDark") == .configured(.bundled, .iconStyle))
+        #expect(decide(enabled: false, configured: custom) == .configured(custom, .disabled))
+    }
+
+    // MARK: - Preview
+
+    /// The preview shows a line only for an exception that the toggle does
+    /// not explain. A run that cannot render shows no error text.
+    @Test
+    func thePreviewExplainsOnlyTheExceptions() {
+        #expect(AdaptiveIcon.StandIn.disabled.previewLine == nil)
+        #expect(AdaptiveIcon.StandIn.unavailable.previewLine == nil)
+        #expect(AdaptiveIcon.StandIn.customIcon.previewLine == nil)
+        #expect(AdaptiveIcon.StandIn.iconStyle.previewLine == nil)
+        #expect(AdaptiveIcon.StandIn.noLidGray.previewLine == "Your theme has no gray color to paint the icon with.")
+    }
+
+    /// Both sides show where the system draws both and the app can read the
+    /// colors of both. Otherwise only the side that the Dock shows.
+    @Test
+    func thePreviewShowsBothSidesOnlyWhereTheSystemDrawsBoth() {
+        for style in [nil, "Regular", "RegularAutomatic"] {
+            #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: style, themeHasTwoSides: false) == [.light, .dark])
+            #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: style, themeHasTwoSides: true) == [.dark])
+        }
+        #expect(AdaptiveIcon.previewAppearances(shown: .light, iconStyle: "RegularLight", themeHasTwoSides: false) == [.light])
+        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "RegularDark", themeHasTwoSides: false) == [.dark])
+        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "Something New", themeHasTwoSides: false) == [.dark])
     }
 
     /// The controller reads the system scheme from `GhosttyApp.shared`. With

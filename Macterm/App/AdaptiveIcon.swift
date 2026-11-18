@@ -161,11 +161,42 @@ enum AdaptiveIcon {
         }
     }
 
+    /// Why the Dock shows the configured icon and not the adaptive icon.
+    enum StandIn: Equatable {
+        /// `Preferences.adaptiveIcon` is off.
+        case disabled
+        /// This run cannot render: before macOS 26, a hermetic run, a render
+        /// that failed, a theme color or a catalog that cannot be read.
+        case unavailable
+        /// `macos-icon = custom`: the user named that image on purpose.
+        case customIcon
+        /// The system's icon style is Clear, Tinted, or a value we do not know.
+        case iconStyle
+        /// The theme has no gray apart from its background (`paint` is nil).
+        case noLidGray
+
+        /// The last line of the App Icon section in Settings, nil where none is
+        /// needed: the toggle says that the setting is off, and its
+        /// description says that it has no effect in a Clear or Tinted icon
+        /// style. A run that cannot render shows the bundled icon with no
+        /// error text. A custom icon gets no line: Macterm stops reading
+        /// `macos-icon` (issue 0350).
+        var previewLine: String? {
+            switch self {
+            case .disabled,
+                 .unavailable,
+                 .customIcon,
+                 .iconStyle: nil
+            case .noLidGray: String(localized: "Your theme has no gray color to paint the icon with.")
+            }
+        }
+    }
+
     /// What the Dock shows.
     enum Decision: Equatable {
         /// The bundled icon or the user's `macos-icon = custom` image —
-        /// whatever the ghostty config asks for (`GhosttyAppIcon`).
-        case configured(GhosttyAppIcon)
+        /// whatever the ghostty config asks for (`GhosttyAppIcon`) — and why.
+        case configured(GhosttyAppIcon, StandIn)
         /// The bundled icon, repainted in the theme for this stack.
         case adaptive(AdaptiveIconRequest.Appearance)
     }
@@ -186,10 +217,30 @@ enum AdaptiveIcon {
         iconStyle: String?,
         systemScheme: () -> ThemeResolver.Scheme
     ) -> Decision {
-        guard enabled, supported, configured == .bundled,
-              let appearance = appearance(iconStyle: iconStyle, systemScheme: systemScheme())
-        else { return .configured(configured) }
+        guard enabled else { return .configured(configured, .disabled) }
+        guard supported else { return .configured(configured, .unavailable) }
+        guard configured == .bundled else { return .configured(configured, .customIcon) }
+        guard let appearance = appearance(iconStyle: iconStyle, systemScheme: systemScheme()) else {
+            return .configured(configured, .iconStyle)
+        }
         return .adaptive(appearance)
+    }
+
+    /// The stacks that the preview in Settings shows for an adaptive icon,
+    /// light first: the one the Dock shows, and the other one where the
+    /// system draws both. That is an icon style that follows the system
+    /// appearance, with a theme that has the same colors on both sides. The
+    /// app reads the colors of the side in use only, so the other side of a
+    /// `light:X,dark:Y` theme is not shown: a guess at it could be wrong.
+    static func previewAppearances(
+        shown: AdaptiveIconRequest.Appearance,
+        iconStyle: String?,
+        themeHasTwoSides: Bool
+    ) -> [AdaptiveIconRequest.Appearance] {
+        let followsSystem = appearance(iconStyle: iconStyle, systemScheme: .light) == .light
+            && appearance(iconStyle: iconStyle, systemScheme: .dark) == .dark
+        guard followsSystem, !themeHasTwoSides else { return [shown] }
+        return [.light, .dark]
     }
 
     /// The icon is Liquid Glass, which only macOS 26 and later draw. Hermetic

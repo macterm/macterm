@@ -1355,11 +1355,15 @@ private struct AppearanceSettings: View {
             // The icon is Liquid Glass, which only macOS 26 and later draw.
             if AdaptiveIcon.systemDrawsGlassIcons {
                 Section("App Icon") {
+                    AdaptiveIconPreview()
+
                     Toggle(isOn: $preferences.adaptiveIcon) {
                         Text("Adaptive icon")
-                        Text("The Dock icon shows the colors of your terminal theme.")
+                        Text("The Dock icon shows the colors of your terminal theme. This has no effect in the Clear or Tinted icon style.")
                             .settingsDescription()
                     }
+
+                    AdaptiveIconPreview.Footnote()
                 }
             }
 
@@ -2541,7 +2545,7 @@ private struct HotkeyCaptureView: NSViewRepresentable {
 
 private struct UpdatesSettings: View {
     /// `Updater` is `@Observable`; read the singleton directly (Observation
-    /// tracks `canCheckForUpdates`/`updateAvailable` reads in `body`).
+    /// tracks the `canCheckForUpdates` read in `body`).
     private var updater: Updater { .shared }
     @State
     private var updateChannel: String = Updater.shared.updateChannel.rawValue

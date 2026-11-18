@@ -201,8 +201,12 @@ struct MainWindow: View {
                 detailWidth = width
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    UpdateAvailableToolbarButton()
+                // Only while an update downloads or waits: a structural branch,
+                // so that an idle toolbar has no empty item.
+                if Updater.shared.updateAvailable {
+                    ToolbarItem(placement: .primaryAction) {
+                        UpdateToolbarButton()
+                    }
                 }
                 // Only while Project Insights is on (Settings → Intelligence)
                 // and the button is not hidden (Settings → Appearance → Toolbar).
