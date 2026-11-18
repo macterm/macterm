@@ -217,11 +217,17 @@ struct PaneTests {
     func attention_postsOneNoticeForEachChange() {
         let p = Pane(projectPath: "/", projectID: UUID())
         let count = LockedBox(0)
+        let id = p.id
+        // Filter by value: each post bridges the id to a new object, and an
+        // `object:` filter compares objects by identity. Other tests post too.
         let token = NotificationCenter.default.addObserver(
             forName: .paneAttentionDidChange,
-            object: p.id,
+            object: nil,
             queue: nil
-        ) { _ in count.mutate { $0 += 1 } }
+        ) { note in
+            guard note.object as? UUID == id else { return }
+            count.mutate { $0 += 1 }
+        }
         defer { NotificationCenter.default.removeObserver(token) }
 
         let bell = MactermProtocol.Attention(bell: true)
