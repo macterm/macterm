@@ -35,25 +35,39 @@ struct ProjectMemoryTests {
         let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(fileURL: base.appendingPathComponent("p.json")))
         let preferences = Preferences.shared
         let memory = ProjectMemory.shared
-        let (wasOn, wasVisible, wasReader) = (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader)
+        let (wasOn, wasReader) = (preferences.projectMemory, memory.modelReader)
         defer {
-            (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader) = (wasOn, wasVisible, wasReader)
+            (preferences.projectMemory, memory.modelReader) = (wasOn, wasReader)
             memory.refreshModelAvailability()
         }
         memory.modelReader = { .available }
         memory.refreshModelAvailability()
 
-        preferences.projectMemoryPanelVisible = true
+        let window = WindowState()
+        window.projectMemoryPanelVisible = true
         preferences.projectMemory = false
         #expect(AppCommand.toggleProjectMemory.action(in: ctx) == nil)
         #expect(!ProjectMemory.isEnabled)
-        #expect(!ProjectMemory.showsPanel)
+        #expect(!ProjectMemory.showsPanel(in: window))
 
         preferences.projectMemory = true
         #expect(AppCommand.toggleProjectMemory.action(in: ctx) != nil)
-        #expect(ProjectMemory.showsPanel)
-        preferences.projectMemoryPanelVisible = false
-        #expect(!ProjectMemory.showsPanel)
+        #expect(ProjectMemory.showsPanel(in: window))
+        window.projectMemoryPanelVisible = false
+        #expect(!ProjectMemory.showsPanel(in: window))
+
+        // The Git read after a command: only for a project that a window
+        // with its panel open shows.
+        let (p, q) = (UUID(), UUID())
+        let open = WindowState(activeProjectID: p)
+        let closed = WindowState(activeProjectID: q)
+        open.projectMemoryPanelVisible = true
+        state.registerWindow(open)
+        state.registerWindow(closed)
+        #expect(state.insightsPanelShows(p))
+        #expect(!state.insightsPanelShows(q))
+        preferences.projectMemory = false
+        #expect(!state.insightsPanelShows(p))
     }
 
     /// Project Insights needs Apple Intelligence: without the model, the
@@ -63,19 +77,20 @@ struct ProjectMemoryTests {
     func the_feature_is_off_while_apple_intelligence_is_off() {
         let preferences = Preferences.shared
         let memory = ProjectMemory.shared
-        let (wasOn, wasVisible, wasReader) = (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader)
+        let (wasOn, wasReader) = (preferences.projectMemory, memory.modelReader)
         defer {
-            (preferences.projectMemory, preferences.projectMemoryPanelVisible, memory.modelReader) = (wasOn, wasVisible, wasReader)
+            (preferences.projectMemory, memory.modelReader) = (wasOn, wasReader)
             memory.refreshModelAvailability()
         }
         preferences.projectMemory = true
-        preferences.projectMemoryPanelVisible = true
+        let window = WindowState()
+        window.projectMemoryPanelVisible = true
 
         for availability in [OnDeviceModel.Availability.notReady, .unsupported] {
             memory.modelReader = { availability }
             memory.refreshModelAvailability()
             #expect(!ProjectMemory.isEnabled)
-            #expect(!ProjectMemory.showsPanel)
+            #expect(!ProjectMemory.showsPanel(in: window))
             #expect(!ProjectMemorySummarizer.isEnabled)
             #expect(preferences.projectMemory)
         }
@@ -318,7 +333,9 @@ struct ProjectMemoryTests {
         // A summary for another state, so that the reads take the quiet
         // wait: a project with no summary gets its first one with no wait.
         summarizer.loadStored = { _ in StoredSummary(key: "older", text: "Earlier work.", writtenAt: Date(), suggestions: nil) }
-        memory.gitReader = { _ in GitStatus(branch: "main") }
+        var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
+        memory.gitReader = { _ in git }
         let deadline = Date().addingTimeInterval(1)
         memory.refreshGit(project.id)
         while runs == 0 || summarizer.state(for: project.id).phase != .done, Date() < deadline {
@@ -335,6 +352,7 @@ struct ProjectMemoryTests {
         var runs = 0
         let (memory, summarizer, project) = makeBackgroundMemory { runs += 1 }
         var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
         memory.gitReader = { _ in git }
         // No command is recorded: the Git state alone earns the summary.
         #expect(memory.store.entries(for: project.id).isEmpty)
@@ -373,6 +391,7 @@ struct ProjectMemoryTests {
         // can arrive.
         memory.summaryQuietPeriod = .seconds(600)
         var git = GitStatus(branch: "main")
+        git.recentCommits = [GitStatus.Commit(hash: "abc1234", subject: "Start", date: now)]
         memory.gitReader = { _ in git }
 
         memory.refreshGit(project.id)

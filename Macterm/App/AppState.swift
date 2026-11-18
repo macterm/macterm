@@ -191,7 +191,7 @@ final class AppState {
         first.activeProjectID = saved[0].activeProjectID ?? first.activeProjectID
         if let width = saved[0].sidebarWidth { first.sidebarWidth = width }
         if let visible = saved[0].sidebarVisible { first.sidebarVisible = visible }
-        adoptPanelVisibility(from: saved[0])
+        if let visible = saved[0].projectMemoryPanelVisible { first.projectMemoryPanelVisible = visible }
         // After the project: making a project active opens its section, and
         // the saved set must win over that.
         if let expanded = saved[0].expandedProjectIDs { first.expandedProjects = Set(expanded) }
@@ -381,7 +381,7 @@ final class AppState {
             }
             if let width = restoring.sidebarWidth { window.sidebarWidth = width }
             if let visible = restoring.sidebarVisible { window.sidebarVisible = visible }
-            adoptPanelVisibility(from: restoring)
+            if let visible = restoring.projectMemoryPanelVisible { window.projectMemoryPanelVisible = visible }
             if let expanded = restoring.expandedProjectIDs { window.expandedProjects = Set(expanded) }
             if let frame = restoring.frame { window.frame = frame }
         } else if hasRestoredWindows {
@@ -719,9 +719,9 @@ final class AppState {
         }
     }
 
-    /// A window's sidebar width or open sections changed; get it into the
-    /// snapshot.
-    func noteSidebarChanged() {
+    /// A window's sidebar width, open sections or Project Insights panel
+    /// changed; get it into the snapshot.
+    func noteWindowChanged() {
         persistWindows()
     }
 
@@ -736,19 +736,17 @@ final class AppState {
         set { keyOrFirstWindow?.sidebarVisible = newValue }
     }
 
-    /// The Project Insights panel (Toggle Project Insights). One toggle for
-    /// the app (`Preferences.projectMemoryPanelVisible`): every window shows
-    /// the panel of its own project.
+    /// The key window's Project Insights panel (Toggle Project Insights,
+    /// the CLI). Each window has its own (`WindowState.projectMemoryPanelVisible`).
     var projectMemoryPanelVisible: Bool {
-        get { Preferences.shared.projectMemoryPanelVisible }
-        set { Preferences.shared.projectMemoryPanelVisible = newValue }
+        get { keyOrFirstWindow?.projectMemoryPanelVisible ?? false }
+        set { keyOrFirstWindow?.projectMemoryPanelVisible = newValue }
     }
 
-    /// A snapshot from before the panel was one toggle kept it per window.
-    /// A window that showed it turns the toggle on, once: the next save
-    /// writes no per-window value, so this never fires again.
-    private func adoptPanelVisibility(from snapshot: WindowSnapshot) {
-        if snapshot.projectMemoryPanelVisible == true { Preferences.shared.projectMemoryPanelVisible = true }
+    /// Whether a window shows the panel for `projectID`. The Git read after
+    /// a command runs only then (`ProjectMemory.panelShows`).
+    func insightsPanelShows(_ projectID: UUID) -> Bool {
+        windows.contains { $0.activeProjectID == projectID && ProjectMemory.showsPanel(in: $0) }
     }
 
     var isCommandPaletteVisible: Bool {
@@ -1214,15 +1212,23 @@ final class AppState {
     /// The project layout files.
     @ObservationIgnored
     let layoutFiles: LayoutFileService
+
+    /// The retired app-wide panel value, read once at the restore
+    /// (`Preferences.takeLegacyProjectMemoryPanelVisible`). Injectable so a
+    /// test does not share the preference with tests that run beside it.
+    @ObservationIgnored
+    private let legacyPanelVisible: () -> Bool
     var projectFiles: ProjectFileStore { layoutFiles.projectFiles }
 
     init(
         workspaceStore: WorkspaceStore = WorkspaceStore(),
         projectFiles: ProjectFileStore = ProjectFileStore(),
         paletteHotkeys: PaletteHotkeys = .shared,
-        quickTerminal: QuickTerminalSplitState? = nil
+        quickTerminal: QuickTerminalSplitState? = nil,
+        legacyPanelVisible: @escaping () -> Bool = { Preferences.shared.takeLegacyProjectMemoryPanelVisible() }
     ) {
         self.workspaceStore = workspaceStore
+        self.legacyPanelVisible = legacyPanelVisible
         layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
@@ -1497,7 +1503,11 @@ final class AppState {
         // `pinned.yaml` (the file is authoritative for membership — see
         // AppState+PinnedTabs). Live tabs materialize async, after zmx says
         // which sessions actually survived.
-        savedWindowSnapshots = loaded.windows
+        // The retired value is read (and removed) only when a window can
+        // take it.
+        savedWindowSnapshots = loaded.windows.isEmpty
+            ? []
+            : WindowSnapshot.adoptingLegacyPanelVisibility(loaded.windows, legacyVisible: legacyPanelVisible())
         restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
         reconcilePinnedLayoutAtLaunch(projects: projects)
         // The quick terminal's tab reattaches like any workspace tab. Before
@@ -1575,7 +1585,7 @@ final class AppState {
                         isKey: window.id == keyWindowID,
                         activeTabID: window.activeProjectID.flatMap { selectedTab(for: $0, in: window)?.id },
                         sidebarVisible: window.sidebarVisible,
-                        projectMemoryPanelVisible: nil,
+                        projectMemoryPanelVisible: window.projectMemoryPanelVisible,
                         frame: window.frame,
                         expandedProjectIDs: window.expandedProjects.sorted { $0.uuidString < $1.uuidString }
                     )
@@ -1693,8 +1703,8 @@ final class AppState {
 
     // MARK: - Remote reconnect (#281)
 
-    /// What woke the reconnect sweep. Logging only — the policy treats all
-    /// triggers identically (attempts are gated per pane, not per trigger).
+    /// What woke the reconnect sweep. The backoff gates each pane for every
+    /// trigger, except `.hostAnswered`, which clears it.
     enum ReconnectTrigger: String {
         case wake
         case activate
@@ -1702,6 +1712,10 @@ final class AppState {
         case network
         /// A login brought a host's link back (`.remoteHostDidConnect`).
         case hostConnected
+        /// A quiet roaming link heard its host again
+        /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
+        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).
         case linkStopped
@@ -1727,35 +1741,61 @@ final class AppState {
     /// unreachable host is tried at most once a minute. Active project only;
     /// other projects reconnect via `.projectSelected` when opened. A key in
     /// a lost pane connects at once, with no backoff. `destination`: only
-    /// the panes of this host (`.hostConnected`).
+    /// the panes of this host (`.hostConnected`, `.hostAnswered`). A host
+    /// that answers again (`.hostAnswered`) clears the backoff of its panes:
+    /// it is one event for each heal, so it adds no load while the host is
+    /// down.
     func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
         // or a network change while the user is in another app waits for the
         // activation, which is a trigger too.
-        guard trigger == .activate || trigger == .projectSelected || trigger == .hostConnected || NSApp.isActive else { return }
+        // A host's own event (a login, a quiet link that hears the host) is
+        // about that host and asks nothing more: it runs at once.
+        let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
+        guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
-        let now = Date()
-        var sessions: Set<String> = []
-        var anyLost = false
-        for pane in ws.tabs.flatMap({ $0.splitRoot.allPanes() }) where pane.isRemote {
-            if let destination, pane.remoteDestination != destination { continue }
-            guard pane.isDisconnected else {
-                reconnectPolicy.observeAlive(pane.id, now: now)
-                continue
-            }
-            anyLost = true
-            // A try runs now: the next sweep judges it.
-            guard !pane.isRemoteReconnecting, reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
-            reconnectPolicy.recordAttempt(pane.id, now: now)
-            sessions.insert(pane.sessionName)
-        }
+        let (sessions, anyLost) = Self.reconnectSessions(
+            ws.tabs.flatMap { $0.splitRoot.allPanes() },
+            trigger: trigger,
+            destination: destination,
+            policy: &reconnectPolicy,
+            now: Date()
+        )
         if anyLost { scheduleReconnectRetry() }
         guard !sessions.isEmpty else { return }
         let count = sessions.count
         logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(count, privacy: .public) lost remote pane(s)")
         RemoteHosts.shared.reconnect(sessions)
+    }
+
+    /// The sessions of the lost panes that the sweep tries now, and whether
+    /// any pane is lost. `destination`: only the panes of this host. Pure,
+    /// except for the policy.
+    static func reconnectSessions(
+        _ panes: [Pane],
+        trigger: ReconnectTrigger,
+        destination: String?,
+        policy: inout RemoteReconnectPolicy,
+        now: Date
+    ) -> (sessions: Set<String>, anyLost: Bool) {
+        var sessions: Set<String> = []
+        var anyLost = false
+        for pane in panes where pane.isRemote {
+            if let destination, pane.remoteDestination != destination { continue }
+            guard pane.isDisconnected else {
+                policy.observeAlive(pane.id, now: now)
+                continue
+            }
+            anyLost = true
+            if trigger == .hostAnswered { policy.hostAnswered(pane.id) }
+            // A try runs now: the next sweep judges it.
+            guard !pane.isRemoteReconnecting, policy.shouldAttempt(pane.id, now: now) else { continue }
+            policy.recordAttempt(pane.id, now: now)
+            sessions.insert(pane.sessionName)
+        }
+        return (sessions, anyLost)
     }
 
     /// One sweep later, unless one is already planned.

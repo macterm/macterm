@@ -224,12 +224,12 @@ struct ProjectMemoryPanel: View {
         }
     }
 
-    /// The summary needs something to say: a command in the log, or the
-    /// Git state alone, which is what a project shows before its first
-    /// command (`ProjectMemoryDigest` is nil with neither).
+    /// The summary needs something to say: a command in the log, or a Git
+    /// state that shows work, which is what a project shows before its
+    /// first command (`ProjectMemoryDigest` is nil with neither).
     private var summaryEnabled: Bool {
         ProjectMemorySummarizer.isEnabled
-            && (!entries.isEmpty || memory.git[project.id] != nil)
+            && (!entries.isEmpty || memory.git[project.id].map(ProjectMemoryDigest.gitShowsWork) == true)
     }
 
     /// The reload button of the Summary header: a spinner while the model
