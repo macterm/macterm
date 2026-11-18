@@ -612,9 +612,31 @@ struct WorkspaceSerializerSessionIdentityTests {
     }
 
     @Test
+    func a_repeated_session_id_restores_one_pane() throws {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let keep = PaneSnapshot(id: UUID(), projectPath: "/tmp/a", sessionID: sessionID)
+        let second = PaneSnapshot(id: UUID(), projectPath: "/tmp/b", sessionID: sessionID)
+        let snap = WorkspaceSnapshot(
+            projectID: projectID,
+            activeTabID: nil,
+            tabs: [TabSnapshot(
+                id: UUID(),
+                customTitle: nil,
+                focusedPaneID: nil,
+                splitRoot: .split(SplitBranchSnapshot(direction: .vertical, ratio: 0.5, first: .pane(keep), second: .pane(second)))
+            )]
+        )
+        let tab = try #require(
+            WorkspaceSerializer.restore(from: [snap], validIDs: [projectID]).first?.tabs.first
+        )
+        #expect(tab.splitRoot.allPanes().map(\.projectPath) == ["/tmp/a"])
+    }
+
+    @Test
     func old_file_restores_its_focused_pane_under_the_session_id() throws {
-        // Before 0225 a pane saved a runtime `id` apart from its `sessionID`,
-        // and the tab's focus named the runtime id.
+        // An older build saved a runtime `id` apart from `sessionID`, and the
+        // tab's focus named the runtime id.
         let projectID = UUID()
         let runtimeID = UUID()
         let sessionID = UUID()

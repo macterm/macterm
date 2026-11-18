@@ -204,11 +204,9 @@ struct PaneSnapshot: Codable {
     /// re-saves the file loses only the dot's color, not worth refusing saves
     /// over (see `currentSchemaVersion`).
     var completionFailed: Bool?
-    /// The pane's session id. It has the same value as `id` (`Pane.id`),
-    /// except in a file from before 0225, which saved a runtime `id` apart
-    /// from it. On restore the rebuilt pane takes it as its id, so its shell
-    /// reattaches to the still-running daemon instead of spawning fresh.
-    /// Optional: an older snapshot decodes nil, and the pane takes `id`.
+    /// The pane's session id, which the restored pane takes as its id. An
+    /// older build saved a different `id`; this key wins. Nil in a very old
+    /// file: the pane then takes `id`.
     var sessionID: UUID?
     /// The pane's zmx session name, persisted VERBATIM — never re-derived. The
     /// name embeds the project slug at creation time, so re-deriving it after
@@ -502,8 +500,8 @@ enum WorkspaceSerializer {
     }
 
     private static func build(_ t: TabSnapshot, root: SplitNode) -> TerminalTab {
-        // A file from before 0225 saved the focused pane's runtime id, so
-        // find its snapshot and take the id that the pane restores with.
+        // An older build saved the focused pane's runtime id: find its
+        // snapshot and take the id that the pane restores with.
         let savedFocus = t.focusedPaneID.flatMap { paneSnapshot(id: $0, in: t.splitRoot) }
         let focused = savedFocus.flatMap { root.findPane(id: $0.sessionID ?? $0.id)?.id } ?? root.allPanes().first?.id
         return TerminalTab(id: t.id, splitRoot: root, focusedPaneID: focused, customTitle: t.customTitle)
@@ -593,8 +591,10 @@ enum WorkspaceSerializer {
     static func withoutRepeatedSessions(_ node: SplitNodeSnapshot, seen: inout Set<String>) -> SplitNodeSnapshot? {
         switch node {
         case let .pane(p):
-            guard let name = p.sessionName else { return node }
-            return seen.insert(name).inserted ? node : nil
+            // The restored pane id must be new too: two panes never share one.
+            let newID = seen.insert((p.sessionID ?? p.id).uuidString).inserted
+            guard let name = p.sessionName else { return newID ? node : nil }
+            return seen.insert(name).inserted && newID ? node : nil
         case let .split(b):
             let first = withoutRepeatedSessions(b.first, seen: &seen)
             let second = withoutRepeatedSessions(b.second, seen: &seen)

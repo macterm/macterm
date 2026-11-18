@@ -4,9 +4,7 @@ import Foundation
 /// A pane is the leaf of the split tree — one terminal surface.
 @MainActor @Observable
 final class Pane: Identifiable {
-    /// The pane's id, which is also its session id (design 010 §1). It is
-    /// stable across restore: the snapshot stores it, and the restored pane
-    /// takes it again, so its session name and a saved focus still match.
+    /// The pane's id. It is also its session id, and a restore keeps it.
     let id: UUID
     let projectPath: String
     /// The workspace this pane currently belongs to — the ROUTING identity used

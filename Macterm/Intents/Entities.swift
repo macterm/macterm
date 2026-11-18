@@ -157,11 +157,11 @@ struct MactermTabQuery: EntityStringQuery, EnumerableEntityQuery {
 
 /// A pane, as Shortcuts sees it.
 ///
-/// **Identity is the zmx session name, not `Pane.id`.** Pane UUIDs are fresh
-/// on every restore, so a shortcut keyed on one would break at the first
-/// relaunch — silently, since the pane it names is visibly still there. The
-/// session name is the restart-stable identity the whole app reattaches by,
-/// and it is what the CLI's `--session` selector already addresses.
+/// **Identity is the zmx session name, not `Pane.id`.** A saved shortcut
+/// from a build that made a new pane UUID at every restore still names its
+/// pane. The session name is the restart-stable identity the whole app
+/// reattaches by, and it is what the CLI's `--session` selector already
+/// addresses.
 struct MactermPaneEntity: AppEntity {
     /// The pane's `sessionName`.
     let id: String
