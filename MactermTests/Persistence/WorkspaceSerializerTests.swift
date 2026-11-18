@@ -605,7 +605,10 @@ struct WorkspaceSerializerTests {
         let kept = WorkspaceSerializer.withoutRepeatedSessions(loaded, validIDs: [])
 
         let live = try #require(kept.pinned[0].live)
-        guard case let .pane(pane) = live.splitRoot else { return Issue.record("expected leaf") }
+        guard case let .pane(pane) = live.splitRoot else {
+            Issue.record("expected leaf")
+            return
+        }
         #expect(pane.sessionName == session)
     }
 }
