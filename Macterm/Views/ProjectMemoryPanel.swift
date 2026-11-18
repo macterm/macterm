@@ -15,6 +15,7 @@ struct ProjectMemoryPanel: View {
     private var appState
     @Environment(ProjectStore.self)
     private var projectStore
+
     static let width: CGFloat = 320
     /// The failure card's corner: the rows are cards like it.
     static let rowCornerRadius: CGFloat = 12
