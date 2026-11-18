@@ -84,7 +84,7 @@ extension SplitNode {
         position: SplitPosition,
         projectPath: String,
         projectID: UUID,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil
     ) -> (node: SplitNode, newPaneID: UUID?) {
         switch self {
@@ -92,7 +92,7 @@ extension SplitNode {
             // Inherit the source pane's session slug so the new sibling groups
             // under the same project in `zmx ls`.
             let newPane = Pane(
-                projectPath: projectPath, projectID: projectID, sessionSlug: p.sessionSlug, command: command, env: env
+                projectPath: projectPath, projectID: projectID, sessionSlug: p.sessionSlug, start: command, env: env
             )
             let first: SplitNode = position == .first ? .pane(newPane) : .pane(p)
             let second: SplitNode = position == .first ? .pane(p) : .pane(newPane)

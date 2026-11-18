@@ -2256,8 +2256,8 @@ final class AppState {
 
     // MARK: - Tabs
 
-    /// A `command` spawns in the new tab's pane via `initial_input` (layout
-    /// `run:` semantics). Returns the new tab's ID, nil when the project has
+    /// A `command` starts in the new tab's pane (`PaneStartCommand`).
+    /// Returns the new tab's ID, nil when the project has
     /// no live workspace. `focus: false` preserves any existing selection and
     /// history, and warms unrendered panes so their shells start without a visit.
     @discardableResult
@@ -2265,7 +2265,7 @@ final class AppState {
         projectID: UUID,
         projectPath: String,
         sessionSlug: String? = nil,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> UUID? {
@@ -2292,7 +2292,7 @@ final class AppState {
     func createTab(
         projectID: UUID,
         projects: [Project],
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> UUID? {
@@ -2323,7 +2323,7 @@ final class AppState {
         projectID: UUID,
         projects: [Project],
         workingDirectory: String,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> UUID? {
@@ -2832,7 +2832,7 @@ final class AppState {
         position: SplitPosition = .second,
         projectID: UUID,
         projectDirectory: String,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> UUID? {
@@ -2871,7 +2871,7 @@ final class AppState {
         direction: SplitDirection,
         position: SplitPosition = .second,
         projectID: UUID,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil,
         focus: Bool = true
@@ -2908,7 +2908,7 @@ final class AppState {
         columns: Int,
         projectID: UUID,
         projectDirectory: String,
-        command: String? = nil
+        command: PaneStartCommand? = nil
     ) -> [UUID] {
         guard let ws = workspaces[projectID],
               let tab = ws.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil }),

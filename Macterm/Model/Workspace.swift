@@ -185,11 +185,11 @@ final class TerminalTab: Identifiable {
         projectPath: String,
         projectID: UUID,
         sessionSlug: String? = nil,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil
     ) {
         id = UUID()
-        let pane = Pane(projectPath: projectPath, projectID: projectID, sessionSlug: sessionSlug, command: command, env: env)
+        let pane = Pane(projectPath: projectPath, projectID: projectID, sessionSlug: sessionSlug, start: command, env: env)
         splitRoot = .pane(pane)
         focusedPaneID = pane.id
     }
@@ -223,8 +223,7 @@ final class TerminalTab: Identifiable {
 
     /// Split the focused pane (or a specific pane) in `direction`, placing the
     /// new pane at `position`. Returns the new pane ID if created.
-    /// A `command` spawns in the new pane via libghostty's `initial_input`
-    /// (the layout `run:` path — typed into the fresh shell verbatim).
+    /// A `command` starts in the new pane (`PaneStartCommand`).
     /// `newPaneWorkingDirectory` overrides cwd inheritance without changing
     /// the source pane's project-scoped session slug. `env` is extra
     /// environment for the new pane's shell. With `focus: false`, preserve
@@ -234,7 +233,7 @@ final class TerminalTab: Identifiable {
         paneID: UUID,
         direction: SplitDirection,
         position: SplitPosition = .second,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil,
         focus: Bool = true
@@ -280,7 +279,7 @@ final class TerminalTab: Identifiable {
     /// Split a pane into a `rows`×`columns` grid of equal cells (row-major),
     /// optionally spawning `command` in every NEW pane. The source pane
     /// becomes the top-left cell and keeps its running shell — a command
-    /// can only be injected at spawn (`initial_input`), so the caller runs
+    /// starts only at spawn (`PaneStartCommand`), so the caller runs
     /// text into it separately if needed. `newPaneWorkingDirectory` overrides
     /// cwd inheritance for every new cell, exactly as in `split`. Returns the
     /// new pane IDs.
@@ -289,7 +288,7 @@ final class TerminalTab: Identifiable {
         paneID: UUID,
         rows: Int,
         columns: Int,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> [UUID] {
         guard rows >= 1, columns >= 1, rows * columns > 1,
@@ -342,7 +341,7 @@ final class TerminalTab: Identifiable {
     fileprivate func autoSplit(
         paneID: UUID,
         drawnSize: CGSize = .zero,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> UUID? {
@@ -596,7 +595,7 @@ final class Workspace: Identifiable {
     fileprivate func createTab(
         projectPath: String,
         sessionSlug: String? = nil,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> TerminalTab {
@@ -756,7 +755,7 @@ enum ModelWriter {
         in workspace: Workspace,
         projectPath: String,
         sessionSlug: String? = nil,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         focus: Bool = true
     ) -> TerminalTab {
@@ -860,7 +859,7 @@ enum ModelWriter {
         paneID: UUID,
         direction: SplitDirection,
         position: SplitPosition = .second,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil,
         focus: Bool = true
@@ -882,7 +881,7 @@ enum ModelWriter {
         _ tab: TerminalTab,
         paneID: UUID,
         drawnSize: CGSize = .zero,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         env: [String: String]? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> UUID? {
@@ -902,7 +901,7 @@ enum ModelWriter {
         paneID: UUID,
         rows: Int,
         columns: Int,
-        command: String? = nil,
+        command: PaneStartCommand? = nil,
         newPaneWorkingDirectory: String? = nil
     ) -> [UUID] {
         tab.makeGrid(

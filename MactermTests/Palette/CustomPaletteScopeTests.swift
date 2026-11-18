@@ -385,8 +385,10 @@ struct CustomPaletteScopeTests {
             projects: context.projectStore.projects
         )
         let pane = try #require(state.focusedPane(for: project.id))
-        #expect(pane.command == nil, "nothing is typed at the prompt")
-        #expect(pane.env?[CustomPaletteScript.commandVariable] == "kubectl logs -f \"$POD\"")
+        #expect(pane.start == .wrapped("\n  kubectl logs -f \"$POD\""), "nothing is typed at the prompt")
+        let launch = PaneStartCommand.launch(pane.start, remote: false, cli: "/App/bin/macterm", shell: "/bin/zsh")
+        #expect(launch.input == nil)
+        #expect(launch.environment[CustomPaletteScript.commandVariable] == "kubectl logs -f \"$POD\"")
         #expect(pane.env?["POD"] == "api-1")
         #expect(pane.env?[CustomPaletteEnvironment.projectDirectoryKey] == "/tmp")
 
@@ -401,8 +403,10 @@ struct CustomPaletteScopeTests {
             projects: context.projectStore.projects
         )
         let remotePane = try #require(state.focusedPane(for: remote.id))
-        #expect(remotePane.command == "htop", "ssh carries no environment, so a remote pane still types it")
-        #expect(remotePane.env?[CustomPaletteScript.commandVariable] == nil)
+        #expect(remotePane.start == .wrapped("htop"))
+        let remoteLaunch = PaneStartCommand.launch(remotePane.start, remote: true, cli: "/App/bin/macterm", shell: "/bin/zsh")
+        #expect(remoteLaunch.input == "htop\n", "ssh carries no environment, so a remote pane still types it")
+        #expect(remoteLaunch.environment.isEmpty)
     }
 
     /// A pinned tab belongs to no project: the command splits beside it,
@@ -426,8 +430,7 @@ struct CustomPaletteScopeTests {
         let panes = try #require(state.workspaces[PinnedTabs.workspaceID]?.activeTab?.splitRoot.allPanes())
         #expect(panes.count == 2)
         let pane = try #require(state.focusedPane(for: PinnedTabs.workspaceID))
-        #expect(pane.command == nil)
-        #expect(pane.env?[CustomPaletteScript.commandVariable] == "htop")
+        #expect(pane.start == .wrapped("htop"))
         #expect(pane.env?["HOST"] == "a")
     }
 
@@ -450,15 +453,14 @@ struct CustomPaletteScopeTests {
         perform(.run(command: nil, in: .tab, cwd: ".path"), name)
         let shell = try #require(state.focusedPane(for: project.id))
         #expect(shell.projectPath == "/tmp/\(name)", "relative to the project")
-        #expect(shell.command == nil)
-        #expect(shell.env?[CustomPaletteScript.commandVariable] == nil, "no run: is a plain shell")
+        #expect(shell.start == nil, "no run: is a plain shell")
 
         perform(.run(command: "make", in: .split, cwd: "/tmp/\(name)/"), "/tmp/\(name)/")
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         #expect(tab.splitRoot.allPanes().count == 2, "in: split splits")
         let split = try #require(state.focusedPane(for: project.id))
         #expect(split.id != shell.id)
-        #expect(split.env?[CustomPaletteScript.commandVariable] == "make")
+        #expect(split.start == .wrapped("make"))
 
         let tabs = state.workspaces[project.id]?.tabs.count
         perform(.run(command: nil, in: .tab, cwd: ".path"), "\(name)/missing")

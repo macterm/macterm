@@ -46,16 +46,11 @@ enum CustomPaletteScript {
     }
 }
 
-/// How a palette's `run:` action starts in a new local pane without being
-/// typed at its prompt, so it never reaches the shell's history: it runs
-/// before the pane's shell, as the shell's parent, then gives way to it.
-///
-/// The palette puts the command in the new pane's environment
-/// (`CustomPaletteScript.commandVariable`), which `Pane` hands to the surface
-/// on its first build only — a reconnect respawn reattaches a session already
-/// past it, and `PaneSnapshot` never persists a pane's environment — and the
-/// surface puts `wrapperArgv` in front of the command libghostty resolved,
-/// after zmx's own wrapper, so the session runs:
+/// The runner of a wrapped `PaneStartCommand` (a palette's `run:` action),
+/// which says why it is not typed. `PaneStartCommand.launch` puts the command
+/// in the new pane's environment (`CustomPaletteScript.commandVariable`) and
+/// `wrapperArgv` in front of the command libghostty resolved, after zmx's own
+/// wrapper, so the session runs:
 ///
 ///     zmx attach <session> macterm palette exec <shell> <flags…> -- <resolved argv>
 ///

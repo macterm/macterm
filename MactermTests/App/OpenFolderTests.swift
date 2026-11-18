@@ -89,7 +89,7 @@ struct OpenFolderTests {
         #expect(state.activeProjectID == project.id)
         let editor = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
         #expect(editor.env?[TextFileEditor.fileVariable] == (file.path(percentEncoded: false) as NSString).standardizingPath)
-        #expect(editor.command == TextFileEditor.typedCommand)
+        #expect(editor.start == .typed(TextFileEditor.typedCommand))
     }
 
     @Test

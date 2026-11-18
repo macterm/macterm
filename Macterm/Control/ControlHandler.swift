@@ -739,7 +739,7 @@ final class ControlHandler {
         guard let tabID = appState.createTab(
             projectID: project.id,
             projects: projectStore.projects,
-            command: args.run,
+            command: args.run.map(PaneStartCommand.typed),
             focus: args.focus ?? true
         ),
             let index = workspace.tabs.firstIndex(where: { $0.id == tabID })
@@ -889,7 +889,7 @@ final class ControlHandler {
             position: placement.position,
             projectID: project.id,
             projectDirectory: project.path,
-            command: args.run,
+            command: args.run.map(PaneStartCommand.typed),
             focus: args.focus ?? true
         ), let newPane = target.tab.splitRoot.findPane(id: newID)
         else {
@@ -1358,7 +1358,7 @@ final class ControlHandler {
             columns: cols,
             projectID: project.id,
             projectDirectory: project.path,
-            command: args.run
+            command: args.run.map(PaneStartCommand.typed)
         )
         guard !created.isEmpty else {
             throw ControlError(code: .internalError, message: "grid produced no panes")

@@ -81,7 +81,7 @@ enum LayoutBuilder {
         Pane(
             projectPath: resolveCwd(pane.cwd, projectRoot: projectRoot),
             projectID: projectID,
-            command: (pane.run?.isEmpty == false) ? pane.run : nil,
+            start: pane.run.flatMap { $0.isEmpty ? nil : .typed($0) },
             shell: pane.shell
         )
     }

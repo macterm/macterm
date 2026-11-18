@@ -342,12 +342,10 @@ final class SurfaceRegistry {
     private struct Entry {
         weak var pane: Pane?
         var surfaces: [PaneSurface] = []
-        /// The pane has built a view. `command` is a FIRST-spawn input (it
-        /// becomes libghostty's `initial_input`, typed into the fresh shell):
-        /// a later build — a reconnect, a second window — attaches an EXISTING
-        /// session, so typing the command again would run it a second time.
-        /// Snapshot restore has the same contract (`PaneSnapshot` does not
-        /// persist `command`).
+        /// The pane has built a view. `Pane.start` is a first-spawn input
+        /// (`PaneStartCommand`): a later build — a reconnect, a second
+        /// window — attaches an EXISTING session, so the command would run a
+        /// second time.
         var hasBuiltView = false
     }
 
@@ -436,13 +434,11 @@ final class SurfaceRegistry {
         // not configuration.
         var mergedEnv = pane.env ?? [:]
         mergedEnv[ControlProtocol.sessionEnvVar] = pane.sessionName
-        // A palette action's command is first-spawn input like `command`.
-        if hasBuilt { mergedEnv[CustomPaletteScript.commandVariable] = nil }
         let view = GhosttyTerminalNSView(
             paneID: pane.id,
             workingDirectory: pane.projectPath,
             sessionName: pane.sessionName,
-            command: hasBuilt ? nil : pane.command,
+            start: hasBuilt ? nil : pane.start,
             shell: pane.shell,
             env: mergedEnv,
             remoteSpec: pane.remoteSpec

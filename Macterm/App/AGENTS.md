@@ -248,7 +248,7 @@ Desktop widgets are terminals on the desktop (`DesktopWidget`, `AppState+Desktop
 - `Preferences.hasSeededFirstRun` is written on the first launch that can answer, seeded or not. The exception is `.postpone` on `WorkspaceStore.loadFailed`.
 - It is off (postponed, not skipped) under `MACTERM_BENCHMARK=1`. The harnesses look like fresh installs, and they do not isolate the defaults domain.
 - The seeded `run:` is bare words, so that it tokenizes in the same way in every login shell.
-- The `run:` is typed after the shell's first prompt, not at the attach (`PaneSession.heldInput`, `Macterm/Server/AGENTS.md`), as is every `initial_input` of a pane on a session. The command of a palette extension is not typed: a command wrapper runs it before the shell starts (`CustomPaletteLaunch`).
+- The `run:` is a typed `PaneStartCommand`. It is typed after the shell's first prompt, not at the attach (`PaneSession.heldInput`, `Macterm/Server/AGENTS.md`), as is every `initial_input` of a pane on a session. The command of a palette extension is a wrapped `PaneStartCommand`: it is not typed, and a command wrapper runs it before the shell starts (`CustomPaletteLaunch`).
 
 ## Project color tags
 

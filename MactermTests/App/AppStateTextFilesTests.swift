@@ -51,7 +51,7 @@ struct AppStateTextFilesTests {
         #expect(panes.count == 2)
         let editor = try #require(panes.first { $0.id != clicked.id })
         #expect(tab.focusedPaneID == editor.id)
-        #expect(editor.command == TextFileEditor.typedCommand)
+        #expect(editor.start == .typed(TextFileEditor.typedCommand))
         #expect(editor.env == [
             TextFileEditor.fileVariable: root + "/src/main.rs",
             TextFileEditor.lineVariable: "12",

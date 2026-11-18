@@ -43,7 +43,7 @@ extension AppState {
 
         let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath)
         // A pure-spawn reconcile (no live workspace → nothing to destroy) is
-        // how the declared `run:` reaches the pane as `initial_input`.
+        // how the declared `run:` reaches the pane as a typed `PaneStartCommand`.
         let plan = LayoutReconciler.plan(
             layout: FirstRunSeed.projectLayout,
             workspace: nil,

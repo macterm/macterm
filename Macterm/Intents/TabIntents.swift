@@ -5,9 +5,9 @@ private let logger = Logger(subsystem: appBundleID, category: "TabIntents")
 
 /// Open a tab in a project, optionally running a command in it.
 ///
-/// The command is spawn-time `initial_input` — the layout `run:` path, the same
-/// one `macterm tab new --run` takes — not a paste into a shell that is already
-/// up. That is what lets it run through the user's own login shell with their
+/// The command is a typed `PaneStartCommand` — the layout `run:` path, the
+/// same one `macterm tab new --run` takes — not a paste into a shell that is
+/// already up. That is what lets it run through the user's own login shell with their
 /// full environment, and it means the command must tokenize in whatever shell
 /// they use.
 struct NewMactermTabIntent: AppIntent {
@@ -53,7 +53,7 @@ struct NewMactermTabIntent: AppIntent {
         guard let tabID = ctx.appState.createTab(
             projectID: target.id,
             projects: ctx.projectStore.projects,
-            command: trimmed?.isEmpty == false ? trimmed : nil
+            command: trimmed.flatMap { $0.isEmpty ? nil : .typed($0) }
         ),
             let tab = ctx.appState.workspaces[target.id]?.tabs.first(where: { $0.id == tabID })
         else {

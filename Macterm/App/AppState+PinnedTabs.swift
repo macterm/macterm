@@ -223,7 +223,7 @@ extension AppState {
 
     /// Rebuild an unloaded record's live tab from its declaration — a
     /// pure-spawn reconcile plan (no live workspace → nothing to destroy),
-    /// so declared `run:` commands launch via `initial_input`.
+    /// so declared `run:` commands start as typed `PaneStartCommand`s.
     private func loadPinnedTab(_ record: PinnedTabRecord) {
         logger.info("loadPinnedTab: restoring \(record.id, privacy: .public) from declaration")
         guard let tab = buildDeclaredPinnedTab(record) else { return }

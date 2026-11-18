@@ -716,7 +716,7 @@ struct ControlHandlerTests {
         #expect(newPane.sessionSlug == "target-project")
         // The declared command reaches the new tab's pane (spawns via
         // initial_input when the surface is created).
-        #expect(newPane.command == "btop")
+        #expect(newPane.start == .typed("btop"))
     }
 
     @Test(arguments: ["tab.new", "pane.split"], [false, true])
@@ -807,7 +807,7 @@ struct ControlHandlerTests {
             child = try #require(sourceTab.splitRoot.allPanes().first { $0.id.uuidString == info.id })
             #expect(workspace.recencyOrder() == recency)
         }
-        #expect(child.command == "echo child")
+        #expect(child.start == .typed("echo child"))
         #expect(warmed == [child.id])
         #expect(selections == 0)
         #expect(workspace.activeTabID == selectedTabID)
@@ -1111,7 +1111,7 @@ struct ControlHandlerTests {
         #expect(tab.splitRoot.allPanes().count == 2)
         let newID = try #require(UUID(uuidString: newInfo.id))
         let newPane = try #require(tab.splitRoot.findPane(id: newID))
-        #expect(newPane.command == "yes")
+        #expect(newPane.start == .typed("yes"))
 
         let bogus = await handler.handle(request("pane.split", args: ControlArgs(direction: "sideways")))
         #expect(bogus.error?.code == .badRequest)

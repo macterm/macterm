@@ -475,19 +475,26 @@ enum CustomPaletteActions {
                     appState.presentToast(String(localized: "No pane to run beside"))
                     return
                 }
-                var env = CustomPaletteEnvironment.make(projectName: nil, projectDirectory: nil, exports: exports)
-                if let command { env[CustomPaletteScript.commandVariable] = CustomPaletteScript.script(command) }
+                let env = CustomPaletteEnvironment.make(projectName: nil, projectDirectory: nil, exports: exports)
+                let start = command.map(PaneStartCommand.wrapped)
                 let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero)
                 if cwd != nil {
                     guard let directory = directory(operand, base: PinnedTabs.fallbackRoot, appState: appState) else { return }
-                    appState.splitPane(pane.id, direction: direction, projectID: projectID, env: env, newPaneWorkingDirectory: directory)
+                    appState.splitPane(
+                        pane.id,
+                        direction: direction,
+                        projectID: projectID,
+                        command: start,
+                        env: env,
+                        newPaneWorkingDirectory: directory
+                    )
                 } else {
                     appState.splitPane(
                         pane.id,
                         direction: direction,
                         projectID: projectID,
                         projectDirectory: PinnedTabs.fallbackRoot,
-                        command: nil,
+                        command: start,
                         env: env
                     )
                 }
@@ -497,16 +504,12 @@ enum CustomPaletteActions {
                 appState.presentToast(String(localized: "No project to run in"))
                 return
             }
-            var env = CustomPaletteEnvironment.make(
+            let env = CustomPaletteEnvironment.make(
                 projectName: project.name,
                 projectDirectory: project.isRemote ? nil : project.path,
                 exports: exports
             )
-            // A local pane runs it before its shell, untyped
-            // (`CustomPaletteLaunch`). A remote pane is ssh, whose environment
-            // stays on this Mac, so there it is typed for the host's shell.
-            let typed: String? = project.isRemote ? command : nil
-            if !project.isRemote, let command { env[CustomPaletteScript.commandVariable] = CustomPaletteScript.script(command) }
+            let start = command.map(PaneStartCommand.wrapped)
             if cwd != nil {
                 // A `cwd:` is a directory on this Mac, where every listing
                 // runs. A remote project's terminals are on the host.
@@ -520,17 +523,18 @@ enum CustomPaletteActions {
                         pane.id,
                         direction: .auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero),
                         projectID: projectID,
+                        command: start,
                         env: env,
                         newPaneWorkingDirectory: directory
                     )
                 } else {
-                    appState.createTab(projectID: projectID, projects: projects, workingDirectory: directory, env: env)
+                    appState.createTab(projectID: projectID, projects: projects, workingDirectory: directory, command: start, env: env)
                 }
                 return
             }
             switch place {
             case .tab:
-                appState.createTab(projectID: projectID, projects: projects, command: typed, env: env)
+                appState.createTab(projectID: projectID, projects: projects, command: start, env: env)
             case .split:
                 if let pane = appState.focusedPane(for: projectID) {
                     appState.splitPane(
@@ -538,11 +542,11 @@ enum CustomPaletteActions {
                         direction: .auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero),
                         projectID: projectID,
                         projectDirectory: project.path,
-                        command: typed,
+                        command: start,
                         env: env
                     )
                 } else {
-                    appState.createTab(projectID: projectID, projects: projects, command: typed, env: env)
+                    appState.createTab(projectID: projectID, projects: projects, command: start, env: env)
                 }
             }
         case .copy:

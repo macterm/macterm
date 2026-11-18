@@ -88,7 +88,7 @@ struct ControlArgs: Codable, Equatable {
     var name: String?
     /// Also select/activate what was created (`project.create`).
     var select: Bool?
-    /// Command to run: spawned via `initial_input` in new panes
+    /// Command to run: a typed `PaneStartCommand` in new panes
     /// (`tab.new`, `pane.split`, `grid`), typed into the live shell for
     /// `pane.run`.
     var run: String?

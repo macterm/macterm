@@ -16,8 +16,8 @@ import Foundation
 /// but the wiring. See `AppState+FirstRun.swift`.
 enum FirstRunSeed {
     /// The bundled CLI's tutorial verb. Bare words, no path and no quoting:
-    /// a pane's `run:` is TYPED into the user's login shell (libghostty
-    /// `initial_input`), so it must tokenize identically in bash, zsh, fish
+    /// a pane's `run:` is TYPED into the user's login shell (a typed
+    /// `PaneStartCommand`), so it must tokenize identically in bash, zsh, fish
     /// AND nushell — which plain words do and little else reliably does.
     /// `EnvironmentSetup` has already put `Resources/bin` on the pane's PATH.
     /// It also keeps the seeded `run:` in `pinned.yaml` readable for the
@@ -98,10 +98,10 @@ enum FirstRunSeed {
     }
 
     /// The home project's single tab. Declared rather than built by hand
-    /// because `Pane.command` is `let`-bound at init: going through the
-    /// reconciler is how the tutorial becomes the pane's spawn-time
-    /// `initial_input` instead of text typed at a prompt that may not exist
-    /// yet.
+    /// because `Pane.start` is `let`-bound at init: going through the
+    /// reconciler is how the tutorial becomes the pane's typed
+    /// `PaneStartCommand` instead of text typed at a prompt that may not
+    /// exist yet.
     static var projectLayout: LayoutFile {
         LayoutFile(
             name: projectName,

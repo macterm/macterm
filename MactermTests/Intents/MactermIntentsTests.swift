@@ -286,10 +286,10 @@ struct MactermIntentsTests {
 
         let tab = try #require(appState.workspaces[project.id]?.tabs.last)
         let pane = try #require(tab.splitRoot.allPanes().first)
-        // `Pane.command` is the layout `run:` / libghostty `initial_input`
+        // The command is a typed `PaneStartCommand`, the layout `run:`
         // path, not a paste — trimmed, because a trailing space in a Shortcuts
         // text field is invisible.
-        #expect(pane.command == "npm run dev")
+        #expect(pane.start == .typed("npm run dev"))
     }
 
     @Test
@@ -304,7 +304,7 @@ struct MactermIntentsTests {
         _ = try await intent.perform()
 
         let pane = try #require(appState.workspaces[project.id]?.tabs.last?.splitRoot.allPanes().first)
-        #expect(pane.command == nil)
+        #expect(pane.start == nil)
     }
 
     @Test

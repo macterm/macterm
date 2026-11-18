@@ -89,10 +89,10 @@ struct SurfaceRegistryTests {
 
     @Test
     func a_view_types_the_command_only_on_its_first_build() {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID(), command: "echo hi")
+        let pane = Pane(projectPath: "/tmp", projectID: UUID(), start: .typed("echo hi"))
         let first = registry.makeView(for: pane)
         let second = registry.makeView(for: pane)
-        #expect(first.command == "echo hi")
-        #expect(second.command == nil)
+        #expect(first.start == .typed("echo hi"))
+        #expect(second.start == nil)
     }
 }

@@ -106,7 +106,7 @@ struct LayoutSerializerTests {
         let ws = Workspace(id: UUID(), projectPath: "/proj")
         ModelWriter.tabSetTree(
             ws.tabs[0],
-            root: .pane(Pane(projectPath: "/proj", projectID: ws.id, command: "btop")),
+            root: .pane(Pane(projectPath: "/proj", projectID: ws.id, start: .typed("btop"))),
             focusedPaneID: ws.tabs[0].focusedPaneID
         )
 
@@ -182,12 +182,12 @@ struct LayoutSerializerTests {
         let tree = SplitNode.split(SplitBranch(
             direction: .vertical,
             ratio: 0.4,
-            first: .pane(Pane(projectPath: root, projectID: ws.id, command: "npm run dev")),
+            first: .pane(Pane(projectPath: root, projectID: ws.id, start: .typed("npm run dev"))),
             second: .pane(Pane(projectPath: root, projectID: ws.id))
         ))
         ModelWriter.tabSetTree(ws.tabs[0], root: tree, focusedPaneID: ws.tabs[0].focusedPaneID)
 
-        let layout = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: root, liveCommand: { $0.command })
+        let layout = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: root, liveCommand: { $0.start?.text })
         try store.write(ProjectFile(name: "proj", path: root, tabs: layout.tabs), projectName: "proj")
         let loaded = try #require(try store.loadFull(forProjectPath: root))
 

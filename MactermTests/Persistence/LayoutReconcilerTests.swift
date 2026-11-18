@@ -19,7 +19,7 @@ struct LayoutReconcilerTests {
 
     /// Run the reconciler with a stubbed live-command lookup. Unit tests have no
     /// live surface, so by default we model each pane's *live* command as the
-    /// one it was constructed with (`Pane.command`) — i.e. "the pane is
+    /// one it was constructed with (`Pane.start`) — i.e. "the pane is
     /// currently running what it was spawned with." Tests exercising idle /
     /// exited processes pass their own `liveCommand`. `liveShellName` models the
     /// basename of the shell an idle pane is running (default: the pane's
@@ -29,7 +29,7 @@ struct LayoutReconcilerTests {
         workspace: Workspace?,
         projectRoot: String,
         projectID: UUID,
-        liveCommand: @escaping (Pane) -> String? = { $0.command },
+        liveCommand: @escaping (Pane) -> String? = { $0.start?.text },
         liveShellName: @escaping (Pane) -> String? = { $0.shell.map { ($0 as NSString).lastPathComponent } }
     ) -> LayoutReconciler.Plan {
         LayoutReconciler.plan(
@@ -68,7 +68,7 @@ struct LayoutReconcilerTests {
     @Test
     func identical_layout_keeps_all_panes_and_destroys_nothing() throws {
         let pid = UUID()
-        let dev = Pane(projectPath: "/proj/api", projectID: pid, command: "npm run dev")
+        let dev = Pane(projectPath: "/proj/api", projectID: pid, start: .typed("npm run dev"))
         let shell = Pane(projectPath: "/proj", projectID: pid)
         let ws = workspace(projectID: pid, root: .split(SplitBranch(
             direction: .horizontal, ratio: 0.6,
@@ -95,7 +95,7 @@ struct LayoutReconcilerTests {
     @Test
     func only_ratio_differs_reuses_panes_without_destruction() throws {
         let pid = UUID()
-        let dev = Pane(projectPath: "/proj", projectID: pid, command: "npm run dev")
+        let dev = Pane(projectPath: "/proj", projectID: pid, start: .typed("npm run dev"))
         let shell = Pane(projectPath: "/proj", projectID: pid)
         let ws = workspace(projectID: pid, root: .split(SplitBranch(
             direction: .horizontal, ratio: 0.5,
@@ -124,8 +124,8 @@ struct LayoutReconcilerTests {
     @Test
     func changed_run_respawns_only_that_pane() throws {
         let pid = UUID()
-        let dev = Pane(projectPath: "/proj", projectID: pid, command: "npm run dev")
-        let test = Pane(projectPath: "/proj", projectID: pid, command: "npm test")
+        let dev = Pane(projectPath: "/proj", projectID: pid, start: .typed("npm run dev"))
+        let test = Pane(projectPath: "/proj", projectID: pid, start: .typed("npm test"))
         let ws = workspace(projectID: pid, root: .split(SplitBranch(
             direction: .vertical, ratio: 0.5,
             first: .pane(dev), second: .pane(test)
@@ -152,7 +152,7 @@ struct LayoutReconcilerTests {
     @Test
     func moved_pane_with_same_identity_survives_structural_edit() throws {
         let pid = UUID()
-        let dev = Pane(projectPath: "/proj/api", projectID: pid, command: "npm run dev")
+        let dev = Pane(projectPath: "/proj/api", projectID: pid, start: .typed("npm run dev"))
         let shell = Pane(projectPath: "/proj", projectID: pid)
         // Live: dev is `first`. Declared: dev is `second` (and direction flipped).
         let ws = workspace(projectID: pid, root: .split(SplitBranch(
@@ -177,8 +177,8 @@ struct LayoutReconcilerTests {
     @Test
     func extra_live_pane_is_flagged_for_destruction() throws {
         let pid = UUID()
-        let dev = Pane(projectPath: "/proj", projectID: pid, command: "npm run dev")
-        let extra = Pane(projectPath: "/proj", projectID: pid, command: "htop")
+        let dev = Pane(projectPath: "/proj", projectID: pid, start: .typed("npm run dev"))
+        let extra = Pane(projectPath: "/proj", projectID: pid, start: .typed("htop"))
         let ws = workspace(projectID: pid, root: .split(SplitBranch(
             direction: .horizontal, ratio: 0.5,
             first: .pane(dev), second: .pane(extra)
@@ -289,7 +289,7 @@ struct LayoutReconcilerTests {
     @Test
     func unmatched_live_tab_is_closed() throws {
         let pid = UUID()
-        let keep = Pane(projectPath: "/proj", projectID: pid, command: "npm run dev")
+        let keep = Pane(projectPath: "/proj", projectID: pid, start: .typed("npm run dev"))
         let goneShell = Pane(projectPath: "/proj", projectID: pid)
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(keep), focusedPaneID: keep.id, customTitle: "Dev")
         let tabB = TerminalTab(id: UUID(), splitRoot: .pane(goneShell), focusedPaneID: goneShell.id, customTitle: "Scratch")
@@ -318,7 +318,7 @@ struct LayoutReconcilerTests {
         // command nil) does NOT match a declared `run: btop` — it's destroyed
         // and a fresh pane is spawned to run btop again.
         let pid = UUID()
-        let stale = Pane(projectPath: "/proj", projectID: pid, command: "btop")
+        let stale = Pane(projectPath: "/proj", projectID: pid, start: .typed("btop"))
         let ws = workspace(projectID: pid, root: .pane(stale))
 
         let file = try layout("""
@@ -334,7 +334,7 @@ struct LayoutReconcilerTests {
         let newPanes = plan.tabs[0].root.allPanes()
         #expect(newPanes.count == 1)
         #expect(newPanes[0].id != stale.id)
-        #expect(newPanes[0].command == "btop")
+        #expect(newPanes[0].start == .typed("btop"))
     }
 
     @Test
@@ -342,7 +342,7 @@ struct LayoutReconcilerTests {
         // Counterpart: a pane actually running its declared command matches and
         // is kept untouched.
         let pid = UUID()
-        let live = Pane(projectPath: "/proj", projectID: pid, command: "btop")
+        let live = Pane(projectPath: "/proj", projectID: pid, start: .typed("btop"))
         let ws = workspace(projectID: pid, root: .pane(live))
 
         let file = try layout("""

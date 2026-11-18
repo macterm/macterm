@@ -194,7 +194,7 @@ struct FilesPaletteScopeTests {
         FilesPaletteActions.openInSplit(src, isDirectory: true, project: project, appState: state, projects: context.projectStore.projects)
         let pane = try #require(state.focusedPane(for: project.id))
         #expect(pane.projectPath == ProjectPath.normalizedForStorage(src.path(percentEncoded: false)))
-        #expect(pane.command == nil)
+        #expect(pane.start == nil)
     }
 
     @Test
