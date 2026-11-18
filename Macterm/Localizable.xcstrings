@@ -2666,7 +2666,7 @@
         }
       }
     },
-    "Connection lost" : {
+    "Connection Lost" : {
       "comment" : "The badge of a remote pane whose connection stopped or failed",
       "localizations" : {
         "ko" : {
@@ -7622,22 +7622,6 @@
         }
       }
     },
-    "Project icon" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 아이콘"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "项目图标"
-          }
-        }
-      }
-    },
     "Projects" : {
       "comment" : "Command category\nSettings pane",
       "localizations" : {
@@ -9106,6 +9090,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索已存储的密码"
+          }
+        }
+      }
+    },
+    "Secure Input" : {
+      "comment" : "The title of the lock badge of a pane while secure keyboard input is on",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보안 입력"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全输入"
           }
         }
       }

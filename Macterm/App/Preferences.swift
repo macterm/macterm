@@ -367,10 +367,6 @@ final class Preferences {
 
     // MARK: - Sidebar icons
 
-    var projectIconSymbol: String {
-        didSet { Keys.projectIconSymbol.write(projectIconSymbol, to: defaults) }
-    }
-
     var tabIconSymbol: String {
         didSet { Keys.tabIconSymbol.write(tabIconSymbol, to: defaults) }
     }
@@ -662,7 +658,7 @@ final class Preferences {
         didSet { Keys.copyModeKeymap.write(copyModeKeymap, to: defaults) }
     }
 
-    /// Sentinel for "no icon" — sidebar rows skip the leading glyph when set.
+    /// Sentinel for "no icon" — tab rows skip the leading glyph when set.
     static let noIcon = "none"
     /// Sentinels for "show 1-based top-down position" — sidebar rows render a number glyph.
     /// Each variant picks a different SF Symbols container (or plain text) around the digit.
@@ -681,20 +677,6 @@ final class Preferences {
     ]
 
     /// Curated SF Symbols offered in Settings — keeps users from typing invalid names.
-    static let projectIconChoices: [String] = [
-        noIcon,
-        numberIconCircleFill,
-        numberIconCircle,
-        numberIconSquareFill,
-        numberIconSquare,
-        numberIconPlain,
-        "folder",
-        "folder.fill",
-        "briefcase",
-        "shippingbox",
-        "cube",
-        "hammer",
-    ]
     static let tabIconChoices: [String] = [
         noIcon,
         numberIconCircleFill,
@@ -1052,7 +1034,6 @@ final class Preferences {
             quickTerminalPosition = nil
         }
         activeProjectID = Keys.activeProjectID.readStored(defaults).flatMap(UUID.init)
-        projectIconSymbol = Keys.projectIconSymbol.read(defaults)
         tabIconSymbol = Keys.tabIconSymbol.read(defaults)
         sidebarIconSize = Keys.sidebarIconSize.read(defaults)
         showAgentIcons = Keys.showAgentIcons.read(defaults)
@@ -1246,7 +1227,6 @@ final class Preferences {
         static let quickTerminalPositionY = PreferenceStorageKey("macterm.quickTerminal.positionY", default: 0.0)
         /// Stored as the UUID string; absent means no selection.
         static let activeProjectID = PreferenceStorageKey("macterm.activeProjectID", default: "")
-        static let projectIconSymbol = PreferenceStorageKey("macterm.sidebar.projectIcon", default: "folder")
         static let tabIconSymbol = PreferenceStorageKey("macterm.sidebar.tabIcon", default: "terminal")
         static let sidebarIconSize = PreferenceStorageKey("macterm.sidebar.iconSize", default: SidebarIconSize.medium)
         static let showAgentIcons = PreferenceStorageKey("macterm.sidebar.showAgentIcons", default: true)

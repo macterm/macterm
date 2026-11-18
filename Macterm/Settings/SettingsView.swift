@@ -1254,7 +1254,6 @@ private struct NotificationPermissionBanner: View {
 private struct AppearanceSettings: View {
     // Seeded from / written back through `Preferences` (see GeneralSettings) —
     // not `@AppStorage`, which would bind to the banned `UserDefaults.standard`.
-    @State private var projectIconSymbol: String = Preferences.shared.projectIconSymbol
     @State private var tabIconSymbol: String = Preferences.shared.tabIconSymbol
     @State private var sidebarIconSize: String = Preferences.shared.sidebarIconSize.rawValue
     @State private var showAgentIcons: Bool = Preferences.shared.showAgentIcons
@@ -1385,13 +1384,6 @@ private struct AppearanceSettings: View {
                 }
                 .disabled(!peekSidebarWhenHidden)
                 .padding(.leading, 16)
-
-                Picker("Project icon", selection: $projectIconSymbol) {
-                    ForEach(Preferences.projectIconChoices, id: \.self) { name in
-                        iconPickerLabel(name).tag(name)
-                    }
-                }
-                .onChange(of: projectIconSymbol) { _, v in Preferences.shared.projectIconSymbol = v }
 
                 Picker("Tab icon", selection: $tabIconSymbol) {
                     ForEach(Preferences.tabIconChoices, id: \.self) { name in

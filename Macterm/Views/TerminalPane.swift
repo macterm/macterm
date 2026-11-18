@@ -23,6 +23,8 @@ struct TerminalPane: View {
     private var appState: AppState?
     @Environment(\.paneHost)
     private var host
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         // This window's view of the pane: its own search, copy mode and
@@ -78,7 +80,7 @@ struct TerminalPane: View {
             .overlay(alignment: .topTrailing) {
                 // The pane's badges, one row in the trailing corner, in this
                 // order from the left: Read-Only, Copy Mode, Outdated, Zoomed,
-                // Reconnecting or Connection lost, then the lock. The Zoomed pill is here too, not
+                // Reconnecting or Connection Lost, then the lock. The Zoomed pill is here too, not
                 // on the tab: a zoomed pane is the only pane on screen, and one
                 // row cannot overlap itself.
                 HStack(spacing: 6) {
@@ -126,23 +128,9 @@ struct TerminalPane: View {
                     // badge for every reason, and a click does nothing. While
                     // a try runs it says so; the app tries again by itself,
                     // and a key connects at once.
-                    switch pane.remoteLinkBadge {
-                    case .reconnecting:
-                        StatusPill(title: String(
-                            localized: "Reconnecting",
-                            comment: "The badge of a remote pane while a try to connect again runs"
-                        )) {
-                            ProgressView().controlSize(.mini)
-                        }
-                    case .lost:
-                        StatusPill(title: String(
-                            localized: "Connection lost",
-                            comment: "The badge of a remote pane whose connection stopped or failed"
-                        )) {
-                            Image(systemName: "network.slash")
-                        }
-                    case nil:
-                        EmptyView()
+                    if let badge = pane.remoteLinkBadge {
+                        RemoteLinkPill(badge: badge)
+                            .transition(.opacity)
                     }
                     // Secure-input badge: the OS is shielding keystrokes for
                     // this pane's password prompt (or the global toggle).
@@ -151,7 +139,12 @@ struct TerminalPane: View {
                         SecureInputBadge()
                     }
                 }
+                .modifier(PanePillRow())
                 .padding(8)
+                // The row's place in the corner animates too, so that no
+                // badge jumps when the remote-link badge comes or goes.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .animation(reduceMotion ? nil : PaletteMotion.animation, value: pane.remoteLinkBadge)
             }
         }
         .background {
@@ -185,18 +178,63 @@ private struct LinkHoverBanner: View {
     }
 }
 
-/// Lock badge shown while secure keyboard input is active for the focused
-/// pane (`macos-secure-input-indication`).
-private struct SecureInputBadge: View {
+/// The glass pills of one badge row share one `GlassEffectContainer`, so
+/// that they sample what is behind them as one.
+private struct PanePillRow: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *), WindowAppearance.glassSupported {
+            GlassEffectContainer(spacing: 0) { content }
+        } else {
+            content
+        }
+    }
+}
+
+/// The badge of a remote pane whose connection is lost. One pill for both
+/// states, so that a change of state animates in place.
+struct RemoteLinkPill: View {
+    let badge: Pane.RemoteLinkBadge
+
     var body: some View {
-        Image(systemName: "lock.fill")
-            .font(.caption)
-            .foregroundStyle(MactermTheme.fgMuted)
-            .padding(5)
-            .background(MactermTheme.bg, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MactermTheme.border))
-            .allowsHitTesting(false)
-            .help("Secure keyboard input is active")
+        StatusPill(title: title(of: badge), otherTitles: Pane.RemoteLinkBadge.allCases.map(title(of:))) {
+            switch badge {
+            case .reconnecting:
+                ProgressView().controlSize(.mini)
+            case .lost:
+                Image(systemName: "network.slash")
+            }
+        }
+    }
+
+    private func title(of badge: Pane.RemoteLinkBadge) -> String {
+        switch badge {
+        case .reconnecting:
+            String(
+                localized: "Reconnecting",
+                comment: "The badge of a remote pane while a try to connect again runs"
+            )
+        case .lost:
+            String(
+                localized: "Connection Lost",
+                comment: "The badge of a remote pane whose connection stopped or failed"
+            )
+        }
+    }
+}
+
+/// Lock badge shown while secure keyboard input is active for the focused
+/// pane (`macos-secure-input-indication`), in the chrome of the other badges.
+struct SecureInputBadge: View {
+    var body: some View {
+        StatusPill(title: String(
+            localized: "Secure Input",
+            comment: "The title of the lock badge of a pane while secure keyboard input is on"
+        )) {
+            Image(systemName: "lock.fill")
+        }
+        // The pill takes no clicks, so AppKit shows no tooltip. VoiceOver
+        // reads this hint after the title.
+        .accessibilityHint(Text("Secure keyboard input is active"))
     }
 }
 
