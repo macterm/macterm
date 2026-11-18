@@ -78,9 +78,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     private static let reconnectTries = 12
     private static let reconnectWait: Duration = .milliseconds(500)
-    /// How long input that came before the first attach waits for the shell
-    /// to show that it started. A shell with no OSC 133 marks (a plain `sh`)
-    /// gets the input after this time.
+    /// The longest time that `heldInput` waits for the shell after an
+    /// attach. A shell with no OSC 133 marks (a plain `sh`) gets the input
+    /// after this time.
     static let shellStartWait: Duration = .seconds(2)
 
     let name: String
@@ -92,17 +92,26 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// A lost link is tried again (a local server that restarted). A remote\n    /// pane's driver connects again itself, with the app's
     /// backoff.
     private let reconnects: Bool
-    private let shellStartWait: Duration
+    private let startWait: Duration
 
     private let lock = NSLock()
     private var channel: PaneChannel?
     private var task: Task<Void, Never>?
     private var stopped = false
-    /// Input that came before the first channel (a layout's `run:`), sent
-    /// when the shell started (`hold`). Over 1 MiB the rest is dropped.
+    /// Input that came before the first channel. Over 1 MiB the rest is
+    /// dropped. At the first attach it becomes `heldInput`.
     private var pendingInput = Data()
     private var attached = false
-    private var hold = Hold.beforeAttach
+    /// Input from before the first attach: a layout's `run:` (libghostty's
+    /// `initial_input`) and keys typed while the pane connects. The pty
+    /// echoes input at once, so input sent at the attach of a new shell
+    /// shows before the login lines and the prompt, and again after them.
+    /// It therefore waits until the shell reads input: an OSC 133 mark after
+    /// the prompt, or a run, which the session parses (`events.zig`). With
+    /// no sign it goes after `startWait`. It goes once. Input after the
+    /// attach (terminal replies, keys) does not wait: a shell can query the
+    /// terminal before its first prompt.
+    private var heldInput = Data()
     private var holdTimer: Task<Void, Never>?
     /// A claim that came before the first attach.
     private var claimPending = false
@@ -114,7 +123,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         wantsForeground: Bool,
         wantsTty: Bool = false,
         reconnects: Bool = true,
-        shellStartWait: Duration = PaneSession.shellStartWait,
+        startWait: Duration = PaneSession.shellStartWait,
         host: any PaneSessionHost,
         connect: @escaping Connect
     ) {
@@ -123,7 +132,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         self.wantsForeground = wantsForeground
         self.wantsTty = wantsTty
         self.reconnects = reconnects
-        self.shellStartWait = shellStartWait
+        self.startWait = startWait
         self.host = host
         self.connect = connect
     }
@@ -158,7 +167,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// the first attach or for the shell is returned by `takePendingInput`.
     func sendInput(_ data: Data) {
         lock.lock()
-        if !attached || hold == .holding {
+        if !attached {
             if pendingInput.count + data.count <= 1 << 20 { pendingInput.append(data) }
             lock.unlock()
             return
@@ -186,7 +195,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     func takePendingInput() -> Data {
         lock.lock()
         defer { lock.unlock() }
-        let kept = pendingInput
+        let kept = heldInput + pendingInput
+        heldInput = Data()
         pendingInput = Data()
         return kept
     }
@@ -334,12 +344,15 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             case let .exit(exit):
                 host.paneExited(code: exit.code, signal: exit.signal)
                 return true
-            case .mark,
-                 .status:
-                // The shell started: a shell sends no mark and no run
-                // before its prompt.
+            case let .mark(mark) where mark.kind != .prompt:
+                // After the prompt mark the shell may not own the tty yet,
+                // and the pty would echo the input before the prompt.
                 releaseHeldInput()
-            case .state,
+            case .status:
+                // A program runs and reads its input.
+                releaseHeldInput()
+            case .mark,
+                 .state,
                  .resumed,
                  .title,
                  .other:
@@ -383,18 +396,21 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         lock.unlock()
     }
 
-    /// An attach went out. Input from before the first attach waits for the
-    /// shell (`Hold`). True when a claim waited too.
+    /// An attach went out. The input from before the first attach becomes
+    /// `heldInput`. True when a claim waited too.
     private func markAttached(_ channel: PaneChannel) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        if !attached {
+            heldInput = pendingInput
+            pendingInput = Data()
+        }
         attached = true
-        if hold == .beforeAttach { hold = pendingInput.isEmpty ? .released : .holding }
-        if hold == .holding {
-            // Each attach waits again: a channel that ended took no input.
+        if !heldInput.isEmpty {
+            // The wait starts again at each attach: the input went nowhere.
             holdTimer?.cancel()
-            holdTimer = Task { [self, shellStartWait] in
-                try? await Task.sleep(for: shellStartWait)
+            holdTimer = Task { [self, startWait] in
+                try? await Task.sleep(for: startWait)
                 guard !Task.isCancelled else { return }
                 releaseHeldInput()
             }
@@ -403,38 +419,23 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return claimPending
     }
 
-    /// Sends the input that waited for the shell, once. It is queued before
-    /// the hold ends, so later input cannot pass it. A session that stopped
-    /// sends nothing: `takePendingInput` gives the input back.
+    /// Sends `heldInput`, once. A stopped session sends nothing, and
+    /// `takePendingInput` gives the input back.
     private func releaseHeldInput() {
         lock.lock()
         defer { lock.unlock() }
-        guard hold == .holding, !stopped, let channel else { return }
-        hold = .released
+        guard !heldInput.isEmpty, !stopped, let channel else { return }
         holdTimer?.cancel()
         holdTimer = nil
-        let held = pendingInput
-        pendingInput = Data()
+        let held = heldInput
+        heldInput = Data()
         output.async { [host] in
-            do { try channel.sendInput(held) } catch {
+            do { try channel.sendInput(held) } catch ProtocolFrame.FrameError.tooLarge {
+                logger.info("pane \(self.name, privacy: .public): held input too large")
+            } catch {
                 logger.info("pane \(self.name, privacy: .public): held input not sent: \(String(describing: error), privacy: .public)")
                 host.paneInputUndelivered(held)
             }
         }
-    }
-
-    /// Input from before the first attach: a layout's `run:` (libghostty's
-    /// `initial_input`) and keys typed while the pane connects. A new shell
-    /// prints its login lines and its prompt after it starts, and the pty
-    /// echoes input at once. Input sent at the attach therefore shows before
-    /// the prompt, and again after it. So the input waits for a sign that
-    /// the shell started: an OSC 133 mark or a run state from the session,
-    /// which parses the marks (`events.zig`), or `shellStartWait` with no
-    /// sign. A session that is at its prompt when this client greets sends a
-    /// `prompt` mark at once, so a running session gives no wait.
-    private enum Hold {
-        case beforeAttach
-        case holding
-        case released
     }
 }

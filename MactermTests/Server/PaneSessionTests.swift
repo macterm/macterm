@@ -181,7 +181,7 @@ struct PaneSessionTests {
     /// A shell that prints its prompt mark after a delay, as a login shell
     /// does, then reads one line.
     private static let markedShell =
-        "sleep 0.5; printf '\\033]133;A\\007$ '; read l; printf 'got-%s' \"$l\"; read m; printf 'twice-%s' \"$m\"; sleep 30"
+        "sleep 0.3; printf '\\033]133;A\\007$ \\033]133;B\\007'; read l; printf 'got-%s' \"$l\"; read m; printf 'twice-%s' \"$m\"; sleep 30"
 
     @Test
     func input_before_the_attach_waits_for_the_prompt_mark() async throws {
@@ -191,7 +191,7 @@ struct PaneSessionTests {
                 name: "ps-mark-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
-                shellStartWait: .seconds(30),
+                startWait: .seconds(30),
                 host: host,
                 connect: { try await server.connect() }
             )
@@ -230,7 +230,7 @@ struct PaneSessionTests {
                 name: name,
                 launch: nil,
                 wantsForeground: false,
-                shellStartWait: .seconds(30),
+                startWait: .seconds(30),
                 host: second,
                 connect: { try await server.connect() }
             )
@@ -254,13 +254,40 @@ struct PaneSessionTests {
                     env: []
                 ),
                 wantsForeground: false,
-                shellStartWait: .milliseconds(300),
+                startWait: .milliseconds(300),
                 host: host,
                 connect: { try await server.connect() }
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
             try await host.waitFor { $0.screen.contains("got-hi") }
+            session.stop()
+        }
+    }
+
+    @Test
+    func input_after_the_attach_does_not_wait() async throws {
+        // Terminal replies come after the attach: a shell can query the
+        // terminal before its first prompt and wait for the answer.
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: "ps-reply-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf up-%s ok; read l; printf got-%s \"$l\"; sleep 30"],
+                    env: []
+                ),
+                wantsForeground: false,
+                startWait: .seconds(30),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("early\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("up-ok") }
+            session.sendInput(Data("reply\n".utf8))
+            try await host.waitFor { $0.screen.contains("got-reply") }
             session.stop()
         }
     }
@@ -274,14 +301,14 @@ struct PaneSessionTests {
                 name: "ps-once-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
-                shellStartWait: .seconds(1),
+                startWait: .milliseconds(1500),
                 host: host,
                 connect: { try await server.connect() }
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
             try await host.waitFor { $0.screen.contains("got-hi") }
-            try await Task.sleep(for: .seconds(1.5))
+            try await Task.sleep(for: .seconds(2))
             #expect(!host.snapshot().screen.contains("twice-"))
             session.stop()
         }
@@ -300,7 +327,7 @@ struct PaneSessionTests {
                     env: []
                 ),
                 wantsForeground: false,
-                shellStartWait: .seconds(1),
+                startWait: .seconds(1),
                 host: host,
                 connect: { try await server.connect() }
             )
