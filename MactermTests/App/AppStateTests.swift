@@ -168,8 +168,8 @@ struct AppStateTests {
         #expect(state.nonLeaderPaneIDs(in: tab).isEmpty)
     }
 
-    /// One pane that two windows draw. Window `a` is key, and its surface
-    /// attached first, so it leads.
+    /// One pane that two windows draw. Window `a` is key, but the session
+    /// made `b`'s surface lead, as when the user typed there.
     private struct TwoWindows {
         let project: Project
         let tab: TerminalTab
@@ -195,42 +195,43 @@ struct AppStateTests {
         state.noteKeyWindow(a)
         let forA = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
         let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
-        session.attach([forA, forB])
+        session.attach([forB, forA])
         session.claimed = []
         return TwoWindows(project: p, tab: tab, pane: pane, a: a, b: b, forA: forA, forB: forB)
     }
 
     @Test
-    func a_second_windows_surface_that_the_session_does_not_make_leader_is_blurred_there() throws {
+    func a_surface_that_the_session_does_not_make_leader_is_blurred_in_its_window() throws {
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let two = try paneInTwoWindows(state, session)
 
         #expect(state.isMirrored(two.pane))
-        #expect(state.isLeader(two.pane))
-        #expect(!two.forB.isLeader)
-        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.a.id).isEmpty)
-        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.b.id) == [two.pane.id])
+        #expect(two.forB.isLeader)
+        #expect(!state.isLeader(two.pane), "the reference surface is the first window's")
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.a.id) == [two.pane.id])
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.b.id).isEmpty)
     }
 
     @Test
-    func focusing_a_pane_in_a_second_window_claims_leadership_for_that_surface() throws {
+    func focusing_a_pane_claims_leadership_for_its_surface_in_that_window() throws {
         // Focus is how the user says "drive the size from here".
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let two = try paneInTwoWindows(state, session)
 
-        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.b.id)
-
-        #expect(session.claimed == [two.forB.id])
-        #expect(two.forB.isLeader)
-        #expect(!two.forA.isLeader)
-        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.a.id) == [two.pane.id])
-
-        // And back again: leadership follows focus, it does not latch.
         state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.a.id)
+
+        #expect(session.claimed == [two.forA.id])
         #expect(two.forA.isLeader)
         #expect(!two.forB.isLeader)
+        #expect(state.nonLeaderPaneIDs(in: two.tab, window: two.b.id) == [two.pane.id])
+
+        // And back again in the other window: leadership does not latch.
+        state.noteKeyWindow(two.b)
+        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.b.id)
+        #expect(two.forB.isLeader)
+        #expect(!two.forA.isLeader)
     }
 
     @Test
@@ -240,13 +241,13 @@ struct AppStateTests {
         let two = try paneInTwoWindows(state, session)
 
         session.deliverable = false
-        state.claimSessionLeadership(two.forB)
-        #expect(two.forA.isLeader)
-        #expect(!two.forB.isLeader)
+        state.claimSessionLeadership(two.forA)
+        #expect(two.forB.isLeader)
+        #expect(!two.forA.isLeader)
 
         session.deliverable = true
-        state.claimSessionLeadership(two.forB)
-        #expect(two.forB.isLeader)
+        state.claimSessionLeadership(two.forA)
+        #expect(two.forA.isLeader)
     }
 
     @Test
@@ -257,16 +258,13 @@ struct AppStateTests {
         let session = FakeSessionLeads(state)
         let two = try paneInTwoWindows(state, session)
 
-        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forB)
         #expect(session.claimed.isEmpty)
 
-        state.claimSessionLeadership(two.forB)
-        state.claimSessionLeadership(two.forB)
-        state.claimSessionLeadership(two.forB)
-        #expect(session.claimed == [two.forB.id])
-
         state.claimSessionLeadership(two.forA)
-        #expect(session.claimed == [two.forB.id, two.forA.id])
+        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id])
     }
 
     @Test
@@ -278,19 +276,19 @@ struct AppStateTests {
         let two = try paneInTwoWindows(state, session)
         session.answers = false
 
-        state.claimSessionLeadership(two.forB)
-        state.claimSessionLeadership(two.forB)
-        #expect(session.claimed == [two.forB.id])
+        state.claimSessionLeadership(two.forA)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id])
 
         // The channel ended before the answer: the claim may be lost, so the
         // next focus sends it again.
-        two.forB.receiveLead(nil)
-        state.claimSessionLeadership(two.forB)
-        #expect(session.claimed == [two.forB.id, two.forB.id])
+        two.forA.receiveLead(nil)
+        state.claimSessionLeadership(two.forA)
+        #expect(session.claimed == [two.forA.id, two.forA.id])
     }
 
     @Test
-    func focusing_a_remote_pane_in_a_second_window_claims_as_a_local_one_does() throws {
+    func focusing_a_remote_pane_claims_as_a_local_one_does() throws {
         // A remote pane is a session of the host's server, and the claim is a
         // message on its channel, never input. So it claims as a local pane.
         let state = makeAppState()
@@ -298,11 +296,11 @@ struct AppStateTests {
         let two = try paneInTwoWindows(state, session, path: "me@box:/srv")
         #expect(two.pane.isRemote)
 
-        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.b.id)
+        state.focusPane(two.pane.id, projectID: two.project.id, windowID: two.a.id)
 
-        #expect(session.claimed == [two.forB.id])
-        #expect(two.forB.isLeader)
-        #expect(!two.forA.isLeader)
+        #expect(session.claimed == [two.forA.id])
+        #expect(two.forA.isLeader)
+        #expect(!two.forB.isLeader)
     }
 
     @Test
@@ -312,7 +310,6 @@ struct AppStateTests {
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let two = try paneInTwoWindows(state, session)
-        session.attach([two.forB, two.forA])
 
         state.unregisterWindow(two.b)
         #expect(session.claimed.isEmpty)
