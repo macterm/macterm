@@ -31,7 +31,7 @@ enum RoamingLink {
         /// `LinkTransport.isQuiet`.
         var quiet: @Sendable () -> Void
         /// The host answers after a gap (`LinkTransport.answersAfter`).
-        var answered: @Sendable () -> Void = {}
+        var answered: @Sendable () -> Void
     }
 
     static func open(

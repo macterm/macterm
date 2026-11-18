@@ -236,7 +236,7 @@ struct RemoteHostsTests {
             #expect(kill(server, SIGSTOP) == 0)
             defer { kill(server, SIGCONT) }
             #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
-            try await Task.sleep(for: .milliseconds(LinkTransport.answersAfter + 1500))
+            try await Task.sleep(for: .milliseconds(LinkTransport.answersAfter + 500))
             #expect(fixture.hosts.quietDestinations.isEmpty)
             #expect(pane.isRemoteLinkLost)
             #expect(fixture.answered.isEmpty)
@@ -244,12 +244,14 @@ struct RemoteHostsTests {
             // The server goes on. The host answers once, within about one
             // keepalive.
             #expect(kill(server, SIGCONT) == 0)
-            deadline = Date().addingTimeInterval(10)
+            let resumed = Date()
+            deadline = resumed.addingTimeInterval(10)
             while fixture.answered.isEmpty, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(100))
             }
             #expect(fixture.answered == ["box"])
             let answered = Date()
+            #expect(answered.timeIntervalSince(resumed) < 5)
 
             // What the sweep does then: a try with no key. The pane attaches
             // within about 5 s, and its session replays its screen.

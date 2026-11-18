@@ -1743,7 +1743,7 @@ final class AppState {
         // A login may ask, and its sheet brings the app to the front. A wake
         // or a network change while the user is in another app waits for the
         // activation, which is a trigger too.
-        // A host's own event (a login, a quiet link that hears the host) is
+        // A host's own event (a login, a roaming link that hears the host after a gap) is
         // about that host and asks nothing more: it runs at once.
         let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
         guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }

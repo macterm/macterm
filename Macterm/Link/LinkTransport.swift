@@ -34,10 +34,9 @@ final class LinkTransport: @unchecked Sendable {
     }
 
     /// A packet after this long (awake) with no packet says that the host
-    /// answers again: the host missed at least one keepalive
-    /// (`LinkStream.keepalive`), with 2 s for delay. It is shorter than
-    /// `quietAfter`, so a pane that went lost in a short freeze of the host
-    /// gets the sign too.
+    /// answers again. It is one keepalive (`LinkStream.keepalive`) and 2 s
+    /// for delay, shorter than `quietAfter`. One lost keepalive also gives
+    /// the sign. The host answers then, so a try of a lost pane can work.
     static let answersAfter: Int64 = LinkStream.keepalive + 2000
 
     static func answersAgain(now: Int64, lastRx: Int64) -> Bool {
@@ -61,8 +60,7 @@ final class LinkTransport: @unchecked Sendable {
     /// comes again. It says only that the state changed: read `isQuiet`.
     private var onQuiet: (@Sendable () -> Void)?
     /// Runs on the thread when a packet comes after `answersAfter` with no
-    /// packet. It costs nothing while the host is down: only a packet from
-    /// the host starts it.
+    /// packet.
     private var onAnswered: (@Sendable () -> Void)?
     /// Under `lock`.
     private var quiet = false
@@ -215,8 +213,10 @@ final class LinkTransport: @unchecked Sendable {
                 _ = Darwin.read(wake.read, &drain, drain.count)
             }
             if fds[1].revents & Int16(POLLIN) != 0 {
-                if readUDP(&buffer, now: after) { reportAnswered() }
+                let answered = readUDP(&buffer, now: after)
+                // Quiet first, so the host is not quiet when it answers.
                 reportQuiet(Self.isQuiet(now: after, lastRx: lastRx))
+                if answered { reportAnswered() }
             }
             if fds[2].revents & Int16(POLLIN) != 0, !readPump() {
                 break

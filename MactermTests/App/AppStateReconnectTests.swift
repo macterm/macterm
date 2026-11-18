@@ -37,7 +37,7 @@ struct AppStateReconnectTests {
         #expect(retry.sessions.isEmpty)
         #expect(retry.anyLost)
 
-        // The quiet link of `box` hears it again: its pane tries now.
+        // The roaming link of `box` hears it after a gap: its pane tries now.
         let answered = AppState.reconnectSessions([box, other], trigger: .hostAnswered, destination: "box", policy: &policy, now: now)
         #expect(answered.sessions == [box.sessionName])
 

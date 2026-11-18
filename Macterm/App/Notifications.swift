@@ -17,7 +17,7 @@ extension Notification.Name {
     /// attach with no login: `AppState.reconnectDroppedRemotePanes`.
     static let remoteHostDidConnect = Notification.Name("MactermRemoteHostDidConnect")
     /// A roaming link heard its host after a gap (`object` is the
-    /// destination, `RemoteHosts`, `LinkTransport.answersAfter`). The lost panes of that host try now,
+    /// destination, `RemoteHosts`). The lost panes of that host try now,
     /// with no backoff: `AppState.reconnectDroppedRemotePanes`.
     static let remoteHostDidAnswer = Notification.Name("MactermRemoteHostDidAnswer")
     /// A pane's surface received its first real size (`object` is the

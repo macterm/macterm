@@ -628,11 +628,9 @@ final class RemoteHosts {
     }
 
     /// The roaming link of this generation heard its host after a gap. A
-    /// pane that went lost in the gap (one on the ssh standby, whose ping
-    /// fails after about 6 s, or a try that failed on this link) has no
-    /// other sign that the host is back: without this, its backoff (up to
-    /// 60 s) decides. The gap is shorter than `LinkTransport.quietAfter`, so
-    /// a short freeze of the host gives the sign too.
+    /// pane that went lost in the gap (on the ssh standby, or a try that
+    /// failed on this link) has no other sign that the host is back.
+    /// Without this, its backoff (up to 60 s) decides.
     private func roamingAnswered(_ destination: String, generation: Int) {
         guard roamingGeneration[destination] == generation, transports[destination] != nil else { return }
         logger.info("link: host=\(destination, privacy: .public) answers again")
