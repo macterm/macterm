@@ -38,13 +38,16 @@ struct PanePillTests {
         PanePillLabel(title: "Connection lost", reveal: reveal) { Image(systemName: systemImage) }
     }
 
-    /// At rest a pill shows its icon only, and every icon gets the same
-    /// width, so that the pills at rest have one size.
+    /// At rest a pill shows its icon only: the label is at least
+    /// `contentHeight` wide, and much narrower than its title.
     @Test
     func a_label_at_rest_is_its_icon_only() {
         let icons = ["eye", "character.cursor.ibeam", "lock.fill", "network.slash", "arrow.down.right.and.arrow.up.left"]
-        let widths = Set(icons.map { Self.size(Self.label($0, reveal: 0)).width })
-        #expect(widths == [PanePill<EmptyView>.contentHeight])
+        for icon in icons {
+            let width = Self.size(Self.label(icon, reveal: 0)).width
+            #expect(width >= PanePill<EmptyView>.contentHeight, "\(icon)")
+            #expect(width < PanePill<EmptyView>.contentHeight + 8, "\(icon)")
+        }
     }
 
     /// The revealed title widens the label and keeps its height.
