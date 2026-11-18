@@ -15,20 +15,20 @@ has changes that are not committed or no prebuilt exists.
 
 ## Commands
 
-`session`, `server`, `connect`, `proxy`, `version` and `help`. `zmx help`
-lists `connect`, `version` and `help`. The hidden `__session` is the session
-process that the server spawns, and `__schema` writes the protocol
-files. The server has no v1 code: v1's verbs (`attach`, `list`, `get`,
+`server`, `connect`, `proxy` and `version`. The hidden `__session` is the
+session process that the server spawns, and `__create-session` makes a
+session for tests. Every other word goes to the `macterm` CLI in
+`src/cli/` (design/011): `help` and `status` for now. The server has no v1 code: v1's verbs (`attach`, `list`, `get`,
 `set`, `clear`, `history`, `send`, `kill`) and its daemon (`__daemon`) are
 gone (design/007 §6).
 
 ## The v2 session
 
-`zmx session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`
-asks the server to start a v2 session process (`src/session.zig`), and
+`zmx __create-session [--cols N] [--rows N] [--cwd DIR] <name> [--]
+[command...]` asks the server to start a v2 session process (`src/session.zig`), and
 returns when its socket accepts connections. The session process is the
 shell's parent, and it speaks the v2 frames (`src/protocol/`). Tests run the
-verb; `help` does not list it.
+verb.
 
 - **Socket.** `<dir>/<name>`, mode 0600. `<dir>` is `MACTERM_RUNTIME_DIR`,
   else `$XDG_RUNTIME_DIR/macterm`, else `$TMPDIR/macterm` on macOS, else

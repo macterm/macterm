@@ -3,7 +3,7 @@
     "arguments": [
       "status"
     ],
-    "method": null,
+    "method": "ping",
     "responses": {
       "status": {
         "data": {
@@ -23,7 +23,7 @@
       "status",
       "--json"
     ],
-    "method": null,
+    "method": "ping",
     "responses": {
       "status": {
         "data": {
@@ -42,7 +42,7 @@
     "arguments": [
       "status"
     ],
-    "method": null,
+    "method": "ping",
     "responses": {
       "status": {
         "data": {
@@ -1786,7 +1786,7 @@
     "arguments": [
       "status"
     ],
-    "method": null,
+    "method": "ping",
     "responses": {
       "status": {
         "error": {
@@ -1801,7 +1801,7 @@
     "arguments": [
       "status"
     ],
-    "method": null,
+    "method": "ping",
     "responses": {
       "status": {
         "error": {

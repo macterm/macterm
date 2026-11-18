@@ -39,7 +39,7 @@ responsible_for() {
 
   # A session with no command runs $SHELL, so the session's argv ends at the
   # session name.
-  "$ZMX" session resp-test
+  "$ZMX" __create-session resp-test
   local session shell i=0
   session=$(pgrep -f "__session resp-test$")
   [[ -n "$session" ]]
