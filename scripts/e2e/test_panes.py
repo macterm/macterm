@@ -27,6 +27,29 @@ def test_split_creates_a_second_live_pane(app, fresh_tab, live_pane):
     )
 
 
+def test_a_split_pane_shell_gets_no_resize_from_the_split(app, fresh_tab, live_pane):
+    """A new split pane starts its shell at its final size, after the split
+    animation. A shell that started during the slide got one SIGWINCH for
+    each step of the grid, and zsh drew its first lines again at a wrong
+    place (issue 0426: `Last login: Wed Noaaaaa`). The command sets a WINCH
+    trap as soon as the shell reads it, and the pane must get no resize."""
+    nonce = uuid.uuid4().hex[:8]
+    command = (
+        f'/bin/sh -c "w() {{ printf resized-%s {nonce}; echo; }}; trap w WINCH; '
+        f'sleep 2; printf settled-%s {nonce}; echo"'
+    )
+    app.cli("pane", "split", "--direction", "right", "--run", command, "--session", live_pane["session"])
+    panes = app.panes(tab=fresh_tab["id"])
+    new = next(pane for pane in panes if pane["id"] != live_pane["id"])
+
+    def finished():
+        text = app.pane_text(pane=new["id"])
+        return text if text and f"settled-{nonce}" in text else None
+
+    text = wait_for(finished, timeout=60, message="the split pane's command to finish")
+    assert f"resized-{nonce}" not in text
+
+
 def test_grid_makes_two_by_two(app, fresh_tab, live_pane):
     app.cli("grid", "2x2", "--session", live_pane["session"])
     panes = app.panes(tab=fresh_tab["id"])

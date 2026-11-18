@@ -629,9 +629,37 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// from a stray updateNSView during SwiftUI teardown).
     private var isDestroyed = false
 
+    /// True while a split animation slides this pane in (`AnimatedSplitView`).
+    /// The surface, and with it the shell, waits for the pane's final size.
+    /// The slide resizes the pane in each frame, and a shell that starts
+    /// during it gets a SIGWINCH for each step of the grid. zsh draws its
+    /// prompt again after each one, at the cursor position that the old width
+    /// gave, while the surface has already reflowed for the new width. The
+    /// first lines of the pane were then garbled (`Last login: Wed Noaaaaa`).
+    private(set) var holdsSurfaceCreation = false
+
+    /// Holds the surface creation until `releaseSurfaceCreation()`. No effect
+    /// on a view that has a surface: its shell runs already.
+    func holdSurfaceCreation() {
+        guard surface == nil, !isDestroyed else { return }
+        holdsSurfaceCreation = true
+    }
+
+    /// Ends the hold and creates the surface at the current size, if a
+    /// creation waited for it.
+    func releaseSurfaceCreation() {
+        guard holdsSurfaceCreation else { return }
+        holdsSurfaceCreation = false
+        if pendingSurfaceCreation { createSurface() }
+    }
+
     func createSurface() {
         guard !isDestroyed else { return }
         guard surface == nil, let app = GhosttyApp.shared.app else { return }
+        guard !holdsSurfaceCreation else {
+            pendingSurfaceCreation = true
+            return
+        }
         let backingSize = convertToBacking(bounds).size
         guard backingSize.width > 0, backingSize.height > 0 else {
             pendingSurfaceCreation = true
