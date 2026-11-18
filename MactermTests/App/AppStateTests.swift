@@ -306,7 +306,8 @@ struct AppStateTests {
     @Test
     func closing_the_window_whose_surface_leads_sends_no_claim() throws {
         // When the leader leaves, the session makes the next client lead and
-        // tells it. The app sends nothing for a window that is not key.
+        // tells it. A closed window that was not key makes the app send
+        // nothing.
         let state = makeAppState()
         let session = FakeSessionLeads(state)
         let two = try paneInTwoWindows(state, session)
@@ -1974,6 +1975,31 @@ struct AppStateTests {
 
         await killed.settle(expecting: names.count)
         #expect(await killed.names == names)
+    }
+
+    @Test
+    func a_session_that_a_pending_pinned_record_names_is_not_killed_and_needs_no_confirmation() async throws {
+        // A pinned record that waits to load reattaches its session later:
+        // a close that releases a pane on that session must leave it.
+        let killed = KilledSessions()
+        let state = makeAppState()
+        state.sessionClient = recordingClient(into: killed)
+        state.paneNeedsConfirmClose = { _ in true }
+        let p = seedProject(state)
+        let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
+        #expect(state.closeNeedsConfirmation([pane]))
+
+        state.pendingPinnedLiveRestores[UUID()] = TabSnapshot(
+            id: UUID(),
+            customTitle: nil,
+            focusedPaneID: nil,
+            splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionName: pane.sessionName))
+        )
+
+        #expect(!state.closeNeedsConfirmation([pane]))
+        state.releaseSessions([pane])
+        await killed.settleExpectingNone()
+        #expect(await killed.names.isEmpty)
     }
 
     @Test

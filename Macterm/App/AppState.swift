@@ -672,8 +672,8 @@ final class AppState {
         claimLeadership(forPanesIn: tab, in: key.id)
     }
 
-    /// Claim for each pane's surface of a tab in window `windowID`. One pane
-    /// is one session, so each surface claims its own session.
+    /// Claim for each pane's surface of a tab in window `windowID`. Each
+    /// surface claims its own session.
     private func claimLeadership(forPanesIn tab: TerminalTab, in windowID: UUID?) {
         let host = Self.host(windowID)
         for pane in tab.splitRoot.allPanes() {
@@ -1880,9 +1880,8 @@ final class AppState {
     }
 
     /// Every pane attached to a session, across ALL workspaces (pinned
-    /// included) — the shared traversal behind `claimedSessionNames` and
-    /// `releaseSessions`. Workspace panes only: these are the panes that KEEP
-    /// a session alive. A window's extra surfaces never do.
+    /// included). Workspace panes only: a window's extra surfaces are not
+    /// panes.
     private func allLivePanes() -> [Pane] {
         workspaces.values
             .flatMap(\.tabs)
@@ -1896,17 +1895,16 @@ final class AppState {
     }
 
     /// Every client of a session that Macterm knows of: the surfaces of the
-    /// live panes. A second window's surface is a real client, but NOT one
-    /// that retains a session: only a pane keeps one. The first surfaces come
-    /// first. A count of what the model knows, never of what the session has.
+    /// live panes, a second window's surfaces included. The first surfaces
+    /// come first. A count of what the model knows, never of what the session has.
     private func allClients() -> [PaneSurface] {
         let panes = allLivePanes()
         let all = panes.map { SurfaceRegistry.shared.surfaces(of: $0) }
         return all.map { $0[0] } + all.flatMap { $0.dropFirst() }
     }
 
-    /// Kill these panes' sessions. One pane is one session, so a session
-    /// stays only when a pinned record that waits to load names it.
+    /// Kill these panes' sessions, except a session that a pinned record that
+    /// waits to load names.
     ///
     /// Callers still destroy the surfaces (`SurfaceRegistry.destroySurfaces`) themselves; this decides only the kill.
     func releaseSessions(_ panes: [Pane]) {
@@ -1916,7 +1914,7 @@ final class AppState {
         }
     }
 
-    // MARK: - Mirrored sessions and leadership (#345)
+    // MARK: - Clients of a session and leadership (#345)
 
     /// Every client of `sessionName`, first surfaces first.
     func clients(of sessionName: String) -> [PaneSurface] {
@@ -2027,8 +2025,9 @@ final class AppState {
     /// This is the ONE busy-close predicate. Every path that ends sessions —
     /// pane close, tab close, project remove, the sidebar's bulk
     /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
-    /// of the overloads below, so the tests' `paneNeedsConfirmClose` seam
-    /// reaches all of them.
+    /// of the overloads below. The raw `allPanes().contains(where:
+    /// \.needsConfirmClose)` ignores the retention, so it would warn about a
+    /// kill that the close does not do.
     func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
         let retained = pendingPinnedSessionNames()
         return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
@@ -2166,8 +2165,7 @@ final class AppState {
         guard !Project.isSynthetic(projectID) else { return }
         logger.debug("removeProject: \(projectID, privacy: .public)")
         if let ws = workspaces[projectID] {
-            // Project removed for good → its sessions die with it, unless a
-            // session is mirrored by a pane outside this project.
+            // Project removed for good → its sessions die with it.
             let removing = ws.tabs.flatMap { $0.splitRoot.allPanes() }
             releaseSessions(removing)
             for pane in removing {
@@ -2356,8 +2354,7 @@ final class AppState {
               let tab = ws.tabs.first(where: { $0.id == tabID })
         else { return }
         logger.debug("closeTab: \(tabID, privacy: .public) project=\(projectID, privacy: .public)")
-        // Tab closed for good → its panes' zmx sessions die with it, unless a
-        // session is mirrored by a pane in another tab or window.
+        // Tab closed for good → its panes' zmx sessions die with it.
         let closing = tab.splitRoot.allPanes()
         releaseSessions(closing)
         for pane in closing {
@@ -2976,11 +2973,9 @@ final class AppState {
             return
         }
         logger.debug("closePane: \(paneID, privacy: .public) project=\(projectID, privacy: .public)")
-        // Pane closed for good → its session dies with it, unless something
-        // else retains it. (The onlyPaneLeft path below re-releases
-        // via closeTab; killSession is a no-op on a missing session, so the
-        // overlap is harmless.) The pane is still in the tree here, which is
-        // why releaseSessions excludes the batch it is given.
+        // Pane closed for good → its session dies with it. (The onlyPaneLeft
+        // path below re-releases via closeTab; killSession is a no-op on a
+        // missing session, so the overlap is harmless.)
         if let closing = tab.splitRoot.findPane(id: paneID) {
             releaseSessions([closing])
         }
@@ -3206,9 +3201,7 @@ final class AppState {
         // Destroy surfaces only AFTER the new trees no longer reference them.
         // A layout-dropped pane is gone for good (no declared node claims it),
         // so its zmx session dies too — otherwise it would linger as a
-        // clients==0 daemon. Unless a pane elsewhere mirrors that session: a
-        // reconcile that drops one of two identical leaves must not kill the
-        // session the surviving one was just matched to.
+        // clients==0 daemon.
         releaseSessions(plan.panesToDestroy)
         for pane in plan.panesToDestroy {
             SurfaceRegistry.shared.destroySurfaces(of: pane)

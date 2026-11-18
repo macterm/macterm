@@ -77,9 +77,8 @@ extension AppState {
         return workspaces[projectID]?.tabs.first { $0.id == tabID }?.focusedPaneID
     }
 
-    /// Where an editor opened from `pane` lands: the real pane it stands for
-    /// in a workspace (itself, or the pane a mirror shows — #345), or a quick
-    /// terminal pane. nil for a pane in neither: a desktop widget's.
+    /// Where an editor opened from `pane` lands: the pane in a workspace, or
+    /// a quick terminal pane. nil for a pane in neither: a desktop widget's.
     private enum EditorAnchor {
         case workspace(projectID: UUID, pane: Pane)
         case quickTerminal(Pane)
@@ -115,8 +114,7 @@ extension AppState {
         let placement = textFilePlacement()
         let env = TextFileEditor.environment(path: path, line: line)
         let command = TextFileEditor.typedCommand
-        // The pane the user clicked, which for a mirror is not the real one:
-        // its own size is what they are looking at.
+        // The size of the pane's view picks the axis of the split.
         let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: clicked)?.bounds.size ?? .zero)
         switch anchor {
         case let .workspace(projectID, pane):

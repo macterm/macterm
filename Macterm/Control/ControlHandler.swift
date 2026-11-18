@@ -1589,7 +1589,6 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "pass either --session or --pane, not both")
         }
         if let session = args.session, !session.isEmpty {
-            // One pane is one session.
             for tab in workspace.tabs {
                 if let pane = tab.splitRoot.allPanes().first(where: { $0.sessionName == session }) {
                     return (tab, pane)
@@ -1701,7 +1700,7 @@ final class ControlHandler {
         }
     }
 
-    /// The live pane bound to each session name. One pane is one session.
+    /// The live pane bound to each session name.
     private func paneIDBySessionName() -> [String: String] {
         var table = appState.sessionAttachments().compactMapValues { $0.first?.pane.id.uuidString }
         // Desktop widget panes live outside every workspace; their sessions
