@@ -31,7 +31,9 @@ enum MactermTheme {
     @MainActor
     static var surface: Color { fgAlpha(0.08) }
     @MainActor
-    static var border: Color { fgAlpha(0.12) }
+    static var border: Color { Color(nsColor: nsBorder) }
+    @MainActor
+    static var nsBorder: NSColor { nsFg.withAlphaComponent(0.12) }
     @MainActor
     static var hover: Color { fgAlpha(0.06) }
     @MainActor

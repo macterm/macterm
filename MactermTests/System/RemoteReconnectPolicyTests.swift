@@ -59,6 +59,24 @@ struct RemoteReconnectPolicyTests {
     }
 
     @Test
+    func a_host_that_answers_again_lets_its_pane_try_at_once_and_back_off_from_the_start() {
+        var policy = RemoteReconnectPolicy()
+        var now = epoch
+        for delay in RemoteReconnectPolicy.backoff {
+            now += delay
+            policy.recordAttempt(pane, now: now)
+        }
+        // Deep in the backoff: the next try waits a minute.
+        #expect(!policy.shouldAttempt(pane, now: now + 1))
+        policy.hostAnswered(pane)
+        #expect(policy.shouldAttempt(pane, now: now + 1))
+        // A try that still fails waits the first step again, not a minute.
+        policy.recordAttempt(pane, now: now + 1)
+        #expect(!policy.shouldAttempt(pane, now: now + 5))
+        #expect(policy.shouldAttempt(pane, now: now + 6))
+    }
+
+    @Test
     func forget_clears_all_state_for_a_closed_pane() {
         var policy = RemoteReconnectPolicy()
         policy.recordAttempt(pane, now: epoch)

@@ -79,6 +79,12 @@ final class RemoteHosts {
             NotificationCenter.default.post(name: .remoteHostDidConnect, object: $0)
         }
 
+        /// A quiet roaming link hears its host again: the host answers. The
+        /// reconnect sweep tries the host's lost panes now, with no backoff.
+        var hostAnswered: @MainActor (String) -> Void = {
+            NotificationCenter.default.post(name: .remoteHostDidAnswer, object: $0)
+        }
+
         /// A pane became lost (its link stopped, or a try failed): the
         /// reconnect sweep runs now, so a try starts at once or is planned.
         var paneLost: @MainActor (String) -> Void = { _ in
@@ -619,7 +625,12 @@ final class RemoteHosts {
         guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
         let quiet = transport.isQuiet
         logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
+        let answersAgain = !quiet && quietDestinations.contains(destination)
         setQuiet(destination, quiet)
+        // A pane that went lost while the host was quiet (one on the ssh
+        // standby, or a try that failed on this link) has no other sign that
+        // the host is back: without this, its backoff (up to 60 s) decides.
+        if answersAgain { configuration.hostAnswered(destination) }
     }
 
     private func setQuiet(_ destination: String, _ quiet: Bool) {
