@@ -74,7 +74,7 @@ extension GhosttyConfigKey where Value == CUnsignedInt {
 
 extension GhosttyConfigKey where Value == String {
     /// An enum key, read as its ghostty tag name (`macos-hidden` → `never`),
-    /// or an optional `?[:0]const u8` key (`macos-custom-icon`). Both arrive
+    /// or an optional `?[:0]const u8` key (`title`). Both arrive
     /// as a bare NUL-terminated pointer — NOT a `ghostty_string_s`, whose
     /// `len` would stay 0. An unset optional is the case to watch: the
     /// getter writes a null pointer and still returns *true*, so the pointer

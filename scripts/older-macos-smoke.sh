@@ -115,7 +115,7 @@ say "macOS $VERSION, $(defaults read "$APP/Contents/Info.plist" CFBundleShortVer
 # kept only in memory, so `log show` after the fact can miss them. The stream
 # has every Macterm of this build; `icon_log` keeps only this run's.
 /usr/bin/log stream --style compact --level info --predicate \
-  "subsystem == \"$BUNDLE_ID\" AND (category BEGINSWITH \"AdaptiveIcon\" OR category == \"AppIconPresenter\")" \
+  "subsystem == \"$BUNDLE_ID\" AND category BEGINSWITH \"AdaptiveIcon\"" \
   > "$ROOT/icon.log" 2>&1 &
 LOG_PID=$!
 sleep 1

@@ -305,7 +305,7 @@ private struct TerminalSurface: NSViewRepresentable {
         guard !surface.isDestroyed else { return host }
         let scroll = surface.ensureScrollView()
         attach(scroll, to: host)
-        let view = scroll.surfaceView
+        let view = surface.ensureNSView()
         configure(view)
         // Defer surface creation until the view is actually in a window — the
         // Metal layer needs a non-zero size to initialize. The re-attach also
@@ -352,7 +352,7 @@ private struct TerminalSurface: NSViewRepresentable {
         guard !surface.isDestroyed else { return }
         let scroll = surface.ensureScrollView()
         attach(scroll, to: host)
-        let view = scroll.surfaceView
+        let view = surface.ensureNSView()
         configure(view)
 
         // Create the surface now if it's still pending (e.g. the view was
