@@ -213,6 +213,57 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_pane_lost_in_a_short_freeze_attaches_with_no_key_soon_after_the_host_answers() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host, roaming: true)
+            let pane = fixture.pane()
+            fixture.hosts.pane = { _ in pane }
+            let first = try await fixture.start(pane)
+            defer { first.stop() }
+            first.type("printf 'before-%s\\n' pause\n")
+            try await first.host.waitFor { $0.screen.contains("before-pause") }
+            var deadline = Date().addingTimeInterval(20)
+            while try await !fixture.attach(pane).link.isRoaming, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            #expect(fixture.answered.isEmpty)
+
+            // The host's server stops for less than `quietAfter`. The pane
+            // reports its link lost, as a driver does when the ping of the
+            // ssh standby fails (after about 6 s). The link never becomes
+            // quiet.
+            let server = try host.serverPID()
+            #expect(kill(server, SIGSTOP) == 0)
+            defer { kill(server, SIGCONT) }
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
+            try await Task.sleep(for: .milliseconds(LinkTransport.answersAfter + 1500))
+            #expect(fixture.hosts.quietDestinations.isEmpty)
+            #expect(pane.isRemoteLinkLost)
+            #expect(fixture.answered.isEmpty)
+
+            // The server goes on. The host answers once, within about one
+            // keepalive.
+            #expect(kill(server, SIGCONT) == 0)
+            deadline = Date().addingTimeInterval(10)
+            while fixture.answered.isEmpty, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(fixture.answered == ["box"])
+            let answered = Date()
+
+            // What the sweep does then: a try with no key. The pane attaches
+            // within about 5 s, and its session replays its screen.
+            fixture.hosts.reconnect([pane.sessionName])
+            let second = try await fixture.start(pane)
+            defer { second.stop() }
+            try await second.host.waitFor { $0.screen.contains("before-pause") }
+            #expect(!pane.isRemoteLinkLost)
+            #expect(Date().timeIntervalSince(answered) < 5)
+            #expect(fixture.answered == ["box"])
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_killed_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
         try await withSSHDHost { host in
             try await lostConnection(host, signal: "TERM", byKey: true)

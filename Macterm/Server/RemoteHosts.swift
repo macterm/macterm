@@ -79,8 +79,10 @@ final class RemoteHosts {
             NotificationCenter.default.post(name: .remoteHostDidConnect, object: $0)
         }
 
-        /// A quiet roaming link hears its host again: the host answers. The
-        /// reconnect sweep tries the host's lost panes now, with no backoff.
+        /// The roaming link hears its host after a gap of more than one
+        /// keepalive (`LinkTransport.answersAfter`): the host answers again.
+        /// The reconnect sweep tries the host's lost panes now, with no
+        /// backoff.
         var hostAnswered: @MainActor (String) -> Void = {
             NotificationCenter.default.post(name: .remoteHostDidAnswer, object: $0)
         }
@@ -588,6 +590,9 @@ final class RemoteHosts {
                     },
                     quiet: { [weak self] in
                         Task { @MainActor in self?.roamingQuiet(destination, generation: generation) }
+                    },
+                    answered: { [weak self] in
+                        Task { @MainActor in self?.roamingAnswered(destination, generation: generation) }
                     }
                 )
             )
@@ -619,12 +624,19 @@ final class RemoteHosts {
         guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
         let quiet = transport.isQuiet
         logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
-        let answersAgain = !quiet && quietDestinations.contains(destination)
         setQuiet(destination, quiet)
-        // A pane that went lost while the host was quiet (one on the ssh
-        // standby, or a try that failed on this link) has no other sign that
-        // the host is back: without this, its backoff (up to 60 s) decides.
-        if answersAgain { configuration.hostAnswered(destination) }
+    }
+
+    /// The roaming link of this generation heard its host after a gap. A
+    /// pane that went lost in the gap (one on the ssh standby, whose ping
+    /// fails after about 6 s, or a try that failed on this link) has no
+    /// other sign that the host is back: without this, its backoff (up to
+    /// 60 s) decides. The gap is shorter than `LinkTransport.quietAfter`, so
+    /// a short freeze of the host gives the sign too.
+    private func roamingAnswered(_ destination: String, generation: Int) {
+        guard roamingGeneration[destination] == generation, transports[destination] != nil else { return }
+        logger.info("link: host=\(destination, privacy: .public) answers again")
+        configuration.hostAnswered(destination)
     }
 
     private func setQuiet(_ destination: String, _ quiet: Bool) {
