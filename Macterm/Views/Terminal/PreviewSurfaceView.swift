@@ -9,12 +9,17 @@ import SwiftUI
 /// The surface is manual (`manual_io`): no pty, no shell, no session. Macterm
 /// feeds the text with `ghostty_surface_feed`. A write of the surface (a
 /// terminal reply) goes nowhere. Its userdata is nil, so each action of
-/// `GhosttyCallbacks` that needs a view returns early. It is not a
+/// `GhosttyCallbacks` that needs a view returns early, except the scrollbar
+/// action (see below). It is not a
 /// `GhosttyTerminalNSView`, so no tab, window, quit prompt or pane list counts
 /// it. `GhosttyApp` gives it each config reload (`liveSurfaces`). A toggle
 /// therefore applies to it at once. It takes the user's whole config, cursor
 /// style and blink included. The surface lives while the view is in a window.
-final class PreviewSurfaceView: NSView {
+///
+/// The scroll preview sits in a pane's own `SurfaceScrollView`, so it has the
+/// pane's overlay scrollbar. `GhosttyCallbacks` sends it the scrollbar action
+/// through `view(for:)`, because its userdata is nil.
+final class PreviewSurfaceView: NSView, ScrollbarSurface {
     enum Kind {
         /// Scrollback to scroll with the wheel or the trackpad. No cursor.
         case scroll
@@ -23,7 +28,6 @@ final class PreviewSurfaceView: NSView {
     }
 
     let kind: Kind
-    private static let cornerRadius: CGFloat = 6
     nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
     /// The cell of the cursor (0-based), which the preview sets itself.
     private var cursorCell = PreviewSurfaceGrid.Cell(column: 0, row: 0)
@@ -32,6 +36,33 @@ final class PreviewSurfaceView: NSView {
 
     static func allLiveViews() -> [PreviewSurfaceView] {
         liveViews.allObjects
+    }
+
+    /// The live preview that owns `surface`, if any.
+    static func view(for surface: ghostty_surface_t) -> PreviewSurfaceView? {
+        liveViews.allObjects.first { $0.surface == surface }
+    }
+
+    // MARK: - ScrollbarSurface
+
+    var scrollAccumulator = ScrollAccumulator()
+    var onScrollbarUpdate: ((UInt64, UInt64, UInt64) -> Void)?
+    /// Never called: the preview sends no pointer position, so libghostty
+    /// computes no pointer shape for it, and the pointer stays an arrow.
+    var onMouseShapeChange: ((NSCursor) -> Void)?
+
+    /// The offset of the last scrollbar action, nil before the first.
+    private var lastScrollbarOffset: UInt64?
+
+    func surfaceDidUpdateScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
+        onScrollbarUpdate?(total, offset, len)
+        // A pane's overlay scroller is hidden at rest, and the wheel goes to
+        // the surface, not to the scroll view. The preview shows the scroller
+        // when its rows first arrive and on each move, so that a user sees
+        // that it scrolls and where it is.
+        guard total > len, offset != lastScrollbarOffset else { return }
+        lastScrollbarOffset = offset
+        enclosingScrollView?.flashScrollers()
     }
 
     init(kind: Kind) {
@@ -66,7 +97,7 @@ final class PreviewSurfaceView: NSView {
             destroySurface()
             return
         }
-        createSurfaceIfReady()
+        createSurface()
         let sync: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.syncFocus() }
         }
@@ -96,10 +127,10 @@ final class PreviewSurfaceView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        if surface == nil { createSurfaceIfReady() } else { updateSize() }
+        if surface == nil { createSurface() } else { updateSize() }
     }
 
-    private func createSurfaceIfReady() {
+    func createSurface() {
         guard surface == nil, window != nil, let app = GhosttyApp.shared.app else { return }
         let backing = convertToBacking(bounds).size
         guard backing.width > 0, backing.height > 0 else { return }
@@ -141,15 +172,15 @@ final class PreviewSurfaceView: NSView {
     private func destroySurface() {
         if let surface { ghostty_surface_free(surface) }
         surface = nil
+        // A new surface starts with an empty accumulator.
+        scrollAccumulator = ScrollAccumulator()
+        lastScrollbarOffset = nil
     }
 
     private func updateSize() {
         guard let surface, let window else { return }
         let scale = Double(window.backingScaleFactor)
-        // libghostty installs the layer, so the corners are set on it here.
         layer?.contentsScale = CGFloat(scale)
-        layer?.cornerRadius = Self.cornerRadius
-        layer?.masksToBounds = true
         ghostty_surface_set_content_scale(surface, scale, scale)
         // Gated as every pane resize is (`SurfaceSizeGate`): a sliver would
         // reflow the rows into fragments.
@@ -255,19 +286,11 @@ final class PreviewSurfaceView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard kind == .scroll, let surface else {
+        guard kind == .scroll, surface != nil else {
             super.scrollWheel(with: event)
             return
         }
-        // This is the same as `GhosttyTerminalNSView.scrollWheel`. Precise
-        // deltas get the 2× of Ghostty.app. The core does the scrolling.
-        var x = event.scrollingDeltaX
-        var y = event.scrollingDeltaY
-        if event.hasPreciseScrollingDeltas {
-            x *= 2
-            y *= 2
-        }
-        ghostty_surface_mouse_scroll(surface, x, y, GhosttyTerminalNSView.scrollMods(for: event))
+        forwardScrollWheel(event)
     }
 }
 
@@ -343,13 +366,95 @@ enum PreviewSurfaceText {
     }
 }
 
-/// The SwiftUI host of a `PreviewSurfaceView`.
+/// The frame of a preview: the background of the user's terminal theme, the
+/// rounded corners with a 1 pt edge, and for the scroll preview a pane's
+/// `SurfaceScrollView`. The edge (`MactermTheme.nsBorder`) keeps a light
+/// theme's preview apart from the Settings group, whose fill is almost the
+/// same color.
+///
+/// A pane draws no default background (`background-default-transparent`):
+/// its window paints the theme color (`WindowAppearance`). The Settings
+/// window does not, so this view paints `GhosttyApp.backgroundColor`, opaque.
+/// It paints again on each `mactermConfigDidChange`, which a config reload, a
+/// new theme side and a change of the system appearance all post.
+///
+/// The pointer that enters the scroll preview shows its scroller.
+final class PreviewSurfaceContainer: NSView {
+    private static let cornerRadius: CGFloat = 6
+    let preview: PreviewSurfaceView
+    nonisolated(unsafe) private var configObserver: NSObjectProtocol?
+    private var hoverTracking: NSTrackingArea?
+
+    init(kind: PreviewSurfaceView.Kind) {
+        preview = PreviewSurfaceView(kind: kind)
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = Self.cornerRadius
+        layer?.masksToBounds = true
+        layer?.borderWidth = 1
+        let content: NSView = switch kind {
+        case .scroll: SurfaceScrollView(surfaceView: preview)
+        case .cursor: preview
+        }
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .mactermConfigDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.paintTheme() }
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    deinit {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+    }
+
+    override var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override func updateLayer() {
+        paintTheme()
+    }
+
+    private func paintTheme() {
+        layer?.backgroundColor = GhosttyApp.shared.backgroundColor.cgColor
+        layer?.borderColor = MactermTheme.nsBorder.cgColor
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        // Only the scroll preview has a scroller to show.
+        guard preview.kind == .scroll else { return }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        preview.enclosingScrollView?.flashScrollers()
+    }
+}
+
+/// The SwiftUI host of a preview.
 struct PreviewSurface: NSViewRepresentable {
     let kind: PreviewSurfaceView.Kind
 
-    func makeNSView(context _: Context) -> PreviewSurfaceView {
-        PreviewSurfaceView(kind: kind)
+    func makeNSView(context _: Context) -> PreviewSurfaceContainer {
+        PreviewSurfaceContainer(kind: kind)
     }
 
-    func updateNSView(_: PreviewSurfaceView, context _: Context) {}
+    func updateNSView(_: PreviewSurfaceContainer, context _: Context) {}
 }
