@@ -1049,6 +1049,15 @@ final class AppState {
     @ObservationIgnored
     var isAppActive: () -> Bool = { NSApp?.isActive ?? false }
 
+    /// Whether the key window draws a view of the pane now. Only the selected
+    /// tab of a window is in the view tree, so a background tab's pane is in
+    /// no window. This is a fact of the views, not of the model: when the
+    /// terminal window is not key, a tab selection changes only the window's
+    /// own choice, and the workspace's `activeTab` can name a tab that is not
+    /// on screen.
+    @ObservationIgnored
+    var paneIsInKeyWindow: (Pane) -> Bool = { SurfaceRegistry.shared.view(of: $0)?.window?.isKeyWindow == true }
+
     /// The two seams of the Dock badge (`AppState+BellBadge.swift`), injectable
     /// so tests can drive the feature set and read the label without the
     /// developer's real ghostty config or the hosting app's Dock tile. The
@@ -3482,14 +3491,16 @@ final class AppState {
         workspaces[projectID]?.activeTab?.markSeen()
     }
 
-    /// Marks the active tab seen when it holds `paneID` and the app is
-    /// active. Reads `isAppActive`, not `NSApp.isActive`: NSApp is nil during
-    /// init (`pollNow`) and in tests.
+    /// Marks the active tab seen when it holds `paneID`, the app is active,
+    /// and the key window draws the pane (`paneIsInKeyWindow`). Reads
+    /// `isAppActive`, not `NSApp.isActive`: NSApp is nil during init
+    /// (`pollNow`) and in tests.
     func markSeenIfActive(paneID: UUID, projectID: UUID) {
         guard isAppActive(),
               projectID == activeProjectID,
               let tab = workspaces[projectID]?.activeTab,
-              tab.splitRoot.findPane(id: paneID) != nil
+              let pane = tab.splitRoot.findPane(id: paneID),
+              paneIsInKeyWindow(pane)
         else { return }
         tab.markSeen()
     }

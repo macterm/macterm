@@ -33,8 +33,10 @@ extension AppState {
     /// at. Mirrors ghostty, where the key window's focused surface drops its
     /// bell on `windowDidBecomeKey`; Macterm's unit is the tab.
     func markActiveTabSeenOnActivation() {
-        guard let projectID = activeProjectID else { return }
-        workspaces[projectID]?.activeTab?.markSeen()
+        guard let projectID = activeProjectID,
+              let pane = workspaces[projectID]?.activeTab?.splitRoot.allPanes().first
+        else { return }
+        markSeenIfActive(paneID: pane.id, projectID: projectID)
     }
 
     /// Re-derive the badge from every tab in every workspace (the pinned

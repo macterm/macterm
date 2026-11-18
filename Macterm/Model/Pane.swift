@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+import os
+
+private let logger = Logger(subsystem: appBundleID, category: "Pane")
 
 /// A pane is the leaf of the split tree — one terminal surface.
 @MainActor @Observable
@@ -165,6 +168,9 @@ final class Pane: Identifiable {
     }
 
     func receiveAttention(_ flags: MactermProtocol.Attention) {
+        guard flags != attention else { return }
+        let text = "unseen=\(flags.unseen) failed=\(flags.failed) bell=\(flags.bell)"
+        logger.info("pane \(self.id, privacy: .public) attention: \(text, privacy: .public)")
         attention = flags
     }
 
@@ -174,6 +180,7 @@ final class Pane: Identifiable {
     func markSeen() {
         acknowledgeCommandCompletion()
         guard attention != MactermProtocol.Attention() else { return }
+        logger.info("pane \(self.id, privacy: .public) seen")
         attention = MactermProtocol.Attention()
         sendSeenToSession()
     }

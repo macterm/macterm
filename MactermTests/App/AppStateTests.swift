@@ -1132,6 +1132,7 @@ struct AppStateTests {
     @Test
     func the_active_tab_is_seen_only_while_the_app_is_active() throws {
         let state = makeAppState()
+        state.paneIsInKeyWindow = { _ in true }
         state.isAppActive = { false }
         let project = seedProject(state)
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
@@ -1143,6 +1144,24 @@ struct AppStateTests {
         state.isAppActive = { true }
         state.paneAttentionDidChange(paneID: pane.id)
         #expect(pane.attention == MactermProtocol.Attention())
+    }
+
+    /// The workspace's active tab can name a tab that the window does not
+    /// draw (a selection made while the window was not key). A pane that is
+    /// in no key window keeps its flags.
+    @Test
+    func a_pane_that_the_key_window_does_not_draw_is_not_seen() throws {
+        let state = makeAppState()
+        state.isAppActive = { true }
+        state.paneIsInKeyWindow = { _ in false }
+        let project = seedProject(state)
+        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        pane.receiveAttention(unseenFailure)
+
+        state.paneAttentionDidChange(paneID: pane.id)
+        state.markActiveTabSeenOnActivation()
+
+        #expect(pane.attention == unseenFailure)
     }
 
     /// The session keeps the flags across a quit: the saved file has none.

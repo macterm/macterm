@@ -114,6 +114,8 @@ struct BellBadgeAppStateTests {
         state.bellFeatures = { features }
         state.dockBadgeWriter = { recorder.labels.append($0) }
         state.isAppActive = { appActive }
+        // No views in tests: the active tab counts as drawn in the key window.
+        state.paneIsInKeyWindow = { _ in true }
         let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         return (state, recorder, project)
@@ -172,6 +174,8 @@ struct BellBadgeAppStateTests {
         #expect(pane.attention.bell)
         #expect(recorder.labels == ["1"])
 
+        // The app comes to the front.
+        state.isAppActive = { true }
         state.markActiveTabSeenOnActivation()
         state.syncDockBadge()
 
