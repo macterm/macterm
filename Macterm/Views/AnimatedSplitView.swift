@@ -573,9 +573,8 @@ struct AnimatedSplitView: View {
     /// present at appearance (see `settledIDs`), and for anything already
     /// settled.
     ///
-    /// A new pane (`pane`, with no surface yet) starts its shell only when
-    /// the slide is over (`GhosttyTerminalNSView.holdSurfaceCreation`), so
-    /// the shell gets one size and no resize while it draws its first lines.
+    /// A new pane (`pane`, with no surface yet) starts its shell when the
+    /// slide stops (`GhosttyTerminalNSView.holdSurfaceCreation`).
     private func settle(_ id: UUID, pane: Pane? = nil) {
         guard let settled = settledIDs, !settled.contains(id) else { return }
         guard let animation, let pane else {
@@ -591,11 +590,11 @@ struct AnimatedSplitView: View {
         } completion: {
             view.releaseSurfaceCreation()
         }
-        // A remount in the middle of the slide (a tab switch) can drop the
-        // completion. A pane must never stay without its shell.
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(SplitAnimation.duration * 3))
-            view.releaseSurfaceCreation()
+        // A pane must never stay without its shell, also if the completion
+        // does not come.
+        Task { @MainActor [weak view] in
+            try? await Task.sleep(for: .seconds(SplitAnimation.duration * 2))
+            view?.releaseSurfaceCreation()
         }
     }
 }
