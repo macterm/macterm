@@ -48,6 +48,19 @@ struct ProjectsSettingsTests {
     }
 
     @Test
+    func a_check_that_stops_adds_nothing() async {
+        let projects = store()
+        let outcome = await Task {
+            await ProjectsSettings.createProject(from: listing(path: "box:~/api"), in: projects) { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return nil
+            }
+        }.value
+        #expect(outcome == .cancelled)
+        #expect(projects.projects.isEmpty)
+    }
+
+    @Test
     func a_file_with_no_path_checks_nothing() async {
         let projects = store()
         var asked = false

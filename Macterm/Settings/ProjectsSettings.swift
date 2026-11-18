@@ -25,6 +25,8 @@ struct ProjectsSettings: View {
     @State private var deleteFailure: String?
     /// The layout whose Create Project checks its remote folder now.
     @State private var checkingLayout: URL?
+    /// The check of `checkingLayout`. Settings closes: it stops.
+    @State private var folderCheck: Task<Void, Never>?
     /// Why Create Project added nothing.
     @State private var createFailure: String?
 
@@ -95,6 +97,7 @@ struct ProjectsSettings: View {
                             layout: layout,
                             hasProject: hasProject(for: layout),
                             isChecking: checkingLayout == layout.id,
+                            canCreate: checkingLayout == nil,
                             onCreateProject: { createProject(from: layout) },
                             onRemove: { layoutPendingDeletion = layout }
                         )
@@ -117,6 +120,11 @@ struct ProjectsSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { reloadLayouts() }
+        .onDisappear {
+            folderCheck?.cancel()
+            folderCheck = nil
+            checkingLayout = nil
+        }
         // Reflect a Save Layout made from this pane (or elsewhere while it's
         // open) — a save can create a file the list doesn't know about yet.
         .onChange(of: appState.layoutFilesVersion) { _, _ in reloadLayouts() }
@@ -210,21 +218,30 @@ struct ProjectsSettings: View {
     }
 
     /// Add a project for this file's declaration and select it. The new
-    /// project opens with the default workspace; the file's layout takes
+    /// project opens with the default workspace. The file's layout takes
     /// effect through Apply Layout (the row menu beside it), never on
-    /// selection. A remote path is added only when its folder is on the host
-    /// (`RemoteHosts.refusal`, 0366), as in New Remote Project; a refusal
-    /// shows in an alert and adds nothing.
+    /// selection. A remote path gets the folder check of New Remote Project
+    /// first (`RemoteHosts.refusal`, 0366). A refusal shows in an alert and
+    /// adds nothing. One check runs at a time. Settings closes: the check
+    /// stops and adds nothing.
     private func createProject(from layout: ProjectFileStore.Listing) {
-        guard checkingLayout == nil else { return }
+        guard folderCheck == nil, let path = layout.declaredPath else { return }
+        guard ProjectPath.isRemote(path) else {
+            appState.selectProject(Self.addProject(from: layout, path: path, in: projectStore))
+            return
+        }
         checkingLayout = layout.id
-        Task {
+        folderCheck = Task {
             let outcome = await Self.createProject(from: layout, in: projectStore)
+            // `onDisappear` cleared the state, and a new check can own it now.
+            guard !Task.isCancelled else { return }
             checkingLayout = nil
+            folderCheck = nil
             switch outcome {
             case let .created(project): appState.selectProject(project)
             case let .refused(line): createFailure = line
-            case .noPath: break
+            case .noPath,
+                 .cancelled: break
             }
         }
     }
@@ -236,10 +253,12 @@ struct ProjectsSettings: View {
         case refused(String)
         /// The file declares no path.
         case noPath
+        /// The task stopped during the check.
+        case cancelled
     }
 
-    /// The model step of Create Project. `refusal` is nil when the path can
-    /// be added; tests answer it.
+    /// Create Project without the view. `refusal` gives nil when Macterm can
+    /// add the path. Tests answer it.
     static func createProject(
         from layout: ProjectFileStore.Listing,
         in store: ProjectStore,
@@ -247,12 +266,17 @@ struct ProjectsSettings: View {
     ) async -> CreateOutcome {
         guard let path = layout.declaredPath else { return .noPath }
         if let line = await refusal(path) { return .refused(line) }
+        guard !Task.isCancelled else { return .cancelled }
+        return .created(addProject(from: layout, path: path, in: store))
+    }
+
+    private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project {
         // `name:` is optional in a project file; fall back to the filename,
         // which is the slug of a name Macterm itself wrote.
         let declared = layout.declaredName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = (declared?.isEmpty == false ? declared : nil)
             ?? layout.url.deletingPathExtension().lastPathComponent
-        return .created(store.create(name: name, path: path))
+        return store.create(name: name, path: path)
     }
 
     private func confirmDeletion() {
@@ -405,9 +429,11 @@ private struct ProjectRow: View {
 private struct LayoutRow: View {
     let layout: ProjectFileStore.Listing
     let hasProject: Bool
-    /// Create Project checks the remote folder now: the row shows a spinner
-    /// and Create Project is off until the check ends.
+    /// Create Project of this row checks the remote folder now. The row
+    /// shows a spinner.
     let isChecking: Bool
+    /// No check runs. Create Project is off in every row during a check.
+    let canCreate: Bool
     let onCreateProject: () -> Void
     let onRemove: () -> Void
 
@@ -427,14 +453,14 @@ private struct LayoutRow: View {
 
             Spacer(minLength: 8)
 
-            if isChecking {
-                ProgressView()
-                    .controlSize(.small)
-            }
+            ProgressView()
+                .controlSize(.small)
+                .opacity(isChecking ? 1 : 0)
+                .accessibilityHidden(!isChecking)
 
             Menu {
                 Button(hasProject ? "Create Another Project" : "Create Project") { onCreateProject() }
-                    .disabled(layout.declaredPath == nil || isChecking)
+                    .disabled(layout.declaredPath == nil || !canCreate)
                 Divider()
                 Button("Remove", role: .destructive) { onRemove() }
             } label: {
