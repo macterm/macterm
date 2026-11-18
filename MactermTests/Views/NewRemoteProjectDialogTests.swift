@@ -30,8 +30,20 @@ struct NewRemoteProjectDialogTests {
         var projects: [(name: String, path: String)] = []
     }
 
-    private func dialog(_ draft: NewRemoteProjectDraft? = nil, check: Check, created: Created) -> NewRemoteProjectDialog {
-        NewRemoteProjectDialog(draft: draft, refusal: { await check.run($0) }, create: { created.projects.append(($0, $1)) })
+    private func dialog(
+        _ draft: NewRemoteProjectDraft? = nil,
+        check: Check,
+        created: Created,
+        askAlone: @escaping @MainActor (String) async -> Bool = { _ in Issue.record("asked alone")
+            return false
+        }
+    ) -> NewRemoteProjectDialog {
+        NewRemoteProjectDialog(
+            draft: draft,
+            refusal: { await check.run($0) },
+            askAlone: askAlone,
+            create: { created.projects.append(($0, $1)) }
+        )
     }
 
     /// Polls `done`, with a sleep, as the check runs in a task.
@@ -142,7 +154,46 @@ struct NewRemoteProjectDialogTests {
     }
 
     @Test
-    func cancel_during_the_install_question_answers_no_and_adds_nothing() async throws {
+    func cancel_during_the_install_question_hands_it_to_its_own_sheet_and_adds_nothing() async throws {
+        // The connect goes on for the host's panes: the user still decides,
+        // and no decline is kept that the user did not choose.
+        let check = Check()
+        let created = Created()
+        var askedAlone: [String] = []
+        let draft = try #require(NewRemoteProjectDraft(path: "devbox:~/dev/api"))
+        let dialog = dialog(draft, check: check, created: created, askAlone: { askedAlone.append($0)
+            return true
+        })
+        dialog.present(on: nil, startCheck: true)
+        await settle { check.isWaiting }
+        let answer = Task { await dialog.askInstall() }
+        await settle { dialog.isAskingInstall }
+        dialog.close()
+        #expect(await answer.value == true)
+        #expect(askedAlone == ["devbox"])
+        check.answer(nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(created.projects.isEmpty)
+        #expect(NewRemoteProjectDialog.current == nil)
+    }
+
+    @Test
+    func cancel_during_the_check_adds_nothing_when_the_check_ends() async throws {
+        let check = Check()
+        let created = Created()
+        let draft = try #require(NewRemoteProjectDraft(path: "devbox:~/dev/api"))
+        let dialog = dialog(draft, check: check, created: created)
+        dialog.present(on: nil, startCheck: true)
+        await settle { check.isWaiting }
+        dialog.alert.buttons[1].performClick(nil)
+        #expect(NewRemoteProjectDialog.current == nil)
+        check.answer(nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(created.projects.isEmpty)
+    }
+
+    @Test
+    func a_second_click_of_continue_without_server_does_not_cancel() async throws {
         let check = Check()
         let created = Created()
         let draft = try #require(NewRemoteProjectDraft(path: "devbox:~/dev/api"))
@@ -151,11 +202,34 @@ struct NewRemoteProjectDialogTests {
         await settle { check.isWaiting }
         let answer = Task { await dialog.askInstall() }
         await settle { dialog.isAskingInstall }
-        dialog.close()
+        dialog.alert.buttons[1].performClick(nil)
+        dialog.alert.buttons[1].performClick(nil)
         #expect(await answer.value == false)
+        #expect(dialog.isChecking)
+        #expect(NewRemoteProjectDialog.current === dialog)
         check.answer(nil)
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(created.projects.isEmpty)
-        #expect(NewRemoteProjectDialog.current == nil)
+        await settle { !created.projects.isEmpty }
+        #expect(created.projects.count == 1)
+    }
+
+    @Test
+    func a_typed_name_wins_and_a_reserved_name_disables_add() async throws {
+        let check = Check()
+        let created = Created()
+        let draft = try #require(NewRemoteProjectDraft(path: "me@devbox:/"))
+        let dialog = dialog(draft, check: check, created: created)
+        dialog.present(on: nil, startCheck: false)
+        // The automatic name has no user, as the palette shows it.
+        #expect(dialog.nameField.placeholderString == "devbox")
+        type("Pinned", in: dialog.nameField, of: dialog)
+        #expect(!dialog.alert.buttons[0].isEnabled)
+        #expect(!dialog.statusText.isEmpty)
+        type("API box", in: dialog.nameField, of: dialog)
+        #expect(dialog.alert.buttons[0].isEnabled)
+        dialog.alert.buttons[0].performClick(nil)
+        await settle { check.isWaiting }
+        check.answer(nil)
+        await settle { !created.projects.isEmpty }
+        #expect(created.projects.map(\.name) == ["API box"])
     }
 }

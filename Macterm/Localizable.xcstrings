@@ -3142,22 +3142,6 @@
         }
       }
     },
-    "Each pane is a session on the host, over one ssh connection. At the first connection, Macterm asks to install its server on the host. Port, identity, and ControlMaster come from ~/.ssh/config." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "각 창은 하나의 ssh 연결을 통한 호스트의 세션입니다. 처음 연결할 때 Macterm은 호스트에 서버를 설치할지 묻습니다. 포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每个窗格都是主机上的会话，通过一个 ssh 连接。第一次连接时，Macterm 会询问是否在主机上安装其服务器。端口、身份和 ControlMaster 来自 ~/.ssh/config。"
-          }
-        }
-      }
-    },
     "Edit Path" : {
       "localizations" : {
         "ko" : {
@@ -7359,6 +7343,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "固定的标签页布局文件有问题"
+          }
+        }
+      }
+    },
+    "Port, identity, and ControlMaster come from ~/.ssh/config." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口、身份和 ControlMaster 来自 ~/.ssh/config。"
           }
         }
       }

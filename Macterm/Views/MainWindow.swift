@@ -318,6 +318,11 @@ struct MainWindow: View {
             guard presented else { return }
             presentNewRemoteProjectDialog()
         }
+        .onChange(of: attachedWindow) { _, window in
+            // A request from before the window was attached.
+            guard window != nil, windowState.isNewRemoteProjectSheetPresented else { return }
+            presentNewRemoteProjectDialog()
+        }
         .sheet(
             item: $windowState.passwordEditor,
             onDismiss: { appState.restoreFocusToActivePane() },
@@ -758,6 +763,8 @@ struct MainWindow: View {
     }
 
     private func presentNewRemoteProjectDialog() {
+        // A sheet needs the window: the request waits until it is attached.
+        guard let window = attachedWindow else { return }
         let draft = windowState.newRemoteProjectDraft
         windowState.isNewRemoteProjectSheetPresented = false
         windowState.newRemoteProjectDraft = nil
@@ -766,7 +773,7 @@ struct MainWindow: View {
             // host:dir adds a distinct project rather than reusing the last.
             appState.selectProject(projectStore.create(name: name, path: path))
         }
-        dialog.present(on: attachedWindow.flatMap { SSHLoginPrompts.sheetParent(of: $0) }, startCheck: draft != nil)
+        dialog.present(on: window, startCheck: draft != nil)
     }
 
     private func cancelDeferredPeek() {

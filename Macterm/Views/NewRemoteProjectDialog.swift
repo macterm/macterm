@@ -55,7 +55,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     private enum Step {
         case fields
         case checking
-        case install(CheckedContinuation<Bool, Never>)
+        /// The install question of `host`.
+        case install(CheckedContinuation<Bool, Never>, host: String)
     }
 
     let alert = NSAlert()
@@ -76,12 +77,18 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     private var checkedDestination: String?
     /// Why the last Add added nothing. An edit clears it.
     private var failure: String?
+    /// When the install question last closed. Its buttons become Add and
+    /// Cancel again: a second click of a double click must not cancel.
+    private var installAnswered = ContinuousClock.now - .seconds(60)
+    private static let doubleClickGuard: Duration = .milliseconds(500)
 
     /// The check: nil when the folder is there, else the line that says why
     /// nothing is added (`RemoteHosts.refusal`). Tests answer it.
     private let refusal: @MainActor (String) async -> String?
     /// Adds the project, named and at the path.
     private let create: @MainActor (String, String) -> Void
+    /// Asks the install question on its own sheet, after the dialog closed.
+    private let askAlone: @MainActor (String) async -> Bool
 
     /// The status line has room for two lines at all times.
     private static let statusHeight: CGFloat = 32
@@ -89,10 +96,12 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     init(
         draft: NewRemoteProjectDraft? = nil,
         refusal: @escaping @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) },
+        askAlone: @escaping @MainActor (String) async -> Bool = { await RemoteServerConsent.ask($0) },
         create: @escaping @MainActor (String, String) -> Void
     ) {
         self.refusal = refusal
         self.create = create
+        self.askAlone = askAlone
         form = NSView()
         super.init()
         hostField.stringValue = draft?.host ?? ""
@@ -114,18 +123,29 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         show(.fields)
     }
 
-    /// Opens the dialog as a sheet on `window` (nil in tests: no window).
-    /// With a draft, the check starts at once.
+    /// Opens the dialog as a sheet on `window`, or on the last sheet open
+    /// on it (nil in tests: no window). An open dialog closes first: there
+    /// is one at a time. With a draft, the check starts at once.
     func present(on window: NSWindow?, startCheck: Bool) {
         Self.current?.close()
         Self.current = self
         if let window {
             NSApp.activate()
-            alert.beginSheetModal(for: window) { _ in }
-            alert.window.initialFirstResponder = hostField.stringValue.isEmpty ? hostField : nameField
-            alert.window.makeFirstResponder(alert.window.initialFirstResponder)
+            // A sheet that ends with no click of ours (its window closed)
+            // ends the dialog too, so no check waits on a dialog that is gone.
+            alert.beginSheetModal(for: SSHLoginPrompts.sheetParent(of: window)) { [weak self] _ in
+                guard let self, Self.current === self else { return }
+                close()
+            }
+            focusFirstField()
         }
         if startCheck { add() }
+    }
+
+    private func focusFirstField() {
+        let field = hostField.stringValue.isEmpty ? hostField : nameField
+        alert.window.initialFirstResponder = field
+        alert.window.makeFirstResponder(field)
     }
 
     // MARK: - Steps
@@ -144,10 +164,13 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         Project.reservedNameMessage(for: nameField.stringValue)
     }
 
+    /// The name of a project that the user did not name, as the palette
+    /// shows it: from the parsed host, with no user.
     private var automaticName: String {
-        let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !host.isEmpty else { return "devbox" }
-        return ProjectPath.remoteDisplayName(host: host, directory: directoryField.stringValue)
+        guard let path = composedPath, case let .remote(_, host, directory) = ProjectPath.parse(path) else {
+            return "devbox"
+        }
+        return ProjectPath.remoteDisplayName(host: host, directory: directory)
     }
 
     /// The line under the fields. Read by tests.
@@ -179,6 +202,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
                 logger.info("new remote project \(path, privacy: .public): not added")
                 failure = answer
                 show(.fields)
+                focusFirstField()
                 return
             }
             create(name, path)
@@ -191,7 +215,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     func askInstall() async -> Bool {
         guard case .checking = step, let destination = checkedDestination else { return false }
         return await withCheckedContinuation { continuation in
-            show(.install(continuation), installHost: destination)
+            show(.install(continuation, host: destination))
         }
     }
 
@@ -200,7 +224,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         switch step {
         case .fields: add()
         case .checking: break
-        case let .install(continuation):
+        case let .install(continuation, _):
+            installAnswered = .now
             show(.checking)
             continuation.resume(returning: true)
         }
@@ -209,34 +234,43 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     @objc
     private func secondary() {
         switch step {
-        case .fields,
-             .checking:
+        case .fields:
             close()
-        case let .install(continuation):
+        case .checking:
+            guard ContinuousClock.now - installAnswered > Self.doubleClickGuard else { return }
+            close()
+        case let .install(continuation, _):
+            installAnswered = .now
             show(.checking)
             continuation.resume(returning: false)
         }
     }
 
-    /// Ends the dialog. A check that runs stops; a question that waits is
-    /// answered no.
+    /// Ends the dialog, and its check adds nothing. The connect of the
+    /// host goes on for its panes, so an install question that waits is not
+    /// answered here: it goes to its own sheet (`RemoteServerConsent`), and
+    /// the user still decides. No decline is kept that the user did not
+    /// choose.
     func close() {
         check?.cancel()
         check = nil
         checkedDestination = nil
-        if case let .install(continuation) = step { continuation.resume(returning: false) }
+        let question = step
         step = .fields
-        if alert.window.isSheet { alert.window.sheetParent?.endSheet(alert.window) }
         if Self.current === self { Self.current = nil }
+        if alert.window.isSheet { alert.window.sheetParent?.endSheet(alert.window) }
+        if case let .install(continuation, host) = question {
+            Task { [askAlone] in await continuation.resume(returning: askAlone(host)) }
+        }
     }
 
     // MARK: - Layout
 
-    private func show(_ next: Step, installHost: String? = nil) {
+    private func show(_ next: Step) {
         step = next
         let primaryButton = alert.buttons[0]
         let secondaryButton = alert.buttons[1]
-        if case .install = next, let installHost {
+        if case let .install(_, installHost) = next {
             alert.messageText = RemoteServerConsent.title(installHost)
             alert.informativeText = RemoteServerConsent.text
             // NSAlert keeps an old accessory in its window: remove it.
@@ -249,11 +283,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
             return
         }
         alert.messageText = String(localized: "New Remote Project")
-        alert.informativeText = String(localized: """
-        Each pane is a session on the host, over one ssh connection. \
-        At the first connection, Macterm asks to install its server on the host. \
-        Port, identity, and ControlMaster come from ~/.ssh/config.
-        """)
+        alert.informativeText = String(localized: "Port, identity, and ControlMaster come from ~/.ssh/config.")
         alert.accessoryView = form
         primaryButton.title = String(localized: "Add")
         secondaryButton.title = String(localized: "Cancel")
@@ -285,6 +315,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         atEdge?.isActive = true
         let message = reservedNameMessage ?? failure
         statusLine.stringValue = message ?? ""
+        // The line has room for two lines; the whole text is in the tooltip.
+        statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
         alert.buttons[0].isEnabled = composedPath != nil && reservedNameMessage == nil
     }
@@ -309,8 +341,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         window.setFrame(new, display: true, animate: animate)
     }
 
-    /// Three labeled fields and the status line, as wide as the alert's
-    /// buttons (at least 300 pt).
+    /// Three labeled fields and the status line, 300 pt wide, or as wide
+    /// as the alert's buttons if they are wider.
     private func buildForm() {
         let labels = [String(localized: "Name"), String(localized: "Host"), String(localized: "Directory")]
             .map { NSTextField(labelWithString: $0) }
@@ -318,6 +350,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         grid.rowSpacing = 8
         grid.columnSpacing = 8
         grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .fill
         grid.rowAlignment = .firstBaseline
         grid.translatesAutoresizingMaskIntoConstraints = false
 
