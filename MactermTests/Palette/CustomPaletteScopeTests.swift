@@ -386,6 +386,7 @@ struct CustomPaletteScopeTests {
         )
         let pane = try #require(state.focusedPane(for: project.id))
         #expect(pane.start == .wrapped("\n  kubectl logs -f \"$POD\""), "nothing is typed at the prompt")
+        #expect(pane.env?[CustomPaletteScript.commandVariable] == nil, "the launch adds it, not the pane")
         let launch = PaneStartCommand.launch(pane.start, remote: false, cli: "/App/bin/macterm", shell: "/bin/zsh")
         #expect(launch.input == nil)
         #expect(launch.environment[CustomPaletteScript.commandVariable] == "kubectl logs -f \"$POD\"")

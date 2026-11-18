@@ -46,8 +46,8 @@ enum CustomPaletteScript {
     }
 }
 
-/// The runner of a wrapped `PaneStartCommand` (a palette's `run:` action),
-/// which says why it is not typed. `PaneStartCommand.launch` puts the command
+/// The runner of a wrapped `PaneStartCommand` (a palette's `run:` action).
+/// `PaneStartCommand.launch` puts the command
 /// in the new pane's environment (`CustomPaletteScript.commandVariable`) and
 /// `wrapperArgv` in front of the command libghostty resolved, after zmx's own
 /// wrapper, so the session runs:

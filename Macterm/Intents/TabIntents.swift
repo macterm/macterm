@@ -7,9 +7,9 @@ private let logger = Logger(subsystem: appBundleID, category: "TabIntents")
 ///
 /// The command is a typed `PaneStartCommand` — the layout `run:` path, the
 /// same one `macterm tab new --run` takes — not a paste into a shell that is
-/// already up. That is what lets it run through the user's own login shell with their
-/// full environment, and it means the command must tokenize in whatever shell
-/// they use.
+/// already up. That is what lets it run through the user's own login shell
+/// with their full environment, and it means the command must tokenize in
+/// whatever shell they use.
 struct NewMactermTabIntent: AppIntent {
     static let title: LocalizedStringResource = "New Tab"
     static let description = IntentDescription("Open a tab in a project. You can run a command in it.")

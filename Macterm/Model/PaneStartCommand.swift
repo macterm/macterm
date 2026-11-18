@@ -5,10 +5,10 @@ import Foundation
 /// (`SurfaceRegistry.makeView`), because a later view attaches a session that
 /// is already past it, and `PaneSnapshot` does not persist it.
 ///
-/// `launch(remote:cli:shell:)` is the one place that turns it into what the
-/// surface starts. Both modes that type a line go through libghostty's
-/// `initial_input`, which a pane on a session holds until the shell's first
-/// prompt (`PaneSession.heldInput`).
+/// `launch` is the one place that turns it into what the surface starts. A
+/// line that it types goes through libghostty's `initial_input`. A pane on a
+/// session holds that line until the shell's first prompt
+/// (`PaneSession.heldInput`), in both modes.
 struct PaneStartCommand: Equatable {
     enum Mode: Equatable {
         /// Typed into the shell verbatim, as if the user entered it at the
@@ -17,17 +17,14 @@ struct PaneStartCommand: Equatable {
         /// and it goes into the shell's history. No shell-syntax handling:
         /// the working directory is set on the surface, not with a `cd`.
         case typed
-        /// A palette `run:` action. It is never typed, so it never reaches
-        /// the shell's history: it runs before the pane's shell, as the
-        /// shell's parent, then gives way to it (`CustomPaletteLaunch`). The
-        /// command goes in the pane's environment
-        /// (`CustomPaletteScript.commandVariable`), so nothing in it is
-        /// quoted into a shell's grammar, and the bundled CLI runs it
-        /// (`CustomPaletteLaunch.wrapperArgv`). With no bundled CLI, the
-        /// fixed line `CustomPaletteScript.trampoline` is typed instead and
-        /// reads the command from the same variable. A remote pane is ssh,
-        /// whose environment stays on this Mac, so there the command is typed
-        /// for the host's shell.
+        /// A palette `run:` action. It is not typed, so it is not in the
+        /// shell's history. It runs before the pane's shell, as the shell's
+        /// parent, then gives way to it (`CustomPaletteLaunch`). The command
+        /// is in the pane's environment, so no shell parses it. With no
+        /// bundled CLI, the fixed line `CustomPaletteScript.trampoline` is
+        /// typed. It reads the command from the environment. A remote pane is
+        /// ssh, which does not carry the environment, so there the command
+        /// is typed.
         case wrapped
     }
 
@@ -62,11 +59,11 @@ struct PaneStartCommand: Equatable {
              .wrapped where remote:
             return Launch(input: command.text + "\n")
         case .wrapped:
-            let environment = [CustomPaletteScript.commandVariable: CustomPaletteScript.script(command.text)]
+            let invocation = CustomPaletteScript.invocation(of: command.text)
             guard let cli else {
-                return Launch(input: CustomPaletteScript.trampoline + "\n", environment: environment)
+                return Launch(input: invocation.line + "\n", environment: invocation.environment)
             }
-            return Launch(wrapper: CustomPaletteLaunch.wrapperArgv(cli: cli, shell: shell), environment: environment)
+            return Launch(wrapper: CustomPaletteLaunch.wrapperArgv(cli: cli, shell: shell), environment: invocation.environment)
         }
     }
 }

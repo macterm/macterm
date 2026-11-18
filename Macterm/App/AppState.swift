@@ -2257,9 +2257,9 @@ final class AppState {
     // MARK: - Tabs
 
     /// A `command` starts in the new tab's pane (`PaneStartCommand`).
-    /// Returns the new tab's ID, nil when the project has
-    /// no live workspace. `focus: false` preserves any existing selection and
-    /// history, and warms unrendered panes so their shells start without a visit.
+    /// Returns the new tab's ID, nil when the project has no live workspace.
+    /// `focus: false` preserves any existing selection and history, and warms
+    /// unrendered panes so their shells start without a visit.
     @discardableResult
     func createTab(
         projectID: UUID,
