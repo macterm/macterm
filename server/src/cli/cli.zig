@@ -93,7 +93,7 @@ fn status(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed 
             return 1;
         },
     }
-    try writeStatus(ctx, .{ .version = conn.hello.build, .pid = conn.pid }, parsed.flag("--json"));
+    try writeStatus(ctx, .{ .version = conn.hello.build, .pid = if (conn.pid) |p| p else null }, parsed.flag("--json"));
     return 0;
 }
 
@@ -132,9 +132,14 @@ fn connect(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed
         .no_server => |attempts| {
             var text: std.Io.Writer.Allocating = .init(ctx.arena);
             const w = &text.writer;
+            if (attempts.len == 0) {
+                try output.writeError(ctx.err, "no runtime folder: set MACTERM_RUNTIME_DIR, or use --socket", null);
+                return .{ .exit = 2 };
+            }
             try w.writeAll("could not reach the Macterm server:");
             for (attempts) |a| try w.print("\n  {s}: {s}", .{ a.path, a.reason });
-            if (pin == null) try w.writeAll("\nIs Macterm running? Start it, or use --socket for a different location.");
+            if (pin == null or pin.?.len == 0)
+                try w.writeAll("\nIs Macterm running? Start it, or use --socket for a different location.");
             try output.writeError(ctx.err, text.written(), null);
             return .{ .exit = 2 };
         },
@@ -195,14 +200,17 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
     var usage: std.Io.Writer.Allocating = .init(arena);
     try command.writeUsage(&usage.writer, path);
     try testing.expectEqualStrings(golden.usage.?, usage.written());
-    try testing.expectEqual(golden.default == null, c.default == null);
+    try testing.expect(golden.default == null);
 
     // Options: the same names, values and abstracts, in the same order.
     var visible: std.ArrayList(contract.Contract.Option) = .empty;
     for (golden.options) |o| if (!o.hidden) try visible.append(arena, o);
-    var options = c.visibleOptions();
+    var all: std.ArrayList(Option) = .empty;
+    try all.appendSlice(arena, c.options);
+    try all.append(arena, command.help_option);
     var n: usize = 0;
-    while (options.next()) |o| : (n += 1) {
+    for (all.items) |o| {
+        defer n += 1;
         try testing.expect(n < visible.items.len);
         const g = visible.items[n];
         try testing.expectEqual(g.names.len, o.names.len);
@@ -340,4 +348,187 @@ test "status with no server exits 2 and names the socket" {
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", "/nonexistent/.server" }));
     try testing.expectEqualStrings("", out.written());
     try testing.expectEqualStrings("macterm: could not reach the Macterm server:\n  /nonexistent/.server: no socket file\n", err.written());
+}
+
+// ── Tests: status against a stand-in server ─────────────────────────────────
+
+const lib_posix = @import("../posix.zig");
+const socket = @import("../socket.zig");
+const frame = @import("../protocol/frame.zig");
+const msgpack = @import("../protocol/msgpack.zig");
+const build_options = @import("build_options");
+
+/// A server on a real socket that answers one connection, on a thread of
+/// its own. It records the method of the request that it got.
+const Stub = struct {
+    listen_fd: i32,
+    build: []const u8,
+    reply: enum { ok, err, garbage },
+    arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator),
+    method: []const u8 = "",
+
+    fn serve(s: *Stub) void {
+        const a = s.arena.allocator();
+        var fds = [_]lib_posix.pollfd{.{ .fd = s.listen_fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+        _ = lib_posix.poll(&fds, 5000) catch return;
+        const fd = std.c.accept(s.listen_fd, null, null);
+        if (fd < 0) return;
+        defer _ = std.c.close(fd);
+        if (s.reply == .garbage) {
+            writeAll(fd, "this is not a frame");
+            return drain(fd);
+        }
+        sendMessage(a, fd, m.Hello{ .level = m.level, .min_level = m.min_level, .build = s.build, .role = .server, .epoch = 1, .caps = &.{} });
+        _ = readMessage(a, fd) orelse return; // the CLI's hello
+        const body = readMessage(a, fd) orelse return;
+        const req = switch (m.decodeControl(a, body) catch return) {
+            .request => |r| r,
+            else => return,
+        };
+        s.method = req.m;
+        switch (s.reply) {
+            .ok => sendMessage(a, fd, struct { re: u64, ok: m.Ping.Result }{ .re = req.id, .ok = .{} }),
+            .err => sendMessage(a, fd, struct { re: u64, err: m.ErrorInfo }{ .re = req.id, .err = .{ .code = "unavailable", .message = "the stand-in refused" } }),
+            .garbage => unreachable,
+        }
+        drain(fd);
+    }
+
+    fn sendMessage(a: std.mem.Allocator, fd: i32, value: anytype) void {
+        const body = msgpack.encodeAlloc(a, value) catch return;
+        var header: [frame.header_len]u8 = undefined;
+        frame.writeHeader(&header, frame.control_channel, .msg, body.len) catch return;
+        writeAll(fd, &header);
+        writeAll(fd, body);
+    }
+
+    fn writeAll(fd: i32, data: []const u8) void {
+        var rest = data;
+        while (rest.len > 0) {
+            const n = std.c.write(fd, rest.ptr, rest.len);
+            if (n <= 0) return;
+            rest = rest[@intCast(n)..];
+        }
+    }
+
+    /// The body of the next frame, or null at the end of the stream.
+    fn readMessage(a: std.mem.Allocator, fd: i32) ?[]const u8 {
+        var header: [frame.header_len]u8 = undefined;
+        if (!readExact(fd, &header)) return null;
+        const len = std.mem.readInt(u32, header[0..4], .little);
+        const body = a.alloc(u8, len) catch return null;
+        if (!readExact(fd, body)) return null;
+        return body;
+    }
+
+    fn readExact(fd: i32, buf: []u8) bool {
+        var got: usize = 0;
+        while (got < buf.len) {
+            var fds = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+            const ready = lib_posix.poll(&fds, 5000) catch return false;
+            if (ready == 0) return false;
+            const n = std.c.read(fd, buf[got..].ptr, buf.len - got);
+            if (n <= 0) return false;
+            got += @intCast(n);
+        }
+        return true;
+    }
+
+    /// Waits until the CLI closes the connection.
+    fn drain(fd: i32) void {
+        var buf: [256]u8 = undefined;
+        while (true) {
+            var fds = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+            const ready = lib_posix.poll(&fds, 5000) catch return;
+            if (ready == 0 or std.c.read(fd, &buf, buf.len) <= 0) return;
+        }
+    }
+};
+
+const StubRun = struct { exit: u8, out: []const u8, err: []const u8, method: []const u8, path: []const u8 };
+
+fn runAgainstStub(arena: std.mem.Allocator, build: []const u8, reply: @FieldType(Stub, "reply"), json: bool) !StubRun {
+    // Short: a socket path has at most 103 bytes on macOS.
+    const path = try std.fmt.allocPrint(arena, "/tmp/macterm-cli-test-{d}.sock", .{std.c.getpid()});
+    const path_z = try arena.dupeSentinel(u8, path, 0);
+    _ = std.c.unlink(path_z);
+    const listen_fd = try socket.createSocket(path);
+    defer {
+        lib_posix.close(listen_fd);
+        _ = std.c.unlink(path_z);
+    }
+    var stub: Stub = .{ .listen_fd = listen_fd, .build = build, .reply = reply };
+    defer stub.arena.deinit();
+    const thread = try std.Thread.spawn(.{}, Stub.serve, .{&stub});
+
+    var env: std.process.Environ.Map = .init(arena);
+    var out: std.Io.Writer.Allocating = .init(arena);
+    var err: std.Io.Writer.Allocating = .init(arena);
+    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const words: []const []const u8 = if (json) &.{ "status", "--json", "--socket", path } else &.{ "status", "--socket", path };
+    const exit = try run(ctx, words);
+    thread.join();
+    return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = try arena.dupe(u8, stub.method), .path = path };
+}
+
+test "status sends ping and prints the server's build and the pid of its socket" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // The stand-in runs in this process, so its pid is ours.
+    const r = try runAgainstStub(arena, build_options.version, .ok, false);
+    try testing.expectEqual(0, r.exit);
+    try testing.expectEqualStrings("ping", r.method);
+    try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "Macterm {s} (pid {d})\n", .{ build_options.version, std.c.getpid() }), r.out);
+    try testing.expectEqualStrings("", r.err);
+
+    const j = try runAgainstStub(arena, build_options.version, .ok, true);
+    try testing.expectEqual(0, j.exit);
+    try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "{{\n  \"status\" : {{\n    \"pid\" : {d},\n    \"version\" : \"{s}\"\n  }}\n}}\n", .{ std.c.getpid(), build_options.version }), j.out);
+}
+
+test "status prints the server's error and exits 1" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const r = try runAgainstStub(arena_state.allocator(), build_options.version, .err, false);
+    try testing.expectEqual(1, r.exit);
+    try testing.expectEqualStrings("", r.out);
+    try testing.expectEqualStrings("macterm: the stand-in refused\n", r.err);
+}
+
+test "status refuses a server of another build and exits 1" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const r = try runAgainstStub(arena, "0.0.0+other", .ok, false);
+    try testing.expectEqual(1, r.exit);
+    try testing.expectEqualStrings("", r.method);
+    try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: the server at {s} runs build 0.0.0+other, and this CLI is build {s}\n", .{ r.path, build_options.version }), r.err);
+}
+
+test "status exits 1 for a program that does not speak the protocol" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const r = try runAgainstStub(arena, build_options.version, .garbage, false);
+    try testing.expectEqual(1, r.exit);
+    try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: the program at {s} does not speak the protocol of the Macterm server\n", .{r.path}), r.err);
+}
+
+test "status exits 2 for a path that is not a socket" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const path = try std.fmt.allocPrint(arena, "/tmp/macterm-cli-test-{d}.file", .{std.c.getpid()});
+    const path_z = try arena.dupeSentinel(u8, path, 0);
+    const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(std.c.mode_t, 0o600));
+    try testing.expect(fd >= 0);
+    _ = std.c.close(fd);
+    defer _ = std.c.unlink(path_z);
+    var env: std.process.Environ.Map = .init(arena);
+    var out: std.Io.Writer.Allocating = .init(arena);
+    var err: std.Io.Writer.Allocating = .init(arena);
+    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", path }));
+    try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: could not reach the Macterm server:\n  {s}: not a socket\n", .{path}), err.written());
 }

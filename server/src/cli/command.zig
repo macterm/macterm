@@ -13,7 +13,6 @@ pub const Option = struct {
     /// The name of the value, for an option that takes one. Null for a flag.
     value: ?[]const u8 = null,
     abstract: []const u8,
-    hidden: bool = false,
 
     fn long(o: Option) []const u8 {
         return o.names[o.names.len - 1];
@@ -29,42 +28,16 @@ pub const Argument = struct {
 pub const Command = struct {
     name: []const u8,
     abstract: []const u8,
-    discussion: ?[]const u8 = null,
     /// Not in the help of its parent.
     hidden: bool = false,
     /// Every command also takes `-h` and `--help` (`help_option`).
     options: []const Option = &.{},
     arguments: []const Argument = &.{},
     subcommands: []const *const Command = &.{},
-    /// The subcommand that runs when the command is given alone.
-    default: ?[]const u8 = null,
 
     pub fn subcommand(c: *const Command, name: []const u8) ?*const Command {
         for (c.subcommands) |sub| {
             if (std.mem.eql(u8, sub.name, name)) return sub;
-        }
-        return null;
-    }
-
-    pub fn visibleOptions(c: *const Command) OptionIterator {
-        return .{ .options = c.options };
-    }
-};
-
-/// The options of a command, then `help_option`.
-pub const OptionIterator = struct {
-    options: []const Option,
-    i: usize = 0,
-
-    pub fn next(it: *OptionIterator) ?Option {
-        while (it.i < it.options.len) {
-            const o = it.options[it.i];
-            it.i += 1;
-            if (!o.hidden) return o;
-        }
-        if (it.i == it.options.len) {
-            it.i += 1;
-            return help_option;
         }
         return null;
     }
@@ -122,15 +95,7 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
     if (path.items.len == 2 and std.mem.eql(u8, path.items[1].name, "help") and path.items[1].hidden)
         return helpCommand(arena, root, words[i..]);
 
-    var command = path.items[path.items.len - 1];
-    if (command.default) |name| {
-        if (i == words.len or std.mem.startsWith(u8, words[i], "-")) {
-            if (!isHelp(words[i..])) {
-                command = command.subcommand(name).?;
-                try path.append(arena, command);
-            }
-        }
-    }
+    const command = path.items[path.items.len - 1];
 
     const values = try arena.alloc(?[]const u8, command.options.len);
     @memset(values, null);
@@ -142,7 +107,7 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
             only_positionals = true;
             continue;
         }
-        if (!only_positionals and std.mem.startsWith(u8, word, "-") and word.len > 1) {
+        if (!only_positionals and isOption(word)) {
             if (std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help")) return .{ .help = path.items };
             const eq = std.mem.indexOfScalar(u8, word, '=');
             const name = if (eq) |e| word[0..e] else word;
@@ -154,7 +119,7 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
                 values[index] = "";
             } else if (eq) |e| {
                 values[index] = word[e + 1 ..];
-            } else if (i + 1 < words.len) {
+            } else if (i + 1 < words.len and !isOption(words[i + 1])) {
                 i += 1;
                 values[index] = words[i];
             } else {
@@ -165,7 +130,7 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
         try positionals.append(arena, word);
     }
 
-    if (command.subcommands.len > 0 and command.default == null) {
+    if (command.subcommands.len > 0) {
         if (positionals.items.len > 0)
             return usageError(arena, path.items, "Unexpected argument '{s}'", .{positionals.items[0]});
         // A group given alone prints its help, as ArgumentParser does.
@@ -183,6 +148,8 @@ fn helpCommand(arena: std.mem.Allocator, root: *const Command, words: []const []
     var path: std.ArrayList(*const Command) = .empty;
     try path.append(arena, root);
     for (words) |word| {
+        // `macterm help -h` is the help of the root, as in v1.
+        if (isHelpFlag(word)) continue;
         const sub = path.items[path.items.len - 1].subcommand(word) orelse
             return usageError(arena, path.items, "Unexpected argument '{s}'", .{word});
         try path.append(arena, sub);
@@ -190,9 +157,14 @@ fn helpCommand(arena: std.mem.Allocator, root: *const Command, words: []const []
     return .{ .help = path.items };
 }
 
-fn isHelp(words: []const []const u8) bool {
-    if (words.len == 0) return false;
-    return std.mem.eql(u8, words[0], "-h") or std.mem.eql(u8, words[0], "--help");
+fn isHelpFlag(word: []const u8) bool {
+    return std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help") or std.mem.eql(u8, word, "-help");
+}
+
+/// A word that names an option, not a value: `-x`, `--name`. A lone `-` is
+/// a value (stdin, by custom).
+fn isOption(word: []const u8) bool {
+    return word.len > 1 and word[0] == '-';
 }
 
 fn optionIndex(command: *const Command, name: []const u8) ?usize {
@@ -232,7 +204,6 @@ pub fn writeUsage(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer
         if (a.optional) try w.print(" [<{s}>]", .{a.name}) else try w.print(" <{s}>", .{a.name});
     }
     for (c.options) |o| {
-        if (o.hidden) continue;
         if (o.value) |v| try w.print(" [{s} <{s}>]", .{ o.long(), v }) else try w.print(" [{s}]", .{o.long()});
     }
 }
@@ -251,10 +222,6 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
     const c = path[path.len - 1];
     try writeWrapped(w, "OVERVIEW: ", c.abstract, 0);
     try w.writeByte('\n');
-    if (c.discussion) |d| {
-        try writeWrapped(w, "", d, 0);
-        try w.writeByte('\n');
-    }
     try w.writeAll("USAGE: ");
     try writeUsage(w, path);
     try w.writeAll("\n\n");
@@ -269,27 +236,15 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
     }
 
     try w.writeAll("OPTIONS:\n");
-    var options = c.visibleOptions();
-    while (options.next()) |o| {
-        var label_buf: [128]u8 = undefined;
-        var label: std.Io.Writer = .fixed(&label_buf);
-        for (o.names, 0..) |n, k| {
-            if (k > 0) label.writeAll(", ") catch {};
-            label.writeAll(n) catch {};
-        }
-        if (o.value) |v| label.print(" <{s}>", .{v}) catch {};
-        try writeRow(w, label.buffered(), o.abstract);
-    }
+    for (c.options) |o| try writeOption(w, o);
+    try writeOption(w, help_option);
     try w.writeByte('\n');
 
     if (c.subcommands.len > 0) {
         try w.writeAll("SUBCOMMANDS:\n");
         for (c.subcommands) |sub| {
             if (sub.hidden) continue;
-            var label: [64]u8 = undefined;
-            const is_default = if (c.default) |d| std.mem.eql(u8, d, sub.name) else false;
-            const text = if (is_default) std.fmt.bufPrint(&label, "{s} (default)", .{sub.name}) catch sub.name else sub.name;
-            try writeRow(w, text, sub.abstract);
+            try writeRow(w, sub.name, sub.abstract);
         }
         try w.writeAll("\n  See '");
         try w.writeAll(path[0].name);
@@ -297,6 +252,17 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
         for (path[1..]) |p| try w.print("{s} ", .{p.name});
         try w.writeAll("<subcommand>' for detailed help.\n");
     }
+}
+
+fn writeOption(w: *std.Io.Writer, o: Option) std.Io.Writer.Error!void {
+    var label_buf: [128]u8 = undefined;
+    var label: std.Io.Writer = .fixed(&label_buf);
+    for (o.names, 0..) |n, k| {
+        if (k > 0) label.writeAll(", ") catch {};
+        label.writeAll(n) catch {};
+    }
+    if (o.value) |v| label.print(" <{s}>", .{v}) catch {};
+    try writeRow(w, label.buffered(), o.abstract);
 }
 
 /// One row of a section: the label at column 2 and the abstract at column
@@ -313,46 +279,30 @@ fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8) std.Io.W
     try writeWrapped(w, "", abstract, abstract_column);
 }
 
-/// Writes `prefix` and `text`, wrapped at `width` on spaces. A line after
-/// the first starts with `indent` spaces; the caller wrote the first
-/// `indent` columns of the first line. Each `\n` of `text` starts a new
-/// paragraph.
+/// Writes `prefix` and `text`, wrapped at `width` on spaces, and a newline.
+/// A line after the first starts with `indent` spaces; the caller wrote the
+/// first `indent` columns of the first line.
 fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent: usize) std.Io.Writer.Error!void {
-    var paragraphs = std.mem.splitScalar(u8, text, '\n');
-    var first_paragraph = true;
-    while (paragraphs.next()) |paragraph| {
-        if (!first_paragraph) {
-            if (paragraph.len == 0) {
-                try w.writeByte('\n');
-                continue;
-            }
+    try w.writeAll(prefix);
+    var column = indent + prefix.len;
+    var words = std.mem.tokenizeScalar(u8, text, ' ');
+    var line_start = true;
+    while (words.next()) |word| {
+        if (!line_start and column + 1 + word.len > width) {
+            try w.writeByte('\n');
             try w.splatByteAll(' ', indent);
+            column = indent;
+            line_start = true;
         }
-        var column = indent;
-        if (first_paragraph) {
-            try w.writeAll(prefix);
-            column += prefix.len;
+        if (!line_start) {
+            try w.writeByte(' ');
+            column += 1;
         }
-        first_paragraph = false;
-        var words = std.mem.tokenizeScalar(u8, paragraph, ' ');
-        var line_start = true;
-        while (words.next()) |word| {
-            if (!line_start and column + 1 + word.len > width) {
-                try w.writeByte('\n');
-                try w.splatByteAll(' ', indent);
-                column = indent;
-                line_start = true;
-            }
-            if (!line_start) {
-                try w.writeByte(' ');
-                column += 1;
-            }
-            try w.writeAll(word);
-            column += word.len;
-            line_start = false;
-        }
-        try w.writeByte('\n');
+        try w.writeAll(word);
+        column += word.len;
+        line_start = false;
     }
+    try w.writeByte('\n');
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -368,8 +318,9 @@ const test_leaf: Command = .{
     },
     .arguments = &.{.{ .name = "name", .abstract = "Name.", .optional = true }},
 };
+const test_needs: Command = .{ .name = "needs", .abstract = "Needs an id.", .arguments = &.{.{ .name = "id", .abstract = "Id." }} };
 const test_help: Command = .{ .name = "help", .abstract = "Help.", .hidden = true };
-const test_root: Command = .{ .name = "macterm", .abstract = "Root.", .subcommands = &.{ &test_leaf, &test_help } };
+const test_root: Command = .{ .name = "macterm", .abstract = "Root.", .subcommands = &.{ &test_leaf, &test_needs, &test_help } };
 
 test "options take a value as the next word or after =, and flags take none" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
@@ -394,6 +345,10 @@ test "usage errors name the word" {
     try testing.expectEqualStrings("Missing value for '--socket <socket>'", (try parse(a, &test_root, &.{ "leaf", "--socket" })).usage_error.message);
     try testing.expectEqualStrings("Unexpected argument 'y'", (try parse(a, &test_root, &.{ "leaf", "x", "y" })).usage_error.message);
     try testing.expectEqualStrings("Unknown option '--json=1'", (try parse(a, &test_root, &.{ "leaf", "--json=1" })).usage_error.message);
+    // A word that names an option is not a value.
+    try testing.expectEqualStrings("Missing value for '--socket <socket>'", (try parse(a, &test_root, &.{ "leaf", "--socket", "--json" })).usage_error.message);
+    try testing.expectEqualStrings("-", (try parse(a, &test_root, &.{ "leaf", "--socket", "-" })).run.value("--socket").?);
+    try testing.expectEqualStrings("Missing expected argument '<id>'", (try parse(a, &test_root, &.{"needs"})).usage_error.message);
 }
 
 test "help comes from -h, --help, the help command and a group alone" {
@@ -407,6 +362,7 @@ test "help comes from -h, --help, the help command and a group alone" {
     // After `--`, a help flag is a word.
     try testing.expectEqualStrings("--help", (try parse(a, &test_root, &.{ "leaf", "--", "--help" })).run.positionals[0]);
     try testing.expectEqualStrings("Unexpected argument 'nope'", (try parse(a, &test_root, &.{ "help", "nope" })).usage_error.message);
+    try testing.expectEqual(1, (try parse(a, &test_root, &.{ "help", "-h" })).help.len);
 }
 
 test "a usage error prints the usage line and where to find help" {

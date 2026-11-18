@@ -4,14 +4,18 @@
 //! - **The CLI never starts the server.** v1's wait loop
 //!   (`until macterm status; do sleep 0.2; done`) needs `status` to fail
 //!   while the app is not up. Only `server`, `proxy` and `connect --` start it.
-//! - **Discovery**: `--socket` pins one socket. Else `MACTERM_RUNTIME_DIR`
-//!   pins the server socket of that folder: the app sets it in every pane,
-//!   and a test that sets it must never reach the user's own server. Else
-//!   the folder of each build flavor, Release first, as
-//!   `LocalServer.runtimeDirectory` makes it. `MACTERM_SOCKET` is not read:
-//!   it names the app's v1 `control.sock`, which this CLI does not speak.
-//! - A server that answers is the target, also when it refuses: the CLI
-//!   never goes on to another server after one answered.
+//! - **Discovery.** These are the steps, in order:
+//!   1. `--socket` gives one socket.
+//!   2. If there is no `--socket`, `MACTERM_RUNTIME_DIR` gives the server
+//!      socket of that folder. The app sets it in every pane. A test sets it,
+//!      so that the test never reaches the user's server.
+//!   3. If there is no `MACTERM_RUNTIME_DIR`, the CLI tries the folder of
+//!      each build flavor, Release first, as `LocalServer.runtimeDirectory`
+//!      makes it.
+//!   The CLI does not read `MACTERM_SOCKET`. That variable names the app's v1
+//!   `control.sock`, and this CLI does not speak that protocol.
+//! - **The first server that answers is the target.** When that server
+//!   refuses the CLI, the CLI stops. It does not try the next socket.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -70,7 +74,8 @@ pub const Connect = union(enum) {
     ok: Connection,
     /// No socket led to a server: exit 2.
     no_server: []const Attempt,
-    /// A server answered and refused this CLI, or broke the protocol: exit 1.
+    /// A server answered and refused this CLI, or the peer does not speak
+    /// the protocol: exit 1.
     failed: []const u8,
 };
 
@@ -82,6 +87,8 @@ pub fn connect(arena: std.mem.Allocator, paths: []const []const u8) error{OutOfM
         const fd = open(path) catch |err| {
             try attempts.append(arena, .{ .path = path, .reason = switch (err) {
                 error.NoFile => "no socket file",
+                error.NotASocket => "not a socket",
+                error.Unreadable => "cannot read the path",
                 error.Refused => "connection refused",
                 error.Failed => "cannot connect",
             } });
@@ -92,7 +99,7 @@ pub fn connect(arena: std.mem.Allocator, paths: []const []const u8) error{OutOfM
             try attempts.append(arena, .{ .path = path, .reason = "the socket belongs to another user" });
             continue;
         }
-        var c: Connection = .{ .arena = arena, .fd = fd, .path = path, .pid = peerPid(fd) };
+        var c: Connection = .{ .arena = arena, .fd = fd, .path = path, .pid = runtime.peerPid(fd) };
         switch (try c.handshake()) {
             .ok => return .{ .ok = c },
             .no_answer => {
@@ -108,33 +115,19 @@ pub fn connect(arena: std.mem.Allocator, paths: []const []const u8) error{OutOfM
     return .{ .no_server = attempts.items };
 }
 
-fn open(path: []const u8) error{ NoFile, Refused, Failed }!i32 {
+fn open(path: []const u8) error{ NoFile, NotASocket, Unreadable, Refused, Failed }!i32 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{path}, 0) catch return error.Failed;
-    if (std.c.access(z, std.c.F_OK) != 0) return error.NoFile;
+    switch (runtime.socketFile(z)) {
+        .socket => {},
+        .missing => return error.NoFile,
+        .not_a_socket => return error.NotASocket,
+        .unreadable => return error.Unreadable,
+    }
     return socket.connectSession(path) catch |err| switch (err) {
         error.ConnectionRefused => error.Refused,
         error.Unexpected => error.Failed,
     };
-}
-
-/// The pid of a Unix socket's peer, from the kernel: the server cannot say
-/// another pid. Null when the system does not say.
-pub fn peerPid(fd: i32) ?i64 {
-    if (comptime builtin.os.tag.isDarwin()) {
-        const sol_local = 0;
-        const local_peerpid = 0x002;
-        var pid: std.c.pid_t = 0;
-        var len: std.c.socklen_t = @sizeOf(std.c.pid_t);
-        if (std.c.getsockopt(fd, sol_local, local_peerpid, &pid, &len) != 0 or pid <= 0) return null;
-        return pid;
-    } else if (comptime builtin.os.tag == .linux) {
-        const Ucred = extern struct { pid: i32, uid: u32, gid: u32 };
-        var cred: Ucred = undefined;
-        var len: std.c.socklen_t = @sizeOf(Ucred);
-        if (std.c.getsockopt(fd, std.c.SOL.SOCKET, std.c.SO.PEERCRED, &cred, &len) != 0 or cred.pid <= 0) return null;
-        return cred.pid;
-    } else return null;
 }
 
 /// The `hello` of this CLI. The server refuses any other build (`negotiate`).
@@ -155,7 +148,7 @@ pub const Connection = struct {
     fd: i32,
     path: []const u8,
     /// The server process, from the socket.
-    pid: ?i64,
+    pid: ?std.c.pid_t,
     /// The server's `hello`.
     hello: m.Hello = undefined,
     in: std.ArrayList(u8) = .empty,
@@ -168,8 +161,12 @@ pub const Connection = struct {
         const mine = helloMessage();
         c.sendControl(mine) catch return .no_answer;
         while (true) {
-            const body = (c.nextMessage(handshake_timeout_ms) catch return .no_answer) orelse return .no_answer;
-            switch (m.decodeControl(c.arena, body) catch return .no_answer) {
+            const body = (c.nextMessage(handshake_timeout_ms) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.Protocol => return .{ .failed = try notProtocol(c.arena, c.path) },
+                error.NoReply => return .no_answer,
+            }) orelse return .no_answer;
+            switch (m.decodeControl(c.arena, body) catch return .{ .failed = try notProtocol(c.arena, c.path) }) {
                 .hello => |theirs| {
                     // Its strings point into `in`, which the next read reuses.
                     c.hello = theirs;
@@ -179,12 +176,12 @@ pub const Connection = struct {
                     switch (m.negotiate(mine, theirs)) {
                         .refuse => |r| {
                             c.sendControl(r) catch {};
-                            return .{ .failed = try refusal(c.arena, c.path, r.reason, theirs.build) };
+                            return .{ .failed = try refusal(c.arena, c.path, r, theirs) };
                         },
                         .speak => return .ok,
                     }
                 },
-                .refuse => |r| return .{ .failed = try refusal(c.arena, c.path, r.reason, null) },
+                .refuse => |r| return .{ .failed = try refusal(c.arena, c.path, r, null) },
                 else => {},
             }
         }
@@ -203,7 +200,9 @@ pub const Connection = struct {
         Protocol,
     };
 
-    /// Sends one request and waits for its reply. Events are skipped.
+    /// Sends one request and waits for its reply. Events are skipped. The
+    /// strings of the reply point into the connection's buffer: they are
+    /// valid until the next request. Copy what must stay.
     pub fn request(c: *Connection, comptime M: type, args: M.Args) RequestError!Reply(M) {
         const id = c.next_id;
         c.next_id += 1;
@@ -264,13 +263,24 @@ pub const Connection = struct {
     }
 };
 
-fn refusal(arena: std.mem.Allocator, path: []const u8, reason: []const u8, their_build: ?[]const u8) error{OutOfMemory}![]const u8 {
-    if (std.mem.eql(u8, reason, "build_mismatch")) {
-        if (their_build) |build|
-            return std.fmt.allocPrint(arena, "the server at {s} runs build {s}, and this CLI is build {s}", .{ path, build, build_options.version });
+/// The text for a refusal. `theirs` is the server's hello when this CLI
+/// refused the server, and null when the server refused this CLI.
+fn refusal(arena: std.mem.Allocator, path: []const u8, r: m.Refuse, theirs: ?m.Hello) error{OutOfMemory}![]const u8 {
+    if (std.mem.eql(u8, r.reason, "build_mismatch")) {
+        if (theirs) |h|
+            return std.fmt.allocPrint(arena, "the server at {s} runs build {s}, and this CLI is build {s}", .{ path, h.build, build_options.version });
         return std.fmt.allocPrint(arena, "the server at {s} runs another build, and this CLI is build {s}", .{ path, build_options.version });
     }
-    return std.fmt.allocPrint(arena, "the server at {s} refused this CLI: {s}", .{ path, reason });
+    if (std.mem.eql(u8, r.reason, "level_too_low")) {
+        if (theirs) |h|
+            return std.fmt.allocPrint(arena, "the server at {s} speaks protocol level {d}, and this CLI needs level {d} or later", .{ path, h.level, r.needs_level });
+        return std.fmt.allocPrint(arena, "the server at {s} needs protocol level {d} or later, and this CLI speaks level {d}", .{ path, r.needs_level, m.level });
+    }
+    return std.fmt.allocPrint(arena, "the server at {s} refused this CLI ({s})", .{ path, r.reason });
+}
+
+fn notProtocol(arena: std.mem.Allocator, path: []const u8) error{OutOfMemory}![]const u8 {
+    return std.fmt.allocPrint(arena, "the program at {s} does not speak the protocol of the Macterm server", .{path});
 }
 
 fn writeAll(fd: i32, data: []const u8) !void {
@@ -328,12 +338,4 @@ test "a missing socket is no server, with the reason" {
     const result = try connect(arena.allocator(), &.{"/nonexistent/macterm/.server"});
     try testing.expectEqual(1, result.no_server.len);
     try testing.expectEqualStrings("no socket file", result.no_server[0].reason);
-}
-
-test "a socket pair's peer pid is this process" {
-    var fds: [2]std.c.fd_t = undefined;
-    try testing.expectEqual(0, std.c.socketpair(std.c.AF.UNIX, std.c.SOCK.STREAM, 0, &fds));
-    defer _ = std.c.close(fds[0]);
-    defer _ = std.c.close(fds[1]);
-    try testing.expectEqual(@as(i64, std.c.getpid()), peerPid(fds[0]).?);
 }

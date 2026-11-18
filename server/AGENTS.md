@@ -15,14 +15,25 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 
 ## The macterm CLI (design/011)
 
-The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resources/bin/macterm` until the swap (design/011 §3), so nothing a user sees changes until then. Run the Zig CLI as `zig-out/bin/zmx <verb>`.
+The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resources/bin/macterm` until the swap (design/011 §3). Until then, nothing that a user sees changes. To run the Zig CLI, use `zig-out/bin/zmx <verb>`.
 
-- **The v1 contract is the test.** `golden/` holds the v1 grammar and output (`contract.zig`). `cli.zig` checks each ported command against `contract.json` (abstract, usage, options, arguments, subcommands), the help of each ported leaf against its `golden/help` file byte for byte, and each case of a ported verb against `cases.json`. A port issue adds its verbs to `root` and sets the `method` of its lines in `cases.input.json`.
-- **Exit codes**: 0 done, 1 refused or failed, 2 no server answered, 64 a usage error (as ArgumentParser).
+- **The v1 contract is the test.** `golden/` holds the grammar and the output of the v1 CLI (`contract.zig`). The tests in `cli.zig` check these items:
+  - each ported command against `contract.json`: abstract, usage, options, arguments and subcommands;
+  - the help of each ported leaf command against its `golden/help` file, byte for byte;
+  - each line of a ported verb against `cases.json`;
+  - each verb against a stand-in server on a real socket: the method that the CLI sends, the output and the exit code.
+
+  A port issue adds its verbs to `root` and sets the `method` of its lines in `cases.input.json`.
+- **Exit codes**: 0 when the command worked, 1 when the server refused it or it failed, 2 when no server answered, 64 for a usage error (as ArgumentParser).
 - **The CLI never starts the server.** `status` must fail while the app is not up.
-- **Discovery** (`client.candidates`): `--socket` pins one socket. Else `MACTERM_RUNTIME_DIR` pins its `.server`. Else the folder of each build flavor, `macterm` then `macterm-debug`, as `LocalServer.runtimeDirectory` makes it. `MACTERM_SOCKET` is not read: it names the app's `control.sock`.
-- The CLI says `hello` with the role `cli`, so a server of another build refuses it, and the CLI exits 1 with both builds. The server's pid comes from the socket (`LOCAL_PEERPID`, `SO_PEERCRED`), not from the server.
-- **Output is streaming** (`writerStreaming`): a positional writer writes at offset 0 of a file that a shell appends to.
+- **Discovery** (`client.candidates`). These are the steps, in order:
+  1. `--socket` gives one socket.
+  2. If there is no `--socket`, `MACTERM_RUNTIME_DIR` gives its `.server`.
+  3. If there is no `MACTERM_RUNTIME_DIR`, the CLI tries the folder of each build flavor: `macterm`, then `macterm-debug`. `LocalServer.runtimeDirectory` makes the same folders.
+
+  The CLI does not read `MACTERM_SOCKET`, because that variable names the app's `control.sock`.
+- The CLI sends `hello` with the role `cli`. A server of another build refuses it. The CLI then exits with 1 and shows the two builds. The server's pid comes from the socket (`runtime.peerPid`), not from the server.
+- **Use a streaming writer for output** (`writerStreaming`). A positional writer writes at the start of a file, also when the shell opened the file to append.
 
 ## The roaming link (design/009, issue 0201)
 
