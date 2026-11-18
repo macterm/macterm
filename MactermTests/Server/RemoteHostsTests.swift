@@ -144,6 +144,8 @@ struct RemoteHostsTests {
                 try await Task.sleep(for: .milliseconds(200))
             }
             #expect(fixture.hosts.quietDestinations.isEmpty)
+            // The same link heals: it was not dropped and opened again.
+            #expect(try await fixture.attach(pane).link === link)
         }
     }
 
