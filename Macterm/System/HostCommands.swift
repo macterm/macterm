@@ -183,6 +183,40 @@ enum HostCommands {
         ["/bin/sh", "-c", createProbeScript, "sh", directory]
     }
 
+    /// Whether a folder is on the host, before a new remote project is added
+    /// (0358, `RemoteHosts.checkFolder`). Exit 0: a shell can `cd` to the
+    /// folder. Exit 3: it cannot (it is not there, or the user may not enter
+    /// it: a pane could not start there). Any other status means that the
+    /// check did not run to its end. A constant here, not a bundled file:
+    /// a bundle without the file must not refuse every host.
+    static let folderCheckScript = expandTilde + " cd -- \"$d\" 2>/dev/null || exit 3; exit 0"
+
+    /// The `command.run` argv of the folder check on a host with a server.
+    /// The folder is `$1`, so no shell parses it.
+    static func folderCheckArgv(directory: String) -> [String] {
+        ["/bin/sh", "-c", "d=$1; " + folderCheckScript, "sh", directory.isEmpty ? "~" : directory]
+    }
+
+    /// The ssh command of the folder check on a host with no server. sshd
+    /// gives it to the login shell, so the folder goes as hex, one plain
+    /// word, as for `plain.sh`. nil for a folder too long for one argument.
+    static func folderCheckCommand(directory: String) -> String? {
+        command(hexFolder + " " + folderCheckScript, [Scripts.hex(directory)])
+    }
+
+    /// Makes `$d` the folder that `$1` gives as hex (`Scripts.hex`). The
+    /// same text is in `server/host/plain.sh`.
+    static let hexFolder = oneLine(#"""
+    b=$(printf "\134");
+    f=;
+    for p in $(printf "%s\n" "$1" | fold -w 2); do
+      v=$((0x$p));
+      f=$f$b$((v / 64))$((v / 8 % 8))$((v % 8));
+    done;
+    d=$(printf "$f.");
+    d=${d%.};
+    """#)
+
     /// Makes `$d` a folder that `cd` takes: a `~` or `~name` at the start
     /// becomes that home folder, as a shell expands it. A name with any
     /// character other than `[A-Za-z0-9._-]` stays as it is, because only a
@@ -307,7 +341,6 @@ extension HostCommands {
         var attach: String
         var install: String
         var plain: String
-        var folder: String
 
         static var bundled: Scripts? {
             Bundle.main.resourceURL.flatMap { load(from: $0.appendingPathComponent("host", isDirectory: true)) }
@@ -317,14 +350,12 @@ extension HostCommands {
         static func load(from directory: URL) -> Scripts? {
             guard let attach = try? String(contentsOf: directory.appendingPathComponent("attach.sh"), encoding: .utf8),
                   let install = try? String(contentsOf: directory.appendingPathComponent("install.sh"), encoding: .utf8),
-                  let plain = try? String(contentsOf: directory.appendingPathComponent("plain.sh"), encoding: .utf8),
-                  let folder = try? String(contentsOf: directory.appendingPathComponent("folder.sh"), encoding: .utf8)
+                  let plain = try? String(contentsOf: directory.appendingPathComponent("plain.sh"), encoding: .utf8)
             else { return nil }
             return Scripts(
                 attach: HostCommands.oneLine(attach),
                 install: HostCommands.oneLine(install),
-                plain: HostCommands.oneLine(plain),
-                folder: HostCommands.oneLine(folder)
+                plain: HostCommands.oneLine(plain)
             )
         }
 
@@ -346,18 +377,6 @@ extension HostCommands {
             let preambles = HostCommands.remoteTermPreamble + HostCommands.remoteColorPreamble
                 + HostCommands.remoteTerminalProgramPreamble
             return HostCommands.command(preambles + plain, [Self.hex(directory)])
-        }
-
-        /// The ssh command of the folder check (`folder.sh`) on a host with
-        /// no server. nil for a folder too long for one argument.
-        func folderCommand(directory: String) -> String? {
-            HostCommands.command(folder, [Self.hex(directory)])
-        }
-
-        /// The `command.run` argv of the folder check on a host with a
-        /// server: the same script, with no login shell between.
-        func folderArgv(directory: String) -> [String] {
-            ["/bin/sh", "-c", folder, "sh", Self.hex(directory)]
         }
 
         /// The folder as one plain word, two hex digits for each byte. No

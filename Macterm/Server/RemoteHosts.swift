@@ -317,12 +317,15 @@ final class RemoteHosts {
     /// Whether `directory` is on the host, before a remote project for it is
     /// added (0358). It connects as a new pane does: the login and the server
     /// install may ask the user, and the host's connection stays for the
-    /// project's panes. With a server, the server runs `folder.sh`
-    /// (`command.run`). With no server, the script runs over the ssh
-    /// connection. Fail closed: anything other than the script's own answer
-    /// is `unreachable`.
+    /// project's panes. With a server, the server runs
+    /// `HostCommands.folderCheckScript` (`command.run`). With no server, the
+    /// script runs over the ssh connection. Fail closed: anything other than
+    /// the script's own answer is `unreachable`, and the log says why.
     func checkFolder(_ directory: String, destination: String) async -> FolderCheck {
-        guard SSHConnections.isValidDestination(destination), let scripts = configuration.scripts else { return .unreachable }
+        guard SSHConnections.isValidDestination(destination) else {
+            logger.info("folder check: \(destination, privacy: .public) is not a valid host")
+            return .unreachable
+        }
         // A link that closed since its last use gets one more connect.
         for _ in 0 ..< 2 {
             switch hosts[destination] {
@@ -337,24 +340,38 @@ final class RemoteHosts {
             switch hosts[destination] {
             case let .ready(link):
                 // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
-                guard let result = await Self.run(scripts.folderArgv(directory: directory), timeout: .seconds(8), over: link) else {
+                let argv = HostCommands.folderCheckArgv(directory: directory)
+                guard let result = await Self.run(argv, timeout: .seconds(8), over: link) else {
                     // Only a closed connection is dropped: a slow folder (a
                     // network mount) on a good link must not end its panes.
-                    guard !link.connection.isOpen else { return .unreachable }
+                    guard !link.connection.isOpen else {
+                        logger.info("folder check: \(destination, privacy: .public): the server did not answer")
+                        return .unreachable
+                    }
                     if case let .ready(current) = hosts[destination], current === link { drop(destination) }
                     continue
                 }
-                return Self.folderCheck(status: result.signal == nil ? result.code.map(Int32.init) : nil)
+                return answer(status: result.signal == nil ? result.code.map(Int32.init) : nil, destination: destination)
             case .plain:
-                guard let command = scripts.folderCommand(directory: directory),
-                      let outcome = try? await connections.run(destination, command, timeout: .seconds(20))
-                else { return .unreachable }
-                return Self.folderCheck(status: outcome.status)
+                guard let command = HostCommands.folderCheckCommand(directory: directory) else {
+                    logger.info("folder check: \(destination, privacy: .public): the folder is too long")
+                    return .unreachable
+                }
+                do {
+                    let outcome = try await connections.run(destination, command, timeout: .seconds(20))
+                    return answer(status: outcome.status, destination: destination)
+                } catch {
+                    logger.info("folder check: \(destination, privacy: .public): \(String(describing: error), privacy: .public)")
+                    return .unreachable
+                }
             case .preparing,
                  nil:
+                // `prepare` logged the reason.
+                logger.info("folder check: \(destination, privacy: .public): no connection")
                 return .unreachable
             }
         }
+        logger.info("folder check: \(destination, privacy: .public): the connection closed twice")
         return .unreachable
     }
 
@@ -371,13 +388,22 @@ final class RemoteHosts {
         }
     }
 
-    /// The answer for the exit status of `folder.sh`. Pure.
+    /// The answer for the exit status of the folder check. Pure.
     nonisolated static func folderCheck(status: Int32?) -> FolderCheck {
         switch status {
         case 0: .exists
         case 3: .missing
         default: .unreachable
         }
+    }
+
+    private func answer(status: Int32?, destination: String) -> FolderCheck {
+        let answer = Self.folderCheck(status: status)
+        if answer == .unreachable {
+            let end = status.map(String.init) ?? "a signal"
+            logger.info("folder check: \(destination, privacy: .public): the check ended with \(end, privacy: .public)")
+        }
+        return answer
     }
 
     /// Install the server on a host where the user declined it, after the
