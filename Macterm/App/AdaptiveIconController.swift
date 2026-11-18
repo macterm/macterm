@@ -23,7 +23,8 @@ private let logger = Logger(subsystem: appBundleID, category: "AdaptiveIconContr
 ///
 /// It also keeps `preview`, the icons that Settings → Appearance shows: the
 /// image that the Dock gets, and the other appearance's while the preview is
-/// on screen (`previewShown`).
+/// on screen (`previewShown`). For a `light:X,dark:Y` theme, the other
+/// appearance takes the colors of the other side (`previewOnlyPaint`).
 @MainActor @Observable
 final class AdaptiveIconController {
     static let shared = AdaptiveIconController()
@@ -173,15 +174,14 @@ final class AdaptiveIconController {
     /// The Dock shows the adaptive icon. While a side renders, its tile keeps
     /// the last image of that side.
     private func showPreview(of shown: AdaptiveIconRequest, paint: AdaptiveIcon.Paint) {
-        let iconStyle = Self.iconStyle()
-        let appearances = previewShown
-            ? AdaptiveIcon.previewAppearances(
-                shown: shown.appearance,
-                iconStyle: iconStyle,
-                themeHasTwoSides: GhosttyApp.shared.themeHasTwoSides
-            )
+        var appearances = previewShown
+            ? AdaptiveIcon.previewAppearances(shown: shown.appearance, iconStyle: Self.iconStyle())
             : [shown.appearance]
-        previewOnly = appearances.first { $0 != shown.appearance }.flatMap { request(for: $0, paint: paint) }
+        let other = appearances.first { $0 != shown.appearance }
+        previewOnly = other.flatMap { appearance in
+            previewOnlyPaint(for: appearance, shownPaint: paint).flatMap { request(for: appearance, paint: $0) }
+        }
+        if other != nil, previewOnly == nil { appearances = [shown.appearance] }
         var icons: [PreviewIcon] = []
         for appearance in appearances {
             let request = appearance == shown.appearance ? shown : previewOnly
@@ -192,6 +192,23 @@ final class AdaptiveIconController {
         }
         setPreview(Preview(icons: icons, standIn: nil))
         renderPreviewOnlySide()
+    }
+
+    /// The paint of the side that only the preview shows. It is the Dock's
+    /// paint, except where the other system appearance takes the other side
+    /// of a `light:X,dark:Y` theme. Then it is that side's paint, or nil when
+    /// its colors cannot be read with certainty.
+    private func previewOnlyPaint(
+        for appearance: AdaptiveIconRequest.Appearance,
+        shownPaint: AdaptiveIcon.Paint
+    ) -> AdaptiveIcon.Paint? {
+        let app = GhosttyApp.shared
+        let scheme = app.windowScheme(forSystem: appearance == .light ? .light : .dark)
+        guard app.themeHasTwoSides, scheme != app.windowScheme else { return shownPaint }
+        guard let colors = app.splitThemeColors(scheme), let theme = AdaptiveIcon.ThemeColors(colors) else {
+            return nil
+        }
+        return AdaptiveIcon.paint(for: theme)
     }
 
     /// A refresh that changes nothing does not redraw the preview.

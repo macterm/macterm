@@ -277,12 +277,34 @@ struct AdaptiveIconTests {
     @Test
     func thePreviewShowsBothSidesOnlyWhereTheSystemDrawsBoth() {
         for style in [nil, "Regular", "RegularAutomatic"] {
-            #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: style, themeHasTwoSides: false) == [.light, .dark])
-            #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: style, themeHasTwoSides: true) == [.dark])
+            #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: style) == [.light, .dark])
         }
-        #expect(AdaptiveIcon.previewAppearances(shown: .light, iconStyle: "RegularLight", themeHasTwoSides: false) == [.light])
-        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "RegularDark", themeHasTwoSides: false) == [.dark])
-        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "Something New", themeHasTwoSides: false) == [.dark])
+        #expect(AdaptiveIcon.previewAppearances(shown: .light, iconStyle: "RegularLight") == [.light])
+        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "RegularDark") == [.dark])
+        #expect(AdaptiveIcon.previewAppearances(shown: .dark, iconStyle: "Something New") == [.dark])
+    }
+
+    @Test
+    func theColorsOfAResolvedConfigPaintTheIcon() throws {
+        typealias RGB = GhosttyApp.ResolvedColors.RGB
+        var palette = [RGB?](repeating: RGB(r: 0, g: 0, b: 0), count: 256)
+        palette[3] = RGB(r: 255, g: 0, b: 51)
+        let resolved = GhosttyApp.ResolvedColors(background: RGB(r: 0, g: 255, b: 0), foreground: nil, palette: palette)
+        let colors = try #require(AdaptiveIcon.ThemeColors(resolved))
+        #expect(colors.background == .init(red: 0, green: 1, blue: 0))
+        #expect(colors.palette.count == 16)
+        #expect(colors.palette[3] == .init(red: 1, green: 0, blue: 0.2))
+
+        var noPalette = resolved
+        noPalette.palette[15] = nil
+        #expect(AdaptiveIcon.ThemeColors(noPalette) == nil)
+        var noBackground = resolved
+        noBackground.background = nil
+        #expect(AdaptiveIcon.ThemeColors(noBackground) == nil)
+        // Only the first sixteen entries count.
+        var noHighEntry = resolved
+        noHighEntry.palette[16] = nil
+        #expect(AdaptiveIcon.ThemeColors(noHighEntry) != nil)
     }
 
     /// The controller reads the system scheme from `GhosttyApp.shared`. With
