@@ -159,6 +159,7 @@ struct RemoteHostsTests {
         try await withSSHDHost { host in
             let fixture = Fixture(host, roaming: true)
             let pane = fixture.pane()
+            fixture.hosts.panes = { _ in [pane] }
             let first = try await fixture.start(pane)
             defer { first.stop() }
             first.type("printf 'before-%s\\n' freeze\n")
