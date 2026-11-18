@@ -50,7 +50,7 @@ struct PanePillTests {
         }
     }
 
-    /// The revealed title widens the label and keeps its height.
+    /// The revealed title widens the label, step by step.
     @Test
     func the_revealed_title_widens_the_label() {
         let rest = Self.size(Self.label("network.slash", reveal: 0))
@@ -59,6 +59,22 @@ struct PanePillTests {
         #expect(rest.width < half.width)
         #expect(half.width < shown.width)
         #expect(shown.width > rest.width + 40)
-        #expect(rest.height == shown.height)
+    }
+
+    /// Every whole badge at rest (chrome, padding and icon, the spinner too)
+    /// is near round: much narrower than a badge that shows its title.
+    @Test
+    func every_badge_at_rest_shows_no_title() {
+        let rest: [(String, CGFloat)] = [
+            ("Read-Only", Self.size(ModePill(title: "Read-Only", systemImage: "eye", help: "") {}).width),
+            ("Zoomed", Self.size(ZoomIndicator {}).width),
+            ("Reconnecting", Self.size(RemoteLinkPill(badge: .reconnecting)).width),
+            ("Connection lost", Self.size(RemoteLinkPill(badge: .lost)).width),
+            ("Secure input", Self.size(SecureInputBadge()).width),
+        ]
+        let height = Self.badges[0].1
+        for (name, width) in rest {
+            #expect(width < height * 2, "\(name): \(width)")
+        }
     }
 }

@@ -1210,14 +1210,15 @@ struct StatusPill<Icon: View>: View {
 ///
 /// At rest the pill shows its icon only. The pointer on the pill reveals the
 /// title: the pill widens on the curve of `PaletteMotion`, and the badges
-/// beside it move with it. Reduce Motion lands the change in one frame. The
-/// hover comes from `RowHoverTracker`, an AppKit tracking area: the pane's
-/// view wins every hit test under the row, and the status pills take none.
+/// beside it move with it. With Reduce Motion, the change has no animation.
+/// The hover comes from `RowHoverTracker`, an AppKit tracking area. The
+/// pane's view gets every hit test under the row, and the status pills get
+/// none.
 struct PanePill<Icon: View>: View {
     /// The least height of every pill's content: the tallest icon. The
     /// glass button sizes to its label, and the icons have different heights.
-    /// It is also the least width of the icon, so that every pill at rest
-    /// has the same size.
+    /// It is also the least width of the icon. A wider icon makes a wider
+    /// pill.
     static var contentHeight: CGFloat { 15 }
 
     let title: String
@@ -1254,8 +1255,8 @@ struct PanePill<Icon: View>: View {
             .frame(minHeight: Self.contentHeight)
     }
 
-    /// A change of the hover runs in one transaction, so that the row moves
-    /// the other badges on the same curve as this pill widens.
+    /// A change of the hover runs in one transaction. Thus the row moves the
+    /// other badges on the same curve as this pill.
     private var revealBinding: Binding<Bool> {
         Binding(
             get: { isRevealed },
@@ -1291,8 +1292,10 @@ struct PanePillLabel<Icon: View>: View {
 }
 
 /// Puts its first subview (the icon) at the leading edge and its second (the
-/// title) after it, and is as wide as the icon plus `reveal` of the title.
-/// `Layout` is `Animatable`: `reveal` interpolates frame by frame.
+/// title) after it. Its width is the icon plus `reveal` of the title, and
+/// not more than the proposed width (a narrow pane clips the title). It is
+/// never less than the icon. `Layout` is `Animatable`: `reveal` interpolates
+/// frame by frame.
 private struct RevealLayout: Layout {
     var reveal: CGFloat
     var spacing: CGFloat = 4
@@ -1302,12 +1305,13 @@ private struct RevealLayout: Layout {
         set { reveal = newValue }
     }
 
-    func sizeThatFits(proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
         guard subviews.count == 2 else { return .zero }
         let icon = subviews[0].sizeThatFits(.unspecified)
         let title = subviews[1].sizeThatFits(.unspecified)
+        let width = icon.width + (spacing + title.width) * reveal
         return CGSize(
-            width: icon.width + (spacing + title.width) * reveal,
+            width: min(width, max(icon.width, proposal.width ?? .infinity)),
             height: max(icon.height, title.height)
         )
     }
