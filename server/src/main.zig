@@ -199,7 +199,7 @@ fn connectCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.En
 }
 
 /// The session process; not a user command. The server starts it
-/// (`Server.spawn`) with argv `__session <name>` and its spec, one msgpack
+/// (`registry.spawn`) with argv `__session <name>` and its spec, one msgpack
 /// `SessionCreate.Args`, on `session.spec_fd`.
 fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
     const name = args.next() orelse return printError(io, "{s}: session name required", .{v2session.command_name});

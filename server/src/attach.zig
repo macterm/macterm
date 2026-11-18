@@ -17,6 +17,7 @@ const Resize = @import("pty.zig").Resize;
 const getTerminalSize = @import("pty.zig").getTerminalSize;
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
+const FrameConn = @import("conn.zig").FrameConn;
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
 const runtime = @import("runtime.zig");
@@ -118,12 +119,12 @@ pub fn run(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, create: ?C
         if (try createSession(gpa, dir, name, spec)) |outcome| return outcome;
     } else if (!have_dir) return error.NoSession;
     const fd = socket.connectSession(path) catch return error.NoSession;
-    var c: Client = .{ .gpa = gpa, .fd = fd, .path = path, .foreground_events = lib_posix.getenv(foreground.env_var) != null };
+    var c: Client = .{ .gpa = gpa, .conn = .{ .fd = fd, .max_frame = server.frame_max }, .path = path, .foreground_events = lib_posix.getenv(foreground.env_var) != null };
     // `reconnect` changes the fd.
-    defer lib_posix.close(c.fd);
+    defer lib_posix.close(c.conn.fd);
     if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return error.WrongPeer;
 
-    defer c.in.deinit(gpa);
+    defer c.conn.in.deinit(gpa);
     if (try c.handshake()) |outcome| return outcome;
     return c.loop();
 }
@@ -157,8 +158,8 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
     defer lib_posix.close(fd);
     if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return error.WrongPeer;
 
-    var c: Client = .{ .gpa = gpa, .fd = fd };
-    defer c.in.deinit(gpa);
+    var c: Client = .{ .gpa = gpa, .conn = .{ .fd = fd, .max_frame = server.frame_max } };
+    defer c.conn.in.deinit(gpa);
     const mine = helloMessage();
     try c.sendControl(mine);
 
@@ -260,10 +261,8 @@ fn helloMessage() m.Hello {
 
 const Client = struct {
     gpa: std.mem.Allocator,
-    fd: i32,
-    in: std.ArrayList(u8) = .empty,
-    /// The bytes at the start of `in` that `nextFrame` returned last.
-    consumed: usize = 0,
+    /// The socket. Only its reader is used: a send writes at once.
+    conn: FrameConn,
     /// Write the session's foreground as v1's APC (interim, until m3).
     foreground_events: bool = false,
     /// The session's socket, to connect again after a lost link.
@@ -360,7 +359,7 @@ const Client = struct {
         while (true) {
             var fds = [_]lib_posix.pollfd{
                 .{ .fd = stdin, .events = lib_posix.POLL.IN, .revents = 0 },
-                .{ .fd = c.fd, .events = lib_posix.POLL.IN, .revents = 0 },
+                .{ .fd = c.conn.fd, .events = lib_posix.POLL.IN, .revents = 0 },
                 .{ .fd = signal.sig_pipe[0], .events = lib_posix.POLL.IN, .revents = 0 },
             };
             _ = lib_posix.poll(&fds, -1) catch return error.Protocol;
@@ -482,11 +481,10 @@ const Client = struct {
             var ts: std.c.timespec = .{ .sec = 0, .nsec = reconnect_wait_ms * std.time.ns_per_ms };
             _ = std.c.nanosleep(&ts, null);
         };
-        lib_posix.close(c.fd);
-        c.fd = fd;
+        lib_posix.close(c.conn.fd);
+        c.conn.fd = fd;
         if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return false;
-        c.in.clearRetainingCapacity();
-        c.consumed = 0;
+        c.conn.reset();
         // A snapshot that the link cut leaves a partial screen: the offset
         // says nothing, and the session sends a snapshot again.
         if (c.in_snapshot) c.offset = null;
@@ -507,24 +505,15 @@ const Client = struct {
     }
 
     /// Reads what the socket has. False at the end of the stream.
-    fn fill(c: *Client) (Error || error{OutOfMemory})!bool {
-        var buf: [64 * 1024]u8 = undefined;
-        const n = lib_posix.read(c.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return true,
-            else => return false,
-        };
-        if (n == 0) return false;
-        try c.in.appendSlice(c.gpa, buf[0..n]);
-        return true;
+    /// False at the end of the stream.
+    fn fill(c: *Client) error{OutOfMemory}!bool {
+        return c.conn.fill(c.gpa);
     }
 
     /// The next whole frame in `in`, or null. The body stays valid until
     /// the next call.
     fn bufferedFrame(c: *Client) Error!?frame.Frame {
-        c.consume();
-        const p = (frame.parse(c.in.items) catch return error.Protocol) orelse return null;
-        c.consumed = p.len;
-        return p.frame;
+        return c.conn.next() catch error.Protocol;
     }
 
     /// The next whole frame, waiting at most `timeout_ms` for it. Null on a
@@ -533,23 +522,18 @@ const Client = struct {
     fn nextFrame(c: *Client, timeout_ms: i32) (Error || error{OutOfMemory})!?frame.Frame {
         while (true) {
             if (try c.bufferedFrame()) |f| return f;
-            var fds = [_]lib_posix.pollfd{.{ .fd = c.fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+            var fds = [_]lib_posix.pollfd{.{ .fd = c.conn.fd, .events = lib_posix.POLL.IN, .revents = 0 }};
             const ready = lib_posix.poll(&fds, timeout_ms) catch return error.Protocol;
             if (ready == 0) return null;
             if (!try c.fill()) return null;
         }
     }
 
-    fn consume(c: *Client) void {
-        c.in.replaceRangeAssumeCapacity(0, c.consumed, &.{});
-        c.consumed = 0;
-    }
-
     fn sendFrame(c: *Client, channel: u32, kind: frame.Kind, body: []const u8) (Error || error{OutOfMemory})!void {
         var header: [frame.header_len]u8 = undefined;
         frame.writeHeader(&header, channel, kind, body.len) catch return error.Protocol;
-        lib_posix.writeAll(c.fd, &header) catch return error.Protocol;
-        lib_posix.writeAll(c.fd, body) catch return error.Protocol;
+        lib_posix.writeAll(c.conn.fd, &header) catch return error.Protocol;
+        lib_posix.writeAll(c.conn.fd, body) catch return error.Protocol;
     }
 
     fn sendControl(c: *Client, value: anytype) (Error || error{OutOfMemory})!void {

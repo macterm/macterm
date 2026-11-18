@@ -48,8 +48,8 @@ pub const Batch = struct {
 /// A GUI or a CLI on the server's socket.
 pub const Peer = struct {
     id: u64,
-    /// Its `out` holds the frames that a write sends now. `relay.fill`
-    /// moves them in from `control` and the channels.
+    /// The connection to the client. A write sends its `out`, and
+    /// `relay.fill` moves frames into it from `control` and the channels.
     conn: FrameConn,
     connected_at: i64,
     /// Channel 0's frames that wait.
@@ -244,6 +244,9 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
             reply(s, p.id, re, m.ServerExit, .{});
             s.exit_peer = p.id;
             s.exiting = true;
+            // It reads nothing more: a bad frame after this request must
+            // not close it before the reply goes (`Server.flushFor`).
+            p.conn.closing = true;
         },
         m.ControlResume => resumeControl(s, p, re, args),
         m.ChannelOpen => openChannel(s, p, re, args.session),

@@ -23,7 +23,12 @@ pub const Class = enum {
 };
 
 /// Whole frames that wait to go out, in order. A write can send part of the
-/// first frame; the rest of that frame then goes out before anything else.
+/// first frame; the rest of that frame then goes out before anything else,
+/// and no drop removes it.
+///
+/// It has two drops. The relay drops the stale frames of a channel
+/// (`dropStale`). A session drops the output at the end of a client's queue
+/// (`dropOutput`).
 pub const FrameQueue = struct {
     items: std.ArrayList(Item) = .empty,
     head: usize = 0,
@@ -31,7 +36,10 @@ pub const FrameQueue = struct {
     bytes: usize = 0,
     /// The bytes of the first frame that a write sent.
     sent: usize = 0,
-    /// The start of a snapshot went out, and its end did not.
+    /// The bytes of the output frames after the last frame of another
+    /// class, less a frame that started to go out (`dropOutput`).
+    output_tail: usize = 0,
+    /// The start of a snapshot went out with `pop`, and its end did not.
     sending_snapshot: bool = false,
 
     pub const Item = struct {
@@ -58,7 +66,7 @@ pub const FrameQueue = struct {
         try frame.writeHeader(data[0..frame.header_len], channel, kind, body.len);
         @memcpy(data[frame.header_len..], body);
         try q.items.append(gpa, .{ .data = data, .at = at, .class = class });
-        q.bytes += data.len;
+        q.added(data.len, class);
     }
 
     /// Adds a frame that another queue gave up (`pop`). On a failure the
@@ -68,7 +76,12 @@ pub const FrameQueue = struct {
             gpa.free(it.data);
             return err;
         };
-        q.bytes += it.data.len;
+        q.added(it.data.len, it.class);
+    }
+
+    fn added(q: *FrameQueue, len: usize, class: Class) void {
+        q.bytes += len;
+        q.output_tail = if (class == .output) q.output_tail + len else 0;
     }
 
     /// The first frame. The caller owns its `data`. Not for a queue that a
@@ -77,9 +90,14 @@ pub const FrameQueue = struct {
         std.debug.assert(q.sent == 0);
         if (q.empty()) return null;
         const it = q.items.items[q.head];
-        q.started(it.class);
+        switch (it.class) {
+            .snapshot_start => q.sending_snapshot = true,
+            .snapshot_end => q.sending_snapshot = false,
+            else => {},
+        }
         q.head += 1;
         q.bytes -= it.data.len;
+        q.output_tail = @min(q.output_tail, q.bytes);
         q.compact();
         return it;
     }
@@ -118,12 +136,11 @@ pub const FrameQueue = struct {
         var left = n;
         while (left > 0) {
             const it = q.items.items[q.head];
-            if (q.sent == 0) q.started(it.class);
             const rest = it.data.len - q.sent;
             if (left < rest) {
                 q.sent += left;
                 q.bytes -= left;
-                return;
+                break;
             }
             left -= rest;
             q.bytes -= rest;
@@ -131,18 +148,14 @@ pub const FrameQueue = struct {
             q.head += 1;
             q.sent = 0;
         }
+        // The tail is the end of the queue: it loses only what went out.
+        const started_rest = if (q.sent > 0) q.items.items[q.head].data.len - q.sent else 0;
+        q.output_tail = @min(q.output_tail, q.bytes - started_rest);
         q.compact();
     }
 
-    fn started(q: *FrameQueue, class: Class) void {
-        switch (class) {
-            .snapshot_start => q.sending_snapshot = true,
-            .snapshot_end => q.sending_snapshot = false,
-            else => {},
-        }
-    }
-
-    /// Gives back the places of the frames that went out.
+    /// Moves the frames that wait to the start of `items`, when the frames
+    /// that went out take more than half of it.
     fn compact(q: *FrameQueue) void {
         if (q.empty()) {
             q.items.clearRetainingCapacity();
@@ -193,8 +206,25 @@ pub const FrameQueue = struct {
             kept += 1;
         }
         q.items.shrinkRetainingCapacity(kept);
+        q.output_tail = 0;
         q.compact();
         return keep_snapshot;
+    }
+
+    /// Drops the output frames at the end of the queue, after the last frame
+    /// of another class, that did not start to go out. Output in front of a
+    /// message stays: it goes out first.
+    pub fn dropOutput(q: *FrameQueue, gpa: std.mem.Allocator) void {
+        const first = q.firstDroppable();
+        while (q.items.items.len > first) {
+            const it = q.items.items[q.items.items.len - 1];
+            if (it.class != .output) break;
+            gpa.free(it.data);
+            q.bytes -= it.data.len;
+            q.items.items.len -= 1;
+        }
+        q.output_tail = 0;
+        q.compact();
     }
 
     fn firstDroppable(q: *const FrameQueue) usize {
@@ -219,11 +249,14 @@ pub const FrameQueue = struct {
 };
 
 /// One connection that carries frames: a client of the session or the
-/// server, the server's connection to a session, or a relay channel.
+/// server, the server's connection to a session, a relay channel, or the
+/// socket of `zmx connect` (`attach.zig`).
 pub const FrameConn = struct {
     /// -1 after `close`.
     fd: i32,
     in: std.ArrayList(u8) = .empty,
+    /// The bytes at the start of `in` that `next` gave out.
+    used: usize = 0,
     out: FrameQueue = .{},
     /// A frame with a longer body ends the connection before its body is
     /// read.
@@ -263,39 +296,62 @@ pub const FrameConn = struct {
         return c.fd >= 0 and !c.dead and !c.closing;
     }
 
-    /// The poll events: always IN, and OUT when frames wait or `more` says
-    /// that the owner has more to send.
-    pub fn events(c: *const FrameConn, more: bool) i16 {
+    /// The poll events: always IN, and OUT when frames wait in `out` or
+    /// `owner_waits` is true (the owner has frames of its own to send).
+    pub fn events(c: *const FrameConn, owner_waits: bool) i16 {
         var ev: i16 = lib_posix.POLL.IN;
-        if (more or !c.out.empty()) ev |= lib_posix.POLL.OUT;
+        if (owner_waits or !c.out.empty()) ev |= lib_posix.POLL.OUT;
         return ev;
     }
 
-    /// Reads once and calls `@call(onFrame, ctx ++ .{frame, arena})` for
-    /// each whole frame, while the connection is `live`. `arena` is reset
-    /// after each frame. The frame's body is valid only for the call. Null,
-    /// or why the connection must end. The owner ends it in its own way.
+    /// Reads what the socket has, and gives each whole frame to
+    /// `onFrame`, with the arguments `ctx`, the frame and `arena`. It stops
+    /// when the connection is not `live`. `arena` is cleared after each
+    /// frame, and the frame's body is valid only in the call. Returns null,
+    /// or why the connection must end: the owner then ends it.
     pub fn read(c: *FrameConn, gpa: std.mem.Allocator, arena: *std.heap.ArenaAllocator, ctx: anytype, comptime onFrame: anytype) ?End {
-        var buf: [16 * 1024]u8 = undefined;
-        const n = lib_posix.read(c.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return null,
-            else => return .closed,
-        };
-        if (n == 0) return .closed;
-        c.in.appendSlice(gpa, buf[0..n]) catch return .no_memory;
-
-        var used: usize = 0;
-        defer c.in.replaceRangeAssumeCapacity(0, used, &.{});
+        if (!(c.fill(gpa) catch return .no_memory)) return .closed;
         while (c.live()) {
-            const rest = c.in.items[used..];
-            if (rest.len >= frame.header_len and std.mem.readInt(u32, rest[0..4], .little) > c.max_frame)
-                return .too_large;
-            const parsed = (frame.parse(rest) catch return .bad_frame) orelse break;
-            used += parsed.len;
-            defer _ = arena.reset(.retain_capacity);
-            @call(.auto, onFrame, ctx ++ .{ parsed.frame, arena.allocator() });
+            const f = (c.next() catch |err| return switch (err) {
+                error.TooLarge => .too_large,
+                error.BadFrame => .bad_frame,
+            }) orelse break;
+            defer _ = arena.reset(.{ .retain_with_limit = 64 * 1024 });
+            @call(.auto, onFrame, ctx ++ .{ f, arena.allocator() });
         }
         return null;
+    }
+
+    /// Reads once into `in`. False at the end of the stream, or when the
+    /// read fails. True when the socket has nothing now.
+    pub fn fill(c: *FrameConn, gpa: std.mem.Allocator) error{OutOfMemory}!bool {
+        var buf: [16 * 1024]u8 = undefined;
+        const n = lib_posix.read(c.fd, &buf) catch |err| switch (err) {
+            error.WouldBlock => return true,
+            else => return false,
+        };
+        if (n == 0) return false;
+        try c.in.appendSlice(gpa, buf[0..n]);
+        return true;
+    }
+
+    /// The next whole frame in `in`, or null. Its body is valid until the
+    /// next call. A frame whose body is longer than `max_frame` is an error
+    /// before its body comes.
+    pub fn next(c: *FrameConn) error{ TooLarge, BadFrame }!?frame.Frame {
+        c.in.replaceRangeAssumeCapacity(0, c.used, &.{});
+        c.used = 0;
+        if (c.in.items.len >= frame.header_len and std.mem.readInt(u32, c.in.items[0..4], .little) > c.max_frame)
+            return error.TooLarge;
+        const parsed = (frame.parse(c.in.items) catch return error.BadFrame) orelse return null;
+        c.used = parsed.len;
+        return parsed.frame;
+    }
+
+    /// Drops what `in` holds, for a new stream on a new socket.
+    pub fn reset(c: *FrameConn) void {
+        c.in.clearRetainingCapacity();
+        c.used = 0;
     }
 
     /// Writes what waits, until the socket is full.
@@ -377,6 +433,75 @@ fn expectBodies(gpa: std.mem.Allocator, q: *FrameQueue, want: []const []const u8
         try testing.expectEqualStrings(w, it.data[frame.header_len..]);
     }
     try testing.expect(q.empty());
+}
+
+test "a drop at the end of the queue keeps a frame that is half sent" {
+    const gpa = testing.allocator;
+    var q: FrameQueue = .{};
+    defer q.deinit(gpa);
+    try q.push(gpa, 1, .bytes, "abcdef", 0, .output);
+    try q.push(gpa, 1, .bytes, "gh", 0, .output);
+    try testing.expectEqual(2 * frame.header_len + 8, q.bytes);
+
+    // A write sent the first header and two bytes of the first body.
+    q.consume(gpa, frame.header_len + 2);
+    try testing.expectEqual(frame.header_len + 2, q.output_tail);
+    try q.push(gpa, 1, .bytes, "x", 0, .output);
+    q.dropOutput(gpa);
+    // What is left is the rest of the first frame: "cdef".
+    try testing.expectEqual(4, q.bytes);
+    try testing.expectEqualStrings("cdef", q.peek().?.data[q.sent..]);
+    q.consume(gpa, 4);
+    try testing.expect(q.empty());
+    try testing.expectEqual(0, q.bytes);
+    try testing.expectEqual(0, q.sent);
+
+    // At a frame's end, a drop leaves nothing.
+    try q.push(gpa, 1, .bytes, "abc", 0, .output);
+    q.dropOutput(gpa);
+    try testing.expect(q.empty());
+
+    // A write that ends inside the header of a later frame.
+    try q.push(gpa, 1, .bytes, "ab", 0, .output);
+    try q.push(gpa, 1, .bytes, "cd", 0, .output);
+    q.consume(gpa, frame.header_len + 2 + 3);
+    try testing.expectEqual(3, q.sent);
+    q.dropOutput(gpa);
+    try testing.expectEqual(frame.header_len - 3 + 2, q.bytes);
+    try testing.expectEqualStrings("cd", q.peek().?.data[frame.header_len..]);
+}
+
+test "a drop at the end of the queue never removes a message, or the output in front of it" {
+    const gpa = testing.allocator;
+    var q: FrameQueue = .{};
+    defer q.deinit(gpa);
+    try q.push(gpa, 1, .bytes, "out1", 0, .output);
+    try q.push(gpa, 1, .msg, "lead", 0, .message);
+    try q.push(gpa, 1, .bytes, "snap", 0, .message);
+    try q.push(gpa, 1, .bytes, "out2", 0, .output);
+    try testing.expectEqual(frame.header_len + 4, q.output_tail);
+    q.dropOutput(gpa);
+    // Output before the last kept frame stays: it comes first on the wire.
+    try testing.expectEqual(3 * (frame.header_len + 4), q.bytes);
+    try testing.expectEqual(0, q.output_tail);
+
+    // Sent bytes leave the tail alone.
+    q.consume(gpa, frame.header_len + 4);
+    try q.push(gpa, 1, .bytes, "out3", 0, .output);
+    try testing.expectEqual(frame.header_len + 4, q.output_tail);
+    q.dropOutput(gpa);
+    try testing.expectEqual(2 * (frame.header_len + 4), q.bytes);
+
+    // A queue of output alone that goes out: the tail goes with it.
+    q.deinit(gpa);
+    for (0..100) |_| try q.push(gpa, 1, .bytes, "o", 0, .output);
+    q.consume(gpa, 70 * (frame.header_len + 1) + 2);
+    try testing.expectEqual(29 * (frame.header_len + 1), q.output_tail);
+    try testing.expectEqual(30 * (frame.header_len + 1) - 2, q.bytes);
+    // The frames that went out gave their places back.
+    try testing.expectEqual(0, q.head);
+    q.dropOutput(gpa);
+    try testing.expectEqual(frame.header_len + 1 - 2, q.bytes);
 }
 
 test "a drop removes output and unsent snapshots, and keeps messages in order" {
@@ -502,7 +627,7 @@ test "a connection reads whole frames, and ends one that is too large" {
     defer seen.bodies.deinit(gpa);
     try testing.expectEqual(null, c.read(gpa, &arena, .{&seen}, Seen.onFrame));
     try testing.expectEqualStrings("ab", seen.bodies.items);
-    try testing.expectEqual(4, c.in.items.len);
+    try testing.expectEqual(4, c.in.items.len - c.used);
     try lib_posix.writeAll(fds[1], header[4..]);
     try lib_posix.writeAll(fds[1], "cd");
     try testing.expectEqual(null, c.read(gpa, &arena, .{&seen}, Seen.onFrame));
@@ -511,4 +636,51 @@ test "a connection reads whole frames, and ends one that is too large" {
     try frame.writeHeader(&header, 1, .bytes, 9);
     try lib_posix.writeAll(fds[1], &header);
     try testing.expectEqual(FrameConn.End.too_large, c.read(gpa, &arena, .{&seen}, Seen.onFrame).?);
+}
+
+test "a connection ends at a bad frame and at the end of the stream, and a closing one reads nothing more" {
+    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const Count = struct {
+        n: usize = 0,
+        fn onFrame(count: *@This(), conn: *FrameConn, f: frame.Frame, a: std.mem.Allocator) void {
+            _ = f;
+            _ = a;
+            count.n += 1;
+            conn.closing = true;
+        }
+    };
+    var header: [frame.header_len]u8 = undefined;
+    try frame.writeHeader(&header, 1, .bytes, 0);
+
+    // Two frames: the first one closes the connection, so the second one
+    // is not read.
+    var fds = try pair();
+    var c: FrameConn = .{ .fd = fds[0], .max_frame = 8 };
+    var count: Count = .{};
+    try lib_posix.writeAll(fds[1], &header);
+    try lib_posix.writeAll(fds[1], &header);
+    try testing.expectEqual(null, c.read(gpa, &arena, .{ &count, &c }, Count.onFrame));
+    try testing.expectEqual(1, count.n);
+
+    // The next read gives the frame that waits.
+    c.closing = false;
+    try testing.expectEqual(null, c.read(gpa, &arena, .{ &count, &c }, Count.onFrame));
+    try testing.expectEqual(2, count.n);
+
+    // The end of the stream.
+    c.closing = false;
+    lib_posix.close(fds[1]);
+    try testing.expectEqual(FrameConn.End.closed, c.read(gpa, &arena, .{ &count, &c }, Count.onFrame).?);
+    c.deinit(gpa);
+
+    // Pane bytes on channel 0.
+    fds = try pair();
+    defer lib_posix.close(fds[1]);
+    c = .{ .fd = fds[0], .max_frame = 8 };
+    defer c.deinit(gpa);
+    try frame.writeHeader(&header, frame.control_channel, .bytes, 0);
+    try lib_posix.writeAll(fds[1], &header);
+    try testing.expectEqual(FrameConn.End.bad_frame, c.read(gpa, &arena, .{ &count, &c }, Count.onFrame).?);
 }

@@ -41,9 +41,10 @@ pub const Waiter = struct {
 /// The server's connection to one session process.
 pub const Entry = struct {
     id: []u8,
-    /// Its fd is -1 after a refusal: the session and the server have no
-    /// common level. `greeted`: both hellos are in and the levels meet.
-    /// `dead`: the session process ended.
+    /// The connection to the session process. It is `greeted` when both
+    /// hellos are in and the levels meet, closed after a refusal (the
+    /// session and the server have no common level), and `dead` when the
+    /// session process ended.
     conn: FrameConn,
     connected_at: i64,
     build: []u8 = &.{},
@@ -113,7 +114,7 @@ pub const Entry = struct {
     }
 };
 
-/// A session process that has not answered yet (`Server.spawn`).
+/// A session process that has not answered yet (`registry.spawn`).
 pub const Spawn = struct {
     pid: lib_posix.pid_t,
     id: []u8,
@@ -605,7 +606,7 @@ pub fn pruneBuilds(s: *Server) void {
 
 extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *cross.posix_spawnattr_t, disclaim: c_int) c_int;
 
-/// The one `posix_spawn` of a session process (`Server.spawn`). `spec_fd` is
+/// The one `posix_spawn` of a session process (`registry.spawn`). `spec_fd` is
 /// the session's end of the socket pair. It becomes `session.spec_fd`.
 ///
 /// The disclaim makes the session its own responsible process on macOS, for

@@ -51,7 +51,7 @@ verb; `help` does not list it.
 
 ## The v2 server
 
-`zmx server` starts the server (`src/server.zig`) unless one answers on its
+`zmx server` starts the server (`src/server.zig`; also `registry.zig`, `peers.zig` and `runs.zig`) unless one answers on its
 socket, and returns when the socket accepts connections. There is one for
 each user and machine. It holds no pty, and local pane bytes do not go
 through it: a client attaches to the session's own socket. The app will

@@ -30,7 +30,7 @@ const conn_mod = @import("conn.zig");
 const FrameConn = conn_mod.FrameConn;
 const m = protocol.messages;
 
-/// The hidden verb of the session process. The server runs it (`Server.spawn`).
+/// The hidden verb of the session process. The server runs it (`registry.spawn`).
 pub const command_name = "__session";
 
 /// The most output that waits for one client. Over it, the session drops
@@ -80,7 +80,7 @@ pub fn validName(name: []const u8) bool {
 }
 
 /// The fd on which the server gives `__session` its spec and reads the
-/// answer (`Server.spawn`).
+/// answer (`registry.spawn`).
 pub const spec_fd = 3;
 
 /// The answer on `spec_fd` when the socket listens and the shell runs. Any
@@ -228,7 +228,8 @@ pub fn openLog(io: std.Io, dir: []const u8, name: []const u8) void {
 }
 
 const Client = struct {
-    /// `greeted`: its `hello` came and was accepted.
+    /// The connection to the client. It is `greeted` when the client's
+    /// `hello` came and was accepted.
     conn: FrameConn,
     /// It sent `attach`: it gets the pane's output.
     attached: bool = false,
@@ -574,8 +575,8 @@ const Session = struct {
                 s.dropClient(c);
                 continue;
             };
-            if (c.conn.out.stale().bytes > client_cap) {
-                _ = c.conn.out.dropStale(s.gpa);
+            if (c.conn.out.output_tail > client_cap) {
+                c.conn.out.dropOutput(s.gpa);
                 c.behind = true;
                 std.log.info("session {s}: client fd={d} fell behind, output dropped", .{ s.name, c.conn.fd });
             }
@@ -763,8 +764,8 @@ const Session = struct {
             };
             rest = rest[n..];
         }
-        if (c.conn.out.stale().bytes > client_cap) {
-            _ = c.conn.out.dropStale(s.gpa);
+        if (c.conn.out.output_tail > client_cap) {
+            c.conn.out.dropOutput(s.gpa);
             c.behind = true;
         }
         return true;
@@ -841,7 +842,7 @@ const Session = struct {
     /// behind gets its snapshot when it catches up.
     fn refresh(s: *Session, c: *Client) void {
         if (!c.attached or c.behind) return;
-        _ = c.conn.out.dropStale(s.gpa);
+        c.conn.out.dropOutput(s.gpa);
         // Events went with the dropped output.
         defer s.sendCurrent(c);
         if (s.has_output and s.sendSnapshot(c, false)) return;

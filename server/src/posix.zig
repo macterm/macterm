@@ -577,12 +577,22 @@ pub fn writev(fd: fd_t, iov: []const iovec_const) WriteError!usize {
         switch (errno(rc)) {
             .SUCCESS => return @intCast(rc),
             .INTR => continue,
+            .INVAL => return error.InvalidArgument,
+            .FAULT => unreachable,
             .AGAIN => return error.WouldBlock,
             .BADF => return error.NotOpenForWriting,
+            .DESTADDRREQ => unreachable,
+            .DQUOT => return error.DiskQuota,
+            .FBIG => return error.FileTooBig,
             .IO => return error.InputOutput,
+            .NOSPC => return error.NoSpaceLeft,
+            .ACCES => return error.AccessDenied,
+            .PERM => return error.PermissionDenied,
             .PIPE => return error.BrokenPipe,
             .CONNRESET => return error.ConnectionResetByPeer,
-            .INVAL => return error.InvalidArgument,
+            .BUSY => return error.DeviceBusy,
+            .NXIO => return error.NoDevice,
+            .MSGSIZE => return error.MessageTooBig,
             else => |err| return unexpectedErrno(err),
         }
     }
