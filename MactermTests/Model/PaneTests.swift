@@ -571,7 +571,7 @@ struct PaneTests {
     @Test
     func session_name_slugs_from_project_path_basename() throws {
         let id = try #require(UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
-        let p = Pane(projectPath: "/Users/me/dev/Macterm", projectID: UUID(), sessionID: id)
+        let p = Pane(projectPath: "/Users/me/dev/Macterm", projectID: UUID(), id: id)
         #expect(p.sessionName == "macterm-macterm-aaaaaaaabbbb")
         #expect(p.sessionSlug == "Macterm")
     }

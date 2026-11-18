@@ -557,10 +557,9 @@ struct WorkspaceSerializerSessionIdentityTests {
         )
         let restoredPane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
 
-        // Session identity survives verbatim; the runtime pane id does not.
-        #expect(restoredPane.sessionID == pane.sessionID)
+        // Session identity survives verbatim, and the pane id is that identity.
+        #expect(restoredPane.id == pane.id)
         #expect(restoredPane.sessionName == pane.sessionName)
-        #expect(restoredPane.id != pane.id)
         // With no live surface the cwd falls back to the project path.
         #expect(restoredPane.projectPath == "/tmp/proj")
     }
@@ -584,6 +583,61 @@ struct WorkspaceSerializerSessionIdentityTests {
         let pane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
         #expect(pane.sessionName.hasPrefix(ZmxSessionName.prefix))
         #expect(pane.projectPath == "/tmp/old")
+    }
+
+    @Test
+    func pane_and_branch_ids_and_focus_survive_a_restore() throws {
+        let projectID = UUID()
+        let left = Pane(projectPath: "/tmp/proj", projectID: projectID)
+        let right = Pane(projectPath: "/tmp/proj", projectID: projectID)
+        let branch = SplitBranch(direction: .horizontal, ratio: 0.3, first: .pane(left), second: .pane(right))
+        let tab = TerminalTab(id: UUID(), splitRoot: .split(branch), focusedPaneID: right.id)
+        let ws = Workspace(id: projectID, tabs: [tab], activeTabID: tab.id)
+
+        let snapshots = WorkspaceSerializer.snapshot([projectID: ws])
+        let restoredWorkspace = try #require(
+            WorkspaceSerializer.restore(from: snapshots, validIDs: [projectID]).first
+        )
+        let restored = try #require(restoredWorkspace.tabs.first)
+        guard case let .split(restoredBranch) = restored.splitRoot else {
+            Issue.record("expected a split root")
+            return
+        }
+        #expect(restoredBranch.id == branch.id)
+        #expect(restored.splitRoot.allPanes().map(\.id) == [left.id, right.id])
+        #expect(restored.focusedPaneID == right.id)
+        // A save after the restore writes the same snapshot.
+        let again = WorkspaceSerializer.snapshot([projectID: restoredWorkspace])
+        #expect(try JSONEncoder().encode(again) == JSONEncoder().encode(snapshots))
+    }
+
+    @Test
+    func old_file_restores_its_focused_pane_under_the_session_id() throws {
+        // Before 0225 a pane saved a runtime `id` apart from its `sessionID`,
+        // and the tab's focus named the runtime id.
+        let projectID = UUID()
+        let runtimeID = UUID()
+        let sessionID = UUID()
+        let snap = WorkspaceSnapshot(
+            projectID: projectID,
+            activeTabID: nil,
+            tabs: [TabSnapshot(
+                id: UUID(),
+                customTitle: nil,
+                focusedPaneID: runtimeID,
+                splitRoot: .split(SplitBranchSnapshot(
+                    direction: .horizontal,
+                    ratio: 0.5,
+                    first: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp/a", sessionID: UUID())),
+                    second: .pane(PaneSnapshot(id: runtimeID, projectPath: "/tmp/b", sessionID: sessionID))
+                ))
+            )]
+        )
+        let tab = try #require(
+            WorkspaceSerializer.restore(from: [snap], validIDs: [projectID]).first?.tabs.first
+        )
+        #expect(tab.focusedPaneID == sessionID)
+        #expect(tab.splitRoot.findPane(id: sessionID)?.projectPath == "/tmp/b")
     }
 
     @Test
@@ -613,7 +667,7 @@ struct WorkspaceSerializerSessionIdentityTests {
         )
         let pane = try #require(restored.tabs.first?.splitRoot.allPanes().first)
         #expect(pane.sessionName == "macterm-oldname-aaaaaaaabbbb")
-        #expect(pane.sessionID == sessionID)
+        #expect(pane.id == sessionID)
         #expect(pane.sessionSlug == "oldname")
         #expect(pane.projectPath == "/tmp/renamed-project/src")
     }

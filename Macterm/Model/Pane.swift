@@ -4,7 +4,10 @@ import Foundation
 /// A pane is the leaf of the split tree — one terminal surface.
 @MainActor @Observable
 final class Pane: Identifiable {
-    let id = UUID()
+    /// The pane's id, which is also its session id (design 010 §1). It is
+    /// stable across restore: the snapshot stores it, and the restored pane
+    /// takes it again, so its session name and a saved focus still match.
+    let id: UUID
     let projectPath: String
     /// The workspace this pane currently belongs to — the ROUTING identity used
     /// to locate the pane's tab (notification-click navigation bakes this into
@@ -15,10 +18,6 @@ final class Pane: Identifiable {
     /// created and must NOT change on a move — the shell keeps running on its
     /// original host under its original name.
     private(set) var projectID: UUID
-    /// Stable session id for zmx-backed persistence, distinct from `id` (which
-    /// is regenerated on every restore). Fresh for a new pane; the restore
-    /// path will pass the saved one.
-    let sessionID: UUID
     /// The pane's zmx session name (`macterm-<slug>-<hex>`), fixed at creation
     /// and — once persistence lands — stored verbatim in the snapshot, never
     /// re-derived: the slug embeds the project *at creation*, and a later
@@ -872,7 +871,7 @@ final class Pane: Identifiable {
     init(
         projectPath: String,
         projectID: UUID,
-        sessionID: UUID = UUID(),
+        id: UUID = UUID(),
         sessionSlug: String? = nil,
         sessionName persistedSessionName: String? = nil,
         command: String? = nil,
@@ -884,7 +883,7 @@ final class Pane: Identifiable {
         titleReportThrottle = TitleReportThrottle(interval: titleReportInterval)
         self.projectPath = projectPath
         self.projectID = projectID
-        self.sessionID = sessionID
+        self.id = id
         if case let .remote(_, host, _)? = ProjectPath.parse(projectPath) {
             isRemote = true
             remoteHost = host
@@ -906,7 +905,7 @@ final class Pane: Identifiable {
         } else {
             let slug = sessionSlug ?? (projectPath as NSString).lastPathComponent
             self.sessionSlug = slug
-            sessionName = ZmxSessionName.make(projectName: slug, paneSessionID: sessionID)
+            sessionName = ZmxSessionName.make(projectName: slug, paneSessionID: id)
         }
         self.command = command
         self.shell = shell

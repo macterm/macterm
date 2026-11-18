@@ -217,6 +217,5 @@ Macterm-side settings go through `Preferences`. Settings that have the shape of 
 - **Adaptive background inference depends on the private renderer layout of ghostty** (BGRA8 IOSurface). It fails closed. Selections that a program renders (helix, or vim under mouse capture) remain a gap that we have not closed.
 - **Developer ID does not sign Macterm**. On first launch, you need `xattr -cr /Applications/Macterm.app`, or Homebrew. The stable self-signed certificate keeps TCC grants across updates.
 - **`macos-hidden = always` costs the menu bar**. Settings, Quit, About and Check for Updates have no route while it is on. Set the own preferences of Macterm before you switch it on.
-- **Pane IDs are not stable across restarts.**
 - **Desktop widgets are not in the widget gallery of the system**. See `Macterm/App/AGENTS.md`. They also do not take the monochrome look of the system while an app is in front.
 - **Macterm detects password prompts only where it can read the tty that prompts**. This means local panes, and remote panes whose host session reports its tty (`tty_mode`, protocol level 3). It does not see anything behind an `ssh` that you typed by hand. It does not see prompts in raw mode that draw their own `*` mask either.
