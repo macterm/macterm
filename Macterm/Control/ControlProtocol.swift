@@ -589,11 +589,7 @@ struct ControlSessionInfo: Codable, Equatable {
     var leaderPID: Int32?
     /// The live pane currently bound to this session, if any (a session with
     /// no pane is an orphan awaiting reap or reattach).
-    ///
     var paneID: String?
-    /// Every live pane bound to this session: one entry. Optional per the
-    /// additive-field convention.
-    var paneIDs: [String]?
 }
 
 /// Read-only snapshot of a pane's terminal core (`pane.inspect`). Every field

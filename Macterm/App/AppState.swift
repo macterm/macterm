@@ -672,20 +672,12 @@ final class AppState {
         claimLeadership(forPanesIn: tab, in: key.id)
     }
 
-    /// Claim for a tab's surfaces in window `windowID`, one per session. A
-    /// session already led by a surface of this tab is left as it is;
-    /// otherwise the tab's focused pane on that session claims, else the
-    /// first.
+    /// Claim for each pane's surface of a tab in window `windowID`. One pane
+    /// is one session, so each surface claims its own session.
     private func claimLeadership(forPanesIn tab: TerminalTab, in windowID: UUID?) {
         let host = Self.host(windowID)
-        let panes = tab.splitRoot.allPanes()
-        var handled: Set<String> = []
-        for pane in panes where !handled.contains(pane.sessionName) {
-            handled.insert(pane.sessionName)
-            let siblings = panes.filter { $0.sessionName == pane.sessionName }
-            if siblings.contains(where: { SurfaceRegistry.shared.surface(for: $0, in: host).lead == true }) { continue }
-            let claimant = siblings.first { $0.id == tab.focusedPaneID } ?? pane
-            claimSessionLeadership(SurfaceRegistry.shared.surface(for: claimant, in: host))
+        for pane in tab.splitRoot.allPanes() {
+            claimSessionLeadership(SurfaceRegistry.shared.surface(for: pane, in: host))
         }
     }
 
@@ -1913,20 +1905,12 @@ final class AppState {
         return all.map { $0[0] } + all.flatMap { $0.dropFirst() }
     }
 
-    /// Give up these panes' claims on their sessions, killing a session
-    /// only when no OTHER pane still attaches it, or a pinned record that
-    /// waits to load names it. One pane is one session, so the pane check
-    /// only fails closed (issue 0282 removes it).
-    ///
-    /// Takes the whole batch at once, because the callers that remove a
-    /// project, close a tab, or drop a layout's panes release many panes
-    /// together — asked one at a time, two panes inside one batch would each
-    /// see the other still in the tree, both decline to kill, and leak the
-    /// session as a clients==0 daemon.
+    /// Kill these panes' sessions. One pane is one session, so a session
+    /// stays only when a pinned record that waits to load names it.
     ///
     /// Callers still destroy the surfaces (`SurfaceRegistry.destroySurfaces`) themselves; this decides only the kill.
     func releaseSessions(_ panes: [Pane]) {
-        let retained = retainedSessionNames(excluding: panes)
+        let retained = pendingPinnedSessionNames()
         for pane in panes where !retained.contains(pane.sessionName) {
             pane.killPersistentSession(using: sessionClient)
         }
@@ -1946,7 +1930,7 @@ final class AppState {
 
     /// Whether another window of Macterm leads `pane`'s session while this
     /// window's surface does not: the pane is in use there, at its size. A
-    /// client outside Macterm, or a mirror in the same window, does not count.
+    /// client outside Macterm does not count.
     /// A pane that this window never drew has no surface here, and a check
     /// for the notice must not make one.
     func isLedFromAnotherWindow(_ pane: Pane, window windowID: UUID) -> Bool {
@@ -2035,38 +2019,18 @@ final class AppState {
         return Set(tab.splitRoot.allPanes().filter { !SurfaceRegistry.shared.surface(for: $0, in: host).isLeader }.map(\.id))
     }
 
-    /// The session names still claimed once `releasing` is gone. Shared by
-    /// `releaseSessions` and `closeNeedsConfirmation` so the kill decision and
-    /// the warning about it can never disagree.
-    private func retainedSessionNames(excluding releasing: [Pane]) -> Set<String> {
-        let ids = Set(releasing.map(\.id))
-        return Set(
-            allLivePanes()
-                .filter { !ids.contains($0.id) }
-                .map(\.sessionName)
-        ).union(pendingPinnedSessionNames())
-    }
-
-    /// Whether closing `closing` is worth stopping the user over.
-    ///
-    /// The busy-close guard exists because closing a pane kills its session
-    /// and whatever is running in it. That is no longer true for every pane:
-    /// a pane whose session ANOTHER pane still attaches is only a view going
-    /// away — nothing is killed, and the program keeps running in the other
-    /// view — so warning "closing kills its session" there would be false.
-    ///
-    /// Uses the same retention rule as `releaseSessions`, because what the
-    /// user stands to lose is exactly what that function decides to kill.
+    /// Whether closing `closing` is worth stopping the user over: a pane
+    /// that closes kills its session and whatever runs in it. It uses the
+    /// retention rule of `releaseSessions`, so the warning and the kill
+    /// agree.
     ///
     /// This is the ONE busy-close predicate. Every path that ends sessions —
     /// pane close, tab close, project remove, the sidebar's bulk
     /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
-    /// of the overloads below rather than spelling
-    /// `allPanes().contains(where: \.needsConfirmClose)` itself: that raw
-    /// form ignores retention, so it would warn about killing a session that
-    /// the close does not kill.
+    /// of the overloads below, so the tests' `paneNeedsConfirmClose` seam
+    /// reaches all of them.
     func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
-        let retained = retainedSessionNames(excluding: closing)
+        let retained = pendingPinnedSessionNames()
         return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
     }
 
@@ -2082,9 +2046,7 @@ final class AppState {
         closeNeedsConfirmation(panes(inProject: projectID))
     }
 
-    /// Every pane of the given projects (removed whole) and tabs, judged
-    /// TOGETHER: a mirror in one selected tab whose source sits in another
-    /// selected tab is killed by the removal, and only the joint set knows.
+    /// Every pane of the given projects (removed whole) and tabs.
     func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {

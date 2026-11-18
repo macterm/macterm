@@ -210,8 +210,7 @@ extension MactermPaneEntity {
     /// Only the identifier, never the pane's text: the entity does not adopt
     /// `Transferable`, because the system would read the text without the
     /// `macos-shortcuts` gate, and terminal text can hold secrets. Get Pane
-    /// Contents stays the one way to read it. A mirror carries the same
-    /// session, which `IntentTargets.pane` resolves to the leader.
+    /// Contents stays the one way to read it.
     @MainActor
     static func annotate(_ view: NSView, for pane: Pane) {
         guard #available(macOS 15.4, *) else { return }
