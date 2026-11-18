@@ -338,10 +338,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     private func read(_ channel: PaneChannel, reconnected: Bool, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
         var leads = false
-        /// The grid of the last attach, while its snapshot has not come.
+        // The grid of the last attach, while its snapshot has not come.
         var attachGrid: PaneGrid? = grid
         var attachesAgain = 0
-        /// The bytes of the snapshot that is in progress.
+        // The bytes of the snapshot that is in progress.
         var held: Data?
         var dropsOutput = false
         for await event in channel.events {
@@ -371,9 +371,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     attachesAgain += 1
                     attachGrid = now
                     dropsOutput = true
-                    logger.info(
-                        "pane \(self.name, privacy: .public): grid \(laidOut.cols, privacy: .public)x\(laidOut.rows, privacy: .public) became \(now.cols, privacy: .public)x\(now.rows, privacy: .public) before the snapshot, attach again"
-                    )
+                    let change = "\(laidOut.cols)x\(laidOut.rows) to \(now.cols)x\(now.rows)"
+                    logger.info("pane \(self.name, privacy: .public): grid \(change, privacy: .public), attach again")
                     // On the queue of the sizes, so that it goes after a
                     // resize that waits there.
                     send { [self] in try sendAttach($0, now) }
