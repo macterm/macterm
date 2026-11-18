@@ -169,8 +169,9 @@ struct RemoteHostsTests {
                 try await Task.sleep(for: .milliseconds(200))
             }
 
-            // The host's server stops. The pane's link stops (on the app, the
-            // ssh standby's ping finds it), and the host becomes quiet.
+            // The host's server stops, and the host becomes quiet. The pane
+            // reports its link lost, as a driver does when the ping of the
+            // ssh standby fails.
             let server = try host.serverPID()
             #expect(kill(server, SIGSTOP) == 0)
             defer { kill(server, SIGCONT) }
@@ -198,7 +199,8 @@ struct RemoteHostsTests {
             }
             #expect(fixture.answered == ["box"])
 
-            // What the sweep does then: a try with no key. The pane attaches
+            // What the sweep does then (`AppState.reconnectSessions`, tested
+            // in `AppStateTests`): a try with no key. The pane attaches
             // to its session, which replays its screen.
             fixture.hosts.reconnect([pane.sessionName])
             let second = try await fixture.start(pane)
