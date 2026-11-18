@@ -1310,38 +1310,6 @@
         }
       }
     },
-    "An update is available. Click to install." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "업데이트를 사용할 수 있습니다. 클릭하여 설치하십시오."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有可用更新。点按以安装。"
-          }
-        }
-      }
-    },
-    "An update is ready. Click to restart Macterm and install it." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "업데이트가 준비되었습니다. 클릭하면 Macterm을 재시작하고 업데이트를 설치합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新已就绪。点按以重新启动 Macterm 并安装更新。"
-          }
-        }
-      }
-    },
     "Animate splits" : {
       "localizations" : {
         "ko" : {
@@ -3108,6 +3076,22 @@
         }
       }
     },
+    "Downloading…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 중…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载…"
+          }
+        }
+      }
+    },
     "Dynamic" : {
       "comment" : "Quick terminal position or size: remembered from the panel",
       "localizations" : {
@@ -4813,6 +4797,22 @@
         }
       }
     },
+    "Macterm %@ is available on the website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트에서 Macterm %@ 버전을 받을 수 있습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm %@ 已可在网站上获取"
+          }
+        }
+      }
+    },
     "Macterm can fill in the password the next time that this prompt appears." : {
       "localizations" : {
         "ko" : {
@@ -4841,6 +4841,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 无法捕捉面板所在的显示器。"
+          }
+        }
+      }
+    },
+    "Macterm cannot check for updates" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 업데이트를 확인할 수 없습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法检查更新"
+          }
+        }
+      }
+    },
+    "Macterm cannot download the update" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 업데이트를 다운로드할 수 없습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法下载更新"
           }
         }
       }
@@ -5066,6 +5098,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 已在写入 %@。"
+          }
+        }
+      }
+    },
+    "Macterm is up to date" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 최신 버전입니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 已是最新版本"
           }
         }
       }
@@ -11513,22 +11561,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要更新 %@ 吗？"
-          }
-        }
-      }
-    },
-    "Update Available" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "업데이트 사용 가능"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有可用更新"
           }
         }
       }
