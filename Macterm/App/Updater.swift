@@ -413,8 +413,9 @@ struct CheckForUpdatesMenuItem: View {
 /// No button while idle.
 ///
 /// Both states are toolbar buttons, so the toolbar gives each one the same
-/// native height, edge margin and inner padding. Downloading… is disabled:
-/// there is nothing to click while Sparkle downloads.
+/// native height, edge margin and inner padding. Downloading… is an enabled
+/// button with no action, so it shows at full contrast. A click does nothing
+/// while Sparkle downloads.
 struct UpdateToolbarButton: View {
     private var updater: Updater { .shared }
 
@@ -444,7 +445,6 @@ struct UpdateToolbarButton: View {
                     .controlSize(.small)
                 })
             }
-            .disabled(true)
         case .readyToRestart:
             Button {
                 updater.installAndRelaunch()
