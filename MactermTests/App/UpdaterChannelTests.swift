@@ -167,8 +167,8 @@ struct UpdaterChannelTests {
     /// prerelease. A wrong default here would push every user onto prereleases
     /// at the next background check.
     @Test
-    func update_channel_defaults_to_the_builds_own_channel() throws {
-        let defaults = try #require(UserDefaults(suiteName: "macterm.updater-channel-tests.\(UUID().uuidString)"))
+    func update_channel_defaults_to_the_builds_own_channel() {
+        let defaults = IsolatedDefaults.make()
         #expect(defaults.string(forKey: Preferences.Keys.updateChannel.name) == nil)
         // Mirrors Preferences.init's read for an unset key.
         let value = defaults.string(forKey: Preferences.Keys.updateChannel.name)

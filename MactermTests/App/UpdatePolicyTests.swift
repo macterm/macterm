@@ -62,7 +62,7 @@ private struct TemporaryHostBundle {
     let defaults: UserDefaults
 
     init() throws {
-        identifier = "com.macterm.tests.update-policy.\(UUID().uuidString)"
+        identifier = IsolatedDefaults.makeSuiteName()
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(identifier).app", isDirectory: true)
         let contents = url.appendingPathComponent("Contents", isDirectory: true)

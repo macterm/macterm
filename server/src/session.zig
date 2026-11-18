@@ -467,6 +467,11 @@ const Session = struct {
 
     /// Ends the shell's process group if it still runs, as v1 does: SIGHUP
     /// (shells ignore SIGTERM), then SIGKILL after a grace time.
+    ///
+    /// The pty closes before the wait. The loop no longer reads it, and a
+    /// process that exits drains its terminal first: with output that nobody
+    /// reads, the shell stayed in its exit and this wait never returned. The
+    /// session then stayed as a process with no socket.
     fn end(s: *Session) void {
         for (s.clients.items) |c| {
             c.deinit(s.gpa);
@@ -477,6 +482,10 @@ const Session = struct {
         lib_posix.kill(-s.shell_pid, lib_posix.SIG.HUP) catch {};
         std.Io.sleep(s.io, .fromMilliseconds(500), .real) catch {};
         lib_posix.kill(-s.shell_pid, lib_posix.SIG.KILL) catch {};
+        if (!s.pty_closed) {
+            lib_posix.close(s.pty_fd);
+            s.pty_closed = true;
+        }
         _ = lib_posix.waitpid(s.shell_pid, 0);
     }
 

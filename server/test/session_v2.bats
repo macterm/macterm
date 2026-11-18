@@ -456,3 +456,19 @@ second.attach(80, 24)
 second.wait_output("GOT_WINCH_2")
 PY
 }
+
+# A process that exits drains its terminal first. The session must not wait
+# for a shell whose output it no longer reads.
+@test "session: SIGTERM ends a session whose shell floods output" {
+  "$ZMX" session s1 -- /bin/sh -c 'while :; do printf "%0200d\n" 0; done'
+  pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid s1)
+  sleep 0.5
+  kill -TERM "$pid"
+  for _ in $(seq 1 40); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  echo "the session still runs 4 s after SIGTERM"
+  return 1
+}
