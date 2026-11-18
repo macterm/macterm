@@ -1187,6 +1187,10 @@ private struct SidebarProjectRow: View {
     private var projectIconSymbol: String
     @FocusState
     private var focused: Bool
+    /// `.increased` on a selected row of a focused list. The selection is
+    /// the accent color there, and the failure red does not read on it.
+    @Environment(\.backgroundProminence)
+    private var backgroundProminence
 
     private var renameTarget: SidebarRenameTarget { .project(project.id) }
 
@@ -1209,6 +1213,10 @@ private struct SidebarProjectRow: View {
     /// (`Workspace.hasLostRemoteLink`), or the host's roaming link hears
     /// nothing (`RemoteHosts.quietDestinations`). Both symbols stay in the
     /// layout and only one is visible. So the mark after it does not move.
+    /// On a selected row of a focused list (`backgroundProminence` is
+    /// `.increased`) the slashed symbol takes the primary style of the row,
+    /// as the row's text does, and a bold weight. The glyph and the weight
+    /// then show the lost state, because red on the accent color does not read.
     private func remoteMark(host: String, destination: String) -> some View {
         let lost = appState.workspaces[project.id]?.hasLostRemoteLink == true
             || RemoteHosts.shared.quietDestinations.contains(destination)
@@ -1221,12 +1229,14 @@ private struct SidebarProjectRow: View {
                 localized: "Remote project on \(host)",
                 comment: "Help of the sidebar mark on a remote project."
             )
+        let onProminentSelection = backgroundProminence == .increased
         return ZStack {
             Image(systemName: "network")
                 .foregroundStyle(.secondary)
                 .opacity(lost ? 0 : 1)
             Image(systemName: "network.slash")
-                .foregroundStyle(MactermTheme.failure)
+                .fontWeight(onProminentSelection ? .bold : nil)
+                .foregroundStyle(onProminentSelection ? AnyShapeStyle(.primary) : AnyShapeStyle(MactermTheme.failure))
                 .opacity(lost ? 1 : 0)
         }
         .font(.caption2)
