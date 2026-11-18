@@ -48,7 +48,7 @@ pub fn pump(sock: i32, in: i32, out: i32) void {
         if (fds[0].revents != 0) {
             if (read(sock, &buf)) |n| {
                 if (n == 0) return;
-                writeAll(out, buf[0..n]) catch return;
+                lib_posix.writeAll(out, buf[0..n]) catch return;
             } else |err| if (err == error.Failed) return;
         }
         if (in_open and fds[1].revents != 0) {
@@ -60,7 +60,7 @@ pub fn pump(sock: i32, in: i32, out: i32) void {
                 if (n == 0) {
                     in_open = false;
                     _ = std.c.shutdown(sock, std.c.SHUT.WR);
-                } else writeAll(sock, buf[0..n]) catch return;
+                } else lib_posix.writeAll(sock, buf[0..n]) catch return;
             }
         }
     }
@@ -72,19 +72,4 @@ fn read(fd: i32, buf: []u8) error{ Again, Failed }!usize {
         error.WouldBlock => error.Again,
         else => error.Failed,
     };
-}
-
-fn writeAll(fd: i32, data: []const u8) !void {
-    var rest = data;
-    while (rest.len > 0) {
-        const n = lib_posix.write(fd, rest) catch |err| switch (err) {
-            error.WouldBlock => {
-                var pfd = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.OUT, .revents = 0 }};
-                _ = try lib_posix.poll(&pfd, -1);
-                continue;
-            },
-            else => return err,
-        };
-        rest = rest[n..];
-    }
 }

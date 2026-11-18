@@ -220,17 +220,15 @@ enum AdaptiveIcon {
     /// The stacks that the preview in Settings shows for an adaptive icon,
     /// light first: the one the Dock shows, and the other one where the
     /// system draws both. That is an icon style that follows the system
-    /// appearance, with a theme that has the same colors on both sides. The
-    /// app reads the colors of the side in use only, so the other side of a
-    /// `light:X,dark:Y` theme is not shown: a guess at it could be wrong.
+    /// appearance. The controller drops the other one when its colors cannot
+    /// be read with certainty (`GhosttyApp.splitThemeColors`).
     static func previewAppearances(
         shown: AdaptiveIconRequest.Appearance,
-        iconStyle: String?,
-        themeHasTwoSides: Bool
+        iconStyle: String?
     ) -> [AdaptiveIconRequest.Appearance] {
         let followsSystem = appearance(iconStyle: iconStyle, systemScheme: .light) == .light
             && appearance(iconStyle: iconStyle, systemScheme: .dark) == .dark
-        guard followsSystem, !themeHasTwoSides else { return [shown] }
+        guard followsSystem else { return [shown] }
         return [.light, .dark]
     }
 
@@ -244,5 +242,22 @@ enum AdaptiveIcon {
     /// macOS 26 and later. Settings shows the setting only there.
     static var systemDrawsGlassIcons: Bool {
         if #available(macOS 26, *) { true } else { false }
+    }
+}
+
+extension AdaptiveIcon.ThemeColors {
+    /// The colors of a config that libghostty resolved. Nil when the
+    /// background or one of the first sixteen palette entries is missing.
+    init?(_ colors: GhosttyApp.ResolvedColors) {
+        func color(_ rgb: GhosttyApp.ResolvedColors.RGB?) -> AdaptiveIcon.Color? {
+            rgb.map { .init(red: Double($0.r) / 255, green: Double($0.g) / 255, blue: Double($0.b) / 255) }
+        }
+        guard let background = color(colors.background), colors.palette.count >= 16 else { return nil }
+        var palette: [AdaptiveIcon.Color] = []
+        for entry in colors.palette.prefix(16) {
+            guard let entry = color(entry) else { return nil }
+            palette.append(entry)
+        }
+        self.init(background: background, palette: palette)
     }
 }

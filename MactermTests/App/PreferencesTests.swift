@@ -161,4 +161,18 @@ struct PreferencesTests {
             customPaths: path.isEmpty ? [] : [path]
         ))
     }
+
+    /// Two runs at the same time must not share the test domain: the run
+    /// holds the lock of its slot, and the domain has the slot in its name.
+    @Test
+    func domain_has_the_slot_that_this_run_holds() {
+        #expect(Preferences.domainName == "\(appBundleID).tests.\(Preferences.testRunSlot)")
+
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-defaults-\(Preferences.testRunSlot).lock").path
+        let descriptor = open(path, O_RDWR | O_CLOEXEC)
+        #expect(descriptor >= 0)
+        defer { close(descriptor) }
+        #expect(flock(descriptor, LOCK_EX | LOCK_NB) != 0)
+    }
 }

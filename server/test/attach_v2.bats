@@ -9,7 +9,7 @@ setup_file() {
 }
 
 @test "connect: attach and type, the size reaches the pty, and Ctrl-\\ detaches" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from ptyrun import connect
 from v2client import Client
@@ -26,7 +26,7 @@ PY
 }
 
 @test "connect: a new size of the terminal reaches the pty" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from ptyrun import connect
 p = connect("s1", cols=80, rows=24)
@@ -47,7 +47,7 @@ PY
 }
 
 @test "connect: Ctrl-\\ detaches while the session floods output" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from ptyrun import connect
 p = connect("s1")
@@ -59,7 +59,7 @@ PY
 }
 
 @test "connect: a session that ends with no exit status is an error" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid s1)
   python3 - "$pid" <<'PY'
 import os, signal, sys
@@ -74,7 +74,7 @@ PY
 }
 
 @test "connect: a reattach shows the snapshot" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from ptyrun import connect
 p = connect("s1")
@@ -91,7 +91,7 @@ PY
 }
 
 @test "connect: the shell's exit status is the exit code" {
-  "$ZMX" session s1 -- /bin/sh -c 'exit 7'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'exit 7'
   python3 - <<'PY'
 from ptyrun import connect
 assert connect("s1").wait_exit() == 7
@@ -161,7 +161,7 @@ zmx = sys.argv[1]
 restore = b"\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\"
 for i, sig in enumerate((signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGWINCH, None)):
     name = "sig%d" % i
-    subprocess.run([zmx, "session", name, "--", "/bin/sh", "-c", "printf '%s\\n' READY; exec cat"],
+    subprocess.run([zmx, "__create-session", name, "--", "/bin/sh", "-c", "printf '%s\\n' READY; exec cat"],
                    check=True, timeout=10)
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))

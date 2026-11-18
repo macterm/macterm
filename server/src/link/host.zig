@@ -4,7 +4,7 @@
 //! know) gives the client a UDP port. The packets that arrive there are
 //! opened with `packet.zig`, and their bytes go through `stream.zig` to one
 //! end of a socket pair. The server holds the other end as an ordinary client
-//! (`Server.addPeer`), so the relay, its skip-ahead and every request work on
+//! (`peers.addPeer`), so the relay, its skip-ahead and every request work on
 //! a link as they work on a socket. This file has no knowledge of the server.
 //!
 //! Rules (design/009 §2, and the three costs in its table):

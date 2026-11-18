@@ -11,6 +11,10 @@ comptime {
     _ = @import("runtime.zig");
     _ = @import("session.zig");
     _ = @import("server.zig");
+    _ = @import("registry.zig");
+    _ = @import("peers.zig");
+    _ = @import("runs.zig");
+    _ = @import("conn.zig");
     _ = @import("attach.zig");
     _ = @import("events.zig");
     _ = @import("relay.zig");
@@ -21,4 +25,8 @@ comptime {
     _ = @import("link/host.zig");
     _ = @import("model/tests.zig");
     _ = @import("cli/contract.zig");
+    _ = @import("cli/command.zig");
+    _ = @import("cli/output.zig");
+    _ = @import("cli/client.zig");
+    _ = @import("cli/cli.zig");
 }

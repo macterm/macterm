@@ -13,6 +13,7 @@ const Resize = @import("pty.zig").Resize;
 const v2attach = @import("attach.zig");
 const socket = @import("socket.zig");
 const protocol = @import("protocol/protocol.zig");
+const cli = @import("cli/cli.zig");
 const version = build_options.version;
 const ghostty_version = build_options.ghostty_version;
 
@@ -56,21 +57,57 @@ fn mainImpl(init: std.process.Init) !void {
     // No log file until a session opens its own: lines go to stderr.
     log.log_system.io = io;
 
-    const cmd = first_arg orelse return help(io);
-    if (std.mem.eql(u8, cmd, "session")) return sessionCommand(gpa, io, init.environ_map, &args);
+    const cmd = first_arg orelse return cliCommand(init, &.{});
+    if (std.mem.eql(u8, cmd, create_session_command)) return sessionCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, v2session.command_name)) return sessionEntry(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "server")) return serverCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "connect")) return connectCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "proxy")) return proxyCommand(gpa, io, init.environ_map, &args);
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "v") or std.mem.eql(u8, cmd, "-v") or std.mem.eql(u8, cmd, "--version")) return printVersion(io);
-    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "h") or std.mem.eql(u8, cmd, "-h") or std.mem.eql(u8, cmd, "--help")) return help(io);
-    return printError(io, "unknown command \"{s}\"", .{cmd});
+    var words: std.ArrayList([]const u8) = .empty;
+    defer words.deinit(gpa);
+    try words.append(gpa, cmd);
+    while (args.next()) |arg| try words.append(gpa, arg);
+    return cliCommand(init, words.items);
 }
 
-/// `session [--cols N] [--rows N] [--cwd DIR] <name> [--] [command...]`: asks
-/// the server to start a session, and starts the server when its socket does
-/// not answer. Returns once the session's socket accepts connections. Not in
-/// `help`: tests run it.
+/// The hidden verb that makes a session through the server, for tests. It
+/// is not `session`: that noun is the CLI's (`session list/info/kill`).
+const create_session_command = "__create-session";
+
+/// The `macterm` CLI (`cli/cli.zig`): every word that is not a verb of the
+/// server's own. Exits with the CLI's code.
+fn cliCommand(init: std.process.Init, words: []const []const u8) !void {
+    var arena_state: std.heap.ArenaAllocator = .init(init.gpa);
+    defer arena_state.deinit();
+    // Streaming, not positional: output that a shell appends to a file
+    // must not write over what is there.
+    var out_buf: [16 * 1024]u8 = undefined;
+    var out = std.Io.File.stdout().writerStreaming(init.io, &out_buf);
+    var err_buf: [4096]u8 = undefined;
+    var err = std.Io.File.stderr().writerStreaming(init.io, &err_buf);
+    var code = cli.run(.{
+        .arena = arena_state.allocator(),
+        .env = init.environ_map,
+        .out = &out.interface,
+        .err = &err.interface,
+    }, words) catch |e| switch (e) {
+        error.OutOfMemory => return e,
+        error.WriteFailed => 1,
+    };
+    // Output that did not get out (stdout closed, a full disk) is a
+    // failure, also when the buffer held all of it until now.
+    out.interface.flush() catch {
+        code = 1;
+    };
+    err.interface.flush() catch {};
+    std.process.exit(code);
+}
+
+/// `__create-session [--cols N] [--rows N] [--cwd DIR] <name> [--]
+/// [command...]`: asks the server to start a session, and starts the server
+/// when its socket does not answer. Returns once the session's socket
+/// accepts connections. Tests run it.
 fn sessionCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
     var name: []const u8 = "";
     var size: Resize = .{ .cols = 80, .rows = 24 };
@@ -199,7 +236,7 @@ fn connectCommand(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.En
 }
 
 /// The session process; not a user command. The server starts it
-/// (`Server.spawn`) with argv `__session <name>` and its spec, one msgpack
+/// (`registry.spawn`) with argv `__session <name>` and its spec, one msgpack
 /// `SessionCreate.Args`, on `session.spec_fd`.
 fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, args: anytype) !void {
     const name = args.next() orelse return printError(io, "{s}: session name required", .{v2session.command_name});
@@ -238,31 +275,6 @@ fn sessionEntry(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Envi
 
 /// The largest spec that `__session` reads.
 const spec_max = 1024 * 1024;
-
-fn help(io: std.Io) !void {
-    const help_text =
-        \\zmx - the Macterm session server
-        \\
-        \\Usage: zmx <command> [args...]
-        \\
-        \\Commands:
-        \\  connect <name> [-- command...]   Attach this terminal to a session. With --,
-        \\                                   make the session if it is not there.
-        \\  [v]ersion                        Show the version
-        \\  [h]elp                           Show this help
-        \\
-        \\Ctrl+\ detaches.
-        \\
-        \\Environment variables:
-        \\  MACTERM_RUNTIME_DIR  The folder of the sockets of the server and the sessions
-        \\  ZMX_NO_DETACH_KEY    Disables the Ctrl+\ detach key (set to any value)
-        \\
-    ;
-    var buf: [4096]u8 = undefined;
-    var w = std.Io.File.stdout().writer(io, &buf);
-    try w.interface.writeAll(help_text);
-    try w.interface.flush();
-}
 
 fn printVersion(io: std.Io) !void {
     var buf: [256]u8 = undefined;

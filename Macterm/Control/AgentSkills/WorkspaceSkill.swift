@@ -168,6 +168,9 @@ extension AgentSkills {
         macterm project create devbox:~/dev/api --name api-devbox
         ```
 
+        `project create` connects to the host first and adds nothing when the folder is not there
+        (`not_found`) or when the host does not answer (`internal`).
+
         Every pane of that project runs a zmx session on the host over ssh. You sign in interactively in the
         pane. zmx must already be on the host, in its `PATH` or in `~/bin` or `~/.local/bin`. A pane that
         prints `macterm: zmx not found in PATH on this host` needs it. Remote sessions keep running when you

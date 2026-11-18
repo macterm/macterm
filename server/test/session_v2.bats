@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# The v2 session process (src/session.zig): `zmx session` (through the
+# The v2 session process (src/session.zig): `zmx __create-session` (through the
 # server), its socket in the runtime directory, and the frames on it.
 # test/v2client.py is the client.
 
@@ -14,20 +14,20 @@ mode_of() {
 }
 
 @test "session: starts, and its socket and directory belong to the user only" {
-  run "$ZMX" session s1 -- /bin/sh
+  run "$ZMX" __create-session s1 -- /bin/sh
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ -S "$MACTERM_RUNTIME_DIR/s1" ]
   [ "$(mode_of "$MACTERM_RUNTIME_DIR")" = "700" ]
   [ "$(mode_of "$MACTERM_RUNTIME_DIR/s1")" = "600" ]
 
-  run "$ZMX" session s1 -- /bin/sh
+  run "$ZMX" __create-session s1 -- /bin/sh
   [ "$status" -eq 1 ]
   [[ "$output" == *'already exists'* ]]
 }
 
 @test "session: hello, then the state with the pids and the pty" {
-  "$ZMX" session --cols 90 --rows 30 s1 -- /bin/sh
+  "$ZMX" __create-session --cols 90 --rows 30 s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -41,7 +41,7 @@ PY
 }
 
 @test "session: attach and type" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -55,7 +55,7 @@ PY
 @test "session: no program in the session holds the listen socket" {
   # As in session.bats: lsof finds the socket in the session process and not
   # in the program.
-  "$ZMX" session s1 -- /bin/sh -c 'echo "pids-$$-$PPID-listed"; exec sleep 30'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'echo "pids-$$-$PPID-listed"; exec sleep 30'
   run python3 - <<'PY'
 import re
 from v2client import Client
@@ -76,7 +76,7 @@ PY
 
 @test "session: --cwd is the shell's folder, also a relative one, and a bad folder leaves no socket" {
   mkdir "$RT/work"
-  (cd "$RT" && "$ZMX" session --cwd work s1 -- /bin/sh -c "pwd -P > '$RT/pwd'; exec sleep 30")
+  (cd "$RT" && "$ZMX" __create-session --cwd work s1 -- /bin/sh -c "pwd -P > '$RT/pwd'; exec sleep 30")
   local i=0
   until [[ -s "$RT/pwd" ]]; do
     (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
@@ -84,7 +84,7 @@ PY
   done
   [ "$(< "$RT/pwd")" = "$(cd "$RT/work" && pwd -P)" ]
 
-  run "$ZMX" session --cwd "$RT/gone" s2 -- /bin/sh
+  run "$ZMX" __create-session --cwd "$RT/gone" s2 -- /bin/sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot open directory"* ]]
   # root enters any folder.
@@ -92,7 +92,7 @@ PY
   rmdir "$RT/work"
   mkdir "$RT/work"
   chmod 000 "$RT/work"
-  run "$ZMX" session --cwd "$RT/work" s3 -- /bin/sh
+  run "$ZMX" __create-session --cwd "$RT/work" s3 -- /bin/sh
   chmod 700 "$RT/work"
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot enter directory"* ]]
@@ -102,7 +102,7 @@ PY
 @test "session: no program in the session gets the fd of the spec" {
   # The server gives the spec on fd 3 (session.spec_fd). `true`, not `:`: a
   # redirect that fails on a special builtin ends a POSIX shell.
-  "$ZMX" session s1 -- /bin/sh -c "if { true >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
+  "$ZMX" __create-session s1 -- /bin/sh -c "if { true >&3; } 2>/dev/null; then echo open; else echo closed; fi > '$RT/fd3'; exec sleep 30"
   local i=0
   until [[ -s "$RT/fd3" ]]; do
     (( i++ < 50 )) || { echo "timed out waiting for the command"; return 1; }
@@ -112,7 +112,7 @@ PY
 }
 
 @test "session: the leader's resize reaches the pty" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -128,7 +128,7 @@ PY
 }
 
 @test "session: two clients, one leader, and a claim moves the size" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -162,7 +162,7 @@ PY
 }
 
 @test "session: a client that attaches later gets a snapshot" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -180,7 +180,7 @@ PY
 }
 
 @test "session: an attach snapshot over the cap arrives whole, after the state" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -203,7 +203,7 @@ PY
 }
 
 @test "session: when the leader leaves, the client that remains leads" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 a = Client("s1")
@@ -228,7 +228,7 @@ PY
 }
 
 @test "session: the exit comes after the last output, and an early take is ignored" {
-  "$ZMX" session s1 -- /bin/sh -c 'sleep 1; printf last-%s 1; exit 3'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'sleep 1; printf last-%s 1; exit 3'
   python3 - <<'PY'
 from v2client import Client, PANE, MSG
 c = Client("s1")
@@ -250,7 +250,7 @@ PY
 }
 
 @test "session: a client that stops reading gets a snapshot, and the shell never blocks" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 stuck = Client("s1")
@@ -278,7 +278,7 @@ PY
 }
 
 @test "session: the exit status stays across reconnects until a client takes it" {
-  "$ZMX" session s1 -- /bin/sh -c 'sleep 1; exit 7'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'sleep 1; exit 7'
   sleep 2
   python3 - <<'PY'
 import os
@@ -297,7 +297,7 @@ PY
 }
 
 @test "session: a shell that a signal ends reports the signal" {
-  "$ZMX" session s1 -- /bin/sh -c 'kill -9 $$'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'kill -9 $$'
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1")
@@ -308,7 +308,7 @@ PY
 }
 
 @test "session: a hello under the session's level is refused" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1", level=0, min_level=0)
@@ -320,7 +320,7 @@ PY
 }
 
 @test "session: a first frame that is not a hello closes the connection" {
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'
 from v2client import Client
 c = Client("s1", greet=False)
@@ -333,14 +333,14 @@ PY
 @test "session: a runtime directory that is not 0700, or is a link, is refused" {
   mkdir -p "$MACTERM_RUNTIME_DIR"
   chmod 755 "$MACTERM_RUNTIME_DIR"
-  run "$ZMX" session s1 -- /bin/sh
+  run "$ZMX" __create-session s1 -- /bin/sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"has a mode other than 0700"* ]]
   [ ! -e "$MACTERM_RUNTIME_DIR/s1" ]
 
   chmod 700 "$MACTERM_RUNTIME_DIR"
   ln -s "$MACTERM_RUNTIME_DIR" "$RT/link"
-  MACTERM_RUNTIME_DIR="$RT/link" run "$ZMX" session s1 -- /bin/sh
+  MACTERM_RUNTIME_DIR="$RT/link" run "$ZMX" __create-session s1 -- /bin/sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"is a symbolic link"* ]]
 }
@@ -354,7 +354,7 @@ PY
   rm -rf "$RT"
   RT="$(mktemp -d /tmp/rt.XXXXXX)"
   export MACTERM_RUNTIME_DIR="$RT/run"
-  "$ZMX" session s1 -- /bin/sh
+  "$ZMX" __create-session s1 -- /bin/sh
   chmod 711 "$RT" "$MACTERM_RUNTIME_DIR"
   chmod 666 "$MACTERM_RUNTIME_DIR/s1"
   # From /, so that no shell warns that it cannot read its directory.
@@ -392,7 +392,7 @@ wait_lines() {
 }
 
 @test "session: answers DA1 while no client is attached, also after a client left" {
-  "$ZMX" session da -- bash --norc --noprofile -c "$(da1_probe 5 "$RT/da"); read -r _; $(da1_probe 5 "$RT/da"); exec sleep 30"
+  "$ZMX" __create-session da -- bash --norc --noprofile -c "$(da1_probe 5 "$RT/da"); read -r _; $(da1_probe 5 "$RT/da"); exec sleep 30"
   wait_lines "$RT/da" 1
   python3 - <<'PY'
 from v2client import Client
@@ -409,7 +409,7 @@ PY
 }
 
 @test "session: leaves DA1 to the client while one is attached" {
-  "$ZMX" session da2 -- bash --norc --noprofile -c "read -r _; $(da1_probe 1 "$RT/da2"); exec sleep 30"
+  "$ZMX" __create-session da2 -- bash --norc --noprofile -c "read -r _; $(da1_probe 1 "$RT/da2"); exec sleep 30"
   python3 - <<'PY' &
 from v2client import Client
 import time
@@ -426,7 +426,7 @@ PY
 
 # The rewrite to `redraw=0` sees a prompt mark whole when a read cuts it.
 @test "session: a prompt mark that comes in two reads gets redraw=0" {
-  "$ZMX" session pm -- /bin/sh -c 'read -r _; printf "\033]133;A"; sleep 0.5; printf ";aid=1\007MARK_DONE\n"; exec sleep 30'
+  "$ZMX" __create-session pm -- /bin/sh -c 'read -r _; printf "\033]133;A"; sleep 0.5; printf ";aid=1\007MARK_DONE\n"; exec sleep 30'
   python3 - <<'PY2'
 from v2client import Client
 c = Client("pm")
@@ -444,7 +444,7 @@ PY2
 @test "session: a reattach at the same size sends SIGWINCH to the foreground" {
   # Each SIGWINCH prints its number, so a snapshot of an earlier one does
   # not count.
-  "$ZMX" session s1 -- /bin/sh -c 'n=0; trap "n=\$((n+1)); printf \"GOT_%s_%s\n\" WINCH \$n" WINCH; printf "%s\n" READY; while :; do sleep 0.1; done'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'n=0; trap "n=\$((n+1)); printf \"GOT_%s_%s\n\" WINCH \$n" WINCH; printf "%s\n" READY; while :; do sleep 0.1; done'
   python3 - <<'PY'
 from v2client import Client
 first = Client("s1")
@@ -460,7 +460,7 @@ PY
 # A process that exits drains its terminal first. The session must not wait
 # for a shell whose output it no longer reads.
 @test "session: SIGTERM ends a session whose shell floods output" {
-  "$ZMX" session s1 -- /bin/sh -c 'while :; do printf "%0200d\n" 0; done'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'while :; do printf "%0200d\n" 0; done'
   pid=$(python3 "$BATS_TEST_DIRNAME/v2client.py" pid s1)
   sleep 0.5
   kill -TERM "$pid"

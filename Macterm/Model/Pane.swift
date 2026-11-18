@@ -53,7 +53,7 @@ final class Pane: Identifiable {
     /// app tries again by itself, and a key connects at once. Its frozen
     /// screen is not dimmed: its cursor is faint and does not blink
     /// (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row says
-    /// `Connection lost` (`TerminalPane`), so that it does not look live.
+    /// `Connection Lost` (`TerminalPane`), so that it does not look live.
     /// Never persisted.
     var isRemoteLinkLost = false {
         didSet { if isRemoteLinkLost { remoteLineMode = nil } }
@@ -64,7 +64,7 @@ final class Pane: Identifiable {
     var isRemoteReconnecting = false
 
     /// The badge of a remote pane whose connection is lost, or nil.
-    enum RemoteLinkBadge: Equatable {
+    enum RemoteLinkBadge: Equatable, CaseIterable {
         /// A try runs now.
         case reconnecting
         /// No try runs now.

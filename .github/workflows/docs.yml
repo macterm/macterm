@@ -20,7 +20,7 @@ concurrency:
 jobs:
   # The `docs` area of .github/path-areas.
   changes:
-    name: Detect changes
+    name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       docs: ${{ steps.changes.outputs.docs }}

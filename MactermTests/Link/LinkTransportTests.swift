@@ -91,6 +91,15 @@ struct LinkTransportTests {
     }
 
     @Test
+    func a_packet_after_one_missed_keepalive_says_the_host_answers_again() {
+        #expect(!LinkTransport.answersAgain(now: 10000, lastRx: 10000 - LinkStream.keepalive))
+        #expect(!LinkTransport.answersAgain(now: 10000, lastRx: 10000 - LinkTransport.answersAfter + 1))
+        #expect(LinkTransport.answersAgain(now: 10000, lastRx: 10000 - LinkTransport.answersAfter))
+        // The sign comes before the link is quiet.
+        #expect(LinkTransport.answersAfter < LinkTransport.quietAfter)
+    }
+
+    @Test
     func a_link_is_quiet_after_three_missed_keepalives() {
         #expect(!LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter + 1))
         #expect(LinkTransport.isQuiet(now: 10000, lastRx: 10000 - LinkTransport.quietAfter))

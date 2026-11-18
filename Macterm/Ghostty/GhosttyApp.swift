@@ -89,6 +89,10 @@ final class GhosttyApp {
     /// "computed, no split theme" from "not yet computed".
     @ObservationIgnored
     private var themeColorsCache: (version: Int, colors: ThemeResolver.Colors?)?
+    /// Memoized `splitThemeColors(_:)`, for each side, keyed on `configVersion`:
+    /// each read builds a whole config.
+    @ObservationIgnored
+    private var splitSideCache: [ThemeResolver.Scheme: (version: Int, colors: ResolvedColors?)] = [:]
 
     private init() {
         // ghostty_init captures `environ` as a pointer+length slice for the
@@ -201,10 +205,16 @@ final class GhosttyApp {
     /// split with two different sides libghostty turns `auto` into `system`,
     /// so the app config holds `auto` only for a theme with one side.
     var windowScheme: ThemeResolver.Scheme {
+        windowScheme(forSystem: systemScheme)
+    }
+
+    /// The scheme of the app if the system were on `system`, with the keys
+    /// and the override of now.
+    func windowScheme(forSystem system: ThemeResolver.Scheme) -> ThemeResolver.Scheme {
         WindowTheme.scheme(
             configured: windowTheme,
             override: windowThemeOverride,
-            system: systemScheme,
+            system: system,
             backgroundIsLight: (read(Keys.background) ?? Self.fallbackBackground).prefersDarkForeground
         )
     }
@@ -749,10 +759,64 @@ final class GhosttyApp {
     }
 
     /// Whether the theme is a `light:X,dark:Y` pair with two different sides.
-    /// The colors that the app reads are those of the side in use only.
+    /// The colors of the app are those of the side in use. The other side's
+    /// colors come from `splitThemeColors`.
     var themeHasTwoSides: Bool {
         guard let value = effectiveThemeValue() else { return false }
         return ThemeResolver.resolve(themeValue: value, scheme: .light) != ThemeResolver.resolve(themeValue: value, scheme: .dark)
+    }
+
+    /// The colors of one side of a `light:X,dark:Y` pair, as libghostty
+    /// merges them: the config of the app with the side as its last layer
+    /// (`ThemeResolver.sideLayer`). Nil for a theme with one side, and when
+    /// the side cannot be read with certainty (`readThemeSideColors`). Each
+    /// read builds two configs, so it is kept until `configVersion` changes.
+    func splitThemeColors(_ scheme: ThemeResolver.Scheme) -> ResolvedColors? {
+        if let cache = splitSideCache[scheme], cache.version == configVersion {
+            return cache.colors
+        }
+        let colors = computeSplitThemeColors(scheme)
+        splitSideCache[scheme] = (configVersion, colors)
+        return colors
+    }
+
+    private func computeSplitThemeColors(_ scheme: ThemeResolver.Scheme) -> ResolvedColors? {
+        guard themeHasTwoSides, let value = effectiveThemeValue(),
+              let side = ThemeResolver.resolve(themeValue: value, scheme: scheme)
+        else { return nil }
+        let layer = MactermConfig.shared.themeSideURL
+        do {
+            try Data(ThemeResolver.sideLayer(side).utf8).write(to: layer, options: .atomic)
+        } catch {
+            logger.warning("cannot write the theme side layer: \(EnglishErrorText.describe(error), privacy: .public)")
+            return nil
+        }
+        var ignored: [String] = []
+        guard let baseline = buildConfig(missingPaths: &ignored) else { return nil }
+        defer { ghostty_config_free(baseline) }
+        guard let cfg = buildConfig(missingPaths: &ignored, last: layer.path) else { return nil }
+        defer { ghostty_config_free(cfg) }
+        return Self.readThemeSideColors(from: cfg, baseline: baseline)
+    }
+
+    /// The colors of a config whose last layer is a side of a split theme.
+    /// `baseline` is the same config with no side layer, built at the same
+    /// moment. A diagnostic that the baseline does not have comes from the
+    /// side (a theme that does not load, a bad line in its file), and
+    /// libghostty then keeps colors that are not the side's: the read gives
+    /// nil.
+    nonisolated static func readThemeSideColors(
+        from cfg: ghostty_config_t,
+        baseline: ghostty_config_t
+    ) -> ResolvedColors? {
+        func messages(_ config: ghostty_config_t) -> [String] {
+            (0 ..< ghostty_config_diagnostics_count(config)).map {
+                String(cString: ghostty_config_get_diagnostic(config, $0).message)
+            }
+        }
+        let known = Set(messages(baseline))
+        guard messages(cfg).allSatisfy(known.contains) else { return nil }
+        return readColors(from: cfg)
     }
 
     private func computeResolvedThemeColors() -> ThemeResolver.Colors? {

@@ -47,7 +47,7 @@ jobs:
 
   # The session server of this commit (server-build.yml).
   server:
-    name: Server
+    name: Bundled Server
     needs: changes
     if: needs.changes.outputs.bench == 'true'
     permissions:

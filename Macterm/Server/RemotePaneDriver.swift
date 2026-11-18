@@ -75,12 +75,12 @@ final class RemotePaneDriver: PaneInputRoute {
         let mine = generation
         Task { @MainActor in
             // A pane that restores before the app has installed its state
-            // waits: no panes would read as "the pane closed".
-            while hosts.panes == nil {
+            // waits: no pane would read as "the pane closed".
+            while hosts.pane == nil {
                 try? await Task.sleep(for: .milliseconds(200))
                 guard mine == generation else { return }
             }
-            let answer = await hosts.answer(event, session: name, panes: hosts.panes?(name) ?? [])
+            let answer = await hosts.answer(event, session: name, pane: hosts.pane?(name))
             guard mine == generation else { return }
             apply(answer, generation: mine)
         }
@@ -168,7 +168,7 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     fileprivate func sessionAttached() {
-        hosts.sessionAttached(name, panes: hosts.panes?(name) ?? [])
+        hosts.sessionAttached(name, pane: hosts.pane?(name))
     }
 
     /// The connection stopped: the pane is lost and waits for a try.
@@ -253,7 +253,7 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     private var isLost: Bool {
-        hosts.panes?(name).contains { $0.isRemoteLinkLost } ?? false
+        hosts.pane?(name)?.isRemoteLinkLost ?? false
     }
 
     private func keep(_ data: Data) {

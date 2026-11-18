@@ -4,32 +4,45 @@
 //! serves channel 0 to the GUI and the CLI: `session.create`, `list`,
 //! `info`, `kill`, `server.exit`, `ping`, `command.run` (a command run to
 //! its end, for the app's background reads of a host, 0058), and the
-//! `session.exit` event. It holds no pty. On the Mac it is not on the byte
-//! path: a client attaches to a session's own socket. On a host, the app reaches every pane through one
-//! stream (`macterm proxy`), and the server relays each pane on a channel of
-//! that stream (`channel.open`, `close`, `pause`, `resume`; `relay.zig`).
+//! `session.exit` event. It holds no pty. The app reaches each pane through
+//! a channel of its one connection to the server, on the Mac and on a host
+//! (`channel.open`, `close`, `pause`, `resume`; `relay.zig`).
 //!
 //! It stores nothing. Each session process holds its state and its exit
 //! status, and keeps the status until a client sends `session.kill`. So a
 //! new server, after a crash or an update, reads every session again from
 //! its socket and loses nothing.
+//!
+//! This file has the start, the loop and the exit. `registry.zig` has the
+//! sessions, `peers.zig` the clients and their channels, `runs.zig`
+//! `command.run`, and `conn.zig` the connection and the poll list that they
+//! all use.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
-const log = @import("log.zig");
-const cross = @import("cross");
 const lib_posix = @import("posix.zig");
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
 const runtime = @import("runtime.zig");
 const session = @import("session.zig");
 const relay = @import("relay.zig");
+const conn = @import("conn.zig");
 const link_host = @import("link/host.zig");
 const protocol = @import("protocol/protocol.zig");
 const frame = protocol.frame;
-const msgpack = protocol.msgpack;
 const m = protocol.messages;
+const registry = @import("registry.zig");
+const runs = @import("runs.zig");
+const peers = @import("peers.zig");
+
+const Peer = peers.Peer;
+const Entry = registry.Entry;
+const Spawn = registry.Spawn;
+const Waiter = registry.Waiter;
+const Batch = peers.Batch;
+const Channel = peers.Channel;
+const Run = runs.Run;
 
 /// The server's socket in the runtime directory. A session name cannot start
 /// with a dot, so no session can take it.
@@ -51,29 +64,8 @@ pub const spawn_ms = 10_000;
 /// left out of the lists that wait for it. It is listed when it answers.
 pub const settle_ms = 2000;
 
-const max_clients = 64;
-
-/// The send buffer of a client's socket (`SO_SNDBUF`).
-const peer_sndbuf = 32 * 1024;
-
-/// A server file of another build younger than this stays (`pruneBuilds`).
-const fresh_build_ms = 60_000;
-
-/// The most channels that one client can have open.
-const max_channels = 256;
-
-/// A client that sends no `hello` this long after it connects is closed, so
-/// that idle connections cannot take every place.
-const hello_ms = 5000;
-const frame_max = 1024 * 1024;
-
-/// The most stdout that `command.run` returns. The rest is read and dropped,
-/// so that the command does not stop on a full pipe.
-const run_output_max = 512 * 1024;
-/// The longest `command.run` that a client can ask for.
-const run_timeout_max_ms = 60_000;
-/// The most commands that run at one time.
-const max_runs = 16;
+/// The longest frame body that a client or a session may send.
+pub const frame_max = 1024 * 1024;
 
 /// The `server` command. Starts the server and returns once its socket
 /// accepts connections. `error.AlreadyRunning` when a server answers.
@@ -151,10 +143,10 @@ fn takeServerLock(dir: []const u8, path: []const u8) !i32 {
     errdefer lib_posix.close(fd);
     var tries: u32 = 0;
     while (std.c.flock(fd, std.c.LOCK.EX | std.c.LOCK.NB) != 0) : (tries += 1) {
-        if (std.c._errno().* != @intFromEnum(std.c.E.AGAIN)) return error.LockFailed;
+        if (std.c._errno().* != @backingInt(std.c.E.AGAIN)) return error.LockFailed;
         if (tries >= 100) return error.AlreadyRunning;
-        if (socket.connectSession(path)) |conn| {
-            lib_posix.close(conn);
+        if (socket.connectSession(path)) |fd_live| {
+            lib_posix.close(fd_live);
             return error.AlreadyRunning;
         } else |_| {}
         var ts: std.c.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
@@ -196,220 +188,25 @@ fn serveAndExit(dir: []const u8, fds: Bound) noreturn {
     std.process.exit(0);
 }
 
-/// How many event batches the server keeps for `control.resume`.
-pub const batch_ring = 256;
-
-/// One sent event batch.
-const Batch = struct {
-    seq: u64,
-    /// The encoded message, as it went on channel 0.
-    body: []u8,
+/// What each fd of the server's loop is.
+const Source = union(enum) {
+    signal,
+    listen,
+    peer: *Peer,
+    entry: *Entry,
+    channel: struct { peer: *Peer, ch: *Channel },
+    run: *Run,
+    spawn: *Spawn,
+    /// The fds of `Server.links`, which `link_host.Host.handle` reads.
+    link,
 };
 
-/// A GUI or a CLI on the server's socket.
-const Peer = struct {
-    id: u64,
-    fd: i32,
-    connected_at: i64,
-    in: std.ArrayList(u8) = .empty,
-    /// The frames that `write` sends now. `relay.fill` moves them in from
-    /// `control` and the channels.
-    out: session.OutQueue = .{},
-    /// Channel 0's frames that wait.
-    control: relay.Queue = .{},
-    channels: std.ArrayList(*Channel) = .empty,
-    next_channel: u32 = 1,
-    /// The channel that goes first in the next fill (`relay.fill`).
-    turn: usize = 0,
-    greeted: bool = false,
-    /// Close it when its queue is empty (after a refusal).
-    closing: bool = false,
-    dead: bool = false,
+const Reactor = conn.Reactor(Source);
 
-    fn findChannel(p: *Peer, id: u32) ?*Channel {
-        for (p.channels.items) |ch| if (ch.id == id and !ch.closed) return ch;
-        return null;
-    }
-
-    /// Everything that waits for this client.
-    fn pending(p: *const Peer) usize {
-        var n = p.out.len() + p.control.bytes;
-        for (p.channels.items) |ch| n += ch.q.bytes;
-        return n;
-    }
-
-    /// What waits for this client and that no skip can drop. The rest has a
-    /// cap for each channel (`relay.skip_bytes`).
-    fn kept(p: *const Peer) usize {
-        var n = p.out.len() + p.control.bytes;
-        for (p.channels.items) |ch| n += ch.q.bytes - ch.q.stale().bytes;
-        return n;
-    }
-};
-
-/// A pane that the server relays to a client: the server's own connection to
-/// the session, and the frames that wait for the client.
-const Channel = struct {
-    /// The channel number on the client's stream.
-    id: u32,
-    session: []u8,
-    /// The connection to the session. -1 when the session closed it: the
-    /// channel goes when its last frames went to the client.
-    fd: i32,
-    in: std.ArrayList(u8) = .empty,
-    /// The client's frames to the session, on the session's pane channel.
-    to_session: session.OutQueue = .{},
-    q: relay.Queue = .{},
-    flow: relay.Flow = .{},
-    greeted: bool = false,
-    /// The `channel.open` request that waits for the session's `hello`.
-    open_re: ?u64 = null,
-    /// The client closed it. Its input that waits still goes to the session,
-    /// then the channel goes.
-    closed: bool = false,
-    /// The client got the session's `exit`, or the channel's stand-in for it.
-    exited: bool = false,
-
-    fn deinit(ch: *Channel, gpa: std.mem.Allocator) void {
-        if (ch.fd >= 0) lib_posix.close(ch.fd);
-        ch.in.deinit(gpa);
-        ch.to_session.deinit(gpa);
-        ch.q.deinit(gpa);
-        gpa.free(ch.session);
-        gpa.destroy(ch);
-    }
-};
-
-/// A request that waits for a session: a create, a kill, or an info or a list
-/// before the state came.
-const Waiter = struct {
-    peer: u64,
-    re: u64,
-    kind: enum { create, info, kill, list, seen },
-};
-
-/// The server's connection to one session process.
-const Entry = struct {
-    id: []u8,
-    /// -1 after a refusal: the session and the server have no common level.
-    fd: i32,
-    in: std.ArrayList(u8) = .empty,
-    out: session.OutQueue = .{},
-    connected_at: i64,
-    build: []u8 = &.{},
-    /// The session's build key, from its `hello`. Null when it sent none, or
-    /// one that is not a key.
-    build_key: ?[]u8 = null,
-    level: u32 = 0,
-    /// Both hellos are in and the levels meet.
-    greeted: bool = false,
-    refused: bool = false,
-    state: ?State = null,
-    /// The session's attention flags, from its last `attention` message.
-    attention: m.Attention = .{},
-    exit: ?session.ExitStatus = null,
-    /// The `session.exit` event went out.
-    announced: bool = false,
-    /// The server sent `take`.
-    taken: bool = false,
-    /// A client sent `session.kill`: the server takes the exit status.
-    killing: bool = false,
-    /// When SIGKILL goes, if the session has not ended.
-    kill_deadline: ?i64 = null,
-    waiters: std.ArrayList(Waiter) = .empty,
-    dead: bool = false,
-
-    const State = struct {
-        pid: i64,
-        shell_pid: i64,
-        pty_buf: [128]u8 = @splat(0),
-        pty_len: usize = 0,
-        cols: u16,
-        rows: u16,
-        clients: ?u16 = null,
-    };
-
-    /// Its state or its refusal is in, or it was silent too long.
-    fn settled(e: *const Entry, now: i64) bool {
-        return e.state != null or e.refused or now - e.connected_at >= settle_ms;
-    }
-
-    /// The server can say something true about it.
-    fn listed(e: *const Entry) bool {
-        return !e.dead and (e.state != null or e.refused);
-    }
-
-    fn info(e: *const Entry) m.Session {
-        var out: m.Session = .{
-            .id = e.id,
-            .state = if (e.refused) .refused else if (e.exit != null) .exited else .running,
-            .build = e.build,
-            .level = e.level,
-            .build_key = e.build_key,
-        };
-        if (e.state) |*st| {
-            out.pid = st.pid;
-            out.shell_pid = st.shell_pid;
-            out.pty = .{ .bytes = st.pty_buf[0..st.pty_len] };
-            out.cols = st.cols;
-            out.rows = st.rows;
-            out.clients = st.clients;
-        }
-        out.unseen = e.attention.unseen;
-        out.failed = e.attention.failed;
-        out.bell = e.attention.bell;
-        if (e.exit) |x| {
-            out.code = x.code;
-            out.signal = x.signal;
-        }
-        return out;
-    }
-};
-
-/// A session process that has not answered yet (`Server.spawn`).
-const Spawn = struct {
-    pid: lib_posix.pid_t,
-    id: []u8,
-    /// The server's end of the socket pair: the spec goes out on it, and the
-    /// session's answer comes back on it.
-    fd: i32,
-    /// The encoded spec, and how much of it went out.
-    spec: []u8,
-    sent: usize = 0,
-    answer: std.ArrayList(u8) = .empty,
-    /// The session closed its end: `finishSpawns` answers the waiters.
-    done: bool = false,
-    started_at: i64,
-    waiters: std.ArrayList(Waiter) = .empty,
-
-    fn events(sp: *const Spawn) i16 {
-        var ev: i16 = lib_posix.POLL.IN;
-        if (sp.sent < sp.spec.len) ev |= lib_posix.POLL.OUT;
-        return ev;
-    }
-};
-
-/// A `command.run` child. The reply goes when its stdout gave EOF and the
-/// child was reaped.
-const Run = struct {
-    pid: lib_posix.pid_t,
-    peer: u64,
-    re: u64,
-    /// The read end of the child's stdout. -1 after EOF.
-    out_fd: i32,
-    output: std.ArrayList(u8) = .empty,
-    truncated: bool = false,
-    deadline: i64,
-    timed_out: bool = false,
-    status: ?session.ExitStatus = null,
-
-    fn done(r: *const Run) bool {
-        return r.out_fd < 0 and r.status != null;
-    }
-};
-
-const Server = struct {
+pub const Server = struct {
     gpa: std.mem.Allocator,
+    /// For the frame that a handler decodes. Reset after each frame.
+    arena: std.heap.ArenaAllocator,
     io: std.Io,
     dir: []const u8,
     listen_fd: i32,
@@ -447,19 +244,19 @@ const Server = struct {
     /// walks it.
     pending_peers: std.ArrayList(i32) = .empty,
 
-    fn init(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, fds: Bound) !Server {
+    pub fn init(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, fds: Bound) !Server {
         var epoch: u64 = undefined;
         io.random(std.mem.asBytes(&epoch));
-        var s: Server = .{ .gpa = gpa, .io = io, .dir = dir, .listen_fd = fds.listen, .lock_fd = fds.lock, .epoch = epoch, .links = link_host.Host.init(gpa) };
+        var s: Server = .{ .gpa = gpa, .io = io, .dir = dir, .listen_fd = fds.listen, .lock_fd = fds.lock, .epoch = epoch, .arena = .init(gpa), .links = link_host.Host.init(gpa) };
         _ = try selfExe(&s.exe_buf);
         return s;
     }
 
-    fn now(s: *const Server) i64 {
+    pub fn now(s: *const Server) i64 {
         return std.Io.Timestamp.now(s.io, .awake).toMilliseconds();
     }
 
-    fn hello(s: *const Server) m.Hello {
+    pub fn hello(s: *const Server) m.Hello {
         return .{
             .level = m.level,
             .min_level = m.min_level,
@@ -471,7 +268,7 @@ const Server = struct {
         };
     }
 
-    fn run(s: *Server) !void {
+    pub fn run(s: *Server) !void {
         // `init` copied the struct: the slice must point into this copy.
         const exe_len = std.mem.findScalar(u8, &s.exe_buf, 0) orelse return error.ExecutablePathUnknown;
         s.exe = s.exe_buf[0..exe_len :0];
@@ -479,119 +276,97 @@ const Server = struct {
         signal.installWakeHandler(@backingInt(lib_posix.SIG.TERM));
         signal.installWakeHandler(@backingInt(lib_posix.SIG.CHLD));
         std.log.info("server started pid={d} epoch={x}", .{ std.c.getpid(), s.epoch });
-        s.discover();
+        registry.discover(s);
 
-        var fds: std.ArrayList(lib_posix.pollfd) = .empty;
-        defer fds.deinit(s.gpa);
-        var chans: std.ArrayList(struct { peer: *Peer, ch: *Channel }) = .empty;
-        defer chans.deinit(s.gpa);
+        var reactor: Reactor = .{};
+        defer reactor.deinit(s.gpa);
         while (!s.exiting) {
             if (s.idleExpired()) return;
-            fds.clearRetainingCapacity();
-            try fds.append(s.gpa, .{ .fd = s.listen_fd, .events = lib_posix.POLL.IN, .revents = 0 });
-            try fds.append(s.gpa, .{ .fd = signal.sig_pipe[0], .events = lib_posix.POLL.IN, .revents = 0 });
-            const npeers = s.peers.items.len;
-            for (s.peers.items) |p| try fds.append(s.gpa, .{ .fd = p.fd, .events = peerEvents(p), .revents = 0 });
-            const nentries = s.entries.items.len;
-            for (s.entries.items) |e| try fds.append(s.gpa, .{ .fd = e.fd, .events = pollEvents(&e.out), .revents = 0 });
-            chans.clearRetainingCapacity();
-            for (s.peers.items) |p| for (p.channels.items) |ch| if (ch.fd >= 0) {
+            reactor.clear();
+            try reactor.add(s.gpa, signal.sig_pipe[0], lib_posix.POLL.IN, .signal);
+            try reactor.add(s.gpa, s.listen_fd, lib_posix.POLL.IN, .listen);
+            for (s.peers.items) |p| try reactor.add(s.gpa, p.conn.fd, p.conn.events(p.pending() > 0), .{ .peer = p });
+            for (s.entries.items) |e| try reactor.add(s.gpa, e.conn.fd, e.conn.events(false), .{ .entry = e });
+            for (s.peers.items) |p| for (p.channels.items) |ch| if (ch.conn.fd >= 0) {
                 // A closed channel reads nothing more: it only sends its input.
-                const events: i16 = if (!ch.closed) pollEvents(&ch.to_session) else if (ch.to_session.len() > 0) lib_posix.POLL.OUT else 0;
-                try chans.append(s.gpa, .{ .peer = p, .ch = ch });
-                try fds.append(s.gpa, .{ .fd = ch.fd, .events = events, .revents = 0 });
+                const events: i16 = if (!ch.closed) ch.conn.events(false) else if (!ch.conn.out.empty()) lib_posix.POLL.OUT else 0;
+                try reactor.add(s.gpa, ch.conn.fd, events, .{ .channel = .{ .peer = p, .ch = ch } });
             };
-            const nruns = s.runs.items.len;
-            for (s.runs.items) |r| try fds.append(s.gpa, .{ .fd = r.out_fd, .events = lib_posix.POLL.IN, .revents = 0 });
-            const nspawns = s.spawns.items.len;
-            for (s.spawns.items) |sp| try fds.append(s.gpa, .{ .fd = sp.fd, .events = sp.events(), .revents = 0 });
-            const link_start = fds.items.len;
-            try s.links.pollFds(&fds, s.gpa);
+            for (s.runs.items) |r| try reactor.add(s.gpa, r.out_fd, lib_posix.POLL.IN, .{ .run = r });
+            for (s.spawns.items) |sp| try reactor.add(s.gpa, sp.fd, sp.events(), .{ .spawn = sp });
+            const link_start = reactor.fds.items.len;
+            try s.links.pollFds(&reactor.fds, s.gpa);
+            try reactor.tag(s.gpa, .link);
 
-            _ = try lib_posix.poll(fds.items, s.pollTimeout());
+            try reactor.poll(s.pollTimeout());
 
-            if (fds.items[1].revents & lib_posix.POLL.IN != 0) {
-                signal.drainSignalPipe() catch {
-                    std.log.info("server: SIGTERM", .{});
-                    return;
-                };
-                s.reapChildren();
-                s.reapRuns();
-            }
-            if (fds.items[0].revents & lib_posix.POLL.IN != 0) s.accept();
-
-            for (s.peers.items[0..npeers], fds.items[2..][0..npeers]) |p, pfd| {
-                if (p.dead) continue;
-                if (pfd.revents & lib_posix.POLL.IN != 0) s.readPeer(p);
-                if (!p.dead and pfd.revents & lib_posix.POLL.OUT != 0) s.writePeer(p);
-                if (!p.dead and pfd.revents & lib_posix.POLL.IN == 0 and
-                    pfd.revents & (lib_posix.POLL.HUP | lib_posix.POLL.ERR | lib_posix.POLL.NVAL) != 0) p.dead = true;
-            }
-            for (s.entries.items[0..nentries], fds.items[2 + npeers ..][0..nentries]) |e, pfd| {
-                if (e.dead or e.fd < 0) continue;
-                if (pfd.revents & lib_posix.POLL.IN != 0) s.readEntry(e);
-                // A refusal closes the connection in `readEntry`.
-                if (e.fd < 0) continue;
-                if (!e.dead and pfd.revents & lib_posix.POLL.OUT != 0) s.writeEntry(e);
-                if (!e.dead and pfd.revents & lib_posix.POLL.IN == 0 and
-                    pfd.revents & (lib_posix.POLL.HUP | lib_posix.POLL.ERR | lib_posix.POLL.NVAL) != 0) s.entryGone(e);
-            }
-            for (chans.items, fds.items[2 + npeers + nentries ..][0..chans.items.len]) |c, pfd| {
-                if (c.peer.dead or c.ch.fd < 0) continue;
-                if (!c.ch.closed and pfd.revents & lib_posix.POLL.IN != 0) s.readChannel(c.peer, c.ch);
-                if (c.ch.fd < 0 or c.peer.dead) continue;
-                if (pfd.revents & lib_posix.POLL.OUT != 0) s.writeChannel(c.peer, c.ch);
-                if (c.ch.fd >= 0 and pfd.revents & lib_posix.POLL.IN == 0 and
-                    pfd.revents & (lib_posix.POLL.HUP | lib_posix.POLL.ERR | lib_posix.POLL.NVAL) != 0) s.channelEnded(c.peer, c.ch);
-            }
-            for (s.runs.items[0..nruns], fds.items[2 + npeers + nentries + chans.items.len ..][0..nruns]) |r, pfd| {
-                if (r.out_fd >= 0 and pfd.revents != 0) s.readRun(r);
-            }
-            for (s.spawns.items[0..nspawns], fds.items[2 + npeers + nentries + chans.items.len + nruns ..][0..nspawns]) |sp, pfd| {
-                if (!sp.done and pfd.revents & lib_posix.POLL.OUT != 0) s.writeSpawn(sp);
-                if (!sp.done and pfd.revents & ~@as(i16, lib_posix.POLL.OUT) != 0) s.readSpawn(sp);
-            }
-            s.finishSpawns();
-            s.links.handle(fds.items[link_start..], s.now());
-            for (s.pending_peers.items) |fd| s.addPeer(fd);
+            for (reactor.fds.items, reactor.sources.items) |pfd, source| switch (source) {
+                .signal => if (pfd.revents & lib_posix.POLL.IN != 0) {
+                    signal.drainSignalPipe() catch {
+                        std.log.info("server: SIGTERM", .{});
+                        return;
+                    };
+                    registry.reapChildren(s);
+                    runs.reapRuns(s);
+                },
+                .listen => if (pfd.revents & lib_posix.POLL.IN != 0) peers.accept(s),
+                .peer => |p| {
+                    if (p.conn.dead) continue;
+                    if (pfd.revents & lib_posix.POLL.IN != 0) peers.readPeer(s, p);
+                    if (!p.conn.dead and pfd.revents & lib_posix.POLL.OUT != 0) peers.writePeer(s, p);
+                    if (!p.conn.dead and conn.hungUp(pfd.revents)) p.conn.dead = true;
+                },
+                .entry => |e| {
+                    if (e.conn.dead or e.conn.fd < 0) continue;
+                    if (pfd.revents & lib_posix.POLL.IN != 0) registry.readEntry(s, e);
+                    // A refusal closes the connection in `readEntry`.
+                    if (e.conn.fd < 0) continue;
+                    if (!e.conn.dead and pfd.revents & lib_posix.POLL.OUT != 0) registry.writeEntry(s, e);
+                    if (!e.conn.dead and conn.hungUp(pfd.revents)) registry.entryGone(s, e);
+                },
+                .channel => |c| {
+                    if (c.peer.conn.dead or c.ch.conn.fd < 0) continue;
+                    if (!c.ch.closed and pfd.revents & lib_posix.POLL.IN != 0) peers.readChannel(s, c.peer, c.ch);
+                    if (c.ch.conn.fd < 0 or c.peer.conn.dead) continue;
+                    if (pfd.revents & lib_posix.POLL.OUT != 0) peers.writeChannel(s, c.peer, c.ch);
+                    if (c.ch.conn.fd >= 0 and conn.hungUp(pfd.revents)) peers.channelEnded(s, c.peer, c.ch);
+                },
+                .run => |r| if (r.out_fd >= 0 and pfd.revents != 0) runs.readRun(s, r),
+                .spawn => |sp| {
+                    if (!sp.done and pfd.revents & lib_posix.POLL.OUT != 0) registry.writeSpawn(s, sp);
+                    if (!sp.done and pfd.revents & ~@as(i16, lib_posix.POLL.OUT) != 0) registry.readSpawn(s, sp);
+                },
+                .link => {},
+            };
+            registry.finishSpawns(s);
+            s.links.handle(reactor.fds.items[link_start..], s.now());
+            for (s.pending_peers.items) |fd| peers.addPeer(s, fd);
             s.pending_peers.clearRetainingCapacity();
             s.timers();
             s.sweep();
-            if (s.prune_due and s.allSettled()) {
+            if (s.prune_due and registry.allSettled(s)) {
                 s.prune_due = false;
-                s.pruneBuilds();
+                registry.pruneBuilds(s);
             }
         }
         // `server.exit`: the reply goes out before the server closes, for at
         // most 1 s. Other clients' queues are dropped.
-        if (s.findPeer(s.exit_peer orelse return)) |p| s.flushFor(p, 1000);
+        if (peers.findPeer(s, s.exit_peer orelse return)) |p| s.flushFor(p, 1000);
     }
 
-    fn flushFor(s: *Server, p: *Peer, ms: i64) void {
+    pub fn flushFor(s: *Server, p: *Peer, ms: i64) void {
         const deadline = s.now() + ms;
-        while (p.out.len() + p.control.bytes > 0 and !p.dead) {
+        while (p.conn.out.bytes + p.control.bytes > 0 and !p.conn.dead) {
             const left = deadline - s.now();
             if (left <= 0) return;
-            var pfd = [_]lib_posix.pollfd{.{ .fd = p.fd, .events = lib_posix.POLL.OUT, .revents = 0 }};
+            var pfd = [_]lib_posix.pollfd{.{ .fd = p.conn.fd, .events = lib_posix.POLL.OUT, .revents = 0 }};
             _ = lib_posix.poll(&pfd, @intCast(left)) catch return;
-            s.writePeer(p);
+            peers.writePeer(s, p);
         }
     }
 
-    fn pollEvents(out: *const session.OutQueue) i16 {
-        var events: i16 = lib_posix.POLL.IN;
-        if (out.len() > 0) events |= lib_posix.POLL.OUT;
-        return events;
-    }
-
-    fn peerEvents(p: *const Peer) i16 {
-        var events: i16 = lib_posix.POLL.IN;
-        if (p.pending() > 0) events |= lib_posix.POLL.OUT;
-        return events;
-    }
-
     /// The time until the next deadline, or -1 for none.
-    fn pollTimeout(s: *const Server) i32 {
+    pub fn pollTimeout(s: *const Server) i32 {
         const t = s.now();
         var next: ?i64 = null;
         if (s.idle_since) |since| next = since + idle_exit_ms;
@@ -602,8 +377,8 @@ const Server = struct {
         for (s.runs.items) |r| if (!r.timed_out) {
             next = @min(next orelse r.deadline, r.deadline);
         };
-        for (s.peers.items) |p| if (!p.greeted) {
-            const d = p.connected_at + hello_ms;
+        for (s.peers.items) |p| if (!p.conn.greeted) {
+            const d = p.connected_at + peers.hello_ms;
             next = @min(next orelse d, d);
         };
         for (s.entries.items) |e| {
@@ -613,7 +388,7 @@ const Server = struct {
                 next = @min(next orelse d, d);
             }
         }
-        for (s.peers.items) |p| for (p.channels.items) |ch| if (ch.fd >= 0 and !ch.closed) {
+        for (s.peers.items) |p| for (p.channels.items) |ch| if (ch.conn.fd >= 0 and !ch.closed) {
             if (ch.flow.deadline(ch.q.stale())) |d| next = @min(next orelse d, d);
         };
         const d = next orelse return s.links.timeout(t);
@@ -622,13 +397,11 @@ const Server = struct {
         return if (link >= 0) @min(own, link) else own;
     }
 
-    // ── Exit ────────────────────────────────────────────────────────────────
-
     /// True when the server has had no session, no client and no start in
     /// flight for `idle_exit_ms`, and no client waits in the backlog.
-    fn idleExpired(s: *Server) bool {
+    pub fn idleExpired(s: *Server) bool {
         // A refused session has no connection: see if it still runs.
-        if (s.peers.items.len == 0 and s.spawns.items.len == 0) s.checkRefused();
+        if (s.peers.items.len == 0 and s.spawns.items.len == 0) registry.checkRefused(s);
         const idle = s.peers.items.len == 0 and s.entries.items.len == 0 and s.spawns.items.len == 0 and s.runs.items.len == 0;
         if (!idle) {
             s.idle_since = null;
@@ -643,7 +416,7 @@ const Server = struct {
         // A client in the backlog is accepted, and the server stays. One that
         // connects after the close gets EOF before `hello`: it starts a
         // server and connects again.
-        s.accept();
+        peers.accept(s);
         if (s.peers.items.len > 0) {
             s.idle_since = null;
             return false;
@@ -656,7 +429,7 @@ const Server = struct {
     /// Closes the socket, unlinks it, then lets the server lock go. Only the
     /// holder of the lock unlinks, so the socket that goes is this server's.
     /// A start after this finds no server and starts one.
-    fn closeListen(s: *Server) void {
+    pub fn closeListen(s: *Server) void {
         if (s.listen_fd < 0) return;
         lib_posix.close(s.listen_fd);
         s.listen_fd = -1;
@@ -666,213 +439,21 @@ const Server = struct {
     }
 
     /// Closes everything. Sessions see a client leave and keep running.
-    fn shutdown(s: *Server) void {
+    pub fn shutdown(s: *Server) void {
         s.links.deinit();
         s.closeListen();
         for (s.peers.items) |p| {
-            lib_posix.close(p.fd);
-            for (p.channels.items) |ch| if (ch.fd >= 0) lib_posix.close(ch.fd);
+            p.conn.close();
+            for (p.channels.items) |ch| ch.conn.close();
         }
-        for (s.entries.items) |e| if (e.fd >= 0) lib_posix.close(e.fd);
+        for (s.entries.items) |e| e.conn.close();
         for (s.runs.items) |r| lib_posix.kill(-r.pid, lib_posix.SIG.KILL) catch {};
     }
 
-    // ── Sessions ────────────────────────────────────────────────────────────
-
-    /// Connects to every session socket in the directory. A socket that
-    /// refuses the connection is left as it is: a session that starts with
-    /// that name removes it.
-    fn discover(s: *Server) void {
-        var dir = std.Io.Dir.openDirAbsolute(s.io, s.dir, .{ .iterate = true }) catch return;
-        defer dir.close(s.io);
-        var it = dir.iterate();
-        while (it.next(s.io) catch null) |entry| {
-            if (entry.kind != .unix_domain_socket or !session.validName(entry.name)) continue;
-            s.connectEntry(entry.name) catch |err|
-                std.log.info("server: session {s} does not answer: {s}", .{ entry.name, @errorName(err) });
-        }
-    }
-
-    fn connectEntry(s: *Server, id: []const u8) !void {
-        const path = try socket.getSocketPath(s.gpa, s.dir, id);
-        defer s.gpa.free(path);
-        const fd = try connectNonblocking(path);
-        errdefer lib_posix.close(fd);
-        const e = try s.gpa.create(Entry);
-        errdefer s.gpa.destroy(e);
-        e.* = .{ .id = try s.gpa.dupe(u8, id), .fd = fd, .connected_at = s.now() };
-        errdefer s.gpa.free(e.id);
-        try s.entries.append(s.gpa, e);
-        s.sendEntryControl(e, s.hello());
-    }
-
-    fn findEntry(s: *Server, id: []const u8) ?*Entry {
-        for (s.entries.items) |e| if (!e.dead and std.mem.eql(u8, e.id, id)) return e;
-        return null;
-    }
-
-    fn readEntry(s: *Server, e: *Entry) void {
-        var buf: [16 * 1024]u8 = undefined;
-        const n = lib_posix.read(e.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => return s.entryGone(e),
-        };
-        if (n == 0) return s.entryGone(e);
-        e.in.appendSlice(s.gpa, buf[0..n]) catch return s.entryGone(e);
-
-        var used: usize = 0;
-        defer if (!e.dead) e.in.replaceRangeAssumeCapacity(0, used, &.{});
-        while (!e.dead and e.fd >= 0) {
-            const rest = e.in.items[used..];
-            if (rest.len >= frame.header_len and std.mem.readInt(u32, rest[0..4], .little) > frame_max)
-                return s.brokenEntry(e, "a frame over 1 MiB");
-            const parsed = (frame.parse(rest) catch return s.brokenEntry(e, "a bad frame")) orelse break;
-            used += parsed.len;
-            s.handleEntryFrame(e, parsed.frame);
-        }
-    }
-
-    fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame) void {
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-
-        if (f.channel == frame.control_channel) {
-            const msg = m.decodeControl(arena, f.body) catch return s.brokenEntry(e, "a bad message");
-            switch (msg) {
-                .hello => |h| {
-                    if (e.greeted or e.refused) return;
-                    e.build = s.gpa.dupe(u8, buildName(h.build)) catch return s.entryGone(e);
-                    if (keyOf(h.build_key)) |k| e.build_key = s.gpa.dupe(u8, k) catch return s.entryGone(e);
-                    e.level = h.level;
-                    switch (m.negotiate(s.hello(), h)) {
-                        .speak => e.greeted = true,
-                        .refuse => |r| {
-                            std.log.info("server: session {s} speaks level {d}, refused", .{ e.id, h.level });
-                            // One try: a session that already left needs no refusal.
-                            s.sendEntryControl(e, r);
-                            _ = lib_posix.write(e.fd, e.out.buf.items) catch {};
-                            s.refuseEntry(e);
-                        },
-                    }
-                },
-                .refuse => |r| {
-                    std.log.info("server: session {s} refused the server: {s}", .{ e.id, r.reason });
-                    s.refuseEntry(e);
-                },
-                else => {},
-            }
-            return;
-        }
-        if (!e.greeted or f.channel != m.pane_channel or f.kind != .msg) return;
-        const msg = msgpack.decodeSlice(m.PaneMessage, arena, f.body) catch return s.brokenEntry(e, "a bad message");
-        if (std.mem.eql(u8, msg.t, m.State.name)) {
-            const st = m.decodePane(m.State, arena, msg) catch return s.brokenEntry(e, "a bad state");
-            // The server may SIGKILL this pid. 0, 1 and -1 would reach a
-            // process group or every process of the user, and a session's pid
-            // never changes: fail closed.
-            if (!validPid(st.pid) or !validPid(st.shell_pid))
-                return s.brokenEntry(e, "a pid that the server cannot signal");
-            if (e.state) |old| if (old.pid != st.pid or old.shell_pid != st.shell_pid)
-                return s.brokenEntry(e, "a pid other than its first");
-            const first = e.state == null;
-            var state: Entry.State = .{ .pid = st.pid, .shell_pid = st.shell_pid, .cols = st.cols, .rows = st.rows, .clients = st.clients };
-            state.pty_len = @min(st.pty.bytes.len, state.pty_buf.len);
-            @memcpy(state.pty_buf[0..state.pty_len], st.pty.bytes[0..state.pty_len]);
-            e.state = state;
-            if (first) s.settle(e);
-        } else if (std.mem.eql(u8, msg.t, m.Attention.name)) {
-            const a = m.decodePane(m.Attention, arena, msg) catch return s.brokenEntry(e, "a bad attention");
-            const changed = !std.meta.eql(e.attention, a);
-            e.attention = a;
-            if (changed) s.emit(m.PaneAttention, .{ .id = e.id, .unseen = a.unseen, .failed = a.failed, .bell = a.bell });
-            // Only `Watch.seen` sends all flags clear after a change, so this
-            // is the answer to `Seen`: the event is out, and the requests
-            // that wait for it get their replies. A flag that was already on
-            // its way does not answer them.
-            if (a.unseen or a.failed or a.bell) return;
-            var i: usize = 0;
-            while (i < e.waiters.items.len) {
-                const w = e.waiters.items[i];
-                if (w.kind != .seen) {
-                    i += 1;
-                    continue;
-                }
-                _ = e.waiters.orderedRemove(i);
-                s.reply(w.peer, w.re, m.PaneSeen, .{});
-            }
-        } else if (std.mem.eql(u8, msg.t, m.Exit.name)) {
-            const x = m.decodePane(m.Exit, arena, msg) catch return s.brokenEntry(e, "a bad exit");
-            if (e.exit != null) return;
-            e.exit = .{ .code = x.code, .signal = x.signal };
-            std.log.info("server: session {s} exited code={?d} signal={?d}", .{ e.id, x.code, x.signal });
-            s.announce(e);
-            if (e.killing) s.take(e);
-        }
-        // `lead` and later messages: not the server's.
-    }
-
-    /// The session's state is in: the requests that wait for it get it.
-    fn settle(s: *Server, e: *Entry) void {
-        const waiters = e.waiters.toOwnedSlice(s.gpa) catch return;
-        defer s.gpa.free(waiters);
-        for (waiters) |w| switch (w.kind) {
-            .create => s.reply(w.peer, w.re, m.SessionCreate, .{ .session = e.info() }),
-            .info => s.reply(w.peer, w.re, m.SessionInfo, .{ .session = e.info() }),
-            .kill, .list, .seen => s.wait(&e.waiters, w),
-        };
-        s.answerLists();
-    }
-
-    /// A session that breaks the protocol. Its connection closes, and it is
-    /// listed as `refused`: the server can say nothing true of it. No exit
-    /// goes out, because nothing says that it ended.
-    fn brokenEntry(s: *Server, e: *Entry, what: []const u8) void {
-        std.log.warn("server: session {s} sent {s}, closed", .{ e.id, what });
-        s.refuseEntry(e);
-    }
-
-    fn refuseEntry(s: *Server, e: *Entry) void {
-        e.refused = true;
-        e.state = null;
-        lib_posix.close(e.fd);
-        e.fd = -1;
-        s.settle(e);
-    }
-
-    fn announce(s: *Server, e: *Entry) void {
-        if (e.announced) return;
-        e.announced = true;
-        const x = e.exit orelse session.ExitStatus{};
-        s.emit(m.SessionExit, .{ .id = e.id, .code = x.code, .signal = x.signal });
-    }
-
-    fn take(s: *Server, e: *Entry) void {
-        if (e.taken) return;
-        e.taken = true;
-        s.sendEntryPane(e, m.Take, .{});
-    }
-
-    /// The session's connection closed: the session process ended.
-    fn entryGone(s: *Server, e: *Entry) void {
-        if (e.dead) return;
-        e.dead = true;
-        s.prune_due = true;
-        if (e.state != null) s.announce(e);
-        std.log.info("server: session {s} is gone", .{e.id});
-        for (e.waiters.items) |w| switch (w.kind) {
-            .kill => s.reply(w.peer, w.re, m.SessionKill, .{}),
-            .create => s.replyError(w.peer, w.re, .start_failed, "The session ended before it was ready."),
-            .info, .list, .seen => s.replyError(w.peer, w.re, .not_found, "No session has this id."),
-        };
-        e.waiters.clearRetainingCapacity();
-        s.answerLists();
-    }
-
-    fn timers(s: *Server) void {
+    pub fn timers(s: *Server) void {
         const t = s.now();
         for (s.entries.items) |e| {
-            if (e.dead) continue;
+            if (e.conn.dead) continue;
             if (e.kill_deadline) |d| if (t >= d) {
                 std.log.warn("server: session {s} did not end, SIGKILL", .{e.id});
                 // The pid is the first that the session reported (`validPid`).
@@ -887,19 +468,19 @@ const Server = struct {
                 const waiters = e.waiters.toOwnedSlice(s.gpa) catch continue;
                 defer s.gpa.free(waiters);
                 for (waiters) |w| switch (w.kind) {
-                    .create => s.replyError(w.peer, w.re, .start_failed, "The session does not answer."),
-                    .info, .list, .seen => s.replyError(w.peer, w.re, .not_found, "The session does not answer."),
-                    .kill => s.wait(&e.waiters, w),
+                    .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session does not answer."),
+                    .info, .list, .seen => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
+                    .kill => registry.wait(s, &e.waiters, w),
                 };
             }
         }
         for (s.peers.items) |p| for (p.channels.items) |ch| {
-            if (ch.fd < 0 or ch.closed) continue;
-            if (ch.flow.mustSkip(ch.q.stale(), t)) s.skip(ch, t) else if (ch.flow.mustAskAgain(t)) s.askSnapshot(ch, t);
+            if (ch.conn.fd < 0 or ch.closed) continue;
+            if (ch.flow.mustSkip(ch.q.stale(), t)) peers.skip(s, ch, t) else if (ch.flow.mustAskAgain(t)) peers.askSnapshot(s, ch, t);
         };
-        for (s.peers.items) |p| if (!p.greeted and !p.dead and t - p.connected_at >= hello_ms) {
+        for (s.peers.items) |p| if (!p.conn.greeted and !p.conn.dead and t - p.connected_at >= peers.hello_ms) {
             std.log.info("server: a client sent no hello, closed", .{});
-            p.dead = true;
+            p.conn.dead = true;
         };
         for (s.spawns.items) |sp| if (t >= sp.started_at + spawn_ms and sp.started_at >= 0) {
             std.log.warn("server: session {s} start takes too long, SIGKILL", .{sp.id});
@@ -917,989 +498,16 @@ const Server = struct {
             if (r.out_fd >= 0) lib_posix.close(r.out_fd);
             r.out_fd = -1;
         };
-        s.finishRuns();
-        s.answerLists();
+        runs.finishRuns(s);
+        registry.answerLists(s);
     }
 
-    fn writeEntry(s: *Server, e: *Entry) void {
-        if (e.out.len() == 0) return;
-        const n = lib_posix.write(e.fd, e.out.buf.items) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => return s.entryGone(e),
-        };
-        e.out.consume(n);
-    }
-
-    fn sendEntryControl(s: *Server, e: *Entry, value: anytype) void {
-        const body = msgpack.encodeAlloc(s.gpa, value) catch return;
-        defer s.gpa.free(body);
-        e.out.append(s.gpa, frame.control_channel, .msg, body, false) catch return s.entryGone(e);
-    }
-
-    fn sendEntryPane(s: *Server, e: *Entry, comptime M: type, value: M) void {
-        var out: std.Io.Writer.Allocating = .init(s.gpa);
-        defer out.deinit();
-        m.encodePane(&out.writer, M, value) catch return;
-        e.out.append(s.gpa, m.pane_channel, .msg, out.written(), false) catch return s.entryGone(e);
-    }
-
-    // ── Starting a session ──────────────────────────────────────────────────
-
-    /// Starts this binary as `__session <id>` with one `posix_spawn`: the
-    /// leader of a new session (`SETSID`), and on macOS its own responsible
-    /// process (the disclaim, server/AGENTS.md) that gets only the fds of
-    /// the file actions (`CLOEXEC_DEFAULT`). On Linux every fd of the server
-    /// is close-on-exec. The spec, one msgpack `SessionCreate.Args`, goes on
-    /// a socket pair at `session.spec_fd`; the session answers on it when
-    /// its socket listens (`session.run`). stdin, stdout and stderr are
-    /// /dev/null. The size is cut to `session.max_cells`, as a session cuts
-    /// a resize.
-    fn spawn(s: *Server, id: []const u8, args: m.SessionCreate.Args) !*Spawn {
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-
-        const id_z = try arena.dupeSentinel(u8, id, 0);
-        const argv = [_:null]?[*:0]const u8{ s.exe.ptr, session.command_name, id_z.ptr };
-        const envp = try s.sessionEnv(arena, args.env);
-        var spec_args = args;
-        spec_args.cols = @min(args.cols, session.max_cells);
-        spec_args.rows = @min(args.rows, session.max_cells);
-        // The environment is the process's own (`envp`).
-        spec_args.env = null;
-        const spec = try msgpack.encodeAlloc(s.gpa, spec_args);
-        errdefer s.gpa.free(spec);
-
-        // No SOCK_CLOEXEC: macOS's socketpair refuses it. The server has one
-        // thread, so no other spawn can start before `fcntl` sets the flag.
-        var pair: [2]i32 = undefined;
-        if (std.c.socketpair(lib_posix.AF.UNIX, lib_posix.SOCK.STREAM, 0, &pair) != 0) return error.SocketPair;
-        errdefer lib_posix.close(pair[0]);
-        defer lib_posix.close(pair[1]);
-        for (pair) |fd| _ = try lib_posix.fcntl(fd, lib_posix.F.SETFD, std.c.FD_CLOEXEC);
-        const flags = try lib_posix.fcntl(pair[0], lib_posix.F.GETFL, 0);
-        _ = try lib_posix.fcntl(pair[0], lib_posix.F.SETFL, flags | lib_posix.O_NONBLOCK);
-
-        // Before the spawn: a child that `children` does not hold is never reaped.
-        try s.children.ensureUnusedCapacity(s.gpa, 1);
-        const pid = try spawnSession(s.exe, &argv, envp, pair[1]);
-        s.children.appendAssumeCapacity(pid);
-        errdefer lib_posix.kill(pid, lib_posix.SIG.KILL) catch {};
-
-        const sp = try s.gpa.create(Spawn);
-        errdefer s.gpa.destroy(sp);
-        sp.* = .{ .pid = pid, .id = try s.gpa.dupe(u8, id), .fd = pair[0], .spec = spec, .started_at = s.now() };
-        errdefer s.gpa.free(sp.id);
-        try s.spawns.append(s.gpa, sp);
-        std.log.info("server: starting session {s} pid={d}", .{ id, pid });
-        return sp;
-    }
-
-    /// The environment of a new session: the client's entries, or the
-    /// server's own environment when it sent none. The runtime directory is
-    /// always the server's, so that the session listens where the server
-    /// looks.
-    fn sessionEnv(s: *const Server, arena: std.mem.Allocator, env: ?[]const msgpack.Bin) ![*:null]const ?[*:0]const u8 {
-        const entries = env orelse return @ptrCast(std.c.environ);
-        var list: std.ArrayList(?[*:0]const u8) = .empty;
-        for (entries) |entry| {
-            if (std.mem.startsWith(u8, entry.bytes, runtime.dir_env ++ "=")) continue;
-            try list.append(arena, (try arena.dupeSentinel(u8, entry.bytes, 0)).ptr);
-        }
-        try list.append(arena, (try std.fmt.allocPrintSentinel(arena, "{s}={s}", .{ runtime.dir_env, s.dir }, 0)).ptr);
-        try list.append(arena, null);
-        return @ptrCast(list.items.ptr);
-    }
-
-    /// Reaps the session processes that exited. The server's only other
-    /// children are the commands of `command.run` (`reapRuns`).
-    fn reapChildren(s: *Server) void {
-        var i: usize = 0;
-        while (i < s.children.items.len) {
-            const pid = s.children.items[i];
-            if (lib_posix.waitpid(pid, std.c.W.NOHANG).pid == pid) {
-                _ = s.children.swapRemove(i);
-            } else i += 1;
-        }
-    }
-
-    /// Sends the rest of the spec. After the last byte, the server shuts its
-    /// side for writes, so that the session reads EOF.
-    fn writeSpawn(s: *Server, sp: *Spawn) void {
-        _ = s;
-        const n = lib_posix.write(sp.fd, sp.spec[sp.sent..]) catch |err| switch (err) {
-            error.WouldBlock => return,
-            // The session is gone: its answer is the EOF.
-            else => {
-                sp.sent = sp.spec.len;
-                return;
-            },
-        };
-        sp.sent += n;
-        if (sp.sent == sp.spec.len) _ = std.c.shutdown(sp.fd, std.c.SHUT.WR);
-    }
-
-    /// Reads the answer. EOF ends it: the session answered and closed its
-    /// end, or it exited.
-    fn readSpawn(s: *Server, sp: *Spawn) void {
-        var buf: [1024]u8 = undefined;
-        while (true) {
-            const n = lib_posix.read(sp.fd, &buf) catch |err| switch (err) {
-                error.WouldBlock => return,
-                else => 0,
-            };
-            if (n == 0) {
-                sp.done = true;
-                return;
-            }
-            // More than any error text: the rest is dropped.
-            const room = 1024 -| sp.answer.items.len;
-            sp.answer.appendSlice(s.gpa, buf[0..@min(n, room)]) catch {};
-        }
-    }
-
-    /// Answers and frees each start that ended. Called after the poll loop
-    /// walked `spawns`.
-    fn finishSpawns(s: *Server) void {
-        var i: usize = 0;
-        while (i < s.spawns.items.len) {
-            const sp = s.spawns.items[i];
-            if (!sp.done) {
-                i += 1;
-                continue;
-            }
-            _ = s.spawns.orderedRemove(i);
-            s.spawnDone(sp);
-            lib_posix.close(sp.fd);
-            sp.answer.deinit(s.gpa);
-            sp.waiters.deinit(s.gpa);
-            s.gpa.free(sp.spec);
-            s.gpa.free(sp.id);
-            s.gpa.destroy(sp);
-        }
-    }
-
-    /// The session answered. With `session.ready_answer`, it listens. Else a
-    /// session of this id may already run (one that the server did not
-    /// start): the server uses it, so that the same id finds the same
-    /// session.
-    fn spawnDone(s: *Server, sp: *Spawn) void {
-        const ready = std.mem.eql(u8, sp.answer.items, session.ready_answer);
-        if (s.connectEntry(sp.id)) |_| {
-            const e = s.findEntry(sp.id).?;
-            e.waiters.appendSlice(s.gpa, sp.waiters.items) catch
-                for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, "The server is out of memory.");
-            return;
-        } else |err| if (ready)
-            std.log.warn("server: session {s} started but does not answer: {s}", .{ sp.id, @errorName(err) });
-        const text = if (ready) errorText("") else errorText(sp.answer.items);
-        std.log.warn("server: session {s} did not start: {s}", .{ sp.id, text });
-        for (sp.waiters.items) |w| s.replyError(w.peer, w.re, .start_failed, text);
-    }
-
-    // ── Clients ─────────────────────────────────────────────────────────────
-
-    /// Accepts every client in the backlog.
-    fn accept(s: *Server) void {
-        var n: usize = 0;
-        while (n < max_clients and s.acceptOne()) : (n += 1) {}
-    }
-
-    /// False when the backlog is empty.
-    fn acceptOne(s: *Server) bool {
-        const fd = lib_posix.accept(s.listen_fd, null, null, lib_posix.SOCK.NONBLOCK | lib_posix.SOCK.CLOEXEC) catch return false;
-        s.addPeer(fd);
-        return true;
-    }
-
-    fn addPeer(s: *Server, fd: i32) void {
-        if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) {
-            std.log.warn("server: refused a peer of another user", .{});
-            lib_posix.close(fd);
-            return;
-        }
-        if (s.peers.items.len >= max_clients) {
-            std.log.warn("server: {d} clients, a new one closed", .{max_clients});
-            lib_posix.close(fd);
-            return;
-        }
-        // Output that waits in the kernel goes before channel 0, whatever
-        // order the relay chose: keep that buffer small (Linux gives about
-        // 200 KiB by default, macOS 8 KiB).
-        const sndbuf: c_int = peer_sndbuf;
-        _ = std.c.setsockopt(fd, std.c.SOL.SOCKET, std.c.SO.SNDBUF, std.mem.asBytes(&sndbuf), @sizeOf(c_int));
-        const p = s.gpa.create(Peer) catch {
-            lib_posix.close(fd);
-            return;
-        };
-        p.* = .{ .id = s.next_peer, .fd = fd, .connected_at = s.now() };
-        s.next_peer += 1;
-        s.peers.append(s.gpa, p) catch {
-            s.gpa.destroy(p);
-            lib_posix.close(fd);
-            return;
-        };
-        s.sendControl(p, s.hello());
-    }
-
-    fn findPeer(s: *Server, id: u64) ?*Peer {
-        for (s.peers.items) |p| if (p.id == id and !p.dead) return p;
-        return null;
-    }
-
-    fn readPeer(s: *Server, p: *Peer) void {
-        var buf: [16 * 1024]u8 = undefined;
-        const n = lib_posix.read(p.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => {
-                p.dead = true;
-                return;
-            },
-        };
-        if (n == 0) {
-            p.dead = true;
-            return;
-        }
-        p.in.appendSlice(s.gpa, buf[0..n]) catch {
-            p.dead = true;
-            return;
-        };
-
-        var used: usize = 0;
-        defer if (!p.dead) p.in.replaceRangeAssumeCapacity(0, used, &.{});
-        while (!p.dead and !p.closing and !s.exiting) {
-            const rest = p.in.items[used..];
-            if (rest.len >= frame.header_len and std.mem.readInt(u32, rest[0..4], .little) > frame_max) {
-                p.dead = true;
-                return;
-            }
-            const parsed = (frame.parse(rest) catch {
-                p.dead = true;
-                return;
-            }) orelse break;
-            used += parsed.len;
-            s.handlePeerFrame(p, parsed.frame);
-        }
-    }
-
-    fn handlePeerFrame(s: *Server, p: *Peer, f: frame.Frame) void {
-        if (f.channel != frame.control_channel) {
-            if (p.greeted) s.relayToSession(p, f);
-            return;
-        }
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-        const msg = m.decodeControl(arena, f.body) catch {
-            p.dead = true;
-            return;
-        };
-
-        if (!p.greeted) {
-            const theirs = switch (msg) {
-                .hello => |h| h,
-                else => {
-                    p.dead = true;
-                    return;
-                },
-            };
-            switch (m.negotiate(s.hello(), theirs)) {
-                .refuse => |r| {
-                    std.log.info("server: refused a {s} at level {d}: {s}", .{ @tagName(theirs.role), theirs.level, r.reason });
-                    s.sendControl(p, r);
-                    p.closing = true;
-                },
-                .speak => p.greeted = true,
-            }
-            return;
-        }
-        switch (msg) {
-            .request => |req| s.handleRequest(p, arena, req),
-            else => {},
-        }
-    }
-
-    fn handleRequest(s: *Server, p: *Peer, arena: std.mem.Allocator, req: m.Request) void {
-        inline for (m.methods) |M| {
-            if (std.mem.eql(u8, req.m, M.name)) {
-                // Every connection to this socket is `local` (design/006 §2).
-                if (!m.maySend(M, .local)) {
-                    std.log.warn("server: {s} from a local client, refused", .{M.name});
-                    return s.replyError(p.id, req.id, .forbidden, "This connection may not send this request.");
-                }
-                const args = m.decodeArgs(M, arena, req) catch
-                    return s.replyError(p.id, req.id, .invalid_args, "The arguments do not decode.");
-                return s.call(M, p, req.id, args);
-            }
-        }
-        s.replyError(p.id, req.id, .unknown_method, "The server has no such method.");
-    }
-
-    fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void {
-        switch (M) {
-            m.SessionCreate => s.create(p, re, args),
-            m.SessionList => {
-                if (s.allSettled()) return s.replyList(p.id, re);
-                s.wait(&s.list_waiters, .{ .peer = p.id, .re = re, .kind = .list });
-            },
-            m.SessionInfo => {
-                const e = s.findEntry(args.id) orelse
-                    return s.replyError(p.id, re, .not_found, "No session has this id.");
-                if (e.listed()) return s.reply(p.id, re, m.SessionInfo, .{ .session = e.info() });
-                s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .info });
-            },
-            m.SessionKill => s.kill(p, re, args.id),
-            m.PaneSeen => {
-                const e = s.findEntry(args.id) orelse
-                    return s.replyError(p.id, re, .not_found, "No session has this id.");
-                if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
-                if (e.dead or e.exit != null) return s.replyError(p.id, re, .not_found, "No running session has this id.");
-                if (!e.listed()) return s.replyError(p.id, re, .starting, "The session is not ready.");
-                s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .seen });
-                s.sendEntryPane(e, m.Seen, .{});
-            },
-            m.ServerExit => {
-                std.log.info("server: server.exit", .{});
-                // Unlinked before the reply, so that a start that follows the
-                // reply finds no server (design/002).
-                s.closeListen();
-                s.reply(p.id, re, m.ServerExit, .{});
-                s.exit_peer = p.id;
-                s.exiting = true;
-            },
-            m.ControlResume => s.resumeControl(p, re, args),
-            m.ChannelOpen => s.openChannel(p, re, args.session),
-            m.ChannelClose => {
-                const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
-                ch.closed = true;
-                ch.q.deinit(s.gpa);
-                s.reply(p.id, re, m.ChannelClose, .{});
-            },
-            m.ChannelPause => {
-                const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
-                ch.flow.paused = true;
-                const open_kept = ch.q.dropStale(s.gpa);
-                ch.flow.discard_snapshot = ch.flow.in_snapshot and !open_kept;
-                s.reply(p.id, re, m.ChannelPause, .{});
-            },
-            m.ChannelResume => {
-                const ch = p.findChannel(args.channel) orelse
-                    return s.replyError(p.id, re, .not_found, "No channel has this number.");
-                if (ch.flow.paused) {
-                    ch.flow.paused = false;
-                    s.askSnapshot(ch, s.now());
-                }
-                s.reply(p.id, re, m.ChannelResume, .{});
-            },
-            m.Ping => s.reply(p.id, re, m.Ping, .{}),
-            m.CommandRun => s.runCommand(p, re, args),
-            m.LinkOpen => s.linkOpen(p, re, args),
-            m.LinkClose => {
-                if (!s.links.closeKey(args.key_id))
-                    return s.replyError(p.id, re, .not_found, "No link has this key id.");
-                s.reply(p.id, re, m.LinkClose, .{});
-            },
-            else => s.replyError(p.id, re, .unknown_method, "The server has no such method."),
-        }
-    }
-
-    fn create(s: *Server, p: *Peer, re: u64, args: m.SessionCreate.Args) void {
-        if (!session.validName(args.id))
-            return s.replyError(p.id, re, .invalid_args, "A session id can have only letters, digits, '-', '_' and '.'. It cannot start with '.' or '-'.");
-        if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
-            return s.replyError(p.id, re, .invalid_args, "The folder must be an absolute path.");
-        if (args.command) |command| for (command) |arg| if (std.mem.findScalar(u8, arg.bytes, 0) != null)
-            return s.replyError(p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
-        if (args.env) |env| for (env) |entry| if (std.mem.findScalar(u8, entry.bytes, 0) != null or std.mem.findScalar(u8, entry.bytes, '=') == null)
-            return s.replyError(p.id, re, .invalid_args, "An environment entry must be NAME=value with no NUL byte.");
-        if (args.cols == 0 or args.rows == 0)
-            return s.replyError(p.id, re, .invalid_args, "The size must be at least 1 by 1.");
-        const waiter: Waiter = .{ .peer = p.id, .re = re, .kind = .create };
-        // The same id again: the session that the first request started.
-        if (s.findEntry(args.id)) |e| {
-            // A session whose shell exited is not given out as a new one:
-            // the client ends it (`session.kill`) and asks again.
-            if (e.exit != null) return s.replyError(p.id, re, .exited, "The session's shell exited. End the session first.");
-            if (e.listed()) return s.reply(p.id, re, m.SessionCreate, .{ .session = e.info() });
-            return s.wait(&e.waiters, waiter);
-        }
-        for (s.spawns.items) |sp| if (std.mem.eql(u8, sp.id, args.id)) return s.wait(&sp.waiters, waiter);
-        const sp = s.spawn(args.id, args) catch |err| {
-            std.log.warn("server: cannot start session {s}: {s}", .{ args.id, @errorName(err) });
-            return s.replyError(p.id, re, .start_failed, "The server cannot start a process.");
-        };
-        s.wait(&sp.waiters, waiter);
-    }
-
-    // ── Running a command ───────────────────────────────────────────────────
-
-    /// The first and last UDP port of a link, from `MACTERM_LINK_PORTS`
-    /// (`first-last`). Null when the link is off: `MACTERM_LINK=off`, or a
-    /// range that does not parse (fail closed: a typo must not open a port
-    /// outside a firewall's range).
-    fn linkPorts() ?[2]u16 {
-        if (std.c.getenv("MACTERM_LINK")) |v| if (std.mem.eql(u8, std.mem.span(v), "off")) return null;
-        const range = std.c.getenv("MACTERM_LINK_PORTS") orelse
-            return .{ link_host.default_first_port, link_host.default_last_port };
-        const text = std.mem.span(range);
-        const dash = std.mem.findScalar(u8, text, '-') orelse return null;
-        const first = std.fmt.parseInt(u16, text[0..dash], 10) catch return null;
-        const last = std.fmt.parseInt(u16, text[dash + 1 ..], 10) catch return null;
-        if (first == 0 or first > last) return null;
-        return .{ first, last };
-    }
-
-    fn linkOpen(s: *Server, p: *Peer, re: u64, args: m.LinkOpen.Args) void {
-        const ports = linkPorts() orelse
-            return s.replyError(p.id, re, .unavailable, "The link is off on this host.");
-        if (args.secret.bytes.len != 32)
-            return s.replyError(p.id, re, .invalid_args, "The key is not 32 bytes.");
-        var seed: u32 = undefined;
-        s.io.random(std.mem.asBytes(&seed));
-        var key: [32]u8 = args.secret.bytes[0..32].*;
-        defer std.crypto.secureZero(u8, &key);
-        const opened = s.links.open(p.id, key, args.key_id, s.now(), ports, seed) catch |err| {
-            std.log.warn("server: link.open failed: {s}", .{@errorName(err)});
-            return switch (err) {
-                error.KeyInUse => s.replyError(p.id, re, .invalid_args, "Another link has this key id."),
-                error.TooMany => s.replyError(p.id, re, .unavailable, "The server has too many links."),
-                else => s.replyError(p.id, re, .unavailable, "The server cannot open a link."),
-            };
-        };
-        s.pending_peers.append(s.gpa, opened.peer_fd) catch {
-            lib_posix.close(opened.peer_fd);
-            _ = s.links.closeKey(args.key_id);
-            return s.replyError(p.id, re, .unavailable, "The server cannot open a link.");
-        };
-        s.reply(p.id, re, m.LinkOpen, .{ .port = opened.port });
-    }
-
-    fn runCommand(s: *Server, p: *Peer, re: u64, args: m.CommandRun.Args) void {
-        if (args.argv.len == 0 or args.argv[0].bytes.len == 0 or args.argv[0].bytes[0] != '/')
-            return s.replyError(p.id, re, .invalid_args, "The program must be an absolute path.");
-        for (args.argv) |arg| if (std.mem.findScalar(u8, arg.bytes, 0) != null)
-            return s.replyError(p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
-        if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
-            return s.replyError(p.id, re, .invalid_args, "The folder must be an absolute path.");
-        if (args.timeout_ms == 0 or args.timeout_ms > run_timeout_max_ms)
-            return s.replyError(p.id, re, .invalid_args, "The time limit must be from 1 ms to 60 s.");
-        if (s.runs.items.len >= max_runs)
-            return s.replyError(p.id, re, .busy, "Too many commands run now.");
-        s.startRun(p.id, re, args) catch |err| {
-            std.log.warn("server: cannot run a command: {s}", .{@errorName(err)});
-            s.replyError(p.id, re, .start_failed, "The server cannot start a process.");
-        };
-    }
-
-    /// Forks the command in a process group of its own, with stdout on a
-    /// pipe. stdin and stderr are the server's `/dev/null` (`detachStdio`).
-    fn startRun(s: *Server, peer: u64, re: u64, args: m.CommandRun.Args) !void {
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-        var argv: std.ArrayList(?[*:0]const u8) = .empty;
-        for (args.argv) |arg| try argv.append(arena, (try arena.dupeSentinel(u8, arg.bytes, 0)).ptr);
-        try argv.append(arena, null);
-        const cwd: ?[*:0]const u8 = if (args.cwd) |c| (try arena.dupeSentinel(u8, c.bytes, 0)).ptr else null;
-
-        // Only the read end is non-blocking: a command that writes to a
-        // non-blocking stdout fails on a full pipe.
-        const pipe = try lib_posix.pipe2(.{ .CLOEXEC = true });
-        errdefer lib_posix.close(pipe[0]);
-        errdefer lib_posix.close(pipe[1]);
-        const flags = try lib_posix.fcntl(pipe[0], lib_posix.F.GETFL, 0);
-        _ = try lib_posix.fcntl(pipe[0], lib_posix.F.SETFL, flags | lib_posix.O_NONBLOCK);
-        const r = try s.gpa.create(Run);
-        errdefer s.gpa.destroy(r);
-        r.* = .{ .pid = 0, .peer = peer, .re = re, .out_fd = pipe[0], .deadline = s.now() + args.timeout_ms };
-        try s.runs.append(s.gpa, r);
-        errdefer _ = s.runs.pop();
-
-        // `main` ignores SIGPIPE, and that survives exec: the command gets
-        // the default, as a session's shell does (`pty.zig`).
-        const dfl: lib_posix.Sigaction = .{
-            .handler = .{ .handler = lib_posix.SIG.DFL },
-            .mask = lib_posix.sigemptyset(),
-            .flags = 0,
-        };
-        const pid = try lib_posix.fork();
-        if (pid == 0) {
-            lib_posix.sigaction(lib_posix.SIG.PIPE, &dfl, null);
-            _ = std.c.setpgid(0, 0);
-            lib_posix.dup2(pipe[1], lib_posix.STDOUT_FILENO) catch std.c._exit(127);
-            if (cwd) |c| if (std.c.chdir(c) != 0) std.c._exit(126);
-            _ = std.c.execve(argv.items[0].?, @ptrCast(argv.items.ptr), @ptrCast(std.c.environ));
-            std.c._exit(127);
-        }
-        lib_posix.close(pipe[1]);
-        r.pid = pid;
-        // The parent too, so that a SIGKILL at the deadline finds the group
-        // even before the child ran its own `setpgid`.
-        _ = std.c.setpgid(pid, pid);
-    }
-
-    /// Reads what the command wrote. Past `run_output_max` it reads and
-    /// drops, so that the command never blocks on a full pipe.
-    fn readRun(s: *Server, r: *Run) void {
-        var buf: [16 * 1024]u8 = undefined;
-        while (true) {
-            const n = lib_posix.read(r.out_fd, &buf) catch |err| switch (err) {
-                error.WouldBlock => return,
-                else => 0,
-            };
-            if (n == 0) {
-                lib_posix.close(r.out_fd);
-                r.out_fd = -1;
-                // `timers` answers it: the poll loop still walks `runs`.
-                return;
-            }
-            const room = run_output_max - r.output.items.len;
-            if (n > room) r.truncated = true;
-            r.output.appendSlice(s.gpa, buf[0..@min(n, room)]) catch {
-                r.truncated = true;
-            };
-        }
-    }
-
-    fn reapRuns(s: *Server) void {
-        for (s.runs.items) |r| {
-            if (r.status != null) continue;
-            const res = lib_posix.waitpid(r.pid, std.c.W.NOHANG);
-            if (res.pid == r.pid) r.status = session.ExitStatus.fromWait(res.status);
-        }
-    }
-
-    /// Answers and frees each command that ended. Only `timers` calls it,
-    /// after the poll loop walked `runs`.
-    fn finishRuns(s: *Server) void {
-        var i: usize = 0;
-        while (i < s.runs.items.len) {
-            const r = s.runs.items[i];
-            if (!r.done()) {
-                i += 1;
-                continue;
-            }
-            _ = s.runs.orderedRemove(i);
-            if (r.timed_out) {
-                s.replyError(r.peer, r.re, .timeout, "The command did not end in time.");
-            } else {
-                const st = r.status.?;
-                s.reply(r.peer, r.re, m.CommandRun, .{
-                    .output = .{ .bytes = r.output.items },
-                    .truncated = r.truncated,
-                    .code = st.code,
-                    .signal = st.signal,
-                });
-            }
-            r.output.deinit(s.gpa);
-            s.gpa.destroy(r);
-        }
-    }
-
-    fn kill(s: *Server, p: *Peer, re: u64, id: []const u8) void {
-        const e = s.findEntry(id) orelse return s.replyError(p.id, re, .not_found, "No session has this id.");
-        if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
-        const st = e.state orelse return s.replyError(p.id, re, .starting, "The session is not ready.");
-        s.wait(&e.waiters, .{ .peer = p.id, .re = re, .kind = .kill });
-        if (e.killing) return;
-        e.killing = true;
-        e.kill_deadline = s.now() + kill_grace_ms;
-        if (e.exit != null) {
-            s.take(e);
-        } else {
-            // The session ends its shell itself: SIGHUP to the shell's process
-            // group, then SIGKILL (`Session.end`). It alone knows if the shell
-            // was reaped, so it never signals a pid that is used again.
-            std.log.info("server: kill session {s} pid={d}", .{ e.id, st.pid });
-            s.sendEntryPane(e, m.End, .{});
-        }
-    }
-
-    /// Adds a waiter, or answers it at once when there is no memory for it.
-    fn wait(s: *Server, list: *std.ArrayList(Waiter), w: Waiter) void {
-        list.append(s.gpa, w) catch s.replyError(w.peer, w.re, .unavailable, "The server is out of memory.");
-    }
-
-    /// A refused session has no connection. Each list and each idle check
-    /// connects to its socket again, so that one that ended is not listed.
-    fn checkRefused(s: *Server) void {
-        for (s.entries.items) |e| {
-            if (!e.refused or e.dead) continue;
-            const path = socket.getSocketPath(s.gpa, s.dir, e.id) catch continue;
-            defer s.gpa.free(path);
-            if (connectNonblocking(path)) |fd| lib_posix.close(fd) else |err| switch (err) {
-                error.WouldBlock => {},
-                else => e.dead = true,
-            }
-        }
-    }
-
-    fn allSettled(s: *const Server) bool {
-        const t = s.now();
-        for (s.entries.items) |e| if (!e.dead and !e.settled(t)) return false;
-        return true;
-    }
-
-    fn answerLists(s: *Server) void {
-        if (s.list_waiters.items.len == 0 or !s.allSettled()) return;
-        const waiters = s.list_waiters.toOwnedSlice(s.gpa) catch return;
-        defer s.gpa.free(waiters);
-        for (waiters) |w| s.replyList(w.peer, w.re);
-    }
-
-    fn replyList(s: *Server, peer: u64, re: u64) void {
-        s.checkRefused();
-        var list: std.ArrayList(m.Session) = .empty;
-        defer list.deinit(s.gpa);
-        for (s.entries.items) |e| if (e.listed()) list.append(s.gpa, e.info()) catch return;
-        std.mem.sortUnstable(m.Session, list.items, {}, struct {
-            fn less(_: void, a: m.Session, b: m.Session) bool {
-                return std.mem.order(u8, a.id, b.id) == .lt;
-            }
-        }.less);
-        s.reply(peer, re, m.SessionList, .{ .sessions = list.items });
-    }
-
-    fn reply(s: *Server, peer: u64, re: u64, comptime M: type, result: M.Result) void {
-        const p = s.findPeer(peer) orelse return;
-        var out: std.Io.Writer.Allocating = .init(s.gpa);
-        defer out.deinit();
-        m.encodeResult(&out.writer, re, M, result) catch return;
-        s.sendBody(p, out.written());
-    }
-
-    fn replyError(s: *Server, peer: u64, re: u64, code: m.ErrorCode, message: []const u8) void {
-        const p = s.findPeer(peer) orelse return;
-        s.sendControl(p, m.Response{ .re = re, .err = .{ .code = @tagName(code), .message = message } });
-    }
-
-    /// One event is one batch: one consistent state (design/003 §5).
-    fn emit(s: *Server, comptime E: type, value: E) void {
-        const args = msgpack.encodeAlloc(s.gpa, value) catch return;
-        defer s.gpa.free(args);
-        s.seq += 1;
-        const ev = [_]m.Event{.{ .e = E.name, .a = .{ .bytes = args } }};
-        const batch: m.EventBatch = .{ .seq = s.seq, .ev = &ev };
-        const body = msgpack.encodeAlloc(s.gpa, batch) catch {
-            // The batch is lost: the ring must not claim to be complete.
-            for (s.batches.items) |b| s.gpa.free(b.body);
-            s.batches.clearRetainingCapacity();
-            return;
-        };
-        const kept = s.keepBatch(body);
-        defer if (!kept) s.gpa.free(body);
-        for (s.peers.items) |p| if (p.greeted and !p.dead) s.sendBody(p, body);
-    }
-
-    /// Keeps the batch for `control.resume`, and gives up the oldest ones.
-    /// The ring owns `body` when this returns true. On an allocation failure
-    /// the ring is emptied, so that a resume never skips a batch.
-    fn keepBatch(s: *Server, body: []u8) bool {
-        s.batches.append(s.gpa, .{ .seq = s.seq, .body = body }) catch {
-            for (s.batches.items) |b| s.gpa.free(b.body);
-            s.batches.clearRetainingCapacity();
-            return false;
-        };
-        while (s.batches.items.len > batch_ring) {
-            s.gpa.free(s.batches.orderedRemove(0).body);
-        }
-        return true;
-    }
-
-    /// `control.resume`: sends the batches after `args.seq` when the epoch is
-    /// this server's and the ring still holds every one of them.
-    fn resumeControl(s: *Server, p: *Peer, re: u64, args: m.ControlResume.Args) void {
-        const held = s.batches.items;
-        const complete = args.epoch == s.epoch and args.seq <= s.seq and
-            (args.seq == s.seq or (held.len > 0 and held[0].seq <= args.seq + 1));
-        if (complete) {
-            for (held) |b| if (b.seq > args.seq) s.sendBody(p, b.body);
-        }
-        s.reply(p.id, re, m.ControlResume, .{ .replayed = complete, .seq = s.seq });
-    }
-
-    fn sendControl(s: *Server, p: *Peer, value: anytype) void {
-        const body = msgpack.encodeAlloc(s.gpa, value) catch return;
-        defer s.gpa.free(body);
-        s.sendBody(p, body);
-    }
-
-    fn sendBody(s: *Server, p: *Peer, body: []const u8) void {
-        p.control.push(s.gpa, frame.control_channel, .msg, body, s.now(), .message) catch {
-            p.dead = true;
-            return;
-        };
-        s.checkPeerCap(p);
-    }
-
-    fn checkPeerCap(s: *Server, p: *Peer) void {
-        _ = s;
-        if (p.kept() > session.client_hard_cap) {
-            std.log.warn("server: client fd={d} does not read, closed", .{p.fd});
-            p.dead = true;
-        }
-    }
-
-    fn writePeer(s: *Server, p: *Peer) void {
-        if (p.out.len() == 0) {
-            var queues: std.ArrayList(*relay.Queue) = .empty;
-            defer queues.deinit(s.gpa);
-            for (p.channels.items) |ch| queues.append(s.gpa, &ch.q) catch {
-                p.dead = true;
-                return;
-            };
-            relay.fill(s.gpa, &p.out.buf, &p.control, queues.items, &p.turn) catch {
-                p.dead = true;
-                return;
-            };
-            // Whole frames, none of which may be dropped.
-            p.out.keep_end = p.out.len();
-        }
-        if (p.out.len() > 0) {
-            const n = lib_posix.write(p.fd, p.out.buf.items) catch |err| switch (err) {
-                error.WouldBlock => return,
-                else => {
-                    p.dead = true;
-                    return;
-                },
-            };
-            p.out.consume(n);
-        }
-        if (p.pending() == 0 and p.closing) p.dead = true;
-    }
-
-    // ── The relay (relay.zig) ───────────────────────────────────────────────
-
-    fn openChannel(s: *Server, p: *Peer, re: u64, id: []const u8) void {
-        const e = s.findEntry(id) orelse return s.replyError(p.id, re, .not_found, "No session has this id.");
-        if (e.refused) return s.replyError(p.id, re, .refused, "The session runs a build that this server cannot speak to.");
-        if (e.state == null) return s.replyError(p.id, re, .starting, "The session is not ready.");
-        if (p.channels.items.len >= max_channels)
-            return s.replyError(p.id, re, .busy, "This connection has too many open channels.");
-        const path = socket.getSocketPath(s.gpa, s.dir, id) catch
-            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
-        defer s.gpa.free(path);
-        const fd = connectNonblocking(path) catch |err| {
-            std.log.warn("server: cannot connect to session {s} for a channel: {s}", .{ id, @errorName(err) });
-            return s.replyError(p.id, re, .unavailable, "The session does not answer.");
-        };
-        const ch = s.gpa.create(Channel) catch {
-            lib_posix.close(fd);
-            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
-        };
-        ch.* = .{ .id = p.next_channel, .session = s.gpa.dupe(u8, id) catch {
-            lib_posix.close(fd);
-            s.gpa.destroy(ch);
-            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
-        }, .fd = fd };
-        p.channels.append(s.gpa, ch) catch {
-            ch.deinit(s.gpa);
-            return s.replyError(p.id, re, .unavailable, "The server is out of memory.");
-        };
-        p.next_channel +%= 1;
-        if (p.next_channel == frame.control_channel) p.next_channel = 1;
-        // The reply goes when the session's `hello` comes, so that a session
-        // that refuses the server gives an error, not a channel that is
-        // silent.
-        ch.open_re = re;
-        s.sendChannelControl(ch, s.hello());
-    }
-
-    /// A frame from the client on a pane channel goes to the session, never
-    /// dropped. A frame for a channel that is not open is ignored.
-    fn relayToSession(s: *Server, p: *Peer, f: frame.Frame) void {
-        const ch = p.findChannel(f.channel) orelse return;
-        if (ch.fd < 0) return;
-        ch.to_session.append(s.gpa, m.pane_channel, f.kind, f.body, false) catch return s.channelGone(p, ch);
-        if (ch.to_session.len() > session.client_hard_cap) {
-            std.log.warn("server: session {s} does not read its channel, closed", .{ch.session});
-            s.channelGone(p, ch);
-        }
-    }
-
-    fn readChannel(s: *Server, p: *Peer, ch: *Channel) void {
-        var buf: [16 * 1024]u8 = undefined;
-        const n = lib_posix.read(ch.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => return s.channelEnded(p, ch),
-        };
-        if (n == 0) return s.channelEnded(p, ch);
-        ch.in.appendSlice(s.gpa, buf[0..n]) catch return s.channelGone(p, ch);
-
-        const t = s.now();
-        var used: usize = 0;
-        defer if (ch.fd >= 0) ch.in.replaceRangeAssumeCapacity(0, used, &.{});
-        while (ch.fd >= 0 and !p.dead) {
-            const rest = ch.in.items[used..];
-            if (rest.len >= frame.header_len and std.mem.readInt(u32, rest[0..4], .little) > frame_max) {
-                std.log.warn("server: session {s} sent a frame over 1 MiB on a channel, closed", .{ch.session});
-                return s.channelGone(p, ch);
-            }
-            const parsed = (frame.parse(rest) catch return s.channelGone(p, ch)) orelse break;
-            used += parsed.len;
-            s.handleChannelFrame(p, ch, parsed.frame, t);
-        }
-        if (ch.fd >= 0 and ch.flow.mustSkip(ch.q.stale(), t)) s.skip(ch, t);
-        s.checkPeerCap(p);
-    }
-
-    fn handleChannelFrame(s: *Server, p: *Peer, ch: *Channel, f: frame.Frame, t: i64) void {
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-
-        if (f.channel == frame.control_channel) {
-            const msg = m.decodeControl(arena, f.body) catch return s.channelGone(p, ch);
-            switch (msg) {
-                .hello => |h| if (!ch.greeted) switch (m.negotiate(s.hello(), h)) {
-                    .speak => {
-                        ch.greeted = true;
-                        if (ch.open_re) |re| s.reply(p.id, re, m.ChannelOpen, .{ .channel = ch.id });
-                        ch.open_re = null;
-                    },
-                    .refuse => |r| {
-                        std.log.info("server: session {s} speaks level {d}, channel closed", .{ ch.session, h.level });
-                        s.sendChannelControl(ch, r);
-                        _ = lib_posix.write(ch.fd, ch.to_session.buf.items) catch {};
-                        s.channelGone(p, ch);
-                    },
-                },
-                .refuse => s.channelGone(p, ch),
-                else => {},
-            }
-            return;
-        }
-        if (!ch.greeted or f.channel != m.pane_channel) return;
-        const class: relay.Class = switch (f.kind) {
-            .msg => blk: {
-                const msg = msgpack.decodeSlice(m.PaneMessage, arena, f.body) catch return s.channelGone(p, ch);
-                if (std.mem.eql(u8, msg.t, m.SnapshotStart.name)) break :blk .snapshot_start;
-                if (std.mem.eql(u8, msg.t, m.SnapshotEnd.name)) break :blk .snapshot_end;
-                if (std.mem.eql(u8, msg.t, m.Exit.name)) ch.exited = true;
-                break :blk .message;
-            },
-            .bytes => if (ch.flow.in_snapshot) .snapshot else .output,
-            _ => return,
-        };
-        if (ch.flow.classify(class) == .drop) return;
-        ch.q.push(s.gpa, ch.id, f.kind, f.body, t, class) catch s.channelGone(p, ch);
-    }
-
-    /// The channel's output is too old or too large: drop it, and show the
-    /// screen as it is now (design/003 §6).
-    fn skip(s: *Server, ch: *Channel, t: i64) void {
-        std.log.info("server: channel {d} (session {s}) fell behind, output dropped", .{ ch.id, ch.session });
-        ch.flow.skipped(ch.q.dropStale(s.gpa), t);
-        s.sendRefresh(ch);
-    }
-
-    /// Output stops until the session's snapshot starts.
-    fn askSnapshot(s: *Server, ch: *Channel, t: i64) void {
-        ch.flow.want_snapshot = true;
-        ch.flow.asked_at = t;
-        s.sendRefresh(ch);
-    }
-
-    fn sendRefresh(s: *Server, ch: *Channel) void {
-        var out: std.Io.Writer.Allocating = .init(s.gpa);
-        defer out.deinit();
-        m.encodePane(&out.writer, m.Refresh, .{}) catch return;
-        ch.to_session.append(s.gpa, m.pane_channel, .msg, out.written(), false) catch {
-            lib_posix.close(ch.fd);
-            ch.fd = -1;
-        };
-    }
-
-    fn writeChannel(s: *Server, p: *Peer, ch: *Channel) void {
-        if (ch.to_session.len() == 0) return;
-        const n = lib_posix.write(ch.fd, ch.to_session.buf.items) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => return s.channelGone(p, ch),
-        };
-        ch.to_session.consume(n);
-    }
-
-    /// The session closed the channel's connection. The frames that wait
-    /// still go to the client (a last `exit`), then the channel goes.
-    /// The session closed its end of the channel with no `exit` (it was
-    /// killed, or it crashed): the client gets an `exit` with no status, as
-    /// the end of the channel. A failure of the relay itself (`channelGone`)
-    /// is not an exit.
-    fn channelEnded(s: *Server, p: *Peer, ch: *Channel) void {
-        if (ch.fd >= 0 and ch.greeted and !ch.closed and !ch.exited) {
-            ch.exited = true;
-            var out: std.Io.Writer.Allocating = .init(s.gpa);
-            defer out.deinit();
-            if (m.encodePane(&out.writer, m.Exit, .{})) {
-                ch.q.push(s.gpa, ch.id, .msg, out.written(), s.now(), .message) catch {};
-            } else |_| {}
-        }
-        s.channelGone(p, ch);
-    }
-
-    fn channelGone(s: *Server, p: *Peer, ch: *Channel) void {
-        if (ch.open_re) |re| s.replyError(p.id, re, .unavailable, "The session closed the connection.");
-        ch.open_re = null;
-        if (ch.fd < 0) return;
-        lib_posix.close(ch.fd);
-        ch.fd = -1;
-    }
-
-    fn sendChannelControl(s: *Server, ch: *Channel, value: anytype) void {
-        const body = msgpack.encodeAlloc(s.gpa, value) catch return;
-        defer s.gpa.free(body);
-        ch.to_session.append(s.gpa, frame.control_channel, .msg, body, false) catch {
-            lib_posix.close(ch.fd);
-            ch.fd = -1;
-        };
-    }
-
-    /// On a host, removes the file of each server build that no session
-    /// runs (design/002, design/005 step 5). The app installs each build as
-    /// `macterm-<key>` in one folder, and a session keeps the build that
-    /// started it, so a file goes when the last session of its build ends.
-    /// The server never removes its own file.
-    ///
-    /// It fails closed: it does nothing unless the server runs from such a
-    /// file (not the Mac's bundle, not a file that was replaced), nothing
-    /// while a session's build has no key, and it keeps a file of the last
-    /// minute (`fresh_build_ms`), whose proxy may still come.
-    fn pruneBuilds(s: *Server) void {
-        const own = keyOf(build_options.key) orelse return;
-        const folder = std.fs.path.dirname(s.exe) orelse return;
-        if (!isBuildFile(std.fs.path.basename(s.exe), own)) return;
-        var keys: std.ArrayList([]const u8) = .empty;
-        defer keys.deinit(s.gpa);
-        for (s.entries.items) |e| {
-            if (e.dead) continue;
-            keys.append(s.gpa, e.build_key orelse return) catch return;
-        }
-        var dir = std.Io.Dir.openDirAbsolute(s.io, folder, .{ .iterate = true }) catch return;
-        defer dir.close(s.io);
-        const now_ms = std.Io.Timestamp.now(s.io, .real).toMilliseconds();
-        var it = dir.iterate();
-        while (it.next(s.io) catch null) |entry| {
-            if (entry.kind != .file or !staleBuild(entry.name, own, keys.items)) continue;
-            // A build that an app just installed: its proxy has not started
-            // yet, so no session reports it.
-            const stat = dir.statFile(s.io, entry.name, .{}) catch continue;
-            if (now_ms - stat.mtime.toMilliseconds() < fresh_build_ms) continue;
-            dir.deleteFile(s.io, entry.name) catch |err| {
-                std.log.warn("server: cannot remove {s}: {s}", .{ entry.name, @errorName(err) });
-                continue;
-            };
-            std.log.info("server: removed {s}, which no session runs", .{entry.name});
-        }
-    }
-
-    fn sweep(s: *Server) void {
+    pub fn sweep(s: *Server) void {
         defer s.links.reap();
         var i: usize = 0;
         while (i < s.peers.items.len) {
             const p = s.peers.items[i];
-            if (p.dead) {
+            if (p.conn.dead) {
                 // Nobody waits for its commands: they end now, and free
                 // their places (`max_runs`).
                 for (s.runs.items) |r| if (r.peer == p.id and !r.timed_out) {
@@ -1908,9 +516,7 @@ const Server = struct {
                     if (r.out_fd >= 0) lib_posix.close(r.out_fd);
                     r.out_fd = -1;
                 };
-                lib_posix.close(p.fd);
-                p.in.deinit(s.gpa);
-                p.out.deinit(s.gpa);
+                p.conn.deinit(s.gpa);
                 p.control.deinit(s.gpa);
                 for (p.channels.items) |ch| ch.deinit(s.gpa);
                 p.channels.deinit(s.gpa);
@@ -1923,7 +529,7 @@ const Server = struct {
                 var j: usize = 0;
                 while (j < p.channels.items.len) {
                     const ch = p.channels.items[j];
-                    if (if (ch.closed) ch.fd < 0 or ch.to_session.len() == 0 else ch.fd < 0 and ch.q.empty()) {
+                    if (if (ch.closed) ch.conn.fd < 0 or ch.conn.out.bytes == 0 else ch.conn.fd < 0 and ch.q.empty()) {
                         ch.deinit(s.gpa);
                         _ = p.channels.orderedRemove(j);
                         if (p.turn > j) p.turn -= 1;
@@ -1936,10 +542,8 @@ const Server = struct {
         i = 0;
         while (i < s.entries.items.len) {
             const e = s.entries.items[i];
-            if (e.dead) {
-                if (e.fd >= 0) lib_posix.close(e.fd);
-                e.in.deinit(s.gpa);
-                e.out.deinit(s.gpa);
+            if (e.conn.dead) {
+                e.conn.deinit(s.gpa);
                 e.waiters.deinit(s.gpa);
                 s.gpa.free(e.build);
                 if (e.build_key) |k| s.gpa.free(k);
@@ -1950,45 +554,6 @@ const Server = struct {
         }
     }
 };
-
-extern "c" fn responsibility_spawnattrs_setdisclaim(attr: *cross.posix_spawnattr_t, disclaim: c_int) c_int;
-
-/// The one `posix_spawn` of a session process (`Server.spawn`). `spec_fd` is
-/// the session's end of the socket pair. It becomes `session.spec_fd`.
-///
-/// The disclaim makes the session its own responsible process on macOS, for
-/// its whole life (macterm#419). Without it, the session belongs to the app
-/// that started the server. After that app quits, a program that Apple did
-/// not sign gets EHOSTUNREACH on the local network, with no prompt. The
-/// disclaim exists only as a spawn attribute (server/AGENTS.md).
-fn spawnSession(exe: [:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8, spec_fd: i32) !lib_posix.pid_t {
-    var attr: cross.posix_spawnattr_t = undefined;
-    if (cross.posix_spawnattr_init(&attr) != 0) return error.SpawnAttr;
-    defer _ = cross.posix_spawnattr_destroy(&attr);
-    var flags: c_int = cross.POSIX_SPAWN_SETSID;
-    if (comptime builtin.os.tag.isDarwin()) flags |= cross.POSIX_SPAWN_CLOEXEC_DEFAULT;
-    if (cross.posix_spawnattr_setflags(&attr, @intCast(flags)) != 0) return error.SpawnAttr;
-    if (comptime builtin.os.tag.isDarwin()) {
-        if (responsibility_spawnattrs_setdisclaim(&attr, 1) != 0) return error.SpawnAttr;
-    }
-
-    var actions: cross.posix_spawn_file_actions_t = undefined;
-    if (cross.posix_spawn_file_actions_init(&actions) != 0) return error.SpawnActions;
-    defer _ = cross.posix_spawn_file_actions_destroy(&actions);
-    if (cross.posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", @bitCast(lib_posix.O{ .ACCMODE = .RDWR }), 0) != 0 or
-        cross.posix_spawn_file_actions_adddup2(&actions, 0, 1) != 0 or
-        cross.posix_spawn_file_actions_adddup2(&actions, 0, 2) != 0 or
-        cross.posix_spawn_file_actions_adddup2(&actions, spec_fd, session.spec_fd) != 0)
-        return error.SpawnActions;
-
-    var pid: cross.pid_t = undefined;
-    const rc = cross.posix_spawn(&pid, exe.ptr, &actions, &attr, @ptrCast(@constCast(argv)), @ptrCast(@constCast(envp)));
-    if (rc != 0) {
-        std.log.warn("server: posix_spawn failed rc={d}", .{rc});
-        return error.SpawnFailed;
-    }
-    return pid;
-}
 
 /// The absolute path of this binary, to start sessions with.
 fn selfExe(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
@@ -2007,119 +572,9 @@ fn selfExe(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     return buf[0..@intCast(n) :0];
 }
 
-/// A connect that fails with `error.WouldBlock` when the session's backlog
-/// is full, so that a stuck session never stops the server.
-fn connectNonblocking(path: []const u8) !i32 {
-    var addr = try lib_posix.initUnix(path);
-    const fd = try lib_posix.socket(lib_posix.AF.UNIX, lib_posix.SOCK.STREAM | lib_posix.SOCK.NONBLOCK | lib_posix.SOCK.CLOEXEC, 0);
-    errdefer lib_posix.close(fd);
-    try lib_posix.connect(fd, &addr.any, addr.getOsSockLen());
-    return fd;
-}
-
-/// A session's build as the server keeps it: at most 64 bytes of printable
-/// ASCII, or `unknown`.
-fn buildName(build: []const u8) []const u8 {
-    if (build.len == 0 or build.len > 64) return "unknown";
-    for (build) |c| if (c < 0x20 or c > 0x7e) return "unknown";
-    return build;
-}
-
-/// A build key (`hello.build_key`, `scripts/build-server.sh`) when it is
-/// one: lowercase hex, at most 40 characters. Null for anything else.
-fn keyOf(key: ?[]const u8) ?[]const u8 {
-    const k = key orelse return null;
-    return if (validKey(k)) k else null;
-}
-
-fn validKey(key: []const u8) bool {
-    if (key.len == 0 or key.len > 40) return false;
-    for (key) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return false;
-    return true;
-}
-
-/// `macterm-<key>`: the name of the server file of the build `key` on a host.
-fn isBuildFile(name: []const u8, key: []const u8) bool {
-    const prefix = "macterm-";
-    return std.mem.startsWith(u8, name, prefix) and std.mem.eql(u8, name[prefix.len..], key);
-}
-
-/// A server file of another build than `own` that no session runs. A temp
-/// file of an install (`.macterm-…`) is not one.
-fn staleBuild(name: []const u8, own: []const u8, running: []const []const u8) bool {
-    const prefix = "macterm-";
-    if (!std.mem.startsWith(u8, name, prefix)) return false;
-    const key = name[prefix.len..];
-    if (!validKey(key) or std.mem.eql(u8, key, own)) return false;
-    for (running) |k| if (std.mem.eql(u8, k, key)) return false;
-    return true;
-}
-
-/// A pid that the server may signal: above 1, and a `pid_t`.
-fn validPid(pid: i64) bool {
-    return pid > 1 and pid <= std.math.maxInt(lib_posix.pid_t);
-}
-
-/// The text of a session's failed answer, for the error reply: its first
-/// line without an `error: ` prefix. Text that is not UTF-8 is replaced.
-fn errorText(stderr: []const u8) []const u8 {
-    var line = std.mem.trim(u8, stderr, " \r\n");
-    if (std.mem.findScalar(u8, line, '\n')) |i| line = line[0..i];
-    if (std.mem.startsWith(u8, line, "error: ")) line = line["error: ".len..];
-    if (line.len == 0 or !std.unicode.utf8ValidateSlice(line)) return "The session did not start.";
-    return line;
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const testing = std.testing;
-
-test "the error text is the first line without its prefix" {
-    try testing.expectEqualStrings("session \"a\" already exists", errorText("error: session \"a\" already exists\n"));
-    try testing.expectEqualStrings("one", errorText("one\ntwo\n"));
-    try testing.expectEqualStrings("The session did not start.", errorText(""));
-    try testing.expectEqualStrings("The session did not start.", errorText("error: \xff\n"));
-}
-
-test "the server signals no pid that reaches a group or every process" {
-    try testing.expect(validPid(2));
-    try testing.expect(!validPid(1));
-    try testing.expect(!validPid(0));
-    try testing.expect(!validPid(-1));
-    try testing.expect(!validPid(-500));
-    try testing.expect(!validPid(@as(i64, std.math.maxInt(lib_posix.pid_t)) + 1));
-}
-
-test "a build key is only lowercase hex" {
-    try testing.expectEqualStrings("2705a118fde2c903", keyOf("2705a118fde2c903").?);
-    try testing.expect(keyOf(null) == null);
-    try testing.expect(keyOf("") == null);
-    try testing.expect(keyOf("ABC") == null);
-    try testing.expect(keyOf("a/b") == null);
-    try testing.expect(keyOf("1.0.1+thdxg.abc") == null);
-}
-
-test "a server file goes only when it is another build that no session runs" {
-    const running = [_][]const u8{"bbbb"};
-    try testing.expect(staleBuild("macterm-cccc", "aaaa", &running));
-    try testing.expect(!staleBuild("macterm-aaaa", "aaaa", &running));
-    try testing.expect(!staleBuild("macterm-bbbb", "aaaa", &running));
-    try testing.expect(!staleBuild(".macterm-cccc.123.456", "aaaa", &running));
-    try testing.expect(!staleBuild("macterm-cccc.old", "aaaa", &running));
-    try testing.expect(!staleBuild("zmx", "aaaa", &running));
-    try testing.expect(!staleBuild("macterm-", "aaaa", &running));
-    try testing.expect(isBuildFile("macterm-aaaa", "aaaa"));
-    try testing.expect(!isBuildFile("zmx", "aaaa"));
-    try testing.expect(!isBuildFile("macterm-aaaa (deleted)", "aaaa"));
-}
-
-test "a session's build is kept only as short printable text" {
-    try testing.expectEqualStrings("1.0.1+thdxg.abc", buildName("1.0.1+thdxg.abc"));
-    try testing.expectEqualStrings("unknown", buildName(""));
-    try testing.expectEqualStrings("unknown", buildName("a\x1b[2Jb"));
-    const long: [65]u8 = @splat('x');
-    try testing.expectEqualStrings("unknown", buildName(&long));
-}
 
 test "the server's socket name is no session name" {
     try testing.expect(!session.validName(socket_name));

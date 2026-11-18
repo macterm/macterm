@@ -30,6 +30,8 @@ enum RoamingLink {
         /// The link became quiet, or hears the host again: read
         /// `LinkTransport.isQuiet`.
         var quiet: @Sendable () -> Void
+        /// The host answers after a gap (`LinkTransport.answersAfter`).
+        var answered: @Sendable () -> Void
     }
 
     static func open(
@@ -66,7 +68,7 @@ enum RoamingLink {
         do {
             let made = try LinkTransport(host: host, port: port, key: key, keyID: keyID)
             transport = made
-            try made.start(onDead: events.dead, onQuiet: events.quiet)
+            try made.start(onDead: events.dead, onQuiet: events.quiet, onAnswered: events.answered)
             handedOff = true
             let connection = try await Task.detached {
                 try ServerConnection.handshake(fd: made.connectionFD, peerPID: nil, timeout: 3)

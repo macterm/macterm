@@ -19,12 +19,13 @@ struct ControlHandlerTests {
 
     private func makeHandler(
         state: AppState? = nil,
-        store: ProjectStore? = nil
+        store: ProjectStore? = nil,
+        remoteFolder: RemoteHosts.FolderCheck = .unreachable
     ) -> (ControlHandler, AppState, ProjectStore) {
         let appState = state ?? makeAppState()
         let projectStore = store ?? ProjectStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
-        let handler = ControlHandler(appState: appState, projectStore: projectStore)
+        let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in remoteFolder }
         return (handler, appState, projectStore)
     }
 
@@ -369,17 +370,56 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func project_create_accepts_a_remote_spec_verbatim() async {
-        // #104 shipped: a remote spec is a valid project path. Stored
-        // verbatim — no local canonicalization or existence check applies,
-        // and a wrong host/dir surfaces in the pane itself.
-        let (handler, _, projectStore) = makeHandler()
+    func project_create_accepts_a_remote_spec_verbatim_when_the_folder_is_on_the_host() async {
+        // A remote spec is stored verbatim, with no local canonicalization.
+        // The host gets the folder and the destination as typed.
+        var asked: [String] = []
+        let appState = makeAppState()
+        let projectStore = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        let handler = ControlHandler(appState: appState, projectStore: projectStore) { folder, destination in
+            asked.append("\(destination) \(folder)")
+            return .exists
+        }
         let response = await handler.handle(request(
             "project.create", args: ControlArgs(path: "dev@host:~/dev/api")
         ))
         #expect(response.ok)
+        #expect(asked == ["dev@host ~/dev/api"])
         #expect(projectStore.projects.first?.path == "dev@host:~/dev/api")
         #expect(projectStore.projects.first?.isRemote == true)
+    }
+
+    @Test
+    func project_create_refuses_a_remote_folder_that_is_missing_or_a_host_that_does_not_answer() async {
+        // 0358: nothing is added when the folder is not on the host, or when
+        // the host cannot be reached.
+        for (check, code) in [(RemoteHosts.FolderCheck.missing, ControlErrorCode.notFound), (.unreachable, .internalError)] {
+            let (handler, _, projectStore) = makeHandler(remoteFolder: check)
+            let response = await handler.handle(request(
+                "project.create", args: ControlArgs(path: "host:/srv/none")
+            ))
+            #expect(!response.ok)
+            #expect(response.error?.code == code)
+            #expect(projectStore.projects.isEmpty)
+        }
+    }
+
+    @Test
+    func project_create_checks_no_host_for_a_bad_name() async {
+        var asked = false
+        let appState = makeAppState()
+        let projectStore = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in
+            asked = true
+            return .exists
+        }
+        let response = await handler.handle(request(
+            "project.create", args: ControlArgs(path: "host:/srv", name: " ")
+        ))
+        #expect(!response.ok)
+        #expect(!asked)
     }
 
     @Test

@@ -137,6 +137,19 @@ enum ProjectPath: Equatable {
         return isRemote(composed) ? composed : nil
     }
 
+    /// The name of a new remote project that the user did not name: the
+    /// folder's last part, or the host for `~` and `/` (with or without a
+    /// trailing slash). Taken from the parsed folder, never the spec:
+    /// `lastPathComponent` of `devbox:/` is `devbox:`.
+    static func remoteDisplayName(host: String, directory: String) -> String {
+        switch (directory.trimmingCharacters(in: .whitespaces) as NSString).lastPathComponent {
+        case "",
+             "~",
+             "/": host
+        case let base: base
+        }
+    }
+
     /// Whether two raw path strings identify the same project location.
     /// Locals compare canonically; remotes compare structurally (same
     /// user/host/directory after parsing). A local never equals a remote,

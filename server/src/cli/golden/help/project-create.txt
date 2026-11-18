@@ -1,7 +1,10 @@
 OVERVIEW: Add a project for a local directory or a remote spec. Each run adds a
 new project.
 
-USAGE: macterm project create <path> [--name <name>] [--select] [--socket <socket>] [--json]
+The folder must exist. For a remote spec, Macterm connects to the host to check
+the folder, as a new pane does. It can ask for the login.
+
+USAGE: macterm project create <path> [--name <name>] [--select] [--skip-folder-check] [--socket <socket>] [--json]
 
 ARGUMENTS:
   <path>                  Project directory (absolute or ~-prefixed), or a
@@ -11,6 +14,7 @@ OPTIONS:
   --name <name>           Display name. The default is the name of the
                           directory.
   --select                Select the project too.
+  --skip-folder-check     [debug] Do not check the remote directory.
   --socket <socket>       Control socket path. It overrides discovery.
   --json                  Print the raw JSON payload instead of a table.
   -h, --help              Show help information.

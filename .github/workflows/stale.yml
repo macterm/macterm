@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   stale:
+    name: Stale
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/stale@v11

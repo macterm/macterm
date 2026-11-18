@@ -26,9 +26,11 @@ const ghostty_vt = terminal.ghostty_vt;
 const frame = protocol.frame;
 const msgpack = protocol.msgpack;
 const ring = @import("ring.zig");
+const conn_mod = @import("conn.zig");
+const FrameConn = conn_mod.FrameConn;
 const m = protocol.messages;
 
-/// The hidden verb of the session process. The server runs it (`Server.spawn`).
+/// The hidden verb of the session process. The server runs it (`registry.spawn`).
 pub const command_name = "__session";
 
 /// The most output that waits for one client. Over it, the session drops
@@ -78,7 +80,7 @@ pub fn validName(name: []const u8) bool {
 }
 
 /// The fd on which the server gives `__session` its spec and reads the
-/// answer (`Server.spawn`).
+/// answer (`registry.spawn`).
 pub const spec_fd = 3;
 
 /// The answer on `spec_fd` when the socket listens and the shell runs. Any
@@ -225,69 +227,10 @@ pub fn openLog(io: std.Io, dir: []const u8, name: []const u8) void {
     log.log_system.init(io, path, std.Io.File.Permissions.fromMode(0o600)) catch {};
 }
 
-/// The bytes that wait for one client, as whole frames. Pane output can be
-/// dropped; messages and snapshots cannot.
-pub const OutQueue = struct {
-    buf: std.ArrayList(u8) = .empty,
-    /// Where the first whole frame starts. Above 0 when a write sent the
-    /// first part of a frame: those bytes must follow, or the stream breaks.
-    boundary: usize = 0,
-    /// Where the last frame that must not be dropped ends.
-    keep_end: usize = 0,
-
-    pub fn deinit(q: *OutQueue, gpa: std.mem.Allocator) void {
-        q.buf.deinit(gpa);
-    }
-
-    pub fn len(q: *const OutQueue) usize {
-        return q.buf.items.len;
-    }
-
-    /// `droppable` is true for pane output only.
-    pub fn append(q: *OutQueue, gpa: std.mem.Allocator, channel: u32, kind: frame.Kind, body: []const u8, droppable: bool) !void {
-        var header: [frame.header_len]u8 = undefined;
-        try frame.writeHeader(&header, channel, kind, body.len);
-        try q.buf.ensureUnusedCapacity(gpa, header.len + body.len);
-        q.buf.appendSliceAssumeCapacity(&header);
-        q.buf.appendSliceAssumeCapacity(body);
-        if (!droppable) q.keep_end = q.buf.items.len;
-    }
-
-    /// The output that a drop would remove.
-    pub fn droppableLen(q: *const OutQueue) usize {
-        return q.buf.items.len - q.dropPoint();
-    }
-
-    fn dropPoint(q: *const OutQueue) usize {
-        return @max(q.boundary, q.keep_end);
-    }
-
-    /// Removes the first `n` bytes, which a write sent.
-    pub fn consume(q: *OutQueue, n: usize) void {
-        std.debug.assert(n <= q.buf.items.len);
-        while (q.boundary < n) {
-            const body_len = std.mem.readInt(u32, q.buf.items[q.boundary..][0..4], .little);
-            q.boundary += frame.header_len + body_len;
-        }
-        q.boundary -= n;
-        q.keep_end -|= n;
-        q.buf.replaceRangeAssumeCapacity(0, n, &.{});
-    }
-
-    /// Drops the output after the last frame that must stay, and that has
-    /// not started to go out. The rest of a frame that is half sent stays,
-    /// so that the stream stays whole.
-    pub fn drop(q: *OutQueue) void {
-        q.buf.shrinkRetainingCapacity(q.dropPoint());
-    }
-};
-
 const Client = struct {
-    fd: i32,
-    in: std.ArrayList(u8) = .empty,
-    out: OutQueue = .{},
-    /// Its `hello` came and was accepted.
-    greeted: bool = false,
+    /// The connection to the client. It is `greeted` when the client's
+    /// `hello` came and was accepted.
+    conn: FrameConn,
     /// It sent `attach`: it gets the pane's output.
     attached: bool = false,
     /// Its `attach` asked for `foreground` messages.
@@ -296,18 +239,13 @@ const Client = struct {
     wants_tty: bool = false,
     /// Its output was dropped. It gets a snapshot when it can take data.
     behind: bool = false,
-    /// Close it when its queue is empty (after a refusal).
-    closing: bool = false,
-    dead: bool = false,
     /// A bell rang since its queue was last empty. A bell is dropped with
     /// output, so a client that falls behind gets it again after its
     /// snapshot.
     rang: bool = false,
 
     fn deinit(c: *Client, gpa: std.mem.Allocator) void {
-        lib_posix.close(c.fd);
-        c.in.deinit(gpa);
-        c.out.deinit(gpa);
+        c.conn.deinit(gpa);
     }
 };
 
@@ -322,6 +260,9 @@ pub const ExitStatus = struct {
         return .{ .signal = sig };
     }
 };
+
+const Source = union(enum) { signal, listen, pty, client: *Client };
+const Reactor = conn_mod.Reactor(Source);
 
 const Session = struct {
     gpa: std.mem.Allocator,
@@ -340,6 +281,8 @@ const Session = struct {
     watch: events.Watch,
     clients: std.ArrayList(*Client) = .empty,
     leader: ?*Client = null,
+    /// For the frame that a client's handler decodes. Reset after each frame.
+    arena: std.heap.ArenaAllocator,
     pty_in: std.ArrayList(u8) = .empty,
     /// The end of the last read that may be the start of a prompt mark
     /// (`forwardOutput`). No client has these bytes yet.
@@ -383,6 +326,7 @@ const Session = struct {
             .pty_name_buf = pty.name_buf,
             .epoch = epoch,
             .size = opts.size,
+            .arena = .init(gpa),
             .watch = .init(gpa, try ghostty_vt.Terminal.init(io, gpa, .{
                 .cols = opts.size.cols,
                 .rows = opts.size.rows,
@@ -408,29 +352,25 @@ const Session = struct {
         var stream = s.watch.term.vtStream();
         defer stream.deinit();
         s.watch.install(&stream.handler);
-        var fds: std.ArrayList(lib_posix.pollfd) = .empty;
-        defer fds.deinit(s.gpa);
+        var reactor: Reactor = .{};
+        defer reactor.deinit(s.gpa);
+        defer s.arena.deinit();
         std.log.info("session {s} started pid={d} shell={d} pty={s}", .{ s.name, std.c.getpid(), s.shell_pid, s.pty_name });
 
         while (!s.taken and !s.ending) {
             s.updateFocus();
-            fds.clearRetainingCapacity();
-            try fds.append(s.gpa, .{ .fd = s.listen_fd, .events = lib_posix.POLL.IN, .revents = 0 });
+            reactor.clear();
+            try reactor.add(s.gpa, signal.sig_pipe[0], lib_posix.POLL.IN, .signal);
+            try reactor.add(s.gpa, s.listen_fd, lib_posix.POLL.IN, .listen);
             var pty_events: i16 = 0;
             if (!s.pty_closed) {
                 pty_events = lib_posix.POLL.IN;
                 if (s.pty_in.items.len > 0) pty_events |= lib_posix.POLL.OUT;
             }
-            try fds.append(s.gpa, .{ .fd = if (s.pty_closed) -1 else s.pty_fd, .events = pty_events, .revents = 0 });
-            try fds.append(s.gpa, .{ .fd = signal.sig_pipe[0], .events = lib_posix.POLL.IN, .revents = 0 });
-            const polled = s.clients.items.len;
-            for (s.clients.items) |c| {
-                var poll_events: i16 = lib_posix.POLL.IN;
-                if (c.out.len() > 0 or c.behind) poll_events |= lib_posix.POLL.OUT;
-                try fds.append(s.gpa, .{ .fd = c.fd, .events = poll_events, .revents = 0 });
-            }
+            try reactor.add(s.gpa, if (s.pty_closed) -1 else s.pty_fd, pty_events, .pty);
+            for (s.clients.items) |c| try reactor.add(s.gpa, c.conn.fd, c.conn.events(c.behind), .{ .client = c });
 
-            _ = try lib_posix.poll(fds.items, s.pollTimeout());
+            try reactor.poll(s.pollTimeout());
 
             // Held events whose window ended, and a foreground that changed
             // while the pty was quiet.
@@ -439,28 +379,29 @@ const Session = struct {
             s.checkTty(null);
             s.sendEvents();
 
-            if (fds.items[2].revents & lib_posix.POLL.IN != 0) {
-                signal.drainSignalPipe() catch {
-                    std.log.info("session {s}: SIGTERM", .{s.name});
-                    return;
-                };
-                s.reap();
-                s.announceExit();
-            }
-
-            if (fds.items[0].revents & lib_posix.POLL.IN != 0) s.accept();
-
-            const pty_revents = fds.items[1].revents;
-            if (pty_revents & (lib_posix.POLL.IN | lib_posix.POLL.HUP | lib_posix.POLL.ERR) != 0) s.readPty(&stream);
-            if (pty_revents & lib_posix.POLL.OUT != 0) s.writePty();
-
-            for (s.clients.items[0..polled], fds.items[3..][0..polled]) |c, pfd| {
-                if (c.dead) continue;
-                if (pfd.revents & lib_posix.POLL.IN != 0) s.readClient(c);
-                if (!c.dead and pfd.revents & lib_posix.POLL.OUT != 0) s.writeClient(c);
-                if (!c.dead and pfd.revents & lib_posix.POLL.IN == 0 and
-                    pfd.revents & (lib_posix.POLL.HUP | lib_posix.POLL.ERR | lib_posix.POLL.NVAL) != 0) s.dropClient(c);
-            }
+            for (reactor.fds.items, reactor.sources.items) |pfd, source| switch (source) {
+                .signal => if (pfd.revents & lib_posix.POLL.IN != 0) {
+                    signal.drainSignalPipe() catch {
+                        std.log.info("session {s}: SIGTERM", .{s.name});
+                        return;
+                    };
+                    s.reap();
+                    s.announceExit();
+                },
+                .listen => if (pfd.revents & lib_posix.POLL.IN != 0) s.accept(),
+                .pty => {
+                    if (pfd.revents & (lib_posix.POLL.IN | lib_posix.POLL.HUP | lib_posix.POLL.ERR) != 0) s.readPty(&stream);
+                    if (pfd.revents & lib_posix.POLL.OUT != 0) s.writePty();
+                },
+                .client => |c| {
+                    if (c.conn.dead) continue;
+                    if (pfd.revents & lib_posix.POLL.IN != 0) {
+                        if (c.conn.read(s.gpa, &s.arena, .{ s, c }, handleFrame)) |_| s.dropClient(c);
+                    }
+                    if (!c.conn.dead and pfd.revents & lib_posix.POLL.OUT != 0) s.writeClient(c);
+                    if (!c.conn.dead and conn_mod.hungUp(pfd.revents)) s.dropClient(c);
+                },
+            };
             s.sweep();
         }
     }
@@ -506,7 +447,7 @@ const Session = struct {
         s.watch.shellExited(s.nowMs());
         s.sendEvents();
         for (s.clients.items) |c| {
-            if (c.greeted) s.sendExit(c, status);
+            if (c.conn.greeted) s.sendExit(c, status);
         }
     }
 
@@ -530,7 +471,7 @@ const Session = struct {
             lib_posix.close(fd);
             return;
         };
-        c.* = .{ .fd = fd };
+        c.* = .{ .conn = .{ .fd = fd, .max_frame = client_frame_max } };
         s.clients.append(s.gpa, c) catch {
             s.gpa.destroy(c);
             lib_posix.close(fd);
@@ -629,15 +570,15 @@ const Session = struct {
         // The offsets count what clients get, so the ring holds `out`.
         s.output.append(s.gpa, out);
         for (s.clients.items) |c| {
-            if (!c.attached or c.behind or c.dead) continue;
-            c.out.append(s.gpa, m.pane_channel, .bytes, out, true) catch {
+            if (!c.attached or c.behind or c.conn.dead) continue;
+            c.conn.out.push(s.gpa, m.pane_channel, .bytes, out, 0, .output) catch {
                 s.dropClient(c);
                 continue;
             };
-            if (c.out.droppableLen() > client_cap) {
-                c.out.drop();
+            if (c.conn.out.output_tail > client_cap) {
+                c.conn.out.dropOutput(s.gpa);
                 c.behind = true;
-                std.log.info("session {s}: client fd={d} fell behind, output dropped", .{ s.name, c.fd });
+                std.log.info("session {s}: client fd={d} fell behind, output dropped", .{ s.name, c.conn.fd });
             }
         }
     }
@@ -664,7 +605,7 @@ const Session = struct {
     }
 
     fn hasAttached(s: *const Session) bool {
-        for (s.clients.items) |c| if (c.attached and !c.dead) return true;
+        for (s.clients.items) |c| if (c.attached and !c.conn.dead) return true;
         return false;
     }
 
@@ -678,35 +619,8 @@ const Session = struct {
         s.had_attached = now;
     }
 
-    fn readClient(s: *Session, c: *Client) void {
-        var buf: [16 * 1024]u8 = undefined;
-        const n = lib_posix.read(c.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return,
-            else => return s.dropClient(c),
-        };
-        if (n == 0) return s.dropClient(c);
-        c.in.appendSlice(s.gpa, buf[0..n]) catch return s.dropClient(c);
-
-        var used: usize = 0;
-        defer c.in.replaceRangeAssumeCapacity(0, used, &.{});
-        while (!c.dead and !c.closing) {
-            // A frame larger than any that a client needs closes the client
-            // before its body is read.
-            const rest = c.in.items[used..];
-            if (rest.len >= frame.header_len and std.mem.readInt(u32, rest[0..4], .little) > client_frame_max)
-                return s.dropClient(c);
-            const parsed = (frame.parse(c.in.items[used..]) catch return s.dropClient(c)) orelse break;
-            used += parsed.len;
-            s.handleFrame(c, parsed.frame);
-        }
-    }
-
-    fn handleFrame(s: *Session, c: *Client, f: frame.Frame) void {
-        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-
-        if (!c.greeted) {
+    fn handleFrame(s: *Session, c: *Client, f: frame.Frame, arena: std.mem.Allocator) void {
+        if (!c.conn.greeted) {
             // The first frame must be the peer's hello.
             if (f.channel != frame.control_channel) return s.dropClient(c);
             const msg = m.decodeControl(arena, f.body) catch return s.dropClient(c);
@@ -718,10 +632,10 @@ const Session = struct {
                 .refuse => |r| {
                     std.log.info("session {s}: refused a client at level {d}: {s}", .{ s.name, theirs.level, r.reason });
                     s.sendControl(c, r);
-                    c.closing = true;
+                    c.conn.closing = true;
                 },
                 .speak => {
-                    c.greeted = true;
+                    c.conn.greeted = true;
                     s.sendPane(c, m.State, s.state());
                     s.sendCurrent(c);
                     if (s.exited()) |status| s.sendExit(c, status);
@@ -840,18 +754,18 @@ const Session = struct {
         const missing = s.output.since(want.offset) orelse return false;
         s.sendPane(c, m.Resumed, .{ .offset = want.offset });
         var rest = missing;
-        while (rest.len > 0 and !c.dead) {
+        while (rest.len > 0 and !c.conn.dead) {
             const n = @min(rest.len, snapshot_chunk);
             // Output, so a client that falls behind drops it as it drops any
             // output, and then gets a snapshot.
-            c.out.append(s.gpa, m.pane_channel, .bytes, rest[0..n], true) catch {
+            c.conn.out.push(s.gpa, m.pane_channel, .bytes, rest[0..n], 0, .output) catch {
                 s.dropClient(c);
                 return true;
             };
             rest = rest[n..];
         }
-        if (c.out.droppableLen() > client_cap) {
-            c.out.drop();
+        if (c.conn.out.output_tail > client_cap) {
+            c.conn.out.dropOutput(s.gpa);
             c.behind = true;
         }
         return true;
@@ -869,7 +783,7 @@ const Session = struct {
     }
 
     fn setLeader(s: *Session, c: *Client) void {
-        if (s.leader) |old| if (old != c and !old.dead) s.sendPane(old, m.Lead, .{ .leader = false });
+        if (s.leader) |old| if (old != c and !old.conn.dead) s.sendPane(old, m.Lead, .{ .leader = false });
         s.leader = c;
         s.sendPane(c, m.Lead, .{ .leader = true });
     }
@@ -888,7 +802,7 @@ const Session = struct {
     fn attachedCount(s: *const Session) u16 {
         var n: u16 = 0;
         for (s.clients.items) |c| {
-            if (c.attached and !c.dead) n +|= 1;
+            if (c.attached and !c.conn.dead) n +|= 1;
         }
         return n;
     }
@@ -898,7 +812,7 @@ const Session = struct {
     fn announceClients(s: *Session) void {
         const st = s.state();
         for (s.clients.items) |c| {
-            if (c.greeted and !c.attached and !c.dead and !c.closing) s.sendPane(c, m.State, st);
+            if (c.conn.greeted and !c.attached and !c.conn.dead and !c.conn.closing) s.sendPane(c, m.State, st);
         }
     }
 
@@ -910,9 +824,10 @@ const Session = struct {
         defer if (data.ptr != raw.ptr) s.gpa.free(data);
         s.sendPane(c, m.SnapshotStart, .{ .scrollback = scrollback, .offset = s.output.end() });
         var rest = data;
-        while (rest.len > 0 and !c.dead) {
+        while (rest.len > 0 and !c.conn.dead) {
             const n = @min(rest.len, snapshot_chunk);
-            c.out.append(s.gpa, m.pane_channel, .bytes, rest[0..n], false) catch {
+            // Never dropped: a drop is followed by a snapshot of its own.
+            c.conn.send(s.gpa, m.pane_channel, .bytes, rest[0..n]) catch {
                 s.dropClient(c);
                 return true;
             };
@@ -927,7 +842,7 @@ const Session = struct {
     /// behind gets its snapshot when it catches up.
     fn refresh(s: *Session, c: *Client) void {
         if (!c.attached or c.behind) return;
-        c.out.drop();
+        c.conn.out.dropOutput(s.gpa);
         // Events went with the dropped output.
         defer s.sendCurrent(c);
         if (s.has_output and s.sendSnapshot(c, false)) return;
@@ -938,19 +853,13 @@ const Session = struct {
     }
 
     fn writeClient(s: *Session, c: *Client) void {
-        if (c.out.len() > 0) {
-            const n = lib_posix.write(c.fd, c.out.buf.items) catch |err| switch (err) {
-                error.WouldBlock => return,
-                else => return s.dropClient(c),
-            };
-            c.out.consume(n);
-        }
-        if (c.out.len() > 0) return;
-        if (c.closing) return s.dropClient(c);
+        c.conn.flush(s.gpa) catch return s.dropClient(c);
+        if (c.conn.out.bytes > 0) return;
+        if (c.conn.closing) return s.dropClient(c);
         // The client takes data again: it gets the screen as it is now.
         if (c.behind) {
             c.behind = false;
-            std.log.info("session {s}: client fd={d} caught up, snapshot sent", .{ s.name, c.fd });
+            std.log.info("session {s}: client fd={d} caught up, snapshot sent", .{ s.name, c.conn.fd });
             // A drop can take a `lead` that waited: say it again.
             s.sendPane(c, m.Lead, .{ .leader = s.leader == c });
             _ = s.sendSnapshot(c, false);
@@ -962,15 +871,15 @@ const Session = struct {
     }
 
     fn dropClient(s: *Session, c: *Client) void {
-        if (c.dead) return;
-        c.dead = true;
+        if (c.conn.dead) return;
+        c.conn.dead = true;
         if (c.attached) s.announceClients();
         if (s.leader != c) return;
         s.leader = null;
         // The client that attached first of those left leads next. It sends
         // its size when it reads `lead`.
         for (s.clients.items) |next| {
-            if (next.attached and !next.dead) return s.setLeader(next);
+            if (next.attached and !next.conn.dead) return s.setLeader(next);
         }
     }
 
@@ -978,7 +887,7 @@ const Session = struct {
         var i: usize = 0;
         while (i < s.clients.items.len) {
             const c = s.clients.items[i];
-            if (c.dead) {
+            if (c.conn.dead) {
                 c.deinit(s.gpa);
                 s.gpa.destroy(c);
                 _ = s.clients.orderedRemove(i);
@@ -987,17 +896,12 @@ const Session = struct {
     }
 
     fn sendControl(s: *Session, c: *Client, value: anytype) void {
-        const body = msgpack.encodeAlloc(s.gpa, value) catch return;
-        defer s.gpa.free(body);
-        c.out.append(s.gpa, frame.control_channel, .msg, body, false) catch return s.dropClient(c);
+        c.conn.sendControl(s.gpa, value) catch return s.dropClient(c);
         s.checkHardCap(c);
     }
 
     fn sendPane(s: *Session, c: *Client, comptime M: type, value: M) void {
-        var out: std.Io.Writer.Allocating = .init(s.gpa);
-        defer out.deinit();
-        m.encodePane(&out.writer, M, value) catch return;
-        c.out.append(s.gpa, m.pane_channel, .msg, out.written(), false) catch return s.dropClient(c);
+        c.conn.sendPane(s.gpa, M, value) catch return s.dropClient(c);
         s.checkHardCap(c);
     }
 
@@ -1012,13 +916,13 @@ const Session = struct {
     /// A live client asked for `foreground` messages. With none, the
     /// session reads no foreground and an idle session never wakes.
     fn hasForegroundClient(s: *const Session) bool {
-        for (s.clients.items) |c| if (c.wants_foreground and !c.dead) return true;
+        for (s.clients.items) |c| if (c.wants_foreground and !c.conn.dead) return true;
         return false;
     }
 
     /// A live client asked for `tty_mode` messages.
     fn hasTtyClient(s: *const Session) bool {
-        for (s.clients.items) |c| if (c.wants_tty and !c.dead) return true;
+        for (s.clients.items) |c| if (c.wants_tty and !c.conn.dead) return true;
         return false;
     }
 
@@ -1042,8 +946,8 @@ const Session = struct {
         defer out.deinit();
         m.encodePane(&out.writer, m.TtyMode, now) catch return;
         for (s.clients.items) |c| {
-            if (!c.wants_tty or c.dead or c.behind) continue;
-            c.out.append(s.gpa, m.pane_channel, .msg, out.written(), true) catch {
+            if (!c.wants_tty or c.conn.dead or c.behind) continue;
+            c.conn.out.push(s.gpa, m.pane_channel, .msg, out.written(), 0, .output) catch {
                 s.dropClient(c);
                 continue;
             };
@@ -1162,8 +1066,8 @@ const Session = struct {
         defer out.deinit();
         m.encodePane(&out.writer, M, value) catch return;
         for (s.clients.items) |c| {
-            if (!c.greeted or c.dead or (droppable and c.behind)) continue;
-            c.out.append(s.gpa, m.pane_channel, .msg, out.written(), droppable) catch {
+            if (!c.conn.greeted or c.conn.dead or (droppable and c.behind)) continue;
+            c.conn.out.push(s.gpa, m.pane_channel, .msg, out.written(), 0, if (droppable) .output else .message) catch {
                 s.dropClient(c);
                 continue;
             };
@@ -1177,8 +1081,8 @@ const Session = struct {
         defer out.deinit();
         m.encodePane(&out.writer, m.Foreground, msg) catch return;
         for (s.clients.items) |c| {
-            if (!c.wants_foreground or c.dead or c.behind) continue;
-            c.out.append(s.gpa, m.pane_channel, .msg, out.written(), true) catch {
+            if (!c.wants_foreground or c.conn.dead or c.behind) continue;
+            c.conn.out.push(s.gpa, m.pane_channel, .msg, out.written(), 0, .output) catch {
                 s.dropClient(c);
                 continue;
             };
@@ -1187,8 +1091,8 @@ const Session = struct {
     }
 
     fn checkHardCap(s: *Session, c: *Client) void {
-        if (c.out.len() <= client_hard_cap) return;
-        std.log.warn("session {s}: client fd={d} does not read, closed", .{ s.name, c.fd });
+        if (c.conn.out.bytes <= client_hard_cap) return;
+        std.log.warn("session {s}: client fd={d} does not read, closed", .{ s.name, c.conn.fd });
         s.dropClient(c);
     }
 };
@@ -1268,63 +1172,6 @@ test "the exit status reads a code or a signal" {
     try testing.expectEqual(ExitStatus{ .code = 0 }, ExitStatus.fromWait(0));
     try testing.expectEqual(ExitStatus{ .signal = 9 }, ExitStatus.fromWait(9));
     try testing.expectEqual(ExitStatus{ .signal = 1 }, ExitStatus.fromWait(1 | 0x80));
-}
-
-test "the out queue drops whole frames and keeps a frame that is half sent" {
-    const gpa = testing.allocator;
-    var q: OutQueue = .{};
-    defer q.deinit(gpa);
-    try q.append(gpa, 1, .bytes, "abcdef", true);
-    try q.append(gpa, 1, .bytes, "gh", true);
-    try testing.expectEqual(2 * frame.header_len + 8, q.len());
-
-    // A write sent the first header and two bytes of the first body.
-    q.consume(frame.header_len + 2);
-    try testing.expectEqual(4, q.boundary);
-    try q.append(gpa, 1, .bytes, "x", true);
-    q.drop();
-    // What is left is the rest of the first frame: "cdef".
-    try testing.expectEqualStrings("cdef", q.buf.items);
-    q.consume(4);
-    try testing.expectEqual(0, q.len());
-    try testing.expectEqual(0, q.boundary);
-
-    // At a boundary, a drop leaves nothing.
-    try q.append(gpa, 1, .bytes, "abc", true);
-    q.drop();
-    try testing.expectEqual(0, q.len());
-
-    // A write that ends inside a later frame.
-    try q.append(gpa, 1, .bytes, "ab", true);
-    try q.append(gpa, 1, .bytes, "cd", true);
-    q.consume(frame.header_len + 2 + 3);
-    try testing.expectEqual(frame.header_len - 3 + 2, q.boundary);
-    q.drop();
-    try testing.expectEqual(frame.header_len - 3 + 2, q.len());
-    try testing.expectEqualStrings("cd", q.buf.items[q.len() - 2 ..]);
-}
-
-test "the out queue never drops a message or a snapshot" {
-    const gpa = testing.allocator;
-    var q: OutQueue = .{};
-    defer q.deinit(gpa);
-    try q.append(gpa, 1, .bytes, "out1", true);
-    try q.append(gpa, 1, .msg, "lead", false);
-    try q.append(gpa, 1, .bytes, "snap", false);
-    try q.append(gpa, 1, .bytes, "out2", true);
-    try testing.expectEqual(frame.header_len + 4, q.droppableLen());
-    q.drop();
-    // Output before the last kept frame stays: it comes first on the wire.
-    try testing.expectEqual(3 * (frame.header_len + 4), q.len());
-    try testing.expectEqualStrings("snap", q.buf.items[q.len() - 4 ..]);
-    try testing.expectEqual(0, q.droppableLen());
-
-    // Sent bytes move the kept end with them.
-    q.consume(frame.header_len + 4);
-    try testing.expectEqual(2 * (frame.header_len + 4), q.keep_end);
-    try q.append(gpa, 1, .bytes, "out3", true);
-    q.drop();
-    try testing.expectEqual(2 * (frame.header_len + 4), q.len());
 }
 
 test "the output is cut after each BEL and ST" {

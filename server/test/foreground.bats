@@ -17,7 +17,7 @@ setup_file() {
   command -v cc >/dev/null || skip "needs a C compiler for the foreground program"
   printf '#include <unistd.h>\nint main(void) { pause(); return 0; }\n' > "$RT/waiter.c"
   cc -o "$RT/waiter" "$RT/waiter.c"
-  BIG=$(printf 'x%.0s' $(seq 16384)) "$ZMX" session outer -- /bin/sh
+  BIG=$(printf 'x%.0s' $(seq 16384)) "$ZMX" __create-session outer -- /bin/sh
   python3 - <<'PY'
 import os
 from v2client import Client

@@ -1,7 +1,7 @@
 name: Checks
 
 # Style gates only — the test suites live in test.yml (named so checks group
-# as "Test / Unit" and "Test / End-to-end" in the PR UI).
+# as "Test / Unit" and "Test / End-to-End" in the PR UI).
 
 on:
   push:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   # The path areas of .github/path-areas that this commit changes.
   changes:
-    name: Detect changes
+    name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       style: ${{ steps.changes.outputs.style }}

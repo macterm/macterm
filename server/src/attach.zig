@@ -17,6 +17,7 @@ const Resize = @import("pty.zig").Resize;
 const getTerminalSize = @import("pty.zig").getTerminalSize;
 const util = @import("util.zig");
 const lib_posix = @import("posix.zig");
+const FrameConn = @import("conn.zig").FrameConn;
 const signal = @import("signal.zig");
 const socket = @import("socket.zig");
 const runtime = @import("runtime.zig");
@@ -118,12 +119,12 @@ pub fn run(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, create: ?C
         if (try createSession(gpa, dir, name, spec)) |outcome| return outcome;
     } else if (!have_dir) return error.NoSession;
     const fd = socket.connectSession(path) catch return error.NoSession;
-    var c: Client = .{ .gpa = gpa, .fd = fd, .path = path, .foreground_events = lib_posix.getenv(foreground.env_var) != null };
+    var c: Client = .{ .gpa = gpa, .conn = .{ .fd = fd, .max_frame = server.frame_max }, .path = path, .foreground_events = lib_posix.getenv(foreground.env_var) != null };
     // `reconnect` changes the fd.
-    defer lib_posix.close(c.fd);
+    defer lib_posix.close(c.conn.fd);
     if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return error.WrongPeer;
 
-    defer c.in.deinit(gpa);
+    defer c.conn.in.deinit(gpa);
     if (try c.handshake()) |outcome| return outcome;
     return c.loop();
 }
@@ -157,8 +158,8 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
     defer lib_posix.close(fd);
     if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return error.WrongPeer;
 
-    var c: Client = .{ .gpa = gpa, .fd = fd };
-    defer c.in.deinit(gpa);
+    var c: Client = .{ .gpa = gpa, .conn = .{ .fd = fd, .max_frame = server.frame_max } };
+    defer c.conn.in.deinit(gpa);
     const mine = helloMessage();
     try c.sendControl(mine);
 
@@ -260,10 +261,8 @@ fn helloMessage() m.Hello {
 
 const Client = struct {
     gpa: std.mem.Allocator,
-    fd: i32,
-    in: std.ArrayList(u8) = .empty,
-    /// The bytes at the start of `in` that `nextFrame` returned last.
-    consumed: usize = 0,
+    /// The socket. Only its reader is used: a send writes at once.
+    conn: FrameConn,
     /// Write the session's foreground as v1's APC (interim, until m3).
     foreground_events: bool = false,
     /// The session's socket, to connect again after a lost link.
@@ -347,9 +346,9 @@ const Client = struct {
         defer {
             if (is_tty) _ = cross.tcsetattr(stdin, cross.TCSAFLUSH, &orig);
             // Reset the terminal and its colors, as v1's attach does.
-            writeAll(stdout, "\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\") catch {};
+            lib_posix.writeAll(stdout, "\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\") catch {};
         }
-        writeAll(stdout, reset_screen) catch {};
+        lib_posix.writeAll(stdout, reset_screen) catch {};
 
         try c.sendAttach(stdout);
 
@@ -360,7 +359,7 @@ const Client = struct {
         while (true) {
             var fds = [_]lib_posix.pollfd{
                 .{ .fd = stdin, .events = lib_posix.POLL.IN, .revents = 0 },
-                .{ .fd = c.fd, .events = lib_posix.POLL.IN, .revents = 0 },
+                .{ .fd = c.conn.fd, .events = lib_posix.POLL.IN, .revents = 0 },
                 .{ .fd = signal.sig_pipe[0], .events = lib_posix.POLL.IN, .revents = 0 },
             };
             _ = lib_posix.poll(&fds, -1) catch return error.Protocol;
@@ -407,7 +406,7 @@ const Client = struct {
                     if (!c.in_snapshot) if (c.offset) |o| {
                         c.offset = o + f.body.len;
                     };
-                    writeAll(stdout, f.body) catch return .detached;
+                    lib_posix.writeAll(stdout, f.body) catch return .detached;
                 },
                 .msg => {
                     var arena_state: std.heap.ArenaAllocator = .init(c.gpa);
@@ -423,7 +422,7 @@ const Client = struct {
                         var buf: [apc_max]u8 = undefined;
                         // In the output stream, so it lands in front of the
                         // output that the session sent after it.
-                        writeAll(stdout, foregroundApc(&buf, fg)) catch return .detached;
+                        lib_posix.writeAll(stdout, foregroundApc(&buf, fg)) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.SnapshotStart.name)) {
                         const start = m.decodePane(m.SnapshotStart, arena, msg) catch return error.Protocol;
                         c.in_snapshot = true;
@@ -432,15 +431,15 @@ const Client = struct {
                             // The session could not resume: draw the pane
                             // again, as the first attach does.
                             c.reconnected = false;
-                            writeAll(stdout, reset_screen) catch return .detached;
+                            lib_posix.writeAll(stdout, reset_screen) catch return .detached;
                         }
                         // Around the snapshot, so the app can tell the
                         // replay from new output: a title in the replay is
                         // old, and nothing says who set it.
-                        if (c.foreground_events) writeAll(stdout, snapshot_start_apc) catch return .detached;
+                        if (c.foreground_events) lib_posix.writeAll(stdout, snapshot_start_apc) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.SnapshotEnd.name)) {
                         c.in_snapshot = false;
-                        if (c.foreground_events) writeAll(stdout, snapshot_end_apc) catch return .detached;
+                        if (c.foreground_events) lib_posix.writeAll(stdout, snapshot_end_apc) catch return .detached;
                     } else if (std.mem.eql(u8, msg.t, m.Resumed.name)) {
                         // The bytes after our offset follow, and nothing is
                         // drawn again.
@@ -482,11 +481,10 @@ const Client = struct {
             var ts: std.c.timespec = .{ .sec = 0, .nsec = reconnect_wait_ms * std.time.ns_per_ms };
             _ = std.c.nanosleep(&ts, null);
         };
-        lib_posix.close(c.fd);
-        c.fd = fd;
+        lib_posix.close(c.conn.fd);
+        c.conn.fd = fd;
         if (!runtime.allowPeer(runtime.peerUid(fd), std.c.getuid())) return false;
-        c.in.clearRetainingCapacity();
-        c.consumed = 0;
+        c.conn.reset();
         // A snapshot that the link cut leaves a partial screen: the offset
         // says nothing, and the session sends a snapshot again.
         if (c.in_snapshot) c.offset = null;
@@ -499,7 +497,7 @@ const Client = struct {
             c.offset = null;
             // The screen shows another session's output: clear it now, as
             // a session with no output sends no snapshot to do it.
-            writeAll(stdout, reset_screen) catch return false;
+            lib_posix.writeAll(stdout, reset_screen) catch return false;
         }
         c.reconnected = true;
         try c.sendAttach(stdout);
@@ -507,24 +505,15 @@ const Client = struct {
     }
 
     /// Reads what the socket has. False at the end of the stream.
-    fn fill(c: *Client) (Error || error{OutOfMemory})!bool {
-        var buf: [64 * 1024]u8 = undefined;
-        const n = lib_posix.read(c.fd, &buf) catch |err| switch (err) {
-            error.WouldBlock => return true,
-            else => return false,
-        };
-        if (n == 0) return false;
-        try c.in.appendSlice(c.gpa, buf[0..n]);
-        return true;
+    /// False at the end of the stream.
+    fn fill(c: *Client) error{OutOfMemory}!bool {
+        return c.conn.fill(c.gpa);
     }
 
     /// The next whole frame in `in`, or null. The body stays valid until
     /// the next call.
     fn bufferedFrame(c: *Client) Error!?frame.Frame {
-        c.consume();
-        const p = (frame.parse(c.in.items) catch return error.Protocol) orelse return null;
-        c.consumed = p.len;
-        return p.frame;
+        return c.conn.next() catch error.Protocol;
     }
 
     /// The next whole frame, waiting at most `timeout_ms` for it. Null on a
@@ -533,23 +522,18 @@ const Client = struct {
     fn nextFrame(c: *Client, timeout_ms: i32) (Error || error{OutOfMemory})!?frame.Frame {
         while (true) {
             if (try c.bufferedFrame()) |f| return f;
-            var fds = [_]lib_posix.pollfd{.{ .fd = c.fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+            var fds = [_]lib_posix.pollfd{.{ .fd = c.conn.fd, .events = lib_posix.POLL.IN, .revents = 0 }};
             const ready = lib_posix.poll(&fds, timeout_ms) catch return error.Protocol;
             if (ready == 0) return null;
             if (!try c.fill()) return null;
         }
     }
 
-    fn consume(c: *Client) void {
-        c.in.replaceRangeAssumeCapacity(0, c.consumed, &.{});
-        c.consumed = 0;
-    }
-
     fn sendFrame(c: *Client, channel: u32, kind: frame.Kind, body: []const u8) (Error || error{OutOfMemory})!void {
         var header: [frame.header_len]u8 = undefined;
         frame.writeHeader(&header, channel, kind, body.len) catch return error.Protocol;
-        writeAll(c.fd, &header) catch return error.Protocol;
-        writeAll(c.fd, body) catch return error.Protocol;
+        lib_posix.writeAll(c.conn.fd, &header) catch return error.Protocol;
+        lib_posix.writeAll(c.conn.fd, body) catch return error.Protocol;
     }
 
     fn sendControl(c: *Client, value: anytype) (Error || error{OutOfMemory})!void {
@@ -596,22 +580,6 @@ fn attachMessage(size: Resize, foreground_events: bool) m.Attach {
 
 fn resizeOf(size: Resize) m.Resize {
     return .{ .cols = size.cols, .rows = size.rows, .xpixel = size.xpixel, .ypixel = size.ypixel };
-}
-
-/// Writes all of `bytes`, and waits when the fd is full.
-fn writeAll(fd: i32, bytes: []const u8) !void {
-    var rest = bytes;
-    while (rest.len > 0) {
-        const n = lib_posix.write(fd, rest) catch |err| switch (err) {
-            error.WouldBlock => {
-                var fds = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.OUT, .revents = 0 }};
-                _ = try lib_posix.poll(&fds, -1);
-                continue;
-            },
-            else => return err,
-        };
-        rest = rest[n..];
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

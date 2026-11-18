@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# The v2 server (src/server.zig): `zmx server`, its socket in the runtime
+# The v2 server (src/server.zig and the files it names): `zmx server`, its socket in the runtime
 # directory, and its requests and events on channel 0. test/v2client.py is
 # the client.
 

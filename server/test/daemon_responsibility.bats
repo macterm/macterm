@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # macOS attributes privacy-gated operations (Local Network, TCC) to a process's
 # *responsible process*, a value fixed at spawn and inherited from the parent.
-# The server spawns the session disclaimed (spawnSession in server.zig) so that
+# The server spawns the session disclaimed (spawnSession in registry.zig) so that
 # it, and not the server or the app, is the responsible process for everything
 # in the session -- and stays so after they exit. These
 # tests pin that contract. The semantics are Darwin-only, so they skip elsewhere.
@@ -39,7 +39,7 @@ responsible_for() {
 
   # A session with no command runs $SHELL, so the session's argv ends at the
   # session name.
-  "$ZMX" session resp-test
+  "$ZMX" __create-session resp-test
   local session shell i=0
   session=$(pgrep -f "__session resp-test$")
   [[ -n "$session" ]]

@@ -103,6 +103,30 @@ fn lstat(path: [:0]const u8) ?Lstat {
     }
 }
 
+pub const SocketFile = enum { socket, missing, not_a_socket, unreadable };
+
+/// What is at `path`, following links: a socket, nothing, or something
+/// else. A connect to a file that is not a socket is not an error that
+/// `posix.connect` expects.
+pub fn socketFile(path: [:0]const u8) SocketFile {
+    const s_ifsock = 0o140000;
+    if (comptime builtin.os.tag == .linux) {
+        const linux = std.os.linux;
+        var stx: linux.Statx = undefined;
+        const rc = linux.statx(linux.AT.FDCWD, path.ptr, 0, .{ .TYPE = true, .MODE = true }, &stx);
+        switch (linux.errno(rc)) {
+            .SUCCESS => return if (stx.mode & s_ifmt == s_ifsock) .socket else .not_a_socket,
+            .NOENT => return .missing,
+            else => return .unreadable,
+        }
+    } else {
+        var st: std.c.Stat = undefined;
+        if (std.c.fstatat(std.c.AT.FDCWD, path.ptr, &st, 0) != 0)
+            return if (std.c._errno().* == @intFromEnum(std.c.E.NOENT)) .missing else .unreadable;
+        return if (st.mode & s_ifmt == s_ifsock) .socket else .not_a_socket;
+    }
+}
+
 /// The check alone. `uid` is the owner that the directory must have.
 pub fn checkDir(path: [:0]const u8, uid: std.c.uid_t) DirError!void {
     const st = lstat(path) orelse return error.Unreadable;
@@ -133,15 +157,40 @@ pub fn peerUid(fd: std.c.fd_t) ?std.c.uid_t {
         if (getpeereid(fd, &uid, &gid) != 0) return null;
         return uid;
     } else if (comptime builtin.os.tag == .linux) {
-        const Ucred = extern struct { pid: i32, uid: u32, gid: u32 };
-        var cred: Ucred = undefined;
-        var len: std.c.socklen_t = @sizeOf(Ucred);
-        if (std.c.getsockopt(fd, std.c.SOL.SOCKET, std.c.SO.PEERCRED, &cred, &len) != 0) return null;
-        if (len != @sizeOf(Ucred)) return null;
-        return cred.uid;
+        return if (peerCred(fd)) |cred| cred.uid else null;
     } else {
         return null;
     }
+}
+
+/// The pid of the process at the other end of a connected Unix socket, from
+/// the kernel, so that the peer cannot say another pid. Null when the system
+/// does not say.
+pub fn peerPid(fd: std.c.fd_t) ?std.c.pid_t {
+    if (comptime builtin.os.tag.isDarwin()) {
+        const sol_local = 0;
+        const local_peerpid = 0x002;
+        var pid: std.c.pid_t = 0;
+        var len: std.c.socklen_t = @sizeOf(std.c.pid_t);
+        if (std.c.getsockopt(fd, sol_local, local_peerpid, &pid, &len) != 0 or pid <= 0) return null;
+        return pid;
+    } else if (comptime builtin.os.tag == .linux) {
+        const cred = peerCred(fd) orelse return null;
+        return if (cred.pid > 0) cred.pid else null;
+    } else {
+        return null;
+    }
+}
+
+const Ucred = extern struct { pid: i32, uid: u32, gid: u32 };
+
+/// `SO_PEERCRED` (Linux).
+fn peerCred(fd: std.c.fd_t) ?Ucred {
+    var cred: Ucred = undefined;
+    var len: std.c.socklen_t = @sizeOf(Ucred);
+    if (std.c.getsockopt(fd, std.c.SOL.SOCKET, std.c.SO.PEERCRED, &cred, &len) != 0) return null;
+    if (len != @sizeOf(Ucred)) return null;
+    return cred;
 }
 
 extern "c" fn getpeereid(fd: std.c.fd_t, uid: *std.c.uid_t, gid: *std.c.gid_t) c_int;
@@ -165,12 +214,13 @@ test "the peer check lets in this user and root, and nobody else" {
     try testing.expect(!allowPeer(null, 501));
 }
 
-test "a socket pair's peer is this user" {
+test "a socket pair's peer is this user and this process" {
     var fds: [2]std.c.fd_t = undefined;
     try testing.expectEqual(0, std.c.socketpair(std.c.AF.UNIX, std.c.SOCK.STREAM, 0, &fds));
     defer _ = std.c.close(fds[0]);
     defer _ = std.c.close(fds[1]);
     try testing.expectEqual(std.c.getuid(), peerUid(fds[0]).?);
+    try testing.expectEqual(std.c.getpid(), peerPid(fds[0]).?);
     try testing.expect(allowPeer(peerUid(fds[0]), std.c.getuid()));
 }
 

@@ -10,7 +10,7 @@ setup_file() {
 }
 
 @test "resume: a drop of a moment gets the missing bytes, no snapshot and no lost byte" {
-  "$ZMX" session r1 -- /bin/cat
+  "$ZMX" __create-session r1 -- /bin/cat
   python3 - <<'PY'
 from v2client import Client
 a = Client("r1"); a.attach(); a.wait_msg("state")
@@ -42,7 +42,7 @@ PY
 }
 
 @test "resume: an offset that the session cannot serve gets a snapshot with its offset" {
-  "$ZMX" session r2 -- /bin/sh -c 'head -c 700000 /dev/zero | tr "\\0" a; echo done-marker; exec cat'
+  "$ZMX" __create-session r2 -- /bin/sh -c 'head -c 700000 /dev/zero | tr "\\0" a; echo done-marker; exec cat'
   python3 - <<'PY'
 from v2client import Client
 first = Client("r2"); first.attach(); first.wait_msg("state")
@@ -83,7 +83,7 @@ PY
 }
 
 @test "resume: a snapshot says the offset that its screen shows, and the output after it counts from there" {
-  "$ZMX" session r3 -- /bin/cat
+  "$ZMX" __create-session r3 -- /bin/cat
   python3 - <<'PY'
 from v2client import Client
 a = Client("r3"); a.attach(); a.wait_msg("state")
