@@ -193,9 +193,9 @@ final class RemoteHosts {
     /// Lists that failed on the current link of a host, in a row.
     @ObservationIgnored private var listFailures: [String: Int] = [:]
     /// When the app last told a session's client to make it. A second client
-    /// (the pane in a second window) can ask before the host lists the new session, and a
-    /// channel can drop before the session starts: in this time a missing
-    /// session is made, not reported as gone.
+    /// of the same pane (in a second window) can ask before the host lists
+    /// the new session, and a channel can drop before the session starts: in
+    /// this time a missing session is made, not reported as gone.
     @ObservationIgnored private var created: [String: Date] = [:]
     /// The folder of a session that the app told a client to make, until
     /// the session attaches.
@@ -454,10 +454,6 @@ final class RemoteHosts {
             // (`sessionAttached`): a create that fails must not make the
             // pane close later as gone.
             creating[session] = directory
-            // The pane's client in a second window may wait: it asks again.
-            if SurfaceRegistry.shared.clientCount(of: pane) > 1 {
-                configuration.post(Self.wakeName(for: session))
-            }
             return .attach(link: link, create: directory)
         case .gone:
             logger.info("remote pane: session=\(session, privacy: .public) is gone on \(destination, privacy: .public), the pane closes")
