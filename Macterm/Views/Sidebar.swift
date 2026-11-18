@@ -1181,6 +1181,9 @@ private struct SidebarProjectRow: View {
     private var appState
     @FocusState
     private var focused: Bool
+    /// `.increased` on a selected row of a focused list (`remoteMark`).
+    @Environment(\.backgroundProminence)
+    private var backgroundProminence
 
     private var renameTarget: SidebarRenameTarget { .project(project.id) }
 
@@ -1198,11 +1201,16 @@ private struct SidebarProjectRow: View {
         return (host, HostCommands.destination(user: user, host: host))
     }
 
-    /// `network`, or `network.slash` in the failure color while the host
-    /// cannot be reached: a pane of the project lost its connection
-    /// (`Workspace.hasLostRemoteLink`), or the host's roaming link hears
-    /// nothing (`RemoteHosts.quietDestinations`). Both symbols stay in the
-    /// layout and only one is visible. So the mark after it does not move.
+    /// `network`, or `network.slash` while the host cannot be reached: a
+    /// pane of the project lost its connection (`Workspace.hasLostRemoteLink`),
+    /// or the host's roaming link hears nothing (`RemoteHosts.quietDestinations`).
+    /// The slashed symbol has the failure color. On a selected row of a
+    /// focused list the selection has the accent color, and red is hard to
+    /// see on it. There, the slashed symbol has the primary style of the row,
+    /// as the project name has. The mark is bold on that row, so the glyph
+    /// and the weight show the lost state. Both symbols stay in the layout
+    /// with the same weight and only one is visible. So the mark after it
+    /// does not move.
     private func remoteMark(host: String, destination: String) -> some View {
         let lost = appState.workspaces[project.id]?.hasLostRemoteLink == true
             || RemoteHosts.shared.quietDestinations.contains(destination)
@@ -1215,15 +1223,17 @@ private struct SidebarProjectRow: View {
                 localized: "Remote project on \(host)",
                 comment: "Help of the sidebar mark on a remote project."
             )
+        let onProminentSelection = backgroundProminence == .increased
         return ZStack {
             Image(systemName: "network")
                 .foregroundStyle(.secondary)
                 .opacity(lost ? 0 : 1)
             Image(systemName: "network.slash")
-                .foregroundStyle(MactermTheme.failure)
+                .foregroundStyle(onProminentSelection ? AnyShapeStyle(.primary) : AnyShapeStyle(MactermTheme.failure))
                 .opacity(lost ? 1 : 0)
         }
         .font(.caption2)
+        .fontWeight(onProminentSelection ? .bold : nil)
         .help(help)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(help)

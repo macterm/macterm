@@ -233,11 +233,19 @@ jobs:
   # archive and a DMG from scripts/build.sh. With no secrets, so it is ad-hoc
   # signed, has the Sparkle placeholder key and is never published. A release
   # always builds again from its own commit; this only proves that it can.
+  #
+  # Only on a push to main, not on a pull request: this job and the two Smoke
+  # jobs take three macOS runners for each run. A failure here therefore shows
+  # after the merge. release-tip.yml gates on the Test run of each commit on
+  # main, so a commit that fails here does not ship as tip.
   release-build:
     name: Release Build
     needs: [changes, server]
     # !cancelled(): see the unit job.
-    if: ${{ !cancelled() && needs.changes.outputs.app == 'true' }}
+    if: >-
+      !cancelled()
+      && github.event_name == 'push'
+      && needs.changes.outputs.app == 'true'
     runs-on: xcode-27
     steps:
       - name: Checkout
@@ -276,10 +284,12 @@ jobs:
   # there, and on macOS 26 it must paint its adaptive icon through the
   # private renderer.
   #
-  # Two jobs, not a matrix: both checks are required, and a skipped matrix job
-  # reports the unexpanded name `Smoke (${{ matrix.runner }})`. A required
-  # `Smoke (macos-26)` would then never report on a pull request that changes
-  # no Swift, and that pull request could never merge.
+  # They run only where Release Build runs (a push to main): a skipped
+  # release-build skips them too.
+  #
+  # Two jobs, not a matrix: a skipped matrix job reports the unexpanded name
+  # `Smoke (${{ matrix.runner }})`. A required `Smoke (macos-26)` would then
+  # never report, and a pull request could never merge.
   #
   # macos-26: the private renderer of the adaptive icon. macos-15: the launch
   # of an app built with a newer SDK, below macOS 26. (macos-14 is being
