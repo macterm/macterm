@@ -423,6 +423,21 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_missing_folder_is_told_before_the_install_question() async throws {
+        // 0384: a wrong folder must not cost a server install first.
+        try await withSSHDHost { host in
+            let fixture = Fixture(host)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            #expect(host.asked.isEmpty)
+            #expect(fixture.ready.isEmpty)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(host.asked == ["box"])
+            #expect(fixture.ready == ["box"])
+            #expect(host.sshd.acceptedLogins() == 1)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func the_folder_check_needs_no_host_script_of_the_bundle() async throws {
         // 0358: a bundle with no host scripts refused every host at once.
         try await withSSHDHost(answer: false) { host in

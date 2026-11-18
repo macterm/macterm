@@ -267,7 +267,9 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     // MARK: - Layout
 
     private func show(_ next: Step) {
+        let wasInstall = isAskingInstall
         step = next
+        if wasInstall != isAskingInstall { crossfade() }
         let primaryButton = alert.buttons[0]
         let secondaryButton = alert.buttons[1]
         if case let .install(_, installHost) = next {
@@ -326,8 +328,22 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         refresh()
     }
 
+    /// The step change between the fields and the install question: the
+    /// old content dissolves into the new (a Core Animation fade on the
+    /// window's content layer). A dissolve is what Reduce Motion keeps, so
+    /// it stays on with Reduce Motion.
+    private func crossfade() {
+        guard alert.window.isVisible, let view = alert.window.contentView else { return }
+        view.wantsLayer = true
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = 0.2
+        view.layer?.add(fade, forKey: "step")
+    }
+
     /// Lays the alert out again. A visible window moves to its new size with
-    /// the native animation, from its top edge, unless Reduce Motion is on.
+    /// the native animation (`NSWindow.setFrame(_:display:animate:)`), from
+    /// its top edge, unless Reduce Motion is on.
     private func relayout() {
         let window = alert.window
         let old = window.frame
@@ -341,8 +357,9 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         window.setFrame(new, display: true, animate: animate)
     }
 
-    /// Three labeled fields and the status line, 300 pt wide, or as wide
-    /// as the alert's buttons if they are wider.
+    /// Three labeled fields and the status line, as wide as the alert's
+    /// row of buttons: a wider accessory makes the alert wider than its
+    /// buttons (0384).
     private func buildForm() {
         let labels = [String(localized: "Name"), String(localized: "Host"), String(localized: "Directory")]
             .map { NSTextField(labelWithString: $0) }
@@ -364,7 +381,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
 
         alert.layout()
         let buttons = alert.buttons.map { $0.convert($0.bounds, to: nil) }.reduce(NSRect.null) { $0.union($1) }
-        let width = max(buttons.width, 300)
+        let width = buttons.width
         form.frame = NSRect(x: 0, y: 0, width: width, height: 0)
         form.addSubview(grid)
         form.addSubview(spinner)

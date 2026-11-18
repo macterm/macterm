@@ -327,68 +327,76 @@ final class RemoteHosts {
     }
 
     /// Whether `directory` is on the host, before a remote project for it is
-    /// added (0358). It connects as a new pane does: the login and the server
-    /// install may ask the user, and the host's connection stays for the
-    /// project's panes. With a server, the server runs
-    /// `HostCommands.folderCheckScript` (`command.run`). With no server, the
-    /// script runs over the ssh connection. Fail closed: anything other than
-    /// the script's own answer is `unreachable`, and the log says why.
+    /// added (0358). A host with a link: its server runs
+    /// `HostCommands.folderCheckScript` (`command.run`). Any other host: the
+    /// same script runs over the ssh connection first, so the login may ask,
+    /// and a missing folder is told before the install question (0384). Then,
+    /// for a folder that is there, the host connects as a new pane does: the
+    /// server install may ask, and the connection stays for the project's
+    /// panes. Fail closed: anything other than the script's own answer is
+    /// `unreachable`, and the log says why.
     func checkFolder(_ directory: String, destination: String) async -> FolderCheck {
         guard SSHConnections.isValidDestination(destination) else {
             logger.info("folder check: \(destination, privacy: .public) is not a valid host")
             return .unreachable
         }
-        // A link that closed since its last use gets one more connect.
-        for _ in 0 ..< 2 {
-            switch hosts[destination] {
-            case nil:
-                prepare(destination, prompts: true)
-            case let .preparing(_, _, asks) where !asks:
-                prepare(destination, prompts: true)
-            default:
-                break
-            }
-            // Another step (an install from Settings) can replace this
-            // prepare: wait for the one that is current.
-            while case let .preparing(_, task, _) = hosts[destination] {
-                await task.value
-            }
-            switch hosts[destination] {
-            case let .ready(link):
-                // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
-                let argv = HostCommands.folderCheckArgv(directory: directory)
-                guard let result = await Self.run(argv, timeout: .seconds(8), over: link) else {
-                    // Only a closed connection is dropped: a slow folder (a
-                    // network mount) on a good link must not end its panes.
-                    guard !link.connection.isOpen else {
-                        logger.info("folder check: \(destination, privacy: .public): the server did not answer")
-                        return .unreachable
-                    }
-                    if case let .ready(current) = hosts[destination], current === link { drop(destination) }
-                    continue
-                }
-                return answer(status: result.signal == nil ? result.code.map(Int32.init) : nil, destination: destination)
-            case .plain:
-                guard let command = HostCommands.folderCheckCommand(directory: directory) else {
-                    logger.info("folder check: \(destination, privacy: .public): the folder is too long")
-                    return .unreachable
-                }
-                do {
-                    let outcome = try await connections.run(destination, command, timeout: .seconds(20))
-                    return answer(status: outcome.status, destination: destination)
-                } catch {
-                    logger.info("folder check: \(destination, privacy: .public): \(String(describing: error), privacy: .public)")
-                    return .unreachable
-                }
-            case .preparing,
-                 nil:
-                // `prepare` logged the reason.
-                logger.info("folder check: \(destination, privacy: .public): no connection")
-                return .unreachable
-            }
+        if case let .ready(link) = hosts[destination], let answer = await checkFolder(directory, destination: destination, over: link) {
+            return answer
         }
-        logger.info("folder check: \(destination, privacy: .public): the connection closed twice")
-        return .unreachable
+        guard let command = HostCommands.folderCheckCommand(directory: directory) else {
+            logger.info("folder check: \(destination, privacy: .public): the folder is too long")
+            return .unreachable
+        }
+        let found: FolderCheck
+        do {
+            let outcome = try await connections.run(destination, command, timeout: .seconds(20))
+            found = answer(status: outcome.status, destination: destination)
+        } catch {
+            logger.info("folder check: \(destination, privacy: .public): \(String(describing: error), privacy: .public)")
+            return .unreachable
+        }
+        guard found == .exists else { return found }
+        switch hosts[destination] {
+        case nil:
+            prepare(destination, prompts: true)
+        case let .preparing(_, _, asks) where !asks:
+            prepare(destination, prompts: true)
+        default:
+            break
+        }
+        // Another step (an install from Settings) can replace this prepare:
+        // wait for the one that is current.
+        while case let .preparing(_, task, _) = hosts[destination] {
+            await task.value
+        }
+        switch hosts[destination] {
+        case .ready,
+             .plain:
+            return .exists
+        case .preparing,
+             nil:
+            // `prepare` logged the reason.
+            logger.info("folder check: \(destination, privacy: .public): no connection after the check")
+            return .unreachable
+        }
+    }
+
+    /// The check by the host's server. nil when the link closed: it is
+    /// dropped, and the check goes over ssh.
+    private func checkFolder(_ directory: String, destination: String, over link: RemoteServers.Link) async -> FolderCheck? {
+        // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
+        let argv = HostCommands.folderCheckArgv(directory: directory)
+        if let result = await Self.run(argv, timeout: .seconds(8), over: link) {
+            return answer(status: result.signal == nil ? result.code.map(Int32.init) : nil, destination: destination)
+        }
+        // Only a closed connection is dropped: a slow folder (a network
+        // mount) on a good link must not end its panes.
+        guard !link.connection.isOpen else {
+            logger.info("folder check: \(destination, privacy: .public): the server did not answer")
+            return .unreachable
+        }
+        if case let .ready(current) = hosts[destination], current === link { drop(destination) }
+        return nil
     }
 
     /// `checkFolder` for the scp-style path of a new remote project in the
