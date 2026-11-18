@@ -43,7 +43,7 @@ struct AppLanguageTests {
         /// The persistent domain, not `stringArray(forKey:)`: the test scheme
         /// passes `-AppleLanguages (en)`, and the argument domain wins a read.
         func stored() -> [String]? {
-            Preferences.defaults.persistentDomain(forName: appBundleID + ".tests")?["AppleLanguages"] as? [String]
+            Preferences.defaults.persistentDomain(forName: Preferences.domainName)?["AppleLanguages"] as? [String]
         }
         preferences.appLanguage = "ko"
         #expect(stored() == ["ko"])

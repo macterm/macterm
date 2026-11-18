@@ -962,10 +962,31 @@ final class Preferences {
     /// corrupt the app they use day to day. Under a test run, back the app's
     /// defaults with a wiped side suite instead so writes never leave the run.
     /// The persistent domain that `defaults` writes: the app's own, or the
-    /// side suite under test.
-    nonisolated private static var domainName: String {
-        isTestRun ? appBundleID + ".tests" : appBundleID
+    /// side suite under test. The side suite has the run's `testRunSlot` in
+    /// its name, so two runs at the same time do not wipe each other's domain.
+    nonisolated static var domainName: String {
+        isTestRun ? "\(appBundleID).tests.\(testRunSlot)" : appBundleID
     }
+
+    /// The slot of this test run: the first slot that no other running test
+    /// process holds. The run holds a lock on the slot file for its life, and
+    /// the kernel releases it when the process ends. The slot repeats in each
+    /// run, so the domains that have it in their name reuse the same plist
+    /// files: `removePersistentDomain` does not delete the file, cfprefsd
+    /// writes the empty domain back to `~/Library/Preferences`. If no lock
+    /// file opens, the process id is the slot: the names are then new in each
+    /// run. `IsolatedDefaults` uses the same slot.
+    nonisolated static let testRunSlot: Int = {
+        let directory = FileManager.default.temporaryDirectory
+        for slot in 0 ..< 64 {
+            let path = directory.appendingPathComponent("macterm-tests-defaults-\(slot).lock").path
+            let descriptor = open(path, O_CREAT | O_RDWR, 0o600)
+            guard descriptor >= 0 else { continue }
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return slot }
+            close(descriptor)
+        }
+        return Int(getpid())
+    }()
 
     nonisolated private static func resolveDefaults() -> UserDefaults {
         guard isTestRun else { return .standard }
