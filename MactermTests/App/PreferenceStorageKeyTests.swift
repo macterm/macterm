@@ -6,14 +6,9 @@ import Testing
 /// these pin what "absent", "stored" and "normalized" mean once, for every
 /// `Preferences` property at the same time.
 struct PreferenceStorageKeyTests {
-    private func isolatedDefaults() throws -> UserDefaults {
-        let suiteName = "com.thdxg.macterm.storage-key-tests.\(UUID().uuidString)"
-        return try #require(UserDefaults(suiteName: suiteName))
-    }
-
     @Test
-    func absent_reads_as_the_default_and_stored_reads_back() throws {
-        let defaults = try isolatedDefaults()
+    func absent_reads_as_the_default_and_stored_reads_back() {
+        let defaults = IsolatedDefaults.make()
         let key = PreferenceStorageKey("test.flag", default: true)
 
         #expect(key.read(defaults) == true)
@@ -29,8 +24,8 @@ struct PreferenceStorageKeyTests {
     }
 
     @Test
-    func a_value_of_the_wrong_shape_reads_as_absent() throws {
-        let defaults = try isolatedDefaults()
+    func a_value_of_the_wrong_shape_reads_as_absent() {
+        let defaults = IsolatedDefaults.make()
         let key = PreferenceStorageKey("test.count", default: 7)
         defaults.set("not a number", forKey: key.name)
         #expect(key.read(defaults) == 7)
@@ -38,8 +33,8 @@ struct PreferenceStorageKeyTests {
     }
 
     @Test
-    func normalize_applies_to_stored_values_only() throws {
-        let defaults = try isolatedDefaults()
+    func normalize_applies_to_stored_values_only() {
+        let defaults = IsolatedDefaults.make()
         // The default is trusted as written even when it sits outside what
         // `normalize` would allow — a stored value is what gets clamped.
         let key = PreferenceStorageKey("test.fraction", default: 5.0) { min(1, max(0, $0)) }
@@ -50,8 +45,8 @@ struct PreferenceStorageKeyTests {
     }
 
     @Test
-    func an_enum_round_trips_through_its_raw_value() throws {
-        let defaults = try isolatedDefaults()
+    func an_enum_round_trips_through_its_raw_value() {
+        let defaults = IsolatedDefaults.make()
         let key = PreferenceStorageKey("test.channel", default: UpdateChannel.stable)
         key.write(.tip, to: defaults)
         #expect(defaults.string(forKey: key.name) == "tip")

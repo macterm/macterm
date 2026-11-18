@@ -78,9 +78,20 @@ final class GhosttyCallbacks: @unchecked Sendable {
             DispatchQueue.main.async { view.surfaceDidReportProgress(report) }
             return true
         case GHOSTTY_ACTION_SCROLLBAR:
-            guard let view = surfaceView(from: target) else { return true }
             let s = action.action.scrollbar
-            DispatchQueue.main.async { view.surfaceDidUpdateScrollbar(total: s.total, offset: s.offset, len: s.len) }
+            if let view = surfaceView(from: target) {
+                DispatchQueue.main.async { view.surfaceDidUpdateScrollbar(total: s.total, offset: s.offset, len: s.len) }
+            } else if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
+                // The scroll preview of Settings → Animations: its userdata
+                // is nil, so it is found by its surface. A preview that is
+                // gone by then matches nothing.
+                let address = UInt(bitPattern: surface)
+                DispatchQueue.main.async {
+                    guard let surface = UnsafeMutableRawPointer(bitPattern: address) else { return }
+                    PreviewSurfaceView.view(for: surface)?
+                        .surfaceDidUpdateScrollbar(total: s.total, offset: s.offset, len: s.len)
+                }
+            }
             return true
         case GHOSTTY_ACTION_RENDER:
             guard let view = surfaceView(from: target) else { return false }

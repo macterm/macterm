@@ -1,6 +1,12 @@
 import Foundation
 @testable import Macterm
+import Observation
 import Testing
+
+@MainActor
+private final class ObservationFlag {
+    var wasInvalidated = false
+}
 
 @MainActor
 struct WorkspaceTests {
@@ -13,6 +19,49 @@ struct WorkspaceTests {
         #expect(Workspace(id: PinnedTabs.workspaceID, tabs: [], activeTabID: nil).kind == .pinned)
         #expect(Workspace(id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil).kind == .scratch)
         #expect(makeWorkspace().kind == .project)
+    }
+
+    @Test
+    func a_remote_workspace_has_a_lost_link_while_any_of_its_panes_is_lost() throws {
+        let ws = Workspace(id: UUID(), projectPath: "box:/srv")
+        let second = ModelWriter.tabCreate(in: ws, projectPath: "box:/srv", focus: false)
+        let first = try #require(second.splitRoot.allPanes().first)
+        let splitID = try #require(ModelWriter.paneSplit(second, paneID: first.id, direction: .vertical))
+        let nested = try #require(second.splitRoot.findPane(id: splitID))
+        #expect(!ws.hasLostRemoteLink)
+        nested.isRemoteLinkLost = true
+        #expect(ws.hasLostRemoteLink)
+        first.isRemoteLinkLost = true
+        nested.isRemoteLinkLost = false
+        #expect(ws.hasLostRemoteLink)
+        first.isRemoteLinkLost = false
+        #expect(!ws.hasLostRemoteLink)
+    }
+
+    @Test
+    func the_lost_link_of_a_workspace_notifies_an_observer_when_it_drops_and_when_it_heals() throws {
+        let ws = Workspace(id: UUID(), projectPath: "box:/srv")
+        let pane = try #require(ws.tabs.first?.splitRoot.allPanes().first)
+        func observe() -> ObservationFlag {
+            let flag = ObservationFlag()
+            withObservationTracking { _ = ws.hasLostRemoteLink } onChange: {
+                MainActor.assumeIsolated { flag.wasInvalidated = true }
+            }
+            return flag
+        }
+        let drop = observe()
+        pane.isRemoteLinkLost = true
+        #expect(drop.wasInvalidated)
+        let heal = observe()
+        pane.isRemoteLinkLost = false
+        #expect(heal.wasInvalidated)
+    }
+
+    @Test
+    func a_local_workspace_never_has_a_lost_link() {
+        let ws = makeWorkspace()
+        ws.tabs[0].splitRoot.allPanes()[0].isRemoteLinkLost = true
+        #expect(!ws.hasLostRemoteLink)
     }
 
     @Test

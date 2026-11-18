@@ -68,6 +68,7 @@ struct MactermApp: App {
                     }
                     appDelegate.projectStore = projectStore
                     NotificationHandler.shared.appState = appState
+                    Updater.shared.presentToast = { [appState] in appState.presentToast($0) }
                     // Termination persists the snapshot AND refreshes the
                     // pinned declarations (`pinned.yaml`) from live state —
                     // the moment the respawn recipes are about to matter.

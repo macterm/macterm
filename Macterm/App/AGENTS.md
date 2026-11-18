@@ -141,6 +141,20 @@ A pane that asks for a password gets a native `NSPopover` at the cursor (`Passwo
 - **A host entry has a scope** (`PasswordEntryID.host`): the ssh destination as `ssh -G` resolves it (`RemotePasswordScope`, read again after 60 s). With no scope yet, or after a failure, the asker is `.unknown`: nothing is filled or offered.
 - **Nothing a host reports is protected.** There is no shared `sudo` entry and no shared key passphrase entry on a host: each is filed under the host's command line. A process on a host can print any prompt and rewrite its own argv, so the host's word is a hint only.
 
+## Updates
+
+Sparkle shows no window. `Updater` drives Sparkle with its own user driver (`UpdateUserDriver`), and `UpdateMachine` (pure, `UpdateStatusTests`) turns each callback into the toolbar state.
+
+- **Sparkle checks at launch when the last check is a day old or more** (`SUScheduledCheckInterval`). Otherwise it checks when the rest of the day has passed.
+- **The toolbar shows the exception only** (`UpdateToolbarButton`). No button while idle. A scheduled check is silent until its update is ready: no ring and no toast. Then Restart to Update shows; a click installs and relaunches.
+- **Both update states are toolbar buttons** (`UpdateToolbarButton`). The toolbar gives a button its height, edge margin and inner padding. On macOS 26 each label adds `UpdateToolbarButton.textInset` at each end, the same in both states. Downloading… is a disabled button.
+- **A check that the user starts shows its progress** (`UpdateMachine.userSession`): Downloading… with a progress ring (determinate when Sparkle knows the size), then Restart to Update. It ends in a toast (`UpdateToast`) when there is nothing to install: up to date, a failed check, a failed download. Never a modal.
+- **"Up to date" only when Sparkle says so** (`SPUNoUpdateFoundReason`). Any other reason (the newest build needs another macOS) shows nothing.
+- **A major upgrade installs as any other update.** Sparkle hands it to the user driver instead of downloading it by itself, and the driver replies install. Macterm dismisses only what it cannot install: an information-only item, and an appcast that failed its signing check (`UpdateFound.untrusted`). A check that the user started then says that the version is on the website.
+- **A background download that waits is sticky** (`UpdateMachine.installsOnQuit`). Sparkle installs it when the app quits, whatever a later check or error says. Sparkle asks nothing at quit. After a quit that the app cancelled, Restart to Update sends Sparkle's quit event again.
+- **The app menu item is the fallback with no window open.** While an update waits, Check for Updates… is Restart to Update (`CheckForUpdatesMenuItem`). An accessory app (`macos-hidden = always`) has no menu bar: its update installs at quit.
+- Release notes are not shown in the app. The changelog of the website has them.
+
 ## Pinned Tabs
 
 Pinned tabs belong to no project. The sidebar shows them above the projects. They are a **sentinel workspace** (`workspaces[PinnedTabs.workspaceID]`, `Workspace.kind == .pinned`). Its ID is a fixed UUID that is not a `ProjectStore` row, so the iteration over projects never sees it. Each pinned tab is a `PinnedTabRecord`: a durable declaration (`LayoutTab`) and, while it is loaded, a live `TerminalTab`. All the logic is in `AppState+PinnedTabs.swift`.

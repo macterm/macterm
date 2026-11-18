@@ -1188,10 +1188,45 @@ private struct SidebarProjectRow: View {
     /// user declined the server, or the host has no build. The row shows it,
     /// so the pane prints no line about it (`RemoteHosts.plainDestinations`).
     private var plainHost: String? {
-        guard case let .remote(user, host, _) = ProjectPath.remote(from: project.path),
-              RemoteHosts.shared.plainDestinations.contains(HostCommands.destination(user: user, host: host))
-        else { return nil }
-        return host
+        guard let remote = remoteHost, RemoteHosts.shared.plainDestinations.contains(remote.destination) else { return nil }
+        return remote.host
+    }
+
+    /// The host of a remote project (#104): its panes run there over ssh.
+    private var remoteHost: (host: String, destination: String)? {
+        guard case let .remote(user, host, _) = ProjectPath.remote(from: project.path) else { return nil }
+        return (host, HostCommands.destination(user: user, host: host))
+    }
+
+    /// `network`, or `network.slash` in the failure color while the host
+    /// cannot be reached: a pane of the project lost its connection
+    /// (`Workspace.hasLostRemoteLink`), or the host's roaming link hears
+    /// nothing (`RemoteHosts.quietDestinations`). Both symbols stay in the
+    /// layout and only one is visible. So the mark after it does not move.
+    private func remoteMark(host: String, destination: String) -> some View {
+        let lost = appState.workspaces[project.id]?.hasLostRemoteLink == true
+            || RemoteHosts.shared.quietDestinations.contains(destination)
+        let help = lost
+            ? String(
+                localized: "Connection to \(host) lost",
+                comment: "Help of the sidebar mark on a remote project whose connection to its host stopped."
+            )
+            : String(
+                localized: "Remote project on \(host)",
+                comment: "Help of the sidebar mark on a remote project."
+            )
+        return ZStack {
+            Image(systemName: "network")
+                .foregroundStyle(.secondary)
+                .opacity(lost ? 0 : 1)
+            Image(systemName: "network.slash")
+                .foregroundStyle(MactermTheme.failure)
+                .opacity(lost ? 1 : 0)
+        }
+        .font(.caption2)
+        .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(help)
     }
 
     @ViewBuilder
@@ -1206,12 +1241,8 @@ private struct SidebarProjectRow: View {
         } else {
             HStack(spacing: 4) {
                 FadingText(project.name)
-                if project.isRemote {
-                    // Remote project (#104): panes live on this host over ssh.
-                    Image(systemName: "network")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .help(project.path)
+                if let remote = remoteHost {
+                    remoteMark(host: remote.host, destination: remote.destination)
                 }
                 if let host = plainHost {
                     Image(systemName: "exclamationmark.circle")
