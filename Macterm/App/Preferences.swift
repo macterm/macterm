@@ -955,12 +955,6 @@ final class Preferences {
 
     // MARK: - Init
 
-    /// The unit-test suite runs hosted inside the debug app, so
-    /// `UserDefaults.standard` there is the developer's real
-    /// `com.thdxg.macterm.debug` domain — a test mutating a preference (even
-    /// indirectly, e.g. `AppState.activeProjectID`'s write-through) would
-    /// corrupt the app they use day to day. Under a test run, back the app's
-    /// defaults with a wiped side suite instead so writes never leave the run.
     /// The persistent domain that `defaults` writes: the app's own, or the
     /// side suite under test. The side suite has the run's `testRunSlot` in
     /// its name, so two runs at the same time do not wipe each other's domain.
@@ -969,18 +963,21 @@ final class Preferences {
     }
 
     /// The slot of this test run: the first slot that no other running test
-    /// process holds. The run holds a lock on the slot file for its life, and
-    /// the kernel releases it when the process ends. The slot repeats in each
-    /// run, so the domains that have it in their name reuse the same plist
-    /// files: `removePersistentDomain` does not delete the file, cfprefsd
-    /// writes the empty domain back to `~/Library/Preferences`. If no lock
-    /// file opens, the process id is the slot: the names are then new in each
-    /// run. `IsolatedDefaults` uses the same slot.
+    /// process holds. The run holds a lock on the slot file for its life. The
+    /// kernel releases the lock when the process ends. The descriptor closes
+    /// on exec, so a child that outlives the run (a session daemon) does not
+    /// keep the slot.
+    ///
+    /// `removePersistentDomain` does not delete a plist file: cfprefsd writes
+    /// the empty domain back to `~/Library/Preferences`. The slot repeats in
+    /// each run, so the domains that have it in their name use the same files
+    /// again. If no lock file opens, the process id is the slot. Each run then
+    /// makes new files. `IsolatedDefaults` uses the same slot.
     nonisolated static let testRunSlot: Int = {
         let directory = FileManager.default.temporaryDirectory
         for slot in 0 ..< 64 {
             let path = directory.appendingPathComponent("macterm-tests-defaults-\(slot).lock").path
-            let descriptor = open(path, O_CREAT | O_RDWR, 0o600)
+            let descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
             guard descriptor >= 0 else { continue }
             if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return slot }
             close(descriptor)
@@ -988,6 +985,12 @@ final class Preferences {
         return Int(getpid())
     }()
 
+    /// The unit-test suite runs hosted inside the debug app, so
+    /// `UserDefaults.standard` there is the developer's real
+    /// `com.thdxg.macterm.debug` domain — a test mutating a preference (even
+    /// indirectly, e.g. `AppState.activeProjectID`'s write-through) would
+    /// corrupt the app they use day to day. Under a test run, back the app's
+    /// defaults with a wiped side suite instead so writes never leave the run.
     nonisolated private static func resolveDefaults() -> UserDefaults {
         guard isTestRun else { return .standard }
         let suiteName = domainName
