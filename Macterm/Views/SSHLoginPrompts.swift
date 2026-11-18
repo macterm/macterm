@@ -159,7 +159,7 @@ final class SSHLoginPrompts {
         }
         // No terminal window: no notice. A modal alert would hold the wait
         // for the login that closes it.
-        guard let wanted, let window = Self.terminalWindow() else { return }
+        guard let wanted, let window = Self.sheetParent() else { return }
         let pid = wanted.sshPID
         let alert = NSAlert()
         alert.messageText = String(localized: "Connecting to \(wanted.host)")
@@ -234,6 +234,18 @@ final class SSHLoginPrompts {
         return candidates.first(where: { AppDelegate.isTerminalWindowCandidate($0) })
     }
 
+    /// The window for a question's sheet: the terminal window, or the sheet
+    /// that is open on it. A sheet on a window with a sheet waits until that
+    /// sheet closes, and the New Remote Project sheet stays open while its
+    /// check waits for the login and the install question (0358).
+    static func sheetParent() -> NSWindow? {
+        var window = terminalWindow()
+        while let sheet = window?.attachedSheet {
+            window = sheet
+        }
+        return window
+    }
+
     // MARK: - Sheets
 
     private enum Button {
@@ -294,7 +306,7 @@ final class SSHLoginPrompts {
         }
         alert.layout()
 
-        guard let window = Self.terminalWindow() else {
+        guard let window = Self.sheetParent() else {
             NSApp.activate()
             finish(pending, response: alert.runModal(), field: field, savedID: savedID)
             return

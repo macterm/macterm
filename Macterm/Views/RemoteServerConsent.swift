@@ -23,7 +23,7 @@ enum RemoteServerConsent {
         ))
         withoutServer.keyEquivalent = "\u{1b}"
         NSApp.activate()
-        guard let window = SSHLoginPrompts.terminalWindow() else {
+        guard let window = SSHLoginPrompts.sheetParent() else {
             return alert.runModal() == .alertFirstButtonReturn
         }
         return await withCheckedContinuation { continuation in

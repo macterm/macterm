@@ -54,6 +54,9 @@ struct NewRemoteProjectSheet: View {
     /// Why the last Add added nothing. An edit clears it.
     @State
     private var failure: String?
+    /// The draft's check started: a second appear does not start it again.
+    @State
+    private var startedDraft = false
 
     init(draft: NewRemoteProjectDraft? = nil) {
         self.draft = draft
@@ -82,9 +85,14 @@ struct NewRemoteProjectSheet: View {
                 .padding(.top, 20)
             Form {
                 Section {
-                    TextField("Name", text: $name, prompt: Text(verbatim: host.isEmpty ? "devbox" : host))
-                    TextField("Host", text: $host, prompt: Text("[user@]host or ssh alias"))
-                    TextField("Directory", text: $directory, prompt: Text(verbatim: "~/dev/api"))
+                    // The check adds the path that it checked.
+                    Group {
+                        TextField("Name", text: $name, prompt: Text(verbatim: host.isEmpty ? "devbox" : host))
+                        TextField("Host", text: $host, prompt: Text("[user@]host or ssh alias"))
+                        TextField("Directory", text: $directory, prompt: Text(verbatim: "~/dev/api"))
+                    }
+                    .disabled(check != nil)
+                    // The section's footnote: its last row, as in Settings.
                     Text("""
                     Each pane is a session on the host, over one ssh connection. \
                     At the first connection, Macterm asks to install its server on the host. \
@@ -93,8 +101,6 @@ struct NewRemoteProjectSheet: View {
                     .settingsSecondaryText()
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                // The check adds the path that it checked.
-                .disabled(check != nil)
                 if let message = reservedNameMessage ?? failure {
                     Section {
                         Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -132,7 +138,11 @@ struct NewRemoteProjectSheet: View {
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: [name, host, directory]) { failure = nil }
-        .onAppear { if draft != nil { add() } }
+        .onAppear {
+            guard draft != nil, !startedDraft else { return }
+            startedDraft = true
+            add()
+        }
         .onDisappear { check?.cancel() }
     }
 

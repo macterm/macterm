@@ -377,6 +377,16 @@ struct RemoteHostsTests {
         }
     }
 
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func the_folder_check_needs_no_host_script_of_the_bundle() async throws {
+        // 0358: a bundle with no host scripts refused every host at once.
+        try await withSSHDHost(answer: false) { host in
+            let fixture = Fixture(host, scripts: nil)
+            #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
+            #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+        }
+    }
+
     @Test
     func a_host_name_that_is_not_valid_is_unreachable() async {
         let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
@@ -428,9 +438,12 @@ struct RemoteHostsTests {
         }
 
         /// `wakes`: the posts reach a pane's driver too, as in the app.
-        init(_ host: SSHDHost, creationGrace: TimeInterval = 30, wakes: Bool = false) {
+        /// `scripts`: the host scripts of the bundle; nil as in a bundle
+        /// without them.
+        init(_ host: SSHDHost, creationGrace: TimeInterval = 30, wakes: Bool = false, scripts: HostCommands.Scripts? = .bundled) {
             directory = host.home.path
             var configuration = RemoteHosts.Configuration(key: host.key, declines: .memory(), creationGrace: creationGrace)
+            configuration.scripts = scripts
             configuration.post = { [posted] name in
                 posted.mutate { $0.append(name) }
                 if wakes { notify_post(name) }

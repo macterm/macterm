@@ -336,7 +336,11 @@ final class RemoteHosts {
             default:
                 break
             }
-            if case let .preparing(_, task, _) = hosts[destination] { await task.value }
+            // Another step (an install from Settings) can replace this
+            // prepare: wait for the one that is current.
+            while case let .preparing(_, task, _) = hosts[destination] {
+                await task.value
+            }
             switch hosts[destination] {
             case let .ready(link):
                 // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
