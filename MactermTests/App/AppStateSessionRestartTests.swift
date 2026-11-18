@@ -114,19 +114,16 @@ struct AppStateSessionRestartTests {
     }
 
     @Test
-    func a_pane_shows_the_badge_only_while_its_session_is_older_and_the_switch_is_on() throws {
-        let prior = Preferences.shared.showOutdatedSessionBadge
-        defer { Preferences.shared.showOutdatedSessionBadge = prior }
+    func a_pane_shows_the_badge_only_while_its_session_is_older() throws {
         let state = makeState()
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
-        Preferences.shared.showOutdatedSessionBadge = true
         #expect(!state.showsOutdatedSessionBadge(pane))
         state.outdatedSessions = [pane.sessionName]
         #expect(state.showsOutdatedSessionBadge(pane))
-        Preferences.shared.showOutdatedSessionBadge = false
+        state.outdatedSessions = []
         #expect(!state.showsOutdatedSessionBadge(pane))
     }
 

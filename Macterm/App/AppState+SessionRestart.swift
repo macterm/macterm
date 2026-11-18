@@ -23,7 +23,7 @@ extension AppState {
     /// and it is a pane of a project tab (the quick terminal and the desktop
     /// widgets have no tab to restart in).
     func showsOutdatedSessionBadge(_ pane: Pane) -> Bool {
-        guard Preferences.shared.showOutdatedSessionBadge, !pane.isRemote,
+        guard !pane.isRemote,
               outdatedSessions.contains(pane.sessionName),
               let tab = workspaces[pane.projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: pane.id) })
         else { return false }

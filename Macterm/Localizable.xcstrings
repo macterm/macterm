@@ -683,22 +683,6 @@
         }
       }
     },
-    "A pane shows a badge when its session runs from an older Macterm version." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션이 이전 Macterm 버전으로 실행 중이면 패널에 배지가 표시됩니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会话运行于旧版 Macterm 时，窗格会显示徽章。"
-          }
-        }
-      }
-    },
     "A pane there has a running program. Close it in %@ instead." : {
       "localizations" : {
         "ko" : {
@@ -9653,22 +9637,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示或隐藏快速终端浮层。"
-          }
-        }
-      }
-    },
-    "Show outdated session badge" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이전 버전 세션 배지 표시"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示旧版会话徽章"
           }
         }
       }
