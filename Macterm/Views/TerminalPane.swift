@@ -223,13 +223,11 @@ struct RemoteLinkPill: View {
 }
 
 /// Lock badge shown while secure keyboard input is active for the focused
-/// pane (`macos-secure-input-indication`). An icon only, in the chrome of
-/// the other badges.
+/// pane (`macos-secure-input-indication`), in the chrome of the other badges.
 struct SecureInputBadge: View {
     var body: some View {
-        PanePill {
-            Label(String(localized: "Secure keyboard input is active"), systemImage: "lock.fill")
-                .labelStyle(.iconOnly)
+        StatusPill(title: String(localized: "Secure keyboard input is active")) {
+            Image(systemName: "lock.fill")
         }
     }
 }

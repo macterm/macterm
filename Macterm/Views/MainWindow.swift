@@ -1183,7 +1183,7 @@ struct ModePill: View {
     let action: () -> Void
 
     var body: some View {
-        PanePill(action: action) { Label(title, systemImage: systemImage) }
+        PanePill(title: title, action: action) { Image(systemName: systemImage) }
             .help(help)
     }
 }
@@ -1195,10 +1195,7 @@ struct StatusPill<Icon: View>: View {
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
-        PanePill {
-            // An animated change of the title morphs the text in place.
-            Label { Text(title).contentTransition(.interpolate) } icon: { icon() }
-        }
+        PanePill(title: title, icon: icon)
     }
 }
 
@@ -1206,25 +1203,36 @@ struct StatusPill<Icon: View>: View {
 /// have the same height, font, padding and corner: the native glass capsule
 /// button on macOS 26, below that the flat badge in the theme colors. With
 /// no action, the pill takes no clicks.
-struct PanePill<Content: View>: View {
+///
+/// At rest the pill shows its icon only. The pointer on the pill reveals the
+/// title: the pill widens on the curve of `PaletteMotion`, and the badges
+/// beside it move with it. Reduce Motion lands the change in one frame. The
+/// hover comes from `RowHoverTracker`, an AppKit tracking area: the pane's
+/// view wins every hit test under the row, and the status pills take none.
+struct PanePill<Icon: View>: View {
     /// The least height of every pill's content: the tallest icon. The
     /// glass button sizes to its label, and the icons have different heights.
+    /// It is also the least width of the icon, so that every pill at rest
+    /// has the same size.
     static var contentHeight: CGFloat { 15 }
 
+    let title: String
     var action: (() -> Void)?
-    @ViewBuilder let content: () -> Content
+    @ViewBuilder let icon: () -> Icon
+
+    @State private var isRevealed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
             if #available(macOS 26.0, *), WindowAppearance.glassSupported {
-                Button(action: action ?? {}) { content().frame(minHeight: Self.contentHeight) }
+                Button(action: action ?? {}) { label }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
             } else {
                 Button(action: action ?? {}) {
-                    content()
-                        .frame(minHeight: Self.contentHeight)
+                    label
                         .modifier(FlatPillChrome())
                         .contentShape(Rectangle())
                 }
@@ -1234,6 +1242,86 @@ struct PanePill<Content: View>: View {
         .allowsHitTesting(action != nil)
         .focusable(action != nil)
         .accessibilityRemoveTraits(action == nil ? .isButton : [])
+        .background(RowHoverTracker(isHovered: revealBinding))
+    }
+
+    private var label: some View {
+        PanePillLabel(title: title, reveal: isRevealed ? 1 : 0, icon: icon)
+            .frame(minHeight: Self.contentHeight)
+    }
+
+    /// A change of the hover runs in one transaction, so that the row moves
+    /// the other badges on the same curve as this pill widens.
+    private var revealBinding: Binding<Bool> {
+        Binding(
+            get: { isRevealed },
+            set: { hovering in
+                withAnimation(reduceMotion ? nil : PaletteMotion.animation) { isRevealed = hovering }
+            }
+        )
+    }
+}
+
+/// The icon and the title of a `PanePill`. `reveal` (0 to 1) is how much of
+/// the title shows. It is one value, so that SwiftUI animates the width of
+/// the pill and the fade of the title, with no view that comes and goes.
+struct PanePillLabel<Icon: View>: View {
+    let title: String
+    let reveal: CGFloat
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        RevealLayout(reveal: reveal) {
+            icon().frame(minWidth: PanePill<Icon>.contentHeight)
+            // An animated change of the title morphs the text in place.
+            Text(title)
+                .contentTransition(.interpolate)
+                .lineLimit(1)
+                .fixedSize()
+                .opacity(reveal)
+        }
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
+    }
+}
+
+/// Puts its first subview (the icon) at the leading edge and its second (the
+/// title) after it, and is as wide as the icon plus `reveal` of the title.
+/// `Layout` is `Animatable`: `reveal` interpolates frame by frame.
+private struct RevealLayout: Layout {
+    var reveal: CGFloat
+    var spacing: CGFloat = 4
+
+    var animatableData: CGFloat {
+        get { reveal }
+        set { reveal = newValue }
+    }
+
+    func sizeThatFits(proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let icon = subviews[0].sizeThatFits(.unspecified)
+        let title = subviews[1].sizeThatFits(.unspecified)
+        return CGSize(
+            width: icon.width + (spacing + title.width) * reveal,
+            height: max(icon.height, title.height)
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        guard subviews.count == 2 else { return }
+        let icon = subviews[0].sizeThatFits(.unspecified)
+        let title = subviews[1].sizeThatFits(.unspecified)
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX, y: bounds.midY),
+            anchor: .leading,
+            proposal: ProposedViewSize(icon)
+        )
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX + icon.width + spacing, y: bounds.midY),
+            anchor: .leading,
+            proposal: ProposedViewSize(title)
+        )
     }
 }
 
