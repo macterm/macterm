@@ -237,8 +237,7 @@ private struct RegistryStatus: View {
 /// One extension: its screenshots; glyph, name and a line saying what it is
 /// for, each cut short with an ellipsis so every card is the same size; a
 /// link to its folder on GitHub when it comes from the repository; and a
-/// button saying whether it is installed. It has no background or border:
-/// it sits directly on the Settings background.
+/// button saying whether it is installed.
 private struct ExtensionCard: View {
     @Environment(\.openURL)
     private var openURL
