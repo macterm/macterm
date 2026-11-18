@@ -110,6 +110,7 @@ struct NewRemoteProjectDialogTests {
         let dialog = dialog(draft, check: check, created: created)
         // With no line, the form is only the fields: no gap above the buttons.
         let bare = try #require(dialog.alert.accessoryView).frame.height
+        let bareWindow = dialog.alert.window.frame.height
         // The palette's draft checks at once.
         dialog.present(on: nil, startCheck: true)
         #expect(dialog.isChecking)
@@ -124,11 +125,16 @@ struct NewRemoteProjectDialogTests {
         // The refused path stays refused: Add is off until an edit.
         #expect(!dialog.alert.buttons[0].isEnabled)
         #expect(try #require(dialog.alert.accessoryView).frame.height > bare)
+        #expect(dialog.alert.window.frame.height > bareWindow)
+        // A disabled Add does not check again.
+        dialog.alert.buttons[0].performClick(nil)
+        #expect(!dialog.isChecking)
         // The name follows the corrected folder.
         type("~/dev/api", in: dialog.directoryField, of: dialog)
         #expect(dialog.statusText.isEmpty)
         #expect(dialog.alert.buttons[0].isEnabled)
         #expect(try #require(dialog.alert.accessoryView).frame.height == bare)
+        #expect(dialog.alert.window.frame.height == bareWindow)
         #expect(dialog.nameField.placeholderString == "api")
         dialog.close()
     }

@@ -37,8 +37,8 @@ struct NewRemoteProjectDraft: Equatable {
 /// - The install question of the host is the dialog's next step, in the same
 ///   window (`askInstall`): the content dissolves into the new text and
 ///   buttons (`crossfade`), and the window resizes with its native animation
-///   (`relayout`). In this dialog Escape means Cancel, so the question has
-///   no Escape key: Continue Without Server is a click only (0393). A login
+///   (`relayout`). Escape does nothing on the install question, so it cannot
+///   decline the server by accident (0393). A login
 ///   question shows on top (`SSHLoginPrompts.sheetParent`).
 /// - The palette opens it with a `NewRemoteProjectDraft`: the check starts at
 ///   once, so the next step is the install question, the login or the
@@ -194,7 +194,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     }
 
     private func add() {
-        guard let path = composedPath, reservedNameMessage == nil, case .fields = step else { return }
+        guard let path = composedPath, reservedNameMessage == nil, failure == nil, case .fields = step else { return }
         guard case let .remote(user, host, _) = ProjectPath.parse(path) else { return }
         let name = trimmedName.isEmpty ? automaticName : trimmedName
         failure = nil
@@ -327,7 +327,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         atEdge?.isActive = true
         let message = reservedNameMessage ?? failure
         statusLine.stringValue = message ?? ""
-        // The line has room for two lines; the whole text is in the tooltip.
+        // The line shows two lines at most; the whole text is in the tooltip.
         statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
         // A refused path stays refused until an edit: Add and Return do nothing.
@@ -339,7 +339,11 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         let height = form.frame.height
         failure = nil
         refresh()
-        if form.frame.height != height { relayout() }
+        if form.frame.height != height {
+            // NSAlert measures its accessory when it is set.
+            alert.accessoryView = form
+            relayout()
+        }
     }
 
     /// The step change between the fields and the install question: the
@@ -419,7 +423,8 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         if !statusLine.stringValue.isEmpty {
             let indent = isChecking ? spinner.fittingSize.width + 6 : 0
             statusLine.preferredMaxLayoutWidth = width - indent
-            height += Self.statusGap + statusLine.fittingSize.height
+            let spinnerHeight = isChecking ? spinner.fittingSize.height : 0
+            height += Self.statusGap + max(statusLine.fittingSize.height, spinnerHeight)
         }
         form.setFrameSize(NSSize(width: width, height: height))
     }
