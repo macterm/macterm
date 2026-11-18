@@ -156,6 +156,11 @@ pub const Watch = struct {
         if (w.term.getPwd()) |p| if (p.len > 0) try out.append(w.gpa, .{ .cwd = p });
         if (w.progress) |p| try out.append(w.gpa, .{ .progress = p });
         if (w.status.state != .idle) try out.append(w.gpa, .{ .status = w.status });
+        // The shell's prompt mark can come before a client greets. A client
+        // that holds input for the first prompt (`PaneSession`) then learns
+        // from the screen that the shell is at its prompt.
+        if (w.term.screens.active.semantic_prompt.seen and w.status.state != .running)
+            try out.append(w.gpa, .{ .mark = .{ .kind = .prompt } });
         if (w.attention.unseen or w.attention.bell) try out.append(w.gpa, .{ .attention = w.attention });
         if (w.records.items.len > 0) {
             const records = try w.programRecords();
@@ -845,6 +850,33 @@ test "events: a new client gets the current state" {
     try testing.expectEqualStrings("file:///srv", out.items[1].cwd);
     try testing.expectEqual(m.Progress{ .state = .set, .percent = 70 }, out.items[2].progress);
     try testing.expectEqual(.running, out.items[3].status.state);
+}
+
+test "events: a new client gets a prompt mark while the shell is at its prompt" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    var out: std.ArrayList(Event) = .empty;
+    defer out.deinit(testing.allocator);
+    // No prompt yet: a shell that starts, or one with no marks.
+    f.feed("Last login: today\r\n", 0);
+    try f.w.current(&out);
+    for (out.items) |e| try testing.expect(e != .mark);
+
+    f.feed("\x1b]133;A\x07$ ", 10);
+    out.clearRetainingCapacity();
+    try f.w.current(&out);
+    var prompts: usize = 0;
+    for (out.items) |e| if (e == .mark and e.mark.kind == .prompt) {
+        prompts += 1;
+    };
+    try testing.expectEqual(1, prompts);
+
+    // A command runs: the shell is not at its prompt.
+    f.feed("\x1b]133;B\x07make\r\n\x1b]133;C\x07", 20);
+    out.clearRetainingCapacity();
+    try f.w.current(&out);
+    for (out.items) |e| try testing.expect(e != .mark);
 }
 
 test "events: a full reset sends an empty title and cwd" {

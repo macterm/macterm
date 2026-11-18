@@ -19,6 +19,12 @@ enum PaneChannelEvent: Equatable {
     case title(Data)
     case foreground(MactermProtocol.Foreground)
     case ttyMode(MactermProtocol.TtyMode)
+    /// An OSC 133 mark of the shell, which the session parsed. A client that
+    /// greets while the shell is at its prompt gets a `prompt` mark too.
+    case mark(MactermProtocol.Mark)
+    /// The run state of the pane. The session sends it only when it changes,
+    /// and to a client that greets while it is not `idle`.
+    case status(MactermProtocol.Status)
     case other(String)
 
     init?(_ frame: ProtocolFrame) {
@@ -52,6 +58,8 @@ enum PaneChannelEvent: Equatable {
         case let .title(title): .title(title.title.bytes)
         case let .foreground(foreground): .foreground(foreground)
         case let .ttyMode(mode): .ttyMode(mode)
+        case let .mark(mark): .mark(mark)
+        case let .status(status): .status(status)
         default: .other(name)
         }
     }
