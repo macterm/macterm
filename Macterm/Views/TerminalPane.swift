@@ -196,7 +196,7 @@ struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 
     var body: some View {
-        StatusPill(title: title(of: badge), otherTitles: [title(of: .reconnecting), title(of: .lost)]) {
+        StatusPill(title: title(of: badge), otherTitles: Pane.RemoteLinkBadge.allCases.map(title(of:))) {
             switch badge {
             case .reconnecting:
                 ProgressView().controlSize(.mini)
@@ -233,8 +233,8 @@ struct SecureInputBadge: View {
             Image(systemName: "lock.fill")
         }
         // The pill takes no clicks, so AppKit shows no tooltip. VoiceOver
-        // reads this help.
-        .help(String(localized: "Secure keyboard input is active"))
+        // reads this hint after the title.
+        .accessibilityHint(Text("Secure keyboard input is active"))
     }
 }
 

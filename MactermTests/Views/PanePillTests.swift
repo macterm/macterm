@@ -19,7 +19,7 @@ struct PanePillTests {
             ("Zoomed", height(ZoomIndicator {})),
             ("Reconnecting", height(RemoteLinkPill(badge: .reconnecting))),
             ("Connection Lost", height(RemoteLinkPill(badge: .lost))),
-            ("Secure input", height(SecureInputBadge())),
+            ("Secure Input", height(SecureInputBadge())),
         ]
     }
 
@@ -88,7 +88,7 @@ struct PanePillTests {
             ("Zoomed", Self.size(ZoomIndicator {}).width),
             ("Reconnecting", Self.size(RemoteLinkPill(badge: .reconnecting)).width),
             ("Connection Lost", Self.size(RemoteLinkPill(badge: .lost)).width),
-            ("Secure input", Self.size(SecureInputBadge()).width),
+            ("Secure Input", Self.size(SecureInputBadge()).width),
         ]
         let height = Self.badges[0].1
         for (name, width) in rest {

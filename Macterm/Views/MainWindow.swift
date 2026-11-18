@@ -1196,7 +1196,7 @@ struct ModePill: View {
 /// corner as `ModePill`. It takes no clicks.
 struct StatusPill<Icon: View>: View {
     let title: String
-    /// The other titles that this pill can show. See `PanePill.titleWidths`.
+    /// The other titles that this pill can show. See `PanePill.otherTitles`.
     var otherTitles: [String] = []
     @ViewBuilder let icon: () -> Icon
 
@@ -1225,14 +1225,21 @@ struct PanePill<Icon: View>: View {
 
     let title: String
     /// The other titles that this pill can show. The open pill is as wide
-    /// as the longest of them and `title`. Thus a change of the title (a
-    /// remote pane that tries again every few seconds) does not change the
+    /// as the longest of them and `title`. A change of the title (a remote
+    /// pane that tries again every few seconds) then does not change the
     /// width of a pill under the pointer.
     var otherTitles: [String] = []
     var action: (() -> Void)?
     @ViewBuilder let icon: () -> Icon
 
+    /// The time from the exit of the pointer to the close of the pill. An
+    /// entry in this time cancels the close. A short exit that a move of the
+    /// row causes under a still pointer then does not start a loop of open
+    /// and close.
+    static var closeDelay: Duration { .milliseconds(150) }
+
     @State private var isRevealed = false
+    @State private var closeTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1262,15 +1269,30 @@ struct PanePill<Icon: View>: View {
             .frame(minHeight: Self.contentHeight)
     }
 
-    /// A change of the hover runs in one transaction. Thus the row moves the
+    /// A change of the hover runs in one transaction. The row then moves the
     /// other badges on the same curve as this pill.
     private var revealBinding: Binding<Bool> {
         Binding(
             get: { isRevealed },
             set: { hovering in
-                withAnimation(reduceMotion ? nil : PaletteMotion.animation) { isRevealed = hovering }
+                closeTask?.cancel()
+                closeTask = nil
+                if hovering {
+                    reveal(true)
+                } else {
+                    closeTask = Task { @MainActor in
+                        try? await Task.sleep(for: Self.closeDelay)
+                        guard !Task.isCancelled else { return }
+                        reveal(false)
+                    }
+                }
             }
         )
+    }
+
+    private func reveal(_ open: Bool) {
+        guard isRevealed != open else { return }
+        withAnimation(reduceMotion ? nil : PaletteMotion.animation) { isRevealed = open }
     }
 }
 
@@ -1288,7 +1310,7 @@ struct PanePillLabel<Icon: View>: View {
             icon().frame(minWidth: PanePill<Icon>.contentHeight)
             ZStack(alignment: .leading) {
                 // Hidden, so that the slot has the width of the longest title.
-                ForEach(otherTitles, id: \.self) { Text($0).hidden() }
+                ForEach(Array(otherTitles.enumerated()), id: \.offset) { Text($0.element).hidden() }
                 // An animated change of the title morphs the text in place.
                 Text(title).contentTransition(.interpolate)
             }
