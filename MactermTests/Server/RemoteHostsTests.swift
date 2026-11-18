@@ -462,7 +462,7 @@ struct RemoteHostsTests {
     // MARK: - The folder check of a new project (0358)
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_new_project_finds_its_folder_on_the_hosts_server_and_the_login_stays_for_its_panes() async throws {
+    func a_new_project_finds_its_folder_over_ssh_then_on_the_hosts_server_and_the_login_stays_for_its_panes() async throws {
         try await withSSHDHost { host in
             let fixture = Fixture(host)
             #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)

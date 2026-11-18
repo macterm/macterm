@@ -34,8 +34,9 @@ struct NewRemoteProjectDraft: Equatable {
 ///   the fields says that it connects, or why nothing was added. The line has
 ///   a fixed height, so the dialog does not move when it changes.
 /// - The install question of the host is the dialog's next step, in the same
-///   window (`askInstall`): the text and the buttons change, and the window
-///   resizes with its native animation. A login question shows on top
+///   window (`askInstall`): the content dissolves into the new text and
+///   buttons (`crossfade`), and the window resizes with its native animation
+///   (`relayout`). A login question shows on top
 ///   (`SSHLoginPrompts.sheetParent`).
 /// - The palette opens it with a `NewRemoteProjectDraft`: the check starts at
 ///   once, so the next step is the install question, the login or the

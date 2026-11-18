@@ -191,13 +191,15 @@ enum HostCommands {
     /// a bundle without the file must not refuse every host.
     static let folderCheckScript = expandTilde + " cd -- \"$d\" 2>/dev/null || exit 3; exit 0"
 
-    /// The `command.run` argv of the folder check on a host with a server.
+    /// The `command.run` argv of the folder check on a host that has a link
+    /// to its server.
     /// The folder is `$1`, so no shell parses it.
     static func folderCheckArgv(directory: String) -> [String] {
         ["/bin/sh", "-c", "d=$1; " + folderCheckScript, "sh", directory.isEmpty ? "~" : directory]
     }
 
-    /// The ssh command of the folder check on a host with no server. sshd
+    /// The ssh command of the folder check on any other host, before its
+    /// install question (0384). sshd
     /// gives it to the login shell, so the folder goes as hex, one plain
     /// word, as for `plain.sh`. nil for a folder too long for one argument.
     static func folderCheckCommand(directory: String) -> String? {
