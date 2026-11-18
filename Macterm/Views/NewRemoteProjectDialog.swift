@@ -184,11 +184,14 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     private(set) var statusText = ""
 
     /// Sets the line under the fields. A hyphen shows as a non-breaking
-    /// hyphen (U+2011, the same glyph), so a host such as
-    /// `no-such-host.invalid` or a folder stays on one line (0399).
+    /// hyphen. U+2011 has the same glyph in the system font. Thus a host
+    /// such as `no-such-host.invalid` is not split at a hyphen (0399). The
+    /// line cannot be selected, and VoiceOver reads the real text, so the
+    /// shown text never goes to a copy.
     private func setStatus(_ text: String) {
         statusText = text
         statusLine.stringValue = text.replacingOccurrences(of: "-", with: "\u{2011}")
+        statusLine.cell?.setAccessibilityValue(text)
     }
 
     var isChecking: Bool {
@@ -333,7 +336,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         atEdge?.isActive = true
         let message = reservedNameMessage ?? failure
         setStatus(message ?? "")
-        // The line shows two lines at most; the whole text is in the tooltip.
+        // The line has a maximum of two lines. The tooltip has all the text.
         statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
         // A refused path stays refused until an edit: Add and Return do nothing.
@@ -397,9 +400,11 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         statusLine.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLine.maximumNumberOfLines = 2
-        // Fill each line: the standard strategy moves words down so that
-        // the last line is not one word, and the line then looks narrow (0399).
-        statusLine.lineBreakStrategy = []
+        // Each line must use the full width. The standard strategy moves
+        // words down so that the last line is not one word, and the line
+        // then looks narrow (0399). Korean words still stay whole.
+        statusLine.lineBreakStrategy = .hangulWordPriority
+        statusLine.isSelectable = false
         statusLine.translatesAutoresizingMaskIntoConstraints = false
 
         alert.layout()
