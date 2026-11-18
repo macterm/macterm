@@ -383,6 +383,12 @@ final class SurfaceRegistry {
         return surface
     }
 
+    /// How many surfaces of `pane` have a view: each one is a client of its
+    /// session. Makes nothing.
+    func clientCount(of pane: Pane) -> Int {
+        entries[pane.id]?.surfaces.count { $0.nsView != nil } ?? 0
+    }
+
     /// The surface of `host`, if the pane has one. Makes nothing.
     func existingSurface(for pane: Pane, in host: SurfaceHost) -> PaneSurface? {
         guard let all = entries[pane.id]?.surfaces else { return nil }

@@ -1888,10 +1888,10 @@ final class AppState {
             .flatMap { $0.splitRoot.allPanes() }
     }
 
-    /// The remote panes that show `session` (`RemoteHosts`, 0057). One entry
-    /// for each pane: its surfaces are its clients.
-    func remotePanes(session: String) -> [Pane] {
-        allLivePanes().filter { $0.isRemote && $0.sessionName == session }
+    /// The remote pane that shows `session` (`RemoteHosts`, 0057). Its
+    /// surfaces are its clients.
+    func remotePane(session: String) -> Pane? {
+        allLivePanes().first { $0.isRemote && $0.sessionName == session }
     }
 
     /// Every client of a session that Macterm knows of: the surfaces of the

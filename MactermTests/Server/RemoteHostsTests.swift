@@ -25,10 +25,10 @@ struct RemoteHostsTests {
     @Test
     func a_pane_that_closed_gets_close() async {
         let hosts = RemoteHosts(connections: .shared, servers: .shared, configuration: .init(key: "k", declines: .memory()))
-        #expect(await hosts.answer(.ask, session: "macterm-x-1", panes: []).isClose)
+        #expect(await hosts.answer(.ask, session: "macterm-x-1", pane: nil).isClose)
         // A local pane has no host.
         let local = Pane(projectPath: "/tmp", projectID: UUID())
-        #expect(await hosts.answer(.ask, session: local.sessionName, panes: [local]).isClose)
+        #expect(await hosts.answer(.ask, session: local.sessionName, pane: local).isClose)
     }
 
     // MARK: - Against a local sshd
@@ -90,11 +90,11 @@ struct RemoteHostsTests {
             host.sshd.dropConnections()
             try await first.host.waitFor { $0.linkLost > 0 }
             // No line goes into the pane: its badge shows the state.
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
             #expect(pane.isRemoteLinkLost)
             #expect(pane.isDisconnected)
             // No sweep yet: the pane keeps waiting.
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, pane: pane).isWait(message: nil))
 
             // The sweep wakes the pane; it logs in again with no question and
             // attaches to the same session, which replays its screen.
@@ -159,7 +159,7 @@ struct RemoteHostsTests {
         try await withSSHDHost { host in
             let fixture = Fixture(host, roaming: true)
             let pane = fixture.pane()
-            fixture.hosts.panes = { _ in [pane] }
+            fixture.hosts.pane = { _ in pane }
             let first = try await fixture.start(pane)
             defer { first.stop() }
             first.type("printf 'before-%s\\n' freeze\n")
@@ -175,7 +175,7 @@ struct RemoteHostsTests {
             let server = try host.serverPID()
             #expect(kill(server, SIGSTOP) == 0)
             defer { kill(server, SIGCONT) }
-            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
             deadline = Date().addingTimeInterval(20)
             while !fixture.hosts.quietDestinations.contains("box"), Date() < deadline {
                 try await Task.sleep(for: .milliseconds(200))
@@ -185,7 +185,7 @@ struct RemoteHostsTests {
             // A sweep's try while the host is down fails, and asks nothing.
             fixture.hosts.reconnect([pane.sessionName])
             #expect(pane.isRemoteReconnecting)
-            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, pane: pane).isWait(message: nil))
             #expect(pane.isRemoteLinkLost)
             #expect(fixture.answered.isEmpty)
 
@@ -260,7 +260,7 @@ struct RemoteHostsTests {
     ) async throws {
         let fixture = Fixture(host, wakes: true)
         let pane = fixture.pane()
-        fixture.hosts.panes = { _ in [pane] }
+        fixture.hosts.pane = { _ in pane }
         let left = RecordingPaneHost()
         let right = RecordingPaneHost()
         let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
@@ -342,7 +342,7 @@ struct RemoteHostsTests {
             try await first.host.waitFor { $0.linkLost > 0 }
             try await second.host.waitFor { $0.linkLost > 0 }
             for pane in [left, right] {
-                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+                #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, pane: pane).isWait(message: nil))
                 #expect(pane.isRemoteLinkLost)
             }
 
@@ -450,7 +450,7 @@ struct RemoteHostsTests {
             #expect(fixture.hosts.plainDestinations == ["box"])
             // A lost connection drops the host, and the host stays plain.
             let lost = fixture.pane()
-            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, panes: [lost])
+            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, pane: lost)
             #expect(lost.isRemoteLinkLost)
             #expect(fixture.hosts.plainDestinations == ["box"])
             // A second decline from Settings keeps the host plain.
@@ -530,11 +530,11 @@ struct RemoteHostsTests {
 
         /// The answer after the waits that a login or an install cause.
         func settle(_ pane: Pane, event: RemotePaneEvent = .ask) async -> RemotePaneAnswer {
-            var answer = await hosts.answer(event, session: pane.sessionName, panes: [pane])
+            var answer = await hosts.answer(event, session: pane.sessionName, pane: pane)
             let deadline = Date().addingTimeInterval(60)
             while answer.isWait(message: nil), Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(100))
-                answer = await hosts.answer(.ask, session: pane.sessionName, panes: [pane])
+                answer = await hosts.answer(.ask, session: pane.sessionName, pane: pane)
             }
             return answer
         }
@@ -582,7 +582,7 @@ struct RemoteHostsTests {
             session.start()
             try await host.waitFor { $0.resets > 0 }
             // What the driver does at the session's first lead message.
-            hosts.sessionAttached(pane.sessionName, panes: [pane])
+            hosts.sessionAttached(pane.sessionName, pane: pane)
             return Running(session: session, host: host)
         }
 
