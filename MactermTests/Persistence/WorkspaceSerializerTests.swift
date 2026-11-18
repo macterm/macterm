@@ -584,6 +584,11 @@ struct WorkspaceSerializerTests {
         #expect(names(kept.pinned[1].live) == ["pinned-own"])
         #expect(kept.quickTerminal == nil)
         #expect(names(kept.desktopWidgets[0].tab) == [nil])
+        guard case let .pane(widgetPane) = kept.desktopWidgets[0].tab.splitRoot else {
+            Issue.record("expected leaf")
+            return
+        }
+        #expect(widgetPane.sessionID == nil)
     }
 
     @Test
