@@ -11686,22 +11686,6 @@
         }
       }
     },
-    "Update extensions automatically" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "확장 프로그램 자동 업데이트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动更新扩展"
-          }
-        }
-      }
-    },
     "Update to the version in the Macterm repository" : {
       "localizations" : {
         "ko" : {

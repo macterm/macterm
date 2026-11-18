@@ -432,14 +432,6 @@ final class Preferences {
         didSet { Keys.autoAssignProjectColors.write(autoAssignProjectColors, to: defaults) }
     }
 
-    /// Settings → Extensions → Update extensions automatically. Off by
-    /// default: an extension runs shell commands, so new commands from the
-    /// repository reach a Mac only when its user chose that
-    /// (`ExtensionAutoUpdater`).
-    var autoUpdateExtensions: Bool {
-        didSet { Keys.autoUpdateExtensions.write(autoUpdateExtensions, to: defaults) }
-    }
-
     /// Record the commands that finish in each project for the project
     /// memory panel (`ProjectMemory`, Settings → Intelligence). Off by
     /// default: a log of commands is the user's to start, never a surprise.
@@ -1066,7 +1058,6 @@ final class Preferences {
         recentTabCandidates = Keys.recentTabCandidates.read(defaults)
         showSpinnerOverAgentIcons = Keys.showSpinnerOverAgentIcons.read(defaults)
         autoAssignProjectColors = Keys.autoAssignProjectColors.read(defaults)
-        autoUpdateExtensions = Keys.autoUpdateExtensions.read(defaults)
         projectMemory = Keys.projectMemory.read(defaults)
         showNewProjectButton = Keys.showNewProjectButton.read(defaults)
         showProjectNewTabButton = Keys.showProjectNewTabButton.read(defaults)
@@ -1261,7 +1252,6 @@ final class Preferences {
         )
         static let showSpinnerOverAgentIcons = PreferenceStorageKey("macterm.sidebar.showSpinnerOverAgentIcons", default: true)
         static let autoAssignProjectColors = PreferenceStorageKey("macterm.projects.autoAssignColors", default: false)
-        static let autoUpdateExtensions = PreferenceStorageKey("macterm.extensions.autoUpdate", default: true)
         static let projectMemory = PreferenceStorageKey("macterm.memory.enabled", default: false)
         static let legacyProjectMemoryPanelVisible = PreferenceStorageKey("macterm.memory.panelVisible", default: false)
         static let showNewProjectButton = PreferenceStorageKey("macterm.sidebar.showNewProjectButton", default: true)

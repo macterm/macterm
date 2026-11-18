@@ -23,7 +23,6 @@ struct ExtensionsSettings: View {
     /// An update that replaces a copy with changes, waiting for a yes.
     @State private var confirmingUpdate: (installed: CustomPaletteStore.InstalledExtension, entry: PaletteRegistry.Entry)?
     @State private var problem: String?
-    @State private var autoUpdate = Preferences.shared.autoUpdateExtensions
     @State private var viewing: ScreenshotSheet.Viewing?
 
     /// The cards have no background or border, so the gaps alone keep them apart.
@@ -96,12 +95,6 @@ struct ExtensionsSettings: View {
                             )
                         }
                     }
-
-                    Toggle("Update extensions automatically", isOn: $autoUpdate)
-                        .onChange(of: autoUpdate) { _, on in
-                            Preferences.shared.autoUpdateExtensions = on
-                            if on { Task { await appState.extensionAutoUpdater.runOnce() } }
-                        }
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
