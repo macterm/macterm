@@ -18,7 +18,7 @@ struct PanePillTests {
             ("Outdated", height(ModePill(title: "Outdated", systemImage: "arrow.triangle.2.circlepath", help: "") {})),
             ("Zoomed", height(ZoomIndicator {})),
             ("Reconnecting", height(RemoteLinkPill(badge: .reconnecting))),
-            ("Connection lost", height(RemoteLinkPill(badge: .lost))),
+            ("Connection Lost", height(RemoteLinkPill(badge: .lost))),
             ("Secure input", height(SecureInputBadge())),
         ]
     }
@@ -35,7 +35,7 @@ struct PanePillTests {
     }
 
     static func label(_ systemImage: String, reveal: CGFloat) -> some View {
-        PanePillLabel(title: "Connection lost", reveal: reveal) { Image(systemName: systemImage) }
+        PanePillLabel(title: "Connection Lost", reveal: reveal) { Image(systemName: systemImage) }
     }
 
     /// At rest a pill shows its icon only: the label is at least
@@ -61,6 +61,24 @@ struct PanePillTests {
         #expect(shown.width > rest.width + 40)
     }
 
+    /// An open pill keeps its width when its title changes to one of its
+    /// other titles: a lost remote pane flips between the two every few
+    /// seconds, and a pill under the pointer must not pulse.
+    @Test
+    func an_open_pill_keeps_its_width_when_its_title_changes() {
+        let titles = ["Reconnecting", "Connection Lost"]
+        let widths = titles.map { title in
+            Self.size(PanePillLabel(title: title, otherTitles: titles, reveal: 1) {
+                Image(systemName: "network.slash")
+            }).width
+        }
+        #expect(widths[0] == widths[1], "\(widths)")
+        let alone = Self.size(PanePillLabel(title: "Reconnecting", reveal: 1) {
+            Image(systemName: "network.slash")
+        }).width
+        #expect(alone < widths[0])
+    }
+
     /// Every whole badge at rest (chrome, padding and icon, the spinner too)
     /// is near round: much narrower than a badge that shows its title.
     @Test
@@ -69,7 +87,7 @@ struct PanePillTests {
             ("Read-Only", Self.size(ModePill(title: "Read-Only", systemImage: "eye", help: "") {}).width),
             ("Zoomed", Self.size(ZoomIndicator {}).width),
             ("Reconnecting", Self.size(RemoteLinkPill(badge: .reconnecting)).width),
-            ("Connection lost", Self.size(RemoteLinkPill(badge: .lost)).width),
+            ("Connection Lost", Self.size(RemoteLinkPill(badge: .lost)).width),
             ("Secure input", Self.size(SecureInputBadge()).width),
         ]
         let height = Self.badges[0].1

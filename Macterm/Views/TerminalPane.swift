@@ -80,7 +80,7 @@ struct TerminalPane: View {
             .overlay(alignment: .topTrailing) {
                 // The pane's badges, one row in the trailing corner, in this
                 // order from the left: Read-Only, Copy Mode, Outdated, Zoomed,
-                // Reconnecting or Connection lost, then the lock. The Zoomed pill is here too, not
+                // Reconnecting or Connection Lost, then the lock. The Zoomed pill is here too, not
                 // on the tab: a zoomed pane is the only pane on screen, and one
                 // row cannot overlap itself.
                 HStack(spacing: 6) {
@@ -196,7 +196,7 @@ struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 
     var body: some View {
-        StatusPill(title: title) {
+        StatusPill(title: title(of: badge), otherTitles: [title(of: .reconnecting), title(of: .lost)]) {
             switch badge {
             case .reconnecting:
                 ProgressView().controlSize(.mini)
@@ -206,7 +206,7 @@ struct RemoteLinkPill: View {
         }
     }
 
-    private var title: String {
+    private func title(of badge: Pane.RemoteLinkBadge) -> String {
         switch badge {
         case .reconnecting:
             String(
@@ -215,7 +215,7 @@ struct RemoteLinkPill: View {
             )
         case .lost:
             String(
-                localized: "Connection lost",
+                localized: "Connection Lost",
                 comment: "The badge of a remote pane whose connection stopped or failed"
             )
         }
@@ -226,9 +226,15 @@ struct RemoteLinkPill: View {
 /// pane (`macos-secure-input-indication`), in the chrome of the other badges.
 struct SecureInputBadge: View {
     var body: some View {
-        StatusPill(title: String(localized: "Secure keyboard input is active")) {
+        StatusPill(title: String(
+            localized: "Secure Input",
+            comment: "The title of the lock badge of a pane while secure keyboard input is on"
+        )) {
             Image(systemName: "lock.fill")
         }
+        // The pill takes no clicks, so AppKit shows no tooltip. VoiceOver
+        // reads this help.
+        .help(String(localized: "Secure keyboard input is active"))
     }
 }
 

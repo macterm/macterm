@@ -50,7 +50,7 @@ enum RemotePaneAnswer {
 /// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
 ///   (`Pane.isRemoteLinkLost`): its cursor says disabled, and its badge
 ///   says `Reconnecting` while a try runs (`Pane.isRemoteReconnecting`),
-///   else `Connection lost`.
+///   else `Connection Lost`.
 ///   It connects again by itself (`AppState.reconnectDroppedRemotePanes`
 ///   with `RemoteReconnectPolicy`): such a try never asks the user anything
 ///   (`reconnect`, a quiet login). A key in the pane connects at once, and
@@ -685,7 +685,7 @@ final class RemoteHosts {
         }
     }
 
-    /// `lost`: no try runs now, and the badge says `Connection lost`. Not
+    /// `lost`: no try runs now, and the badge says `Connection Lost`. Not
     /// lost: the session attaches. Either way a try ended.
     private func mark(_ panes: [Pane], lost: Bool) {
         for pane in panes {
