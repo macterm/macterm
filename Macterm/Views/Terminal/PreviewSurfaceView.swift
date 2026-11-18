@@ -51,8 +51,18 @@ final class PreviewSurfaceView: NSView, ScrollbarSurface {
     /// computes no pointer shape for it, and the pointer stays an arrow.
     var onMouseShapeChange: ((NSCursor) -> Void)?
 
+    /// The offset of the last scrollbar action, nil before the first.
+    private var lastScrollbarOffset: UInt64?
+
     func surfaceDidUpdateScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
         onScrollbarUpdate?(total, offset, len)
+        // A pane's overlay scroller is hidden at rest, and the wheel goes to
+        // the surface, not to the scroll view. The preview shows the scroller
+        // when its rows first arrive and on each move, so that a user sees
+        // that it scrolls and where it is.
+        guard total > len, offset != lastScrollbarOffset else { return }
+        lastScrollbarOffset = offset
+        enclosingScrollView?.flashScrollers()
     }
 
     init(kind: Kind) {
@@ -164,6 +174,7 @@ final class PreviewSurfaceView: NSView, ScrollbarSurface {
         surface = nil
         // A new surface starts with an empty accumulator.
         scrollAccumulator = ScrollAccumulator()
+        lastScrollbarOffset = nil
     }
 
     private func updateSize() {
@@ -356,17 +367,23 @@ enum PreviewSurfaceText {
 }
 
 /// The frame of a preview: the background of the user's terminal theme, the
-/// rounded corners, and for the scroll preview a pane's `SurfaceScrollView`.
+/// rounded corners with a 1 pt edge, and for the scroll preview a pane's
+/// `SurfaceScrollView`. The edge (`MactermTheme.nsBorder`) keeps a light
+/// theme's preview apart from the Settings group, whose fill is almost the
+/// same color.
 ///
 /// A pane draws no default background (`background-default-transparent`):
 /// its window paints the theme color (`WindowAppearance`). The Settings
 /// window does not, so this view paints `GhosttyApp.backgroundColor`, opaque.
 /// It paints again on each `mactermConfigDidChange`, which a config reload, a
 /// new theme side and a change of the system appearance all post.
+///
+/// The pointer that enters the scroll preview shows its scroller.
 final class PreviewSurfaceContainer: NSView {
     private static let cornerRadius: CGFloat = 6
     let preview: PreviewSurfaceView
     nonisolated(unsafe) private var configObserver: NSObjectProtocol?
+    private var hoverTracking: NSTrackingArea?
 
     init(kind: PreviewSurfaceView.Kind) {
         preview = PreviewSurfaceView(kind: kind)
@@ -374,6 +391,7 @@ final class PreviewSurfaceContainer: NSView {
         wantsLayer = true
         layer?.cornerRadius = Self.cornerRadius
         layer?.masksToBounds = true
+        layer?.borderWidth = 1
         let content: NSView = switch kind {
         case .scroll: SurfaceScrollView(surfaceView: preview)
         case .cursor: preview
@@ -407,6 +425,24 @@ final class PreviewSurfaceContainer: NSView {
 
     private func paintBackground() {
         layer?.backgroundColor = GhosttyApp.shared.backgroundColor.cgColor
+        layer?.borderColor = MactermTheme.nsBorder.cgColor
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        preview.enclosingScrollView?.flashScrollers()
     }
 }
 

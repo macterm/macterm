@@ -99,4 +99,12 @@ struct PreviewSurfaceViewTests {
         container.updateLayer()
         #expect(container.layer?.backgroundColor == GhosttyApp.shared.backgroundColor.cgColor)
     }
+
+    @Test
+    func containerHasAThemeEdge() {
+        let container = PreviewSurfaceContainer(kind: .scroll)
+        container.updateLayer()
+        #expect(container.layer?.borderWidth == 1)
+        #expect(container.layer?.borderColor == MactermTheme.nsBorder.cgColor)
+    }
 }

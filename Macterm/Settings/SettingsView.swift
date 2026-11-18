@@ -1571,6 +1571,11 @@ private struct AnimationsSettings: View {
     var body: some View {
         Form {
             Section {
+                PreviewSurface(kind: .scroll)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .accessibilityLabel(Text("Scroll preview"))
+
                 Toggle("Smooth scrolling", isOn: $smoothScrolling)
                     .onChange(of: smoothScrolling) { _, v in
                         Preferences.shared.smoothScrolling = v
@@ -1588,16 +1593,16 @@ private struct AnimationsSettings: View {
                 }
                 .disabled(!smoothScrolling)
                 .padding(.leading, 16)
-
-                PreviewSurface(kind: .scroll)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 120)
-                    .accessibilityLabel(Text("Scroll preview"))
             } header: {
                 DocsSectionHeader("Scrolling", docs: .animations)
             }
 
             Section {
+                PreviewSurface(kind: .cursor)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 72)
+                    .accessibilityLabel(Text("Cursor preview"))
+
                 Toggle(isOn: $smoothCursor) {
                     Text("Smooth cursor")
                     Text("The cursor glides between positions. It does not jump.")
@@ -1628,11 +1633,6 @@ private struct AnimationsSettings: View {
                 .onChange(of: cursorTrail) { _, v in
                     Preferences.shared.cursorTrail = v
                 }
-
-                PreviewSurface(kind: .cursor)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 72)
-                    .accessibilityLabel(Text("Cursor preview"))
             } header: {
                 DocsSectionHeader("Cursor", docs: .animations)
             }
