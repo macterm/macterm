@@ -2,7 +2,7 @@ import AppKit
 
 extension Pane {
     /// Connect the view's callbacks that feed the pane's own state: execution
-    /// tracking, titles, bells, notifications and project memory.
+    /// tracking, attention flags, titles, notifications and project memory.
     /// `PaneSurface.ensureNSView` calls this when it makes the view, so the callbacks work
     /// before any window draws the pane. A pane in a `tab new --no-focus` tab,
     /// or in a background tab that a launch warmed, otherwise recorded no
@@ -13,7 +13,7 @@ extension Pane {
     ///
     /// Every surface of a pane parses the same output, so only the feed
     /// surface (the first) gets the callbacks that read it: titles, runs,
-    /// bells, notifications and project memory. A second window's surface
+    /// notifications and project memory. A second window's surface
     /// gets the ones that its own user and its own view cause: typing, size,
     /// chrome. `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
@@ -53,6 +53,8 @@ extension Pane {
             guard let view else { return }
             AdaptiveTerminalChrome.shared.terminalBackgroundDidChange(color, in: view)
         }
+        // Every surface's channel gets the same flags from the session.
+        view.onAttention = { [weak self] flags in self?.receiveAttention(flags) }
         guard isFeed else { return }
         // Each OSC title is a command-boundary signal that re-reads the
         // foreground process, and — when a real program (not the shell) holds
@@ -63,21 +65,16 @@ extension Pane {
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
-        // Unconditional, unlike the notification above: whether the user is
-        // looking is decided centrally by `AppState` (which acknowledges a
-        // bell in the active tab of the active app on the spot), so the pane's
-        // tab and the badge can never disagree about what counts as seen.
-        view.onBell = { [weak self] in self?.ringBell() }
         view.onProgressStarted = { [weak self] in
             self?.refreshForegroundProcess()
             self?.markCommandRunning()
         }
-        view.onProgressFinished = { [weak self, weak view] failed in
-            // Only a live run can end. The REMOVE a program sends after its
-            // ERROR finds the pane already `.done` and leaves the red dot up.
+        view.onProgressFinished = { [weak self, weak view] _ in
+            // Only a live run can end. Whether it failed is the session's
+            // flag (`Pane.attention`).
             guard let self, executionState == .running else { return }
             refreshForegroundProcess()
-            markProgressFinished(failed: failed)
+            markProgressFinished()
             view?.onRunEnded?()
         }
         view.onOutputActivity = { [weak self, weak view] total in
@@ -153,5 +150,11 @@ extension Pane {
             let mins = (rounded % 3600) / 60
             return String(localized: "\(hours)h \(mins)m", comment: "A duration in hours and minutes, as in 2h 5m")
         }
+    }
+
+    /// Tells the session that the user saw the pane, on one of its surfaces'
+    /// channels. Every client of the session then gets the cleared flags.
+    func sendSeenToSession() {
+        SurfaceRegistry.shared.surfaces(of: self).lazy.compactMap(\.nsView).first?.sendSeen()
     }
 }

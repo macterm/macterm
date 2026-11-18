@@ -645,7 +645,7 @@ private struct QuickTerminalView: View {
                       state.focusedPaneID == paneID,
                       let pane = state.tab.splitRoot.findPane(id: paneID)
                 else { return }
-                pane.acknowledgeCommandCompletion()
+                pane.markSeen()
             },
             onAdaptiveBackgroundChange: { paneID, color in
                 state.setAdaptiveBackgroundColor(color, paneID: paneID)

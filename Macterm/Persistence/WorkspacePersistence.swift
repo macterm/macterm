@@ -187,23 +187,9 @@ indirect enum SplitNodeSnapshot: Codable {
 struct PaneSnapshot: Codable {
     let id: UUID
     let projectPath: String
-    /// Whether the pane was left in the "done / needs attention" state when the
-    /// app last quit, so the green checkmark survives a restart until the user
-    /// acknowledges it. Only `.done` is worth persisting: `.running` can't
-    /// outlive the shell process, and `.idle` is the default. Optional so older
-    /// snapshots (without the field) decode as nil / idle.
-    var needsAttention: Bool?
-    /// Whether that attention-needing completion was a failure (an OSC 9;4
-    /// ERROR, `Pane.completionFailed`), so a red dot survives a restart as
-    /// red. Its own optional key rather than a new meaning for
-    /// `needsAttention`, so builds either side of it read each other's files:
-    /// an older build ignores the key and shows the dot green, and a file
-    /// without it decodes as nil — not failed. Written only when true, and
-    /// only beside `needsAttention`, so a file with no failure in it is the
-    /// same file an older build writes. Not a schema bump: a downgrade that
-    /// re-saves the file loses only the dot's color, not worth refusing saves
-    /// over (see `currentSchemaVersion`).
-    var completionFailed: Bool?
+    /// No `needsAttention` or `completionFailed`: the session keeps a pane's
+    /// attention flags across a quit (`Pane.attention`). An older file's keys
+    /// are ignored on decode.
     /// Stable zmx session id (`Pane.sessionID`). On restore the rebuilt pane
     /// reuses it, so its shell reattaches to the still-running daemon instead
     /// of spawning fresh. Optional: older snapshots decode nil → fresh id.
@@ -233,8 +219,6 @@ struct PaneSnapshot: Codable {
     init(
         id: UUID,
         projectPath: String,
-        needsAttention: Bool? = nil,
-        completionFailed: Bool? = nil,
         sessionID: UUID? = nil,
         sessionName: String? = nil,
         workingDirectory: String? = nil,
@@ -242,8 +226,6 @@ struct PaneSnapshot: Codable {
     ) {
         self.id = id
         self.projectPath = projectPath
-        self.needsAttention = needsAttention
-        self.completionFailed = completionFailed
         self.sessionID = sessionID
         self.sessionName = sessionName
         self.workingDirectory = workingDirectory
@@ -330,30 +312,14 @@ final class WorkspaceStore {
                 supported v\(currentSchemaVersion, privacy: .public); not overwriting
                 """)
                 loadFailed = true
-                let migrated = migrate(file)
-                return Loaded(
-                    workspaces: migrated.workspaces,
-                    pinned: migrated.pinned ?? [],
-                    pinnedActiveTabID: migrated.pinnedActiveTabID,
-                    windows: migrated.windows ?? [],
-                    quickTerminal: migrated.quickTerminal,
-                    desktopWidgets: migrated.desktopWidgets ?? []
-                )
+                return Loaded(file)
             }
-            let migrated = migrate(file)
-            return Loaded(
-                workspaces: migrated.workspaces,
-                pinned: migrated.pinned ?? [],
-                pinnedActiveTabID: migrated.pinnedActiveTabID,
-                windows: migrated.windows ?? [],
-                quickTerminal: migrated.quickTerminal,
-                desktopWidgets: migrated.desktopWidgets ?? []
-            )
+            return Loaded(file)
         } catch let envelopeError {
             // Fallback: pre-envelope format where the file was a bare array of
             // WorkspaceSnapshot. Upgrade on next save.
             if let bare = try? decoder.decode([WorkspaceSnapshot].self, from: data) {
-                return Loaded(workspaces: clearPersistedAttention(in: bare))
+                return Loaded(workspaces: bare)
             }
             // Present but decodable as neither shape → corrupt or a format we
             // don't understand. Log the PRIMARY (envelope) error and preserve
@@ -393,58 +359,18 @@ final class WorkspaceStore {
             logger.error("Failed to save workspaces: \(error, privacy: .public)")
         }
     }
+}
 
-    /// Apply any needed in-memory migrations.
-    private func migrate(_ file: WorkspacesFile) -> WorkspacesFile {
-        if file.version < 4 {
-            // v3 could persist spurious completion checkmarks for tabs that had
-            // already been visually cleared. Drop the old attention bits once;
-            // v4+ saves them only after the false-start and clear/save fixes.
-            logger.info("Migrating workspaces v\(file.version, privacy: .public)→4: clearing persisted attention bits")
-            return WorkspacesFile(
-                version: 4,
-                workspaces: clearPersistedAttention(in: file.workspaces),
-                pinned: file.pinned,
-                pinnedActiveTabID: file.pinnedActiveTabID,
-                windows: file.windows,
-                quickTerminal: file.quickTerminal,
-                desktopWidgets: file.desktopWidgets
-            )
-        }
-        return file
-    }
-
-    private func clearPersistedAttention(in snapshots: [WorkspaceSnapshot]) -> [WorkspaceSnapshot] {
-        snapshots.map { ws in
-            WorkspaceSnapshot(
-                projectID: ws.projectID,
-                activeTabID: ws.activeTabID,
-                tabs: ws.tabs.map { tab in
-                    TabSnapshot(
-                        id: tab.id,
-                        customTitle: tab.customTitle,
-                        focusedPaneID: tab.focusedPaneID,
-                        splitRoot: clearPersistedAttention(in: tab.splitRoot)
-                    )
-                }
-            )
-        }
-    }
-
-    private func clearPersistedAttention(in node: SplitNodeSnapshot) -> SplitNodeSnapshot {
-        switch node {
-        case var .pane(p):
-            p.needsAttention = nil
-            p.completionFailed = nil
-            return .pane(p)
-        case let .split(b):
-            return .split(SplitBranchSnapshot(
-                direction: b.direction,
-                ratio: b.ratio,
-                first: clearPersistedAttention(in: b.first),
-                second: clearPersistedAttention(in: b.second)
-            ))
-        }
+extension WorkspaceStore.Loaded {
+    init(_ file: WorkspacesFile) {
+        self.init(
+            workspaces: file.workspaces,
+            pinned: file.pinned ?? [],
+            pinnedActiveTabID: file.pinnedActiveTabID,
+            windows: file.windows ?? [],
+            quickTerminal: file.quickTerminal,
+            desktopWidgets: file.desktopWidgets ?? []
+        )
     }
 }
 
@@ -545,13 +471,9 @@ enum WorkspaceSerializer {
             let liveCwd = p.isRemote
                 ? nil
                 : (SurfaceRegistry.shared.view(of: p)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: p))
-            let needsAttention = p.executionState == .done
-            let completionFailed = needsAttention && p.completionFailed
             return .pane(PaneSnapshot(
                 id: p.id,
                 projectPath: p.projectPath,
-                needsAttention: needsAttention,
-                completionFailed: completionFailed ? true : nil,
                 sessionID: p.sessionID,
                 sessionName: p.sessionName,
                 workingDirectory: liveCwd,
@@ -607,9 +529,6 @@ enum WorkspaceSerializer {
                 sessionID: p.sessionID ?? UUID(),
                 sessionName: p.sessionName
             )
-            if p.needsAttention == true {
-                pane.restoreNeedsAttention(failed: p.completionFailed == true)
-            }
             if pane.isRemote { pane.hostSessionDirectory = p.hostSessionDirectory }
             return .pane(pane)
         case let .split(b):

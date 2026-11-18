@@ -1098,7 +1098,7 @@ struct WorkspaceView: View {
             // last pane unloads the tab instead of closing it (#285).
             onClosePane: { paneID in appState.handleProcessExit(paneID, projectID: project.id) },
             onCommandFinished: { paneID in
-                appState.acknowledgeFinishedCommandIfActive(paneID: paneID, projectID: project.id)
+                appState.markSeenIfActive(paneID: paneID, projectID: project.id)
             },
             onAdaptiveBackgroundChange: { paneID, color in
                 appState.setAdaptiveBackgroundColor(color, paneID: paneID, projectID: project.id, windowID: windowState.id)

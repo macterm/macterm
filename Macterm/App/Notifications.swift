@@ -28,10 +28,10 @@ extension Notification.Name {
     /// one that says it leads (`object` is the surface's id). The key window
     /// claims again (`AppState.claimLeadershipForKeyWindow`).
     static let terminalSessionLead = Notification.Name("MactermTerminalSessionLead")
-    /// A pane's `hasUnacknowledgedBell` flipped (`object` is the pane's id).
-    /// Observed by `AppState`, which acknowledges it on the spot when the pane
-    /// is already being looked at and re-derives the Dock badge (`BellBadge`).
-    static let terminalBellStateDidChange = Notification.Name("MactermTerminalBellStateDidChange")
+    /// A pane's `attention` flags changed (`object` is the pane's id).
+    /// Observed by `AppState`, which marks the pane seen on the spot when the
+    /// user already looks at it and derives the Dock badge again (`BellBadge`).
+    static let paneAttentionDidChange = Notification.Name("MactermPaneAttentionDidChange")
     /// A final IO heartbeat's quiet deadline. Unlike ordinary poll events,
     /// this must force one poll even when coalescing and window occlusion would
     /// otherwise leave the timer paused.

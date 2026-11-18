@@ -140,8 +140,10 @@ struct WorkspaceSerializerTests {
         #expect(snaps[0].tabs[0].focusedPaneID == ids["b"])
     }
 
+    /// The session keeps a pane's attention flags across a quit, so the file
+    /// holds none: a pane that was `.done` restores idle.
     @Test
-    func round_trip_preserves_done_attention_state() {
+    func round_trip_does_not_persist_a_done_run() {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
             p.recordUserInteraction()
@@ -151,83 +153,16 @@ struct WorkspaceSerializerTests {
         }
         let roundTripped = roundTrip([ws.id: ws])
         if case let .pane(p) = roundTripped[0].tabs[0].splitRoot {
-            #expect(p.executionState == .done)
-            #expect(!p.completionFailed)
+            #expect(p.executionState == .idle)
         } else {
             Issue.record("expected leaf")
         }
     }
 
-    // MARK: - Failed completion (OSC 9;4 ERROR)
-
-    /// A workspace whose one pane ended its progress run on an ERROR.
-    private func failedWorkspace() -> Workspace {
-        let ws = Workspace(id: UUID(), projectPath: "/tmp")
-        if case let .pane(p) = ws.tabs[0].splitRoot {
-            p.recordUserInteraction()
-            p.markCommandRunning()
-            p.markProgressFinished(failed: true)
-        }
-        return ws
-    }
-
+    /// A file from an older build still has `needsAttention` and
+    /// `completionFailed`. It loads, and the keys are ignored.
     @Test
-    func round_trip_preserves_a_failed_completion() throws {
-        let ws = failedWorkspace()
-        let roundTripped = roundTrip([ws.id: ws])
-        let tab = try #require(roundTripped.first?.tabs.first)
-        let p = try #require(tab.splitRoot.allPanes().first)
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
-        #expect(tab.completionFailed)
-    }
-
-    /// The failure is written beside `needsAttention`, never instead of it, so
-    /// an older build that ignores the new key still shows the dot — green.
-    /// A passing completion writes no failure key at all.
-    @Test
-    func snapshot_writes_the_failure_beside_needsAttention() throws {
-        func leaf(_ ws: Workspace) -> PaneSnapshot? {
-            let root = WorkspaceSerializer.snapshot([ws.id: ws]).first?.tabs.first?.splitRoot
-            guard case let .pane(p) = root else { return nil }
-            return p
-        }
-        let passed = Workspace(id: UUID(), projectPath: "/tmp")
-        if case let .pane(p) = passed.tabs[0].splitRoot {
-            p.recordUserInteraction()
-            p.markCommandRunning()
-            p.markProgressFinished()
-        }
-
-        let failure = try #require(leaf(failedWorkspace()))
-        #expect(failure.needsAttention == true)
-        #expect(failure.completionFailed == true)
-
-        let success = try #require(leaf(passed))
-        #expect(success.needsAttention == true)
-        #expect(success.completionFailed == nil)
-    }
-
-    @Test
-    func a_failed_completion_round_trips_via_WorkspaceStore_on_disk() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let ws = failedWorkspace()
-
-        store.save(WorkspaceSerializer.snapshot([ws.id: ws]))
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [ws.id])
-
-        let pane = try #require(restored.first?.tabs.first?.splitRoot.allPanes().first)
-        #expect(pane.executionState == .done)
-        #expect(pane.completionFailed)
-    }
-
-    /// A file from before the failure had a key of its own restores its
-    /// completion green, as it always did.
-    @Test
-    func a_file_without_completionFailed_restores_a_green_dot() throws {
+    func a_file_with_the_old_attention_keys_loads_and_ignores_them() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -236,7 +171,8 @@ struct WorkspaceSerializerTests {
         {"version": 6, "workspaces": [{"projectID": "\(projectID.uuidString)", "tabs": [{
             "id": "\(UUID().uuidString)",
             "splitRoot": {"type": "pane", "pane": {
-                "id": "\(UUID().uuidString)", "projectPath": "/tmp", "needsAttention": true
+                "id": "\(UUID().uuidString)", "projectPath": "/tmp",
+                "needsAttention": true, "completionFailed": true
             }}
         }]}]}
         """
@@ -246,27 +182,9 @@ struct WorkspaceSerializerTests {
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [projectID])
 
         #expect(!store.loadFailed)
-        let pane = try #require(restored.first?.tabs.first?.splitRoot.allPanes().first)
-        #expect(pane.executionState == .done)
-        #expect(!pane.completionFailed)
-    }
-
-    @Test
-    func restored_failure_is_cleared_by_acknowledge() throws {
-        let ws = failedWorkspace()
-        let tab = try #require(roundTrip([ws.id: ws]).first?.tabs.first)
-        #expect(tab.completionFailed)
-
-        tab.acknowledgeCommandCompletion()
-
+        let tab = try #require(restored.first?.tabs.first)
         #expect(tab.executionState == .idle)
         #expect(!tab.completionFailed)
-        guard case let .pane(p) = WorkspaceSerializer.snapshotTab(tab).splitRoot else {
-            Issue.record("expected leaf")
-            return
-        }
-        #expect(p.needsAttention == false)
-        #expect(p.completionFailed == nil)
     }
 
     @Test
@@ -279,24 +197,6 @@ struct WorkspaceSerializerTests {
         let idleRound = roundTrip([ws.id: ws])
         if case let .pane(p) = idleRound[0].tabs[0].splitRoot {
             #expect(p.executionState == .idle)
-        }
-    }
-
-    @Test
-    func restore_done_is_cleared_by_acknowledge() {
-        let ws = Workspace(id: UUID(), projectPath: "/tmp")
-        if case let .pane(p) = ws.tabs[0].splitRoot {
-            p.recordUserInteraction()
-            p.markCommandRunning()
-            p.markCommandFinished()
-        }
-        let roundTripped = roundTrip([ws.id: ws])
-        if case let .pane(p) = roundTripped[0].tabs[0].splitRoot {
-            #expect(p.executionState == .done)
-            p.acknowledgeCommandCompletion()
-            #expect(p.executionState == .idle)
-        } else {
-            Issue.record("expected leaf")
         }
     }
 
@@ -372,42 +272,6 @@ struct WorkspaceSerializerTests {
 
         store.save([])
         #expect(store.load().quickTerminal == nil)
-    }
-
-    @Test
-    func load_v3_file_clears_persisted_attention_bits() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-v3-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let projectID = UUID()
-        let tabID = UUID()
-        let paneID = UUID()
-        let file = WorkspacesFile(
-            version: 3,
-            workspaces: [WorkspaceSnapshot(
-                projectID: projectID,
-                activeTabID: tabID,
-                tabs: [TabSnapshot(
-                    id: tabID,
-                    customTitle: nil,
-                    focusedPaneID: paneID,
-                    splitRoot: .pane(PaneSnapshot(
-                        id: paneID,
-                        projectPath: "/tmp",
-                        needsAttention: true,
-                        completionFailed: true
-                    ))
-                )]
-            )]
-        )
-        let encoder = JSONEncoder()
-        try encoder.encode(file).write(to: tmp)
-
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [projectID])
-
-        #expect(restored.first?.tabs.first?.executionState == .idle)
-        #expect(restored.first?.tabs.first?.completionFailed == false)
     }
 
     @Test

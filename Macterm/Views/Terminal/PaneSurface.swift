@@ -241,7 +241,6 @@ final class PaneSurface: Identifiable {
         // Null callbacks before destroy so any in-flight ghostty events
         // triggered by destroySurface() itself can't re-enter.
         view.onProcessExit = nil
-        view.onBell = nil
         view.onTitleChange = nil
         view.onSearchStart = nil
         view.onSearchEnd = nil
@@ -264,6 +263,7 @@ final class PaneSurface: Identifiable {
         view.onSnapshotMark = nil
         view.onRemoteForeground = nil
         view.onRemoteTtyMode = nil
+        view.onAttention = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil
         view.onReadOnlyChange = nil

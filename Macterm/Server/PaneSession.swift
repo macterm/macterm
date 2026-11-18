@@ -23,6 +23,9 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneForeground(_ foreground: MactermProtocol.Foreground)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
+    /// The session's attention flags: at an attach when one is set, and at
+    /// each change (design/004 §6).
+    func paneAttention(_ flags: MactermProtocol.Attention)
     /// The session says whether this client leads: its size is the pty's.
     /// Nil when the channel ended: the next attach tells again.
     func paneLead(_ leader: Bool?)
@@ -45,9 +48,16 @@ protocol PaneInputRoute: AnyObject, Sendable {
     func sendInput(_ data: Data)
     func claim(grid: PaneGrid?)
     func sendSize(_ grid: PaneGrid?)
+    /// The user saw the pane: the session clears its attention flags.
+    func seen()
+}
+
+extension PaneInputRoute {
+    func seen() {}
 }
 
 extension PaneSessionHost {
+    func paneAttention(_: MactermProtocol.Attention) {}
     func paneLead(_: Bool?) {}
     func paneLinkLost() {}
     func paneInputUndelivered(_: Data) {}
@@ -194,6 +204,12 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         sendSize(grid)
     }
 
+    /// The user saw the pane: the session clears its attention flags and
+    /// sends them again to every client.
+    func seen() {
+        send { try $0.send(MactermProtocol.Seen()) }
+    }
+
     /// Tells the session the surface's size. Only the leader's size reaches
     /// the pty.
     func sendSize(_ known: PaneGrid?) {
@@ -319,6 +335,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 host.paneForeground(foreground)
             case let .ttyMode(mode):
                 host.paneTtyMode(mode)
+            case let .attention(flags):
+                host.paneAttention(flags)
             case let .exit(exit):
                 host.paneExited(code: exit.code, signal: exit.signal)
                 return true

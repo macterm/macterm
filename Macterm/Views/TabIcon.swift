@@ -84,9 +84,9 @@ struct TabGlyph: View {
 ///   and it avoids the heavy, off-platform look of a checkmark glyph badge.
 ///   It overlays the agent logo the same way, regardless of the spinner
 ///   preference — "unread agent messages" is the signal #225 asked to keep.
-///   The dot is red instead of green when the run reported a failure (an
-///   OSC 9;4 ERROR); nothing else about it changes, and no progress
-///   percentage is ever drawn.
+///   The dot is red instead of green when the session says that the run
+///   failed (`Pane.attention.failed`); nothing else about it changes, and no
+///   progress percentage is ever drawn.
 /// - `idle`: the icon as-is.
 struct TabStatusGlyph: View {
     let state: TerminalExecutionState

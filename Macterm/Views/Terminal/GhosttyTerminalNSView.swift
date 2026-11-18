@@ -416,11 +416,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSearchTotal: ((Int?) -> Void)?
     var onSearchSelected: ((Int?) -> Void)?
     var onDesktopNotification: ((String, String) -> Void)?
-    /// The surface rang BEL (`GHOSTTY_ACTION_RING_BELL`). The app-level
-    /// features (beep, sound, dock bounce) are handled in `GhosttyCallbacks`
-    /// for every surface; this is the per-pane half — the pane marks itself
-    /// as ringing so the Dock badge can count its tab (`Pane.ringBell`).
-    var onBell: (() -> Void)?
     /// Exit code (-1 unknown), duration in ns, and the command as typed
     /// at the prompt when libghostty has it (fork patch 0019), else nil.
     var onCommandFinished: ((Int16, UInt64, String?) -> Void)?
@@ -450,6 +445,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onRemoteForeground: ((RemoteForeground) -> Void)?
     /// The host's session reports how the pane's pty reads input.
     var onRemoteTtyMode: ((TerminalLineMode) -> Void)?
+    /// The session's attention flags (`PaneSessionHost.paneAttention`).
+    var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
     /// when the pointer leaves it. Drives the pane's hover-URL banner.
     var onLinkHover: ((String?) -> Void)?
@@ -2274,6 +2271,11 @@ extension GhosttyTerminalNSView {
     /// Refuses before the surface has a real size: a surface that has not
     /// laid out yet (an off-screen tab, the incubator) would resize the shared
     /// pty to a placeholder for every client at once.
+    /// Tells the session that the user saw the pane (`PaneSession.seen`).
+    func sendSeen() {
+        channelRuntime?.route.seen()
+    }
+
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }

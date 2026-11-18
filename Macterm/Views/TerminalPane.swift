@@ -341,7 +341,7 @@ private struct TerminalSurface: NSViewRepresentable {
             // in Notification Center for it is stale. Same point Ghostty clears
             // a surface's notifications — and its bell — from (`focusDidChange`).
             NotificationHandler.shared.clearDelivered(paneID: pane.id)
-            pane.acknowledgeBell()
+            pane.markSeen()
             FocusRestoration.restoreFocusWhenAttached(surface)
         } else if !focused, wasFocused {
             view.notifySurfaceUnfocused()
@@ -372,7 +372,7 @@ private struct TerminalSurface: NSViewRepresentable {
         view.isSplit = isSplit
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
-        // A run ended: the window acknowledges it if the user looks at the pane.
+        // A run ended: the window marks it seen if the user looks at the pane.
         view.onRunEnded = onCommandFinished
         view.onOpenLink = { [weak appState, weak projectStore, weak pane] text in
             // The quick terminal's and desktop widgets' hosting views carry

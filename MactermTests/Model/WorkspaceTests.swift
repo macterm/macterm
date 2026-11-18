@@ -227,12 +227,13 @@ struct WorkspaceTests {
     }
 
     @Test
-    func selectTab_acknowledges_completion_in_selected_tab_only() {
+    func selectTab_marks_only_the_selected_tab_seen() {
         let ws = makeWorkspace()
         let selected = ws.tabs[0]
         let other = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-        selected.splitRoot.allPanes().first?.executionState = .done
-        other.splitRoot.allPanes().first?.executionState = .done
+        let unseen = MactermProtocol.Attention(unseen: true)
+        selected.splitRoot.allPanes().first?.receiveAttention(unseen)
+        other.splitRoot.allPanes().first?.receiveAttention(unseen)
         let selectedID = selected.id
         ModelWriter.tabSelect(selectedID, in: ws)
         #expect(ws.activeTabID == selectedID)
