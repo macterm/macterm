@@ -10,19 +10,39 @@ struct Project: Identifiable, Codable, Hashable {
     /// so an unknown value (hand-edited json, newer build) reads as untagged
     /// instead of failing the row's decode. Absent in older projects.json.
     var colorName: String?
+    /// The group that holds this row, or nil at the top level (design 013).
+    /// `sortOrder` orders the rows of one parent. Absent in older
+    /// projects.json. `ProjectStore` reads a parent that is not one of its
+    /// groups as nil.
+    var parent: UUID?
+    /// A project, or a group: a row that only holds other rows. A group has
+    /// an empty `path` and never gets a workspace, so `ProjectStore.projects`
+    /// never returns one. Absent in older projects.json, where every row is
+    /// a project.
+    var kind: ProjectKind
 
     init(
         name: String,
         path: String,
         sortOrder: Int = 0,
-        colorName: String? = nil
+        colorName: String? = nil,
+        parent: UUID? = nil
     ) {
         id = UUID()
         self.name = name
         self.path = path
         self.sortOrder = sortOrder
         self.colorName = colorName
+        self.parent = parent
+        kind = .project
         createdAt = Date()
+    }
+
+    /// A new group. It has no path.
+    static func group(name: String, sortOrder: Int = 0, parent: UUID? = nil) -> Project {
+        var group = Project(name: name, path: "", sortOrder: sortOrder, parent: parent)
+        group.kind = .group
+        return group
     }
 
     /// Explicit-id variant for SYNTHETIC projects only (`PinnedTabs.project`,
@@ -35,13 +55,62 @@ struct Project: Identifiable, Codable, Hashable {
         self.path = path
         sortOrder = 0
         colorName = nil
+        parent = nil
+        kind = .project
         createdAt = Date()
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case path
+        case sortOrder
+        case createdAt
+        case colorName
+        case parent
+        case kind
+    }
+
+    /// `parent` and `kind` are optional keys, so a file from before groups
+    /// decodes as before. A file with no group writes neither key.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        path = try container.decode(String.self, forKey: .path)
+        sortOrder = try container.decode(Int.self, forKey: .sortOrder)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        colorName = try container.decodeIfPresent(String.self, forKey: .colorName)
+        parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
+        kind = try container.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? .project
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(path, forKey: .path)
+        try container.encode(sortOrder, forKey: .sortOrder)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(colorName, forKey: .colorName)
+        try container.encodeIfPresent(parent, forKey: .parent)
+        if kind != .project { try container.encode(kind, forKey: .kind) }
+    }
+}
+
+/// What a `ProjectStore` row is. An unknown value fails the decode of the
+/// file, and the store then refuses to save over it: a newer build's row
+/// is never read as a project.
+enum ProjectKind: String, Codable {
+    case project
+    case group
 }
 
 extension Project {
     /// nil when untagged, or tagged with a value this build doesn't know.
     var color: ProjectColor? { colorName.flatMap(ProjectColor.init(rawValue:)) }
+
+    var isGroup: Bool { kind == .group }
 
     /// Parsed location: `.local` for a directory path, `.remote` for an
     /// scp-style `[user@]host:dir` spec (#104). nil when `path` parses as
