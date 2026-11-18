@@ -223,6 +223,13 @@ struct ProjectMemorySummarizerTests {
     }
 
     @Test
+    func the_reply_is_one_paragraph() {
+        #expect(ProjectMemorySummarizer.oneParagraph("You fixed the tests.  \nYou added `make lint`.\n\nYou wrote docs.")
+            == "You fixed the tests. You added `make lint`. You wrote docs.")
+        #expect(ProjectMemorySummarizer.oneParagraph("You fixed  the tests.") == "You fixed  the tests.")
+    }
+
+    @Test
     func a_failed_suggestion_request_keeps_the_text() async throws {
         let model = FakeModel()
         model.suggestionsFail = true
