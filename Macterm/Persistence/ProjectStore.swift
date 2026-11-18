@@ -5,14 +5,12 @@ private let logger = Logger(subsystem: appBundleID, category: "ProjectStore")
 
 @MainActor @Observable
 final class ProjectStore {
-    /// The projects, in tree order: the rows of a parent in `sortOrder`, the
-    /// rows of a group in its place. Never a group, so every caller that
-    /// needs a path or a workspace reads this list. Derived from `rows`
-    /// after each change.
+    /// The projects in tree order: depth first, and the rows of each parent
+    /// in `sortOrder`. It never holds a group, so a caller that needs a path
+    /// or a workspace reads this list. `normalize` derives it from `rows`
+    /// after each change. It is stored because many view bodies read it.
     private(set) var projects: [Project] = []
     /// Every row of projects.json: the projects and the groups (design 013).
-    /// Each row's `parent` is nil or a group of this list, and the rows of
-    /// one parent have `sortOrder` 0, 1, 2, … (`normalize`).
     private var rows: [Project] = []
     private let fileURL: URL
     /// Set when `load()` found a present-but-undecodable projects.json. While
@@ -87,8 +85,8 @@ final class ProjectStore {
         return project
     }
 
-    /// Remove a row. The rows of a removed group move to the top level, so
-    /// a caller that removes a group moves or removes its rows first.
+    /// Remove a row. The rows of a removed group go to the end of the top
+    /// level.
     func remove(id: UUID) {
         rows.removeAll { $0.id == id }
         changed()
@@ -102,9 +100,9 @@ final class ProjectStore {
         rows.filter { $0.parent == parent }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    /// Move a row to the end of the group `parent` (nil: the top level).
-    /// Refused, with false, when `parent` is not a group, or is the row
-    /// itself or a group inside it.
+    /// Move a row into the group `parent` (nil: the top level), at its end.
+    /// A row that is already in `parent` does not move. Returns false when
+    /// `parent` is not a group, or is the row or a group inside the row.
     @discardableResult
     func move(_ id: UUID, into parent: UUID?) -> Bool {
         guard let index = rows.firstIndex(where: { $0.id == id }), isGroup(parent) else { return false }
@@ -197,9 +195,9 @@ final class ProjectStore {
     }
 
     /// Move projects by their offsets in `projects`. A project stays in its
-    /// group: the projects of each parent take the order that the move
-    /// gives them, in the places that projects held among that parent's
-    /// rows, so groups do not move.
+    /// parent, and a group does not move. In each parent, the projects get
+    /// the order of the move. A move across a group boundary therefore does
+    /// nothing: use `reorder(parent:ids:)` for a tree.
     func reorder(fromOffsets source: IndexSet, toOffset destination: Int) {
         var moved = projects
         moved.move(fromOffsets: source, toOffset: destination)
@@ -222,11 +220,13 @@ final class ProjectStore {
         save()
     }
 
-    /// Make the rows a tree, and derive `projects`. A parent that is not a
-    /// group of this list (a removed group, a hand edit, a project) and a
-    /// parent link in a loop read as the top level. The rows of each parent
-    /// get `sortOrder` 0, 1, 2, … in their order. Load calls it too, and
-    /// changes nothing on disk until the next save.
+    /// Repair the rows, then derive `projects`. Load calls it too. It writes
+    /// nothing to disk; the next save writes the repaired rows.
+    /// - A group has no path.
+    /// - A parent that is not a group of this list (a removed group, a hand
+    ///   edit, a project) becomes nil, and the row goes to the end of the
+    ///   top level. A parent link in a loop becomes nil too.
+    /// - The rows of each parent get `sortOrder` 0, 1, 2 in their order.
     private func normalize() {
         let groups = Set(rows.filter(\.isGroup).map(\.id))
         for index in rows.indices {
@@ -234,13 +234,12 @@ final class ProjectStore {
                 rows[index].path = ""
             }
             if let parent = rows[index].parent, !groups.contains(parent) {
-                rows[index].parent = nil
+                moveToEndOfTopLevel(index)
             }
         }
-        // A loop has no top: cut it at the first row that finds itself.
         for index in rows.indices {
             if let parent = rows[index].parent, ancestors(of: parent).contains(rows[index].id) || parent == rows[index].id {
-                rows[index].parent = nil
+                moveToEndOfTopLevel(index)
             }
         }
         // Stable: rows with equal `sortOrder` keep their order.
@@ -253,6 +252,11 @@ final class ProjectStore {
             next[rows[index].parent, default: 0] += 1
         }
         projects = treeOrder(under: nil)
+    }
+
+    private func moveToEndOfTopLevel(_ index: Int) {
+        rows[index].parent = nil
+        rows[index].sortOrder = rows.count + index
     }
 
     private func treeOrder(under parent: UUID?) -> [Project] {

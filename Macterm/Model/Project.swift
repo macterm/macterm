@@ -99,8 +99,8 @@ struct Project: Identifiable, Codable, Hashable {
 }
 
 /// What a `ProjectStore` row is. An unknown value fails the decode of the
-/// file, and the store then refuses to save over it: a newer build's row
-/// is never read as a project.
+/// file, and the store does not save over it. Thus a row of a newer kind
+/// never opens as a project.
 enum ProjectKind: String, Codable {
     case project
     case group

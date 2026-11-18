@@ -428,12 +428,62 @@ struct ProjectStoreTests {
     }
 
     @Test
-    func removing_a_group_moves_its_rows_to_the_top_level() {
+    func removing_a_group_moves_its_rows_to_the_end_of_the_top_level() {
         let store = makeStore()
         let group = store.add(.group(name: "group"))
-        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        let top = store.add(Project(name: "top", path: "/tmp/top"))
+        let x = store.add(Project(name: "x", path: "/tmp/x", parent: group.id))
+        let y = store.add(Project(name: "y", path: "/tmp/y", parent: group.id))
         store.remove(id: group.id)
-        #expect(store.children(of: nil).map(\.id) == [a.id])
-        #expect(store.projects.map(\.id) == [a.id])
+        #expect(store.children(of: nil).map(\.id) == [top.id, x.id, y.id])
+        #expect(store.children(of: nil).map(\.sortOrder) == [0, 1, 2])
+        #expect(store.projects.map(\.id) == [top.id, x.id, y.id])
+    }
+
+    @Test
+    func move_into_the_same_parent_keeps_the_place() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let b = store.add(Project(name: "b", path: "/tmp/b"))
+        #expect(store.move(a.id, into: nil))
+        #expect(store.children(of: nil).map(\.id) == [a.id, b.id])
+    }
+
+    @Test
+    func reorder_by_offsets_across_a_group_does_not_move_a_project() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let group = store.add(.group(name: "group"))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+        // projects: a, b, c. Moving c above b changes no parent's order.
+        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 1)
+        #expect(store.projects.map(\.id) == [a.id, b.id, c.id])
+        #expect(store.children(of: group.id).map(\.id) == [b.id])
+    }
+
+    @Test
+    func an_unknown_kind_fails_the_load_and_keeps_the_file() throws {
+        let fileURL = tempURL("kind")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let file = Data("""
+        [{"createdAt": 0, "id": "11111111-1111-1111-1111-111111111111", "kind": "board", "name": "b", "path": "", "sortOrder": 0}]
+        """.utf8)
+        try file.write(to: fileURL)
+
+        let store = makeStore(fileURL: fileURL)
+        #expect(store.loadFailed)
+        store.add(Project(name: "a", path: "/tmp/a"))
+        #expect(try Data(contentsOf: fileURL) == file)
+    }
+
+    @Test
+    func on_save_gets_only_projects() {
+        let store = makeStore()
+        var saved: [Project] = []
+        store.onSave = { saved = $0 }
+        let group = store.add(.group(name: "group"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        #expect(saved.map(\.id) == [a.id])
     }
 }
