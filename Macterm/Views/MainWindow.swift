@@ -308,9 +308,11 @@ struct MainWindow: View {
         .overlay {
             ToastOverlay()
         }
-        .sheet(isPresented: $windowState.isNewRemoteProjectSheetPresented) {
-            NewRemoteProjectSheet()
-        }
+        .sheet(
+            isPresented: $windowState.isNewRemoteProjectSheetPresented,
+            onDismiss: { windowState.newRemoteProjectDraft = nil },
+            content: { NewRemoteProjectSheet(draft: windowState.newRemoteProjectDraft) }
+        )
         .sheet(
             item: $windowState.passwordEditor,
             onDismiss: { appState.restoreFocusToActivePane() },

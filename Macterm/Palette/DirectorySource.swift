@@ -12,10 +12,6 @@ struct DirectorySource: PaletteSource {
         String(localized: "Directories", comment: "Command palette: the section of folder rows in path mode")
     }
 
-    /// Why a new remote project is not added (`RemoteHosts.refusal`), nil
-    /// when its folder is on the host. Tests answer it with no host.
-    var remoteRefusal: @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) }
-
     func items(query: String, context: PaletteContext) -> [PaletteItem] {
         // A typed remote spec offers add/switch, mirroring local directories
         // (#104). No filesystem browsing — the host isn't consulted; the
@@ -142,25 +138,19 @@ struct DirectorySource: PaletteSource {
             subtitle: String(localized: "Add remote project: \(spec)"),
             category: Self.category,
             score: 0
-        ) { [appState = context.appState, projectStore = context.projectStore] in
-            addRemote(spec, appState: appState) {
-                projectStore.findOrCreate(name: name, path: spec)
-            }
+        ) { [appState = context.appState] in
+            Self.addRemote(spec, name: name, appState: appState)
         }
         return [addItem]
     }
 
-    /// Adds a remote project only when its folder is on the host (0358).
-    /// The palette is closed by then, so a refusal is a toast.
-    private func addRemote(_ spec: String, appState: AppState, create: @escaping @MainActor () -> Project) {
-        let remoteRefusal = remoteRefusal
-        Task { @MainActor in
-            if let refusal = await remoteRefusal(spec) {
-                appState.presentToast(refusal)
-                return
-            }
-            appState.selectProject(create())
-        }
+    /// A new remote project goes through the New Remote Project sheet,
+    /// filled in, which checks the folder on the host at once (0358): the
+    /// login, the progress and a refusal show there, and the user can
+    /// correct a field.
+    private static func addRemote(_ spec: String, name: String, appState: AppState) {
+        guard let draft = NewRemoteProjectDraft(path: spec, name: name) else { return }
+        appState.presentNewRemoteProject(draft)
     }
 
     private func directoryItem(
@@ -217,9 +207,7 @@ struct DirectorySource: PaletteSource {
                 appState.selectProject(projectStore.create(name: name, path: fullPath))
                 return
             }
-            addRemote(fullPath, appState: appState) {
-                projectStore.create(name: name, path: fullPath)
-            }
+            Self.addRemote(fullPath, name: name, appState: appState)
         }
     }
 }

@@ -2666,6 +2666,22 @@
         }
       }
     },
+    "Connecting to %@…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 연결하는 중…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在连接到 %@…"
+          }
+        }
+      }
+    },
     "Connection lost" : {
       "comment" : "The badge of a remote pane whose connection stopped or failed",
       "localizations" : {
