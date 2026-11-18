@@ -149,4 +149,9 @@ struct ThemeResolverTests {
             appHasAppearanceOverride: true, effectiveAppearanceIsDark: false, globalInterfaceStyle: "Light"
         ) == .light)
     }
+
+    @Test
+    func theSideLayerIsAPlainThemeLine() {
+        #expect(ThemeResolver.sideLayer("Builtin Tango Dark") == "theme = Builtin Tango Dark\n")
+    }
 }

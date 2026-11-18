@@ -6,7 +6,8 @@ import Testing
 /// `GhosttyApp.readThemeSideColors` reads one side of a `light:X,dark:Y`
 /// theme from a real, finalized libghostty config, the way
 /// `GhosttyApp.splitThemeColors` builds it: the user's config, then
-/// `ThemeResolver.sideLayer` last.
+/// `ThemeResolver.sideLayer` last, against the same config with no side
+/// layer.
 @MainActor
 struct GhosttyAppTests {
     private let directory = FileManager.default.temporaryDirectory
@@ -30,6 +31,16 @@ struct GhosttyAppTests {
         return config
     }
 
+    /// The colors of the side layer over `user`, nil when the read refuses.
+    private func readSide(_ side: String, over user: String) throws -> GhosttyApp.ResolvedColors? {
+        let layer = try write("layer", ThemeResolver.sideLayer(side))
+        let baseline = try makeConfig([user])
+        defer { ghostty_config_free(baseline) }
+        let config = try makeConfig([user, layer])
+        defer { ghostty_config_free(config) }
+        return GhosttyApp.readThemeSideColors(from: config, baseline: baseline)
+    }
+
     private func rgb(_ hex: UInt32) -> GhosttyApp.ResolvedColors.RGB {
         .init(r: UInt8((hex >> 16) & 0xFF), g: UInt8((hex >> 8) & 0xFF), b: UInt8(hex & 0xFF))
     }
@@ -47,11 +58,7 @@ struct GhosttyAppTests {
     func theSideLayerReadsTheDarkSideWithTheUsersColorKeysOverIt() throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         let split = try makeSplit()
-        let layer = try write("layer", ThemeResolver.sideLayer(split.dark))
-        let config = try makeConfig([split.user, layer])
-        defer { ghostty_config_free(config) }
-
-        let colors = try #require(GhosttyApp.readThemeSideColors(from: config))
+        let colors = try #require(try readSide(split.dark, over: split.user))
         #expect(colors.background == rgb(0x202020))
         #expect(colors.palette[0] == rgb(0x303030))
         // A color key of the user's config wins over the theme, as libghostty
@@ -63,11 +70,7 @@ struct GhosttyAppTests {
     func theSideLayerReadsTheLightSide() throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         let split = try makeSplit(paletteOverride: "")
-        let layer = try write("layer", ThemeResolver.sideLayer(split.light))
-        let config = try makeConfig([split.user, layer])
-        defer { ghostty_config_free(config) }
-
-        let colors = try #require(GhosttyApp.readThemeSideColors(from: config))
+        let colors = try #require(try readSide(split.light, over: split.user))
         #expect(colors.background == rgb(0xF0F0F0))
         #expect(colors.palette[0] == rgb(0x101010))
         #expect(colors.palette[1] == rgb(0x111111))
@@ -80,10 +83,25 @@ struct GhosttyAppTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let split = try makeSplit()
         let missing = directory.appendingPathComponent("No Such Theme").path
-        let layer = try write("layer", ThemeResolver.sideLayer(missing))
-        let config = try makeConfig([split.user, layer])
-        defer { ghostty_config_free(config) }
+        #expect(try readSide(missing, over: split.user) == nil)
+    }
 
-        #expect(GhosttyApp.readThemeSideColors(from: config) == nil)
+    /// A bad line in the side's theme file leaves a default color in place.
+    @Test
+    func aBadLineInTheSideReadsNothing() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let split = try makeSplit()
+        let broken = try write("Broken Dark", "background = #202020\npalette = 4=zzz\n")
+        #expect(try readSide(broken, over: split.user) == nil)
+    }
+
+    /// A diagnostic of the user's own config is in both configs, so it does
+    /// not stop the read.
+    @Test
+    func aDiagnosticOfTheUsersConfigDoesNotStopTheRead() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let split = try makeSplit(paletteOverride: "window-theme = bogus\nno-such-key = 1")
+        let colors = try #require(try readSide(split.dark, over: split.user))
+        #expect(colors.background == rgb(0x202020))
     }
 }
