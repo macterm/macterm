@@ -748,7 +748,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
 
         // Declared `run` is typed into the shell verbatim, as if the
         // user had entered it at the prompt. No shell-syntax handling: cwd is
-        // set above, not via an injected `cd`.
+        // set above, not via an injected `cd`. A pane on a session sends it
+        // after the shell's first prompt (`PaneSession.heldInput`).
         if let typedInput, !typedInput.isEmpty {
             config.initial_input = cString(typedInput + "\n")
         }

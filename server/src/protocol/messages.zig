@@ -774,7 +774,9 @@ pub const MarkKind = enum {
     unknown,
 };
 
-/// A step of a command, from shell integration (OSC 133).
+/// A step of a command, from shell integration (OSC 133). A client that
+/// greets, refreshes or catches up while the shell waits for input also gets
+/// an `input` mark: it tells the current state, not a new step.
 pub const Mark = struct {
     pub const name = "mark";
     pub const since = 1;

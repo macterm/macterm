@@ -234,6 +234,178 @@ struct PaneSessionTests {
         }
     }
 
+    // MARK: - Input before the shell starts
+
+    /// A shell that prints its prompt mark after a delay, as a login shell
+    /// does, then reads one line.
+    private static let markedShell =
+        "sleep 0.3; printf '\\033]133;A\\007$ \\033]133;B\\007'; read l; printf 'got-%s' \"$l\"; read m; printf 'twice-%s' \"$m\"; sleep 30"
+
+    @Test
+    func input_before_the_attach_waits_for_the_prompt_mark() async throws {
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: "ps-mark-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
+                wantsForeground: false,
+                startWait: .seconds(30),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("hi\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("got-hi") }
+            // The pty echoes the line when it comes: after the prompt, never
+            // before it.
+            let screen = host.snapshot().screen
+            let prompt = try #require(screen.range(of: "$ "))
+            let echo = try #require(screen.range(of: "hi"))
+            #expect(prompt.lowerBound < echo.lowerBound)
+            session.stop()
+        }
+    }
+
+    @Test
+    func input_for_a_session_at_its_prompt_goes_with_no_wait() async throws {
+        // The mark came before this client greeted: the session tells it
+        // from the screen.
+        try await withServer { server in
+            let name = "ps-atprompt-\(UInt32.random(in: 0 ... .max))"
+            let first = RecordingPaneHost()
+            let a = PaneSession(
+                name: name,
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.screen.contains("$ ") }
+
+            let second = RecordingPaneHost()
+            let b = PaneSession(
+                name: name,
+                launch: nil,
+                wantsForeground: false,
+                startWait: .seconds(30),
+                host: second,
+                connect: { try await server.connect() }
+            )
+            b.sendInput(Data("hi\n".utf8))
+            b.start()
+            try await first.waitFor { $0.screen.contains("got-hi") }
+            a.stop()
+            b.stop()
+        }
+    }
+
+    @Test
+    func input_for_a_shell_with_no_marks_goes_after_the_wait() async throws {
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: "ps-nomark-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf up-%s ok; read l; printf got-%s \"$l\"; sleep 30"],
+                    env: []
+                ),
+                wantsForeground: false,
+                startWait: .milliseconds(300),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("hi\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("got-hi") }
+            session.stop()
+        }
+    }
+
+    @Test
+    func input_after_the_attach_does_not_wait() async throws {
+        // Terminal replies come after the attach: a shell can query the
+        // terminal before its first prompt and wait for the answer.
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: "ps-reply-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf up-%s ok; read l; printf got-%s \"$l\"; sleep 30"],
+                    env: []
+                ),
+                wantsForeground: false,
+                startWait: .seconds(30),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("early\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("up-ok") }
+            session.sendInput(Data("reply\n".utf8))
+            try await host.waitFor { $0.screen.contains("got-reply") }
+            session.stop()
+        }
+    }
+
+    @Test
+    func held_input_goes_once() async throws {
+        // The mark sends the input. The wait that ends later sends nothing.
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: "ps-once-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
+                wantsForeground: false,
+                startWait: .milliseconds(1500),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("hi\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("got-hi") }
+            try await Task.sleep(for: .seconds(2))
+            #expect(!host.snapshot().screen.contains("twice-"))
+            session.stop()
+        }
+    }
+
+    @Test
+    func held_input_is_not_sent_after_the_pane_closed() async throws {
+        try await withServer { server in
+            let name = "ps-closed-\(UInt32.random(in: 0 ... .max))"
+            let host = RecordingPaneHost()
+            let session = PaneSession(
+                name: name,
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf up-%s ok; read l; printf got-%s \"$l\"; sleep 30"],
+                    env: []
+                ),
+                wantsForeground: false,
+                startWait: .seconds(1),
+                host: host,
+                connect: { try await server.connect() }
+            )
+            session.sendInput(Data("hi\n".utf8))
+            session.start()
+            try await host.waitFor { $0.screen.contains("up-ok") }
+            session.stop()
+            #expect(session.takePendingInput() == Data("hi\n".utf8))
+            try await Task.sleep(for: .seconds(1.5))
+
+            // Another client sees the session's screen: the line never came.
+            let viewer = RecordingPaneHost()
+            let other = PaneSession(name: name, launch: nil, wantsForeground: false, host: viewer, connect: { try await server.connect() })
+            other.start()
+            try await viewer.waitFor { $0.screen.contains("up-ok") }
+            #expect(!viewer.snapshot().screen.contains("hi"))
+            other.stop()
+        }
+    }
+
     // MARK: - Support
 
     /// Holds the connection that a session got, so that a test can end it.

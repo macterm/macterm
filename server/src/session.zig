@@ -1055,6 +1055,7 @@ const Session = struct {
             .status => |st| s.sendPane(c, m.Status, st),
             .attention => |a| s.sendPane(c, m.Attention, a),
             .program => |records| s.sendPane(c, m.ProgramStatus, .{ .records = records }),
+            .mark => |mk| s.sendPane(c, m.Mark, .{ .kind = mk.kind }),
             else => {},
         };
     }
