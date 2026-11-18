@@ -44,14 +44,11 @@ libghostty resolves a unicode binding such as `super+c` from the text before it 
 - `AppState` polls in an adaptive way (`PollCadence` and `refreshAllForegroundProcesses`). It polls every 250 ms in a burst after any `.terminalPollEvent`. It polls every 1 s when the app is active and idle. It polls every 2 s when the app is inactive. It stops when nothing is on the screen.
 - **Execution tracking runs whatever the "Show tab status indicator" setting is** (#705). `pane list` reports the state, and agents wait on it. The setting only chooses what the tab row draws (`TabIcon`).
 - **The `GHOSTTY_ACTION_OUTPUT_ACTIVITY` heartbeat is the only source of activity**. It fires also while the pane is occluded. The scrollbar action in the render path does not. Completion edges (OSC 133;D and foreground transitions) rebase the row baseline. Then the late heartbeat of a fast command never starts it again as activity. `TerminalExecutionTracker` has the rules for when output that does not grow counts as work (foregrounds of AI agents after a real Return).
-- **An OSC 9;4 progress ERROR ends the run as a failure**. The done dot of the tab turns red (`MactermTheme.failure`, palette 1, tooltip "Failed"). The outcome is `Pane.completionFailed`. This flag has a meaning only while the state is `.done`.
-  - `executionState`'s `didSet` clears the flag each time that the state leaves `.done`. Every path that acknowledges a run therefore clears red in the same way as it clears green.
-  - The code sets the flag *before* `.done` publishes. The poll that the publish wakes can save or acknowledge at once, in the same call.
-  - Never add a fourth `TerminalExecutionState`. The guards of the tracker compare against `.done`.
-  - REMOVE and PAUSE end a run as a success. Macterm drops a report that finds the pane not `.running`. For this reason SET → ERROR → REMOVE stays red.
-  - Within a tab, running wins over failed, and failed wins over done.
-  - It persists as `PaneSnapshot.completionFailed` next to `needsAttention`. It never replaces `needsAttention`.
-  - The `state` of the CLI stays `done`. The percentage is never shown.
+- **The done and failed dots come from the session** (`Pane.attention`, design/004 §6). The session sets `unseen` when a run ends, `failed` when an OSC 9;4 ERROR ended it, and `bell` at a BEL, and sends them on the pane's channel at each change and at an attach (`PaneSessionHost.paneAttention`). The running spinner still comes from the app's tracker (`Pane.executionState`) until the run state moves to the session.
+  - The tab's dot (`TerminalTab.executionState`): running wins over failed, and failed wins over done. A failed dot is red (`MactermTheme.failure`, palette 1, tooltip "Failed").
+  - The session ends a run only at OSC 133;D, or at the end of a run that a progress report started. An agent in a pane is one run until it exits, so its replies get no dot until its rules move to the session (Ethan, 2026-11-18).
+  - **Looking at a pane marks it seen** (`Pane.markSeen`): the flags clear here at once, and `seen` goes on the pane's channel, so every client of the session sees the clear. The same call ends a `.done` run state. Nothing about the dots is saved: the session keeps the flags while the app is quit.
+  - The `state` of the CLI comes from the run state, not from the flags. The percentage is never shown.
 - OSC 0 and OSC 2 titles are **gated by provenance** (`Pane.receiveReportedTitle`). Macterm adopts one as `programTitle` only while the foreground is a real program. It pins the title to that pid. The title expires when the program loses the foreground. Macterm discards titles that a prompt sets (nushell, Starship). It never persists titles.
 - **Macterm throttles a title report before it costs anything** (`TitleReportThrottle`, one for each pane, pure and tested).
   - The lookup of provenance and the refresh of the foreground that a title triggers cost about 100 µs of syscalls. These are `KERN_PROCARGS2` three times, and `open` and `tcgetattr` on the tty.
@@ -66,12 +63,12 @@ libghostty resolves a unicode binding such as `super+c` from the text before it 
   - The session reports only on macOS and Linux (`proc_pidpath`, `/proc`). A pane with no server on its host (a plain shell) gets no report: it keeps the host name and the titles of its runs, and closing it always asks (the surface's reading of the ssh client: never silently kill an unknown foreground).
   - Both pipelines publish one value, `Pane.foregroundSample`. Policies such as `ForegroundPolicy.needsConfirmClose` are pure functions over it. Every busy-close guard reads `Pane.needsConfirmClose`. It never reads `needsConfirmQuit` of libghostty directly, because for a remote pane that only sees the `ssh` client.
 - **`bell-features = attention` has two halves.**
-  - `GHOSTTY_ACTION_RING_BELL` handles the app-level parts in `GhosttyCallbacks.ringBell`: the beep, `bell-audio-path` and `NSApp.requestUserAttention`. It also flags the pane that rings (`Pane.ringBell`). `title` and `border` are UI for each tab that Macterm does not implement.
+  - `GHOSTTY_ACTION_RING_BELL` handles the app-level parts in `GhosttyCallbacks.ringBell`: the beep, `bell-audio-path` and `NSApp.requestUserAttention`. The pane's bell flag comes from the session (`Pane.attention.bell`). `title` and `border` are UI for each tab that Macterm does not implement.
   - The Dock badge is the second half. `BellBadge.label` is the pure rule from the count to the label (nil without `attention` or with nothing that rings, capped at `99+`). `BellBadge.apply` is the one AppKit write. `AppState.syncDockBadge` joins the two.
   - The badge counts **tabs**, not the windows of ghostty, because the user goes to a tab and looks at it.
   - The badge is DERIVED. Code never writes it from the ring. For this reason, a config reload that drops `attention` clears a badge that is already up, and no code path needs to know about clearing.
-  - Acknowledgment follows the existing verdict of Macterm, "looking at the active tab". It does not follow the rule of ghostty about the next keypress. The badge therefore cannot disagree with the sidebar. A bell in the active tab of the active app is seen the moment that it rings. Everything else clears in the same way as the completion dot: tab selection, pane focus or interaction, the app that comes forward, and surface teardown.
-  - Each change of the flag posts `.terminalBellStateDidChange`, so clearing is derived again with no extra work.
+  - What counts as seen follows the verdict of Macterm, "looking at the active tab". It does not follow the rule of ghostty about the next keypress. The badge therefore cannot disagree with the sidebar. A bell in the active tab of the active app is seen the moment that it rings. Everything else clears in the same way as the completion dot: tab selection, pane focus or interaction, the app that comes forward, and surface teardown.
+  - Each change of the flags posts `.paneAttentionDidChange`, so clearing is derived again with no extra work.
 
 ## Password prompts (Settings → Password Manager)
 
