@@ -1143,8 +1143,8 @@ final class AppState {
     /// Settings → Extensions (`PaletteRegistry`); here so its hourly cache
     /// outlives the Settings window.
     let paletteRegistry = PaletteRegistry()
-    /// Applies the extension updates that need no question. The app starts it after the launch restore. Tests
-    /// and benchmarks never do.
+    /// Applies the extension updates that need no question. The app starts
+    /// it after the launch restore. Tests and benchmarks never do.
     @ObservationIgnored
     private(set) lazy var extensionAutoUpdater = ExtensionAutoUpdater(
         registry: paletteRegistry,

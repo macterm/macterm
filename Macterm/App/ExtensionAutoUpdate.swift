@@ -14,8 +14,9 @@ private let logger = Logger(subsystem: appBundleID, category: "ExtensionAutoUpda
 /// automatic update never discards changes of the user's own.
 ///
 /// It reads the repository at launch and once a day after that. This is
-/// the one read of the repository outside Settings → Extensions. Each update moves the old folder to the Trash, as a click does, and
-/// a toast names what changed.
+/// the one read of the repository outside Settings → Extensions. Each
+/// update moves the old folder to the Trash, as a click does, and a toast
+/// names what changed.
 @MainActor
 final class ExtensionAutoUpdater {
     static let interval: Duration = .seconds(24 * 60 * 60)
