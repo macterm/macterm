@@ -149,6 +149,69 @@ struct RemoteHostsTests {
         }
     }
 
+    /// 0381: a pane that became lost while the host's server was frozen
+    /// attached only at the next backoff step (up to 60 s) or at a key. The
+    /// quiet roaming link that hears the host again is the sign that the
+    /// host answers: the app hears it once, and the sweep's try attaches
+    /// the pane with no key.
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_lost_pane_attaches_with_no_key_soon_after_its_quiet_host_answers_again() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host, roaming: true)
+            let pane = fixture.pane()
+            fixture.hosts.panes = { _ in [pane] }
+            let first = try await fixture.start(pane)
+            defer { first.stop() }
+            first.type("printf 'before-%s\\n' freeze\n")
+            try await first.host.waitFor { $0.screen.contains("before-freeze") }
+            var deadline = Date().addingTimeInterval(20)
+            while try await !fixture.attach(pane).link.isRoaming, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+
+            // The host's server stops, and the host becomes quiet. The pane
+            // reports its link lost, as a driver does when the ping of the
+            // ssh standby fails.
+            let server = try host.serverPID()
+            #expect(kill(server, SIGSTOP) == 0)
+            defer { kill(server, SIGCONT) }
+            #expect(await fixture.hosts.answer(.lost, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            deadline = Date().addingTimeInterval(20)
+            while !fixture.hosts.quietDestinations.contains("box"), Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            #expect(fixture.hosts.quietDestinations == ["box"])
+
+            // A sweep's try while the host is down fails, and asks nothing.
+            fixture.hosts.reconnect([pane.sessionName])
+            #expect(pane.isRemoteReconnecting)
+            #expect(await fixture.hosts.answer(.ask, session: pane.sessionName, panes: [pane]).isWait(message: nil))
+            #expect(pane.isRemoteLinkLost)
+            #expect(fixture.answered.isEmpty)
+
+            // The server goes on. The host answers once, within a few
+            // keepalives.
+            #expect(kill(server, SIGCONT) == 0)
+            let healed = Date()
+            deadline = healed.addingTimeInterval(10)
+            while fixture.answered.isEmpty, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(fixture.answered == ["box"])
+
+            // What the sweep does then (`AppState.reconnectSessions`, tested
+            // in `AppStateTests`): a try with no key. The pane attaches
+            // to its session, which replays its screen.
+            fixture.hosts.reconnect([pane.sessionName])
+            let second = try await fixture.start(pane)
+            defer { second.stop() }
+            try await second.host.waitFor { $0.screen.contains("before-freeze") }
+            #expect(!pane.isRemoteLinkLost)
+            #expect(Date().timeIntervalSince(healed) < 10)
+            #expect(fixture.answered == ["box"])
+        }
+    }
+
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_killed_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
         try await withSSHDHost { host in
@@ -483,6 +546,10 @@ struct RemoteHostsTests {
         var connected: [String] { connections.value }
         private let readyHosts = LockedBox<[String]>([])
         private let stopped = LockedBox<[String]>([])
+        private let answers = LockedBox<[String]>([])
+        /// The hosts whose quiet roaming link heard them again
+        /// (`hostAnswered`), in order.
+        var answered: [String] { answers.value }
         /// The sessions that became lost (`paneLost`), in order.
         var panesLost: [String] { stopped.value }
 
@@ -519,6 +586,7 @@ struct RemoteHostsTests {
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
             configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
             configuration.paneLost = { [stopped] session in stopped.mutate { $0.append(session) } }
+            configuration.hostAnswered = { [answers] destination in answers.mutate { $0.append(destination) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)
         }
 

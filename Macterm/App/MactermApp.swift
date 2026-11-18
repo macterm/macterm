@@ -558,6 +558,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             focusCenter.addObserver(
+                forName: .remoteHostDidAnswer,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                let destination = note.object as? String
+                MainActor.assumeIsolated {
+                    self?.appState?.reconnectDroppedRemotePanes(trigger: .hostAnswered, destination: destination)
+                }
+            },
+            focusCenter.addObserver(
                 forName: .remoteLinkDidStop,
                 object: nil,
                 queue: .main
