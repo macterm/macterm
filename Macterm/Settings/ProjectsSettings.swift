@@ -23,6 +23,10 @@ struct ProjectsSettings: View {
     @State private var layouts: [ProjectFileStore.Listing] = []
     @State private var layoutPendingDeletion: ProjectFileStore.Listing?
     @State private var deleteFailure: String?
+    /// The layout whose Create Project checks its remote folder now.
+    @State private var checkingLayout: URL?
+    /// Why Create Project added nothing.
+    @State private var createFailure: String?
 
     var body: some View {
         Form {
@@ -90,6 +94,7 @@ struct ProjectsSettings: View {
                         LayoutRow(
                             layout: layout,
                             hasProject: hasProject(for: layout),
+                            isChecking: checkingLayout == layout.id,
                             onCreateProject: { createProject(from: layout) },
                             onRemove: { layoutPendingDeletion = layout }
                         )
@@ -142,6 +147,17 @@ struct ProjectsSettings: View {
             Button("OK", role: .cancel) { deleteFailure = nil }
         } message: {
             Text(deleteFailure ?? "")
+        }
+        .alert(
+            "Cannot create the project",
+            isPresented: Binding(
+                get: { createFailure != nil },
+                set: { if !$0 { createFailure = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { createFailure = nil }
+        } message: {
+            Text(createFailure ?? "")
         }
     }
 
@@ -196,16 +212,47 @@ struct ProjectsSettings: View {
     /// Add a project for this file's declaration and select it. The new
     /// project opens with the default workspace; the file's layout takes
     /// effect through Apply Layout (the row menu beside it), never on
-    /// selection.
+    /// selection. A remote path is added only when its folder is on the host
+    /// (`RemoteHosts.refusal`, 0366), as in New Remote Project; a refusal
+    /// shows in an alert and adds nothing.
     private func createProject(from layout: ProjectFileStore.Listing) {
-        guard let path = layout.declaredPath else { return }
+        guard checkingLayout == nil else { return }
+        checkingLayout = layout.id
+        Task {
+            let outcome = await Self.createProject(from: layout, in: projectStore)
+            checkingLayout = nil
+            switch outcome {
+            case let .created(project): appState.selectProject(project)
+            case let .refused(line): createFailure = line
+            case .noPath: break
+            }
+        }
+    }
+
+    /// What `createProject(from:in:refusal:)` did.
+    enum CreateOutcome: Equatable {
+        case created(Project)
+        /// The line that says why nothing is added.
+        case refused(String)
+        /// The file declares no path.
+        case noPath
+    }
+
+    /// The model step of Create Project. `refusal` is nil when the path can
+    /// be added; tests answer it.
+    static func createProject(
+        from layout: ProjectFileStore.Listing,
+        in store: ProjectStore,
+        refusal: @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) }
+    ) async -> CreateOutcome {
+        guard let path = layout.declaredPath else { return .noPath }
+        if let line = await refusal(path) { return .refused(line) }
         // `name:` is optional in a project file; fall back to the filename,
         // which is the slug of a name Macterm itself wrote.
         let declared = layout.declaredName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = (declared?.isEmpty == false ? declared : nil)
             ?? layout.url.deletingPathExtension().lastPathComponent
-        let project = projectStore.create(name: name, path: path)
-        appState.selectProject(project)
+        return .created(store.create(name: name, path: path))
     }
 
     private func confirmDeletion() {
@@ -358,6 +405,9 @@ private struct ProjectRow: View {
 private struct LayoutRow: View {
     let layout: ProjectFileStore.Listing
     let hasProject: Bool
+    /// Create Project checks the remote folder now: the row shows a spinner
+    /// and Create Project is off until the check ends.
+    let isChecking: Bool
     let onCreateProject: () -> Void
     let onRemove: () -> Void
 
@@ -377,9 +427,14 @@ private struct LayoutRow: View {
 
             Spacer(minLength: 8)
 
+            if isChecking {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
             Menu {
                 Button(hasProject ? "Create Another Project" : "Create Project") { onCreateProject() }
-                    .disabled(layout.declaredPath == nil)
+                    .disabled(layout.declaredPath == nil || isChecking)
                 Divider()
                 Button("Remove", role: .destructive) { onRemove() }
             } label: {
