@@ -151,14 +151,12 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private var agentIconPID: pid_t?
 
-    /// The session's attention flags (design/004 §6): a run ended (`unseen`,
-    /// and `failed` when it failed) or the bell rang, and no client showed
-    /// the pane since. The session keeps them, also while the app is quit,
-    /// and sends them on the pane's channel at each change and at an attach
-    /// (`receiveAttention`). The app keeps no copy of its own: the dots and
-    /// the Dock badge read these. Each change posts `.paneAttentionDidChange`,
-    /// so `AppState` marks the pane seen when the user looks at it and
-    /// derives the badge again.
+    /// The session's attention flags (design/004 §6). `unseen`: a run ended
+    /// and no client showed the pane since. `failed`: that run failed.
+    /// `bell`: the bell rang. The session keeps them, also while the app is
+    /// quit. It sends them on the pane's channel (`receiveAttention`). The
+    /// dots and the Dock badge read them. Each change posts
+    /// `.paneAttentionDidChange`.
     private(set) var attention = MactermProtocol.Attention() {
         didSet {
             guard attention != oldValue else { return }
@@ -170,17 +168,14 @@ final class Pane: Identifiable {
         attention = flags
     }
 
-    /// The user looked at the pane: the session clears its flags
-    /// (`sendSeenToSession`), and a `.done` run state goes back to `.idle`.
-    /// The flags clear here at once; the session's answer says the same.
-    /// True when a flag was set.
-    @discardableResult
-    func markSeen() -> Bool {
+    /// The user looked at the pane. The flags clear here at once, and the
+    /// session clears its own (`sendSeenToSession`). A `.done` run state
+    /// goes back to `.idle`.
+    func markSeen() {
         acknowledgeCommandCompletion()
-        guard attention != MactermProtocol.Attention() else { return false }
+        guard attention != MactermProtocol.Attention() else { return }
         attention = MactermProtocol.Attention()
         sendSeenToSession()
-        return true
     }
 
     var executionState: TerminalExecutionState = .idle {
@@ -431,8 +426,8 @@ final class Pane: Identifiable {
             activityQuietPollWork = nil
             // This dedicated deadline bypasses ordinary event coalescing: if
             // every window is occluded there may be no timer left to retry.
-            // AppState still performs the settle so acknowledgement and
-            // persistence stay central.
+            // AppState still performs the settle, so that the poll's other
+            // work stays in one place.
             NotificationCenter.default.post(name: .terminalQuietSettleDeadline, object: self)
         }
         activityQuietPollWork = work
@@ -771,12 +766,10 @@ final class Pane: Identifiable {
     /// `SurfaceRegistry.destroySurfaces` destroys the views. Safe to call
     /// more than once.
     func surfacesWillTearDown(hadView: Bool) {
-        // A pane with no surface shows nothing — an unloaded pinned tab's
-        // panes stay in the tree, and their flags must not keep a dot or the
-        // Dock badge for shells that no longer exist. Only the copy here
-        // clears: the session's flags stay with the session. Before the
-        // guard, so a pane torn down before its view ever existed still
-        // settles.
+        // A pane with no surface shows nothing. The panes of an unloaded
+        // pinned tab stay in the tree, and must keep no dot and no badge.
+        // Only the copy here clears. Before the guard, so that a pane with
+        // no view also clears.
         attention = MactermProtocol.Attention()
         cancelHeldTitle()
         guard hadView else { return }

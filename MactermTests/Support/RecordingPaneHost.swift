@@ -13,6 +13,8 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         var foreground: MactermProtocol.Foreground?
         /// Each `lead` message, in order. A nil is an end of the channel.
         var leads: [Bool?] = []
+        /// Each set of attention flags, in order.
+        var attention: [MactermProtocol.Attention] = []
     }
 
     private let lock = NSLock()
@@ -57,6 +59,12 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
 
     func paneSnapshot(started _: Bool) {}
     func paneTtyMode(_: MactermProtocol.TtyMode) {}
+    func paneAttention(_ flags: MactermProtocol.Attention) {
+        lock.lock()
+        state.attention.append(flags)
+        lock.unlock()
+    }
+
     func paneLead(_ leader: Bool?) {
         lock.lock()
         state.leads.append(leader)

@@ -24,7 +24,7 @@ protocol PaneSessionHost: AnyObject, Sendable {
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
     /// The session's attention flags: at an attach when one is set, and at
-    /// each change (design/004 §6).
+    /// each change (design/004 §6). All clear when the channel ends.
     func paneAttention(_ flags: MactermProtocol.Attention)
     /// The session says whether this client leads: its size is the pty's.
     /// Nil when the channel ended: the next attach tells again.
@@ -281,7 +281,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     // The session does not connect again (a remote pane), so
                     // it reports the end of the channel here: no `lead`.
                     uninstall()
-                    host.paneLead(nil)
+                    channelEnded()
                     host.paneLinkLost()
                     return
                 }
@@ -295,7 +295,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             uninstall()
-            host.paneLead(nil)
+            channelEnded()
             tries += 1
             if !reconnects {
                 host.paneLinkLost()
@@ -368,6 +368,14 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             _ = try await connection.call(MactermProtocol.SessionKill.self, .init(id: name))
             _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
         }
+    }
+
+    /// The channel ended. The lead and the flags were this channel's: the
+    /// next attach tells them again. The session sends its flags at an
+    /// attach only when one is set, so a copy kept here could stay wrong.
+    private func channelEnded() {
+        host.paneLead(nil)
+        host.paneAttention(MactermProtocol.Attention())
     }
 
     private func install(_ channel: PaneChannel) -> Bool {

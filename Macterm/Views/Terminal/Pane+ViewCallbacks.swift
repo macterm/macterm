@@ -69,7 +69,7 @@ extension Pane {
             self?.refreshForegroundProcess()
             self?.markCommandRunning()
         }
-        view.onProgressFinished = { [weak self, weak view] _ in
+        view.onProgressFinished = { [weak self, weak view] in
             // Only a live run can end. Whether it failed is the session's
             // flag (`Pane.attention`).
             guard let self, executionState == .running else { return }
@@ -152,9 +152,11 @@ extension Pane {
         }
     }
 
-    /// Tells the session that the user saw the pane, on one of its surfaces'
-    /// channels. Every client of the session then gets the cleared flags.
+    /// Tells the session that the user saw the pane, on the channel of one
+    /// of its surfaces. Every client of the session then gets the cleared
+    /// flags.
     func sendSeenToSession() {
-        SurfaceRegistry.shared.surfaces(of: self).lazy.compactMap(\.nsView).first?.sendSeen()
+        let views = SurfaceRegistry.shared.surfaces(of: self).lazy.compactMap(\.nsView)
+        views.first { $0.channelRuntime != nil }?.sendSeen()
     }
 }

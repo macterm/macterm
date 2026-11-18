@@ -16,7 +16,8 @@ enum TerminalProgressReport: Equatable {
     /// REMOVE, or PAUSE, which has always ended a run here: the program has
     /// stopped reporting work and reported nothing wrong.
     case ended
-    /// ERROR: the run ended in failure (`Pane.completionFailed`).
+    /// ERROR: the run ended in failure. The session keeps the failure
+    /// (`Pane.attention.failed`); here it only ends the run.
     case failed
 }
 

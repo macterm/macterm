@@ -186,8 +186,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     func surfaceDidReportProgress(_ report: TerminalProgressReport) {
         switch report {
         case .running: onProgressStarted?()
-        case .ended: onProgressFinished?(false)
-        case .failed: onProgressFinished?(true)
+        case .ended,
+             .failed: onProgressFinished?()
         }
     }
 
@@ -420,12 +420,12 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// at the prompt when libghostty has it (fork patch 0019), else nil.
     var onCommandFinished: ((Int16, UInt64, String?) -> Void)?
     var onProgressStarted: (() -> Void)?
-    /// A progress report ended the run (`TerminalProgressReport`). The Bool is
-    /// whether it failed: true for ERROR, false for REMOVE and PAUSE.
-    var onProgressFinished: ((Bool) -> Void)?
+    /// A progress report ended the run (`TerminalProgressReport`): REMOVE,
+    /// PAUSE or ERROR. The session says whether it failed (`Pane.attention`).
+    var onProgressFinished: (() -> Void)?
     /// A run ended (`onCommandFinished` or `onProgressFinished`), after the
-    /// pane recorded it. The window that draws the pane sets it, to
-    /// acknowledge the run when the user looks at the pane.
+    /// pane recorded it. The window that draws the pane sets it, to mark the
+    /// pane seen when the user looks at it.
     var onRunEnded: (() -> Void)?
     var onTerminalRender: (() -> Void)?
     var onBackgroundColorChange: ((NSColor) -> Void)?
@@ -2262,6 +2262,11 @@ extension GhosttyTerminalNSView {
 // MARK: - Read-only introspection (control CLI `pane inspect`/`dump`)
 
 extension GhosttyTerminalNSView {
+    /// Tells the session that the user saw the pane (`PaneSession.seen`).
+    func sendSeen() {
+        channelRuntime?.route.seen()
+    }
+
     /// The live terminal grid + cell/surface pixel dimensions
     /// (`ghostty_surface_size`), or nil when the surface isn't created yet.
     /// Ask the session to make this surface's client its leader (#345), so
@@ -2271,11 +2276,6 @@ extension GhosttyTerminalNSView {
     /// Refuses before the surface has a real size: a surface that has not
     /// laid out yet (an off-screen tab, the incubator) would resize the shared
     /// pty to a placeholder for every client at once.
-    /// Tells the session that the user saw the pane (`PaneSession.seen`).
-    func sendSeen() {
-        channelRuntime?.route.seen()
-    }
-
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }

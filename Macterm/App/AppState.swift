@@ -3482,12 +3482,9 @@ final class AppState {
         workspaces[projectID]?.activeTab?.markSeen()
     }
 
-    /// Marks the whole active tab seen when it holds `paneID` and the app is
-    /// active: the user looks at it. The whole tab, not only its focused
-    /// pane, so a split pane that finished does not keep the tab's dot.
-    /// Route through the injected `isAppActive` seam (not `NSApp.isActive`
-    /// directly): NSApp is nil during construction and unset in tests, and
-    /// this path is reachable from init via pollNow().
+    /// Marks the active tab seen when it holds `paneID` and the app is
+    /// active. Reads `isAppActive`, not `NSApp.isActive`: NSApp is nil during
+    /// init (`pollNow`) and in tests.
     func markSeenIfActive(paneID: UUID, projectID: UUID) {
         guard isAppActive(),
               projectID == activeProjectID,

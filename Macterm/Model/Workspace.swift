@@ -132,9 +132,8 @@ final class TerminalTab: Identifiable {
         return nil
     }
 
-    /// The tab's status dot. Running comes from the panes' run state; done
-    /// comes from the session's flags (`Pane.attention.unseen`): a run ended
-    /// in a pane that nobody showed since.
+    /// The tab's status dot. Running comes from the panes' run state. Done
+    /// comes from the session's flag `Pane.attention.unseen`.
     var executionState: TerminalExecutionState {
         let panes = splitRoot.allPanes()
         if panes.contains(where: { $0.executionState == .running }) { return .running }
@@ -142,11 +141,9 @@ final class TerminalTab: Identifiable {
         return .idle
     }
 
-    /// Whether the tab's `.done` is a failure — some pane's ended run failed
-    /// (`Pane.attention.failed`) — which turns its status dot red. A running
-    /// pane outranks it exactly as it outranks done, and it outranks a sibling
-    /// pane's success: a split where one pane failed and another passed shows
-    /// the failure.
+    /// The tab's done dot is red: the ended run of a pane failed
+    /// (`Pane.attention.failed`). Running wins over failed, and failed wins
+    /// over the success of another pane.
     var completionFailed: Bool {
         executionState == .done && splitRoot.allPanes().contains { $0.attention.unseen && $0.attention.failed }
     }
@@ -156,16 +153,15 @@ final class TerminalTab: Identifiable {
         return splitRoot.findPane(id: focusedPaneID)
     }
 
-    /// Whether any pane of this tab rang BEL and nobody showed it since
-    /// (`Pane.attention.bell`). The tab is the unit the Dock badge counts
+    /// A pane of the tab rang the bell, and nobody showed it since
+    /// (`Pane.attention.bell`). The Dock badge counts tabs
     /// (`BellBadge.tabCount`).
     var hasUnseenBell: Bool {
         splitRoot.allPanes().contains(where: \.attention.bell)
     }
 
-    /// Looking at the tab marks every pane seen, not just the focused pane:
-    /// a split pane that finished or rang would otherwise keep its dot and
-    /// the badge up while the user sits right next to it.
+    /// Looking at the tab marks every pane seen, not only the focused pane.
+    /// Otherwise a split pane next to the focused one keeps its dot.
     func markSeen() {
         for pane in splitRoot.allPanes() {
             pane.markSeen()

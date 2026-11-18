@@ -195,10 +195,10 @@ struct GhosttyTerminalNSViewTests {
 
     // MARK: - Progress report routing
 
-    /// ERROR reaches the finish callback flagged as a failure; REMOVE and
-    /// PAUSE (both `.ended`) reach it as a success.
+    /// ERROR, REMOVE and PAUSE all end the run. The session keeps the
+    /// failure, not the view.
     @Test
-    func progressReport_routesToStartAndFinishWithTheOutcome() {
+    func progressReport_routesToStartAndFinish() {
         let view = GhosttyTerminalNSView(
             paneID: UUID(),
             workingDirectory: "/tmp",
@@ -206,13 +206,13 @@ struct GhosttyTerminalNSViewTests {
         )
         var events: [String] = []
         view.onProgressStarted = { events.append("started") }
-        view.onProgressFinished = { failed in events.append(failed ? "failed" : "finished") }
+        view.onProgressFinished = { events.append("finished") }
 
         view.surfaceDidReportProgress(.running)
         view.surfaceDidReportProgress(.failed)
         view.surfaceDidReportProgress(.ended)
 
-        #expect(events == ["started", "failed", "finished"])
+        #expect(events == ["started", "finished", "finished"])
     }
 
     // MARK: - Context-menu scroll navigation

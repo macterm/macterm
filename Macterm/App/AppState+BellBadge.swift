@@ -13,20 +13,15 @@ private let logger = Logger(subsystem: appBundleID, category: "BellBadge")
 /// That is what lets a config reload that drops `attention` clear a badge
 /// that is already up, with no code path that knows about "clearing" at all.
 ///
-/// What counts as seen follows Macterm's verdict for a finished run rather
-/// than ghostty's own: ghostty flags the surface unconditionally and clears
-/// it on the next keypress or focus gain, so a bell in the window you are
-/// typing in badges the Dock until you type. Here a bell in the active tab of
-/// the active app is seen the moment it rings (`markSeenIfActive`), and the
-/// badge does not disagree with the sidebar about what the user has seen.
-/// Everything else clears the same way the completion dot does: selecting
-/// the tab, focusing or interacting with the pane, or bringing the app back
-/// to the front while the tab is showing.
+/// What counts as seen is Macterm's rule for the done dot, not ghostty's
+/// (ghostty clears at the next key or focus gain). A bell in the active tab
+/// of the active app is seen when it rings (`markSeenIfActive`). Other bells
+/// clear as the done dot does: tab selection, pane focus or input, or the
+/// app that comes to the front.
 extension AppState {
-    /// A pane's flags changed. Mark it seen right away if the user is looking
-    /// at its tab, and only then derive the badge — the clear re-enters here
-    /// with the flags already down, so the badge is written once and never
-    /// flashes a count for a bell that was seen.
+    /// A pane's flags changed. Mark the pane seen if the user looks at its
+    /// tab, then derive the badge. The clear comes back here with no flags
+    /// set, so the badge never shows a bell that the user saw.
     func paneAttentionDidChange(paneID: UUID) {
         if let projectID = activeProjectID {
             markSeenIfActive(paneID: paneID, projectID: projectID)

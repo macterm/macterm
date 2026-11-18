@@ -237,10 +237,9 @@ struct PaneTests {
         let p = progressRunningPane()
         p.markProgressFinished()
         p.receiveAttention(MactermProtocol.Attention(unseen: true, failed: true, bell: true))
-        #expect(p.markSeen())
+        p.markSeen()
         #expect(p.attention == MactermProtocol.Attention())
         #expect(p.executionState == .idle)
-        #expect(!p.markSeen())
     }
 
     @Test
