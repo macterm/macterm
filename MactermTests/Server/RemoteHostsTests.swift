@@ -110,6 +110,46 @@ struct RemoteHostsTests {
     }
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_host_that_stops_answering_on_the_roaming_link_is_quiet_until_it_answers_again() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host, roaming: true)
+            let pane = fixture.pane()
+            let first = try await fixture.start(pane)
+            defer { first.stop() }
+            // The roaming link opens in the background and becomes the
+            // host's link.
+            var deadline = Date().addingTimeInterval(20)
+            var link = try await fixture.attach(pane).link
+            while !link.isRoaming, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+                link = try await fixture.attach(pane).link
+            }
+            #expect(link.isRoaming)
+            #expect(fixture.hosts.quietDestinations.isEmpty)
+
+            // The host's server stops: no packet comes back over UDP.
+            let server = try host.serverPID()
+            #expect(kill(server, SIGSTOP) == 0)
+            defer { kill(server, SIGCONT) }
+            deadline = Date().addingTimeInterval(20)
+            while !fixture.hosts.quietDestinations.contains("box"), Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            #expect(fixture.hosts.quietDestinations == ["box"])
+
+            // The server goes on: the next keepalive comes back.
+            #expect(kill(server, SIGCONT) == 0)
+            deadline = Date().addingTimeInterval(20)
+            while !fixture.hosts.quietDestinations.isEmpty, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            #expect(fixture.hosts.quietDestinations.isEmpty)
+            // The same link heals: it was not dropped and opened again.
+            #expect(try await fixture.attach(pane).link === link)
+        }
+    }
+
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_killed_ssh_connection_dims_the_pane_and_a_key_connects_again() async throws {
         try await withSSHDHost { host in
             try await lostConnection(host, signal: "TERM", byKey: true)
@@ -345,6 +385,11 @@ struct RemoteHostsTests {
             #expect(host.asked == ["box"])
             #expect(fixture.hosts.declined == ["box"])
             #expect(fixture.hosts.plainDestinations == ["box"])
+            // A lost connection drops the host, and the host stays plain.
+            let lost = fixture.pane()
+            _ = await fixture.hosts.answer(.lost, session: lost.sessionName, panes: [lost])
+            #expect(lost.isRemoteLinkLost)
+            #expect(fixture.hosts.plainDestinations == ["box"])
             // A second decline from Settings keeps the host plain.
             await #expect(throws: RemoteServers.Failure.self) { try await fixture.hosts.installServer("box") }
             #expect(fixture.hosts.plainDestinations == ["box"])
@@ -438,11 +483,19 @@ struct RemoteHostsTests {
         }
 
         /// `wakes`: the posts reach a pane's driver too, as in the app.
+        /// `roaming`: a roaming link (UDP) opens after the ssh connect.
         /// `scripts`: the host scripts of the bundle; nil as in a bundle
         /// without them.
-        init(_ host: SSHDHost, creationGrace: TimeInterval = 30, wakes: Bool = false, scripts: HostCommands.Scripts? = .bundled) {
+        init(
+            _ host: SSHDHost,
+            creationGrace: TimeInterval = 30,
+            wakes: Bool = false,
+            roaming: Bool = false,
+            scripts: HostCommands.Scripts? = .bundled
+        ) {
             directory = host.home.path
             var configuration = RemoteHosts.Configuration(key: host.key, declines: .memory(), creationGrace: creationGrace)
+            configuration.roamingEnabled = { roaming }
             configuration.scripts = scripts
             configuration.post = { [posted] name in
                 posted.mutate { $0.append(name) }

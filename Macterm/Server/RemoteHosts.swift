@@ -147,17 +147,29 @@ final class RemoteHosts {
 
     @ObservationIgnored private var hosts: [String: Host] = [:] {
         didSet {
-            let plain = Set(hosts.compactMap { destination, host in
-                if case .plain = host { destination } else { nil }
-            })
+            var plain = plainDestinations
+            for (destination, host) in hosts {
+                switch host {
+                case .plain: plain.insert(destination)
+                case .ready: plain.remove(destination)
+                case .preparing: break
+                }
+            }
             if plain != plainDestinations { plainDestinations = plain }
         }
     }
 
-    /// The destinations whose panes are plain ssh shells now: the user
-    /// declined the server, or the host has no build. Derived from `hosts`.
-    /// The sidebar's project row shows it, so the pane prints no line.
+    /// The destinations whose panes are plain ssh shells: the user declined
+    /// the server, or the host has no build. Derived from `hosts`. A host
+    /// stays in it while its connection is down, until a link to its server
+    /// is ready. The sidebar's project row shows it, so the pane prints no
+    /// line.
     private(set) var plainDestinations: Set<String> = []
+    /// The destinations whose roaming link hears nothing from the host now
+    /// (`LinkTransport.isQuiet`). The link stays and its panes keep their
+    /// channels, but the host cannot be reached. The sidebar's project row
+    /// shows the host as lost.
+    private(set) var quietDestinations: Set<String> = []
     /// The roaming link of a host (design/009), and the ssh link that it
     /// replaced as the host's link. Panes that attached over the ssh link
     /// stay on it until it ends.
@@ -667,15 +679,21 @@ final class RemoteHosts {
         let enabled = configuration.roamingEnabled()
         let generation = roamingGeneration[destination, default: 0] + 1
         roamingGeneration[destination] = generation
+        setQuiet(destination, false)
         Task { [weak self] in
             let opened = await RoamingLink.open(
                 destination: destination,
                 over: ssh,
                 connections: connections,
                 enabled: enabled,
-                onDead: { [weak self] in
-                    Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
-                }
+                events: .init(
+                    dead: { [weak self] in
+                        Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
+                    },
+                    quiet: { [weak self] in
+                        Task { @MainActor in self?.roamingQuiet(destination, generation: generation) }
+                    }
+                )
             )
             guard let self, let opened else { return }
             // The host may have changed while the link opened.
@@ -694,6 +712,25 @@ final class RemoteHosts {
             transports[destination]?.stop()
             transports[destination] = opened.transport
             hosts[destination] = .ready(opened.link)
+            setQuiet(destination, opened.transport.isQuiet)
+        }
+    }
+
+    /// The roaming link of this generation stopped or started to hear the
+    /// host. The state comes from the transport, not from the event, so
+    /// events in a different order give the same result.
+    private func roamingQuiet(_ destination: String, generation: Int) {
+        guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
+        let quiet = transport.isQuiet
+        logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
+        setQuiet(destination, quiet)
+    }
+
+    private func setQuiet(_ destination: String, _ quiet: Bool) {
+        if quiet {
+            if !quietDestinations.contains(destination) { quietDestinations.insert(destination) }
+        } else if quietDestinations.contains(destination) {
+            quietDestinations.remove(destination)
         }
     }
 
@@ -714,6 +751,7 @@ final class RemoteHosts {
 
     private func endRoaming(_ destination: String) {
         roamingGeneration[destination, default: 0] += 1
+        setQuiet(destination, false)
         transports.removeValue(forKey: destination)?.stop()
         standby.removeValue(forKey: destination)?.close()
     }

@@ -2683,6 +2683,23 @@
         }
       }
     },
+    "Connection to %@ lost" : {
+      "comment" : "Help of the sidebar mark on a remote project whose connection to its host stopped.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 연결 끊김"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与 %@ 的连接已断开"
+          }
+        }
+      }
+    },
     "Connects a disconnected pane again by itself. A login that needs an answer waits until you type in the pane." : {
       "localizations" : {
         "ko" : {
@@ -8024,6 +8041,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "远程项目"
+          }
+        }
+      }
+    },
+    "Remote project on %@" : {
+      "comment" : "Help of the sidebar mark on a remote project.",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 원격 프로젝트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上的远程项目"
           }
         }
       }

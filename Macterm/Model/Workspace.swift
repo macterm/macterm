@@ -559,6 +559,13 @@ final class Workspace: Identifiable {
         return tabs.first { $0.id == activeTabID }
     }
 
+    /// Whether a remote pane of this workspace lost its connection
+    /// (`Pane.isDisconnected`). The sidebar row of a remote project then shows
+    /// `network.slash`. One lost pane is enough: its shell is not live.
+    var hasLostRemoteLink: Bool {
+        tabs.contains { $0.splitRoot.allPanes().contains(where: \.isDisconnected) }
+    }
+
     init(id: WorkspaceID, projectPath: String) {
         self.id = id
         kind = WorkspaceKind(id: id)

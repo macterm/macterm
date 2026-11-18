@@ -87,6 +87,15 @@ final class SSHDHost {
         connection.close()
     }
 
+    /// The pid of the host's server, from its socket. A test sends it
+    /// `SIGSTOP` to freeze it: it then reads nothing and answers nothing,
+    /// over ssh or UDP.
+    func serverPID() throws -> pid_t {
+        let connection = try ServerConnection.connect(path: runtime.appendingPathComponent(".server").path)
+        defer { connection.close() }
+        return try #require(connection.serverPID, "the kernel names no server pid")
+    }
+
     /// The user's pkill of the host's ssh master, on the Mac's side. `STOP`
     /// makes a master that hangs: only the link's ping sees it.
     func signalConnection(signal: String = "TERM") throws {

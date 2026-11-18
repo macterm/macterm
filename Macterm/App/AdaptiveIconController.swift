@@ -4,13 +4,13 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "AdaptiveIconController")
 
 /// Keeps the Dock icon on what `AdaptiveIcon.decide` asks for: the bundled
-/// icon, the user's custom image, or the bundled icon repainted in the theme.
+/// icon, or the bundled icon repainted in the theme.
 ///
-/// `GhosttyApp` hands it the config's choice on every load and reload; the
-/// theme colors, the system's appearance and icon style and the preference
-/// are read again on each `refresh`, which runs on every config change, when
-/// the app becomes active (System Settings sends no notice when the icon
-/// style changes) and when the preference changes. A refresh whose request is
+/// `GhosttyApp` starts it when the first config loads. The theme colors, the
+/// system's appearance and icon style and the preference are read again on
+/// each `refresh`, which runs on every config change, when the app becomes
+/// active (System Settings sends no notice when the icon style changes) and
+/// when the preference changes. A refresh whose request is
 /// the one already shown or in flight does nothing, so the frequent config
 /// notifications cost a few color reads.
 ///
@@ -30,7 +30,7 @@ final class AdaptiveIconController {
 
     /// One icon of the preview in Settings.
     struct PreviewIcon: Equatable {
-        /// Nil for the configured icon, which has one image for both sides.
+        /// Nil for the bundled icon, which has one image for both sides.
         var appearance: AdaptiveIconRequest.Appearance?
         /// Nil until the first image of this side exists: the tile stays
         /// empty, with no spinner.
@@ -59,9 +59,8 @@ final class AdaptiveIconController {
         }
     }
 
-    @ObservationIgnored
-    private var configured: GhosttyAppIcon = .bundled
-    /// The request shown or in flight, nil while the Dock shows `configured`.
+    /// The request shown or in flight, nil while the Dock shows the bundled
+    /// icon.
     @ObservationIgnored
     private var current: AdaptiveIconRequest?
     /// The renders for the Dock that run or wait. A render for the preview
@@ -117,12 +116,12 @@ final class AdaptiveIconController {
         })
     }
 
-    /// The ghostty config's `macos-icon` choice, from `GhosttyApp`. The
-    /// refresh waits one main-queue turn: the first call comes from inside
+    /// The first refresh, from `GhosttyApp` when the first config loads.
+    /// Later config changes come as `.mactermConfigDidChange`. The refresh
+    /// waits one main-queue turn: the call comes from inside
     /// `GhosttyApp.init`, and `refresh` reads `GhosttyApp.shared`, which
     /// would deadlock its dispatch_once there.
-    func configuredIconDidChange(_ icon: GhosttyAppIcon) {
-        configured = icon
+    func start() {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { AdaptiveIconController.shared.refresh() }
         }
@@ -130,8 +129,8 @@ final class AdaptiveIconController {
 
     func refresh() {
         switch adaptiveRequest() {
-        case let .configured(standIn):
-            showConfigured()
+        case let .bundled(standIn):
+            showBundled()
             showPreview(of: standIn)
         case let .adaptive(request, paint):
             note("on (\(request.appearance.rawValue))")
@@ -165,7 +164,7 @@ final class AdaptiveIconController {
 
     // MARK: - Preview
 
-    /// The Dock shows the configured icon: the preview shows the same image.
+    /// The Dock shows the bundled icon: the preview shows the same image.
     private func showPreview(of standIn: AdaptiveIcon.StandIn) {
         previewOnly = nil
         setPreview(Preview(icons: [PreviewIcon(appearance: nil, image: NSApp.applicationIconImage)], standIn: standIn))
@@ -228,12 +227,12 @@ final class AdaptiveIconController {
     }
 
     private enum Outcome {
-        case configured(AdaptiveIcon.StandIn)
+        case bundled(AdaptiveIcon.StandIn)
         case adaptive(AdaptiveIconRequest, AdaptiveIcon.Paint)
     }
 
     /// The request for the adaptive icon and its paint, or why the Dock shows
-    /// the configured icon. Each stand-in says why in the log.
+    /// the bundled icon. Each stand-in says why in the log.
     private func adaptiveRequest() -> Outcome {
         let iconStyle = Self.iconStyle()
         let enabled = Preferences.shared.adaptiveIcon
@@ -241,31 +240,30 @@ final class AdaptiveIconController {
         let decision = AdaptiveIcon.decide(
             enabled: enabled,
             supported: supported && suspension == nil,
-            configured: configured,
             iconStyle: iconStyle,
             systemScheme: { GhosttyApp.shared.systemScheme }
         )
         let appearance: AdaptiveIconRequest.Appearance
         switch decision {
-        case let .configured(_, standIn):
+        case let .bundled(standIn):
             let suspended = suspension != nil
             let style = iconStyle ?? "none"
-            note("off (enabled \(enabled), supported \(supported), suspended \(suspended), configured \(configured), icon style \(style))")
-            return .configured(standIn)
+            note("off (enabled \(enabled), supported \(supported), suspended \(suspended), icon style \(style))")
+            return .bundled(standIn)
         case let .adaptive(side):
             appearance = side
         }
         guard let theme = themeColors() else {
             note("off (a theme color cannot be read)")
-            return .configured(.unavailable)
+            return .bundled(.unavailable)
         }
         guard let paint = AdaptiveIcon.paint(for: theme) else {
             note("off (the theme has no gray for the lid)")
-            return .configured(.noLidGray)
+            return .bundled(.noLidGray)
         }
         guard let request = request(for: appearance, paint: paint) else {
             note("off (the bundle has no Assets.car)")
-            return .configured(.unavailable)
+            return .bundled(.unavailable)
         }
         return .adaptive(request, paint)
     }
@@ -278,13 +276,13 @@ final class AdaptiveIconController {
         logger.info("adaptive icon \(outcome, privacy: .public)")
     }
 
-    private func showConfigured() {
+    private func showBundled() {
         if current != nil {
             generation += 1
-            logger.info("adaptive icon off, showing the configured icon")
+            logger.info("adaptive icon off, showing the bundled icon")
         }
         current = nil
-        AppIconPresenter.apply(configured)
+        AppIconPresenter.applyBundled()
     }
 
     private func render(_ request: AdaptiveIconRequest, generation: Int) {

@@ -8,6 +8,7 @@ There is one `XxxTests.swift` for each production type. It mirrors the source pa
 
 - Swift Testing suites run in parallel. Anything that touches shared state (preferences, stores) is injected. Tests that need `AppState` or `WorkspaceStore` inject a file in a temp directory.
 - Helpers are in `Support/`: the DSL `TreeBuilder` (`H(pane("a"), V(pane("b"), pane("c")))`), `TreeRenderer` and `LayoutFixture`.
+- A test that needs a defaults suite gets it from `IsolatedDefaults`. Do not put a `UUID` in a suite name.
 - The coverage targets the model, persistence, palette and hotkey logic, and pure helpers. Nothing unit-tests SwiftUI views and the bindings of libghostty.
 - A wait that polls for a condition must sleep. Do not use `Task.yield()` in a loop with a fixed count.
 - **The CLI contract** is in `server/src/cli/golden/` (`CLIContractTests` writes and checks it; `server/src/cli/contract.zig` reads it for the Zig CLI). `MACTERM_UPDATE_GOLDEN=1 mise run test` writes it again after a change on purpose. A change there changes the server build key.

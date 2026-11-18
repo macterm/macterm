@@ -241,28 +241,23 @@ struct AdaptiveIconTests {
     // MARK: - Decision
 
     @Test
-    func theAdaptiveIconNeedsTheSettingSupportAndTheBundledIcon() {
+    func theAdaptiveIconNeedsTheSettingSupportAndARegularIconStyle() {
         func decide(
             enabled: Bool = true,
             supported: Bool = true,
-            configured: GhosttyAppIcon = .bundled,
             style: String? = nil
         ) -> AdaptiveIcon.Decision {
             AdaptiveIcon.decide(
                 enabled: enabled,
                 supported: supported,
-                configured: configured,
                 iconStyle: style,
                 systemScheme: { .dark }
             )
         }
-        let custom = GhosttyAppIcon.custom(URL(fileURLWithPath: "/tmp/mine.png"))
         #expect(decide() == .adaptive(.dark))
-        #expect(decide(enabled: false) == .configured(.bundled, .disabled))
-        #expect(decide(supported: false) == .configured(.bundled, .unavailable))
-        #expect(decide(configured: custom) == .configured(custom, .customIcon))
-        #expect(decide(style: "TintedDark") == .configured(.bundled, .iconStyle))
-        #expect(decide(enabled: false, configured: custom) == .configured(custom, .disabled))
+        #expect(decide(enabled: false) == .bundled(.disabled))
+        #expect(decide(supported: false) == .bundled(.unavailable))
+        #expect(decide(style: "TintedDark") == .bundled(.iconStyle))
     }
 
     // MARK: - Preview
@@ -273,7 +268,6 @@ struct AdaptiveIconTests {
     func thePreviewExplainsOnlyTheExceptions() {
         #expect(AdaptiveIcon.StandIn.disabled.previewLine == nil)
         #expect(AdaptiveIcon.StandIn.unavailable.previewLine == nil)
-        #expect(AdaptiveIcon.StandIn.customIcon.previewLine == nil)
         #expect(AdaptiveIcon.StandIn.iconStyle.previewLine == nil)
         #expect(AdaptiveIcon.StandIn.noLidGray.previewLine == "Your theme has no gray color to paint the icon with.")
     }
@@ -301,13 +295,10 @@ struct AdaptiveIconTests {
             reads += 1
             return .dark
         }
-        let custom = GhosttyAppIcon.custom(URL(fileURLWithPath: "/tmp/mine.png"))
-        _ = AdaptiveIcon.decide(enabled: false, supported: true, configured: .bundled, iconStyle: nil, systemScheme: scheme)
-        _ = AdaptiveIcon.decide(enabled: true, supported: false, configured: .bundled, iconStyle: nil, systemScheme: scheme)
-        _ = AdaptiveIcon.decide(enabled: true, supported: true, configured: custom, iconStyle: nil, systemScheme: scheme)
+        _ = AdaptiveIcon.decide(enabled: false, supported: true, iconStyle: nil, systemScheme: scheme)
+        _ = AdaptiveIcon.decide(enabled: true, supported: false, iconStyle: nil, systemScheme: scheme)
         #expect(reads == 0)
-        #expect(AdaptiveIcon
-            .decide(enabled: true, supported: true, configured: .bundled, iconStyle: nil, systemScheme: scheme) == .adaptive(.dark))
+        #expect(AdaptiveIcon.decide(enabled: true, supported: true, iconStyle: nil, systemScheme: scheme) == .adaptive(.dark))
         #expect(reads == 1)
     }
 
