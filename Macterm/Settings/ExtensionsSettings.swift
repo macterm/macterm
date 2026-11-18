@@ -26,7 +26,8 @@ struct ExtensionsSettings: View {
     @State private var autoUpdate = Preferences.shared.autoUpdateExtensions
     @State private var viewing: ScreenshotSheet.Viewing?
 
-    private let columns = [GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 12, alignment: .top)]
+    /// The cards have no background or border, so the gaps alone keep them apart.
+    private let columns = [GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 20, alignment: .top)]
 
     var body: some View {
         let registry = appState.paletteRegistry
@@ -74,7 +75,7 @@ struct ExtensionsSettings: View {
                         Text(query.isEmpty && filter == .all ? "No extensions yet." : "No extensions match.")
                             .settingsSecondaryText()
                     }
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
                         ForEach(items) { item in
                             let screenshots = item.screenshots(ref: registry.ref)
                             ExtensionCard(
@@ -236,7 +237,8 @@ private struct RegistryStatus: View {
 /// One extension: its screenshots; glyph, name and a line saying what it is
 /// for, each cut short with an ellipsis so every card is the same size; a
 /// link to its folder on GitHub when it comes from the repository; and a
-/// button saying whether it is installed.
+/// button saying whether it is installed. It has no background or border:
+/// it sits directly on the Settings background.
 private struct ExtensionCard: View {
     @Environment(\.openURL)
     private var openURL
@@ -254,45 +256,42 @@ private struct ExtensionCard: View {
     @State private var page: Int? = 0
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                ScreenshotPager(
-                    screenshots: screenshots,
-                    icon: item.icon,
-                    loader: loader,
-                    page: $page,
-                    maxPixelSize: ScreenshotPager.cardPixelSize,
-                    enlarge: enlarge
-                )
-                HStack(alignment: .center, spacing: 8) {
-                    PaletteIconImage(icon: item.icon, side: 20)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                    Text(item.title)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    // Use a Button, not a `Link`. A bordered `Link` has its
-                    // own height, which is not the height of the Install button.
-                    if let link {
-                        Button { openURL(link) } label: {
-                            ButtonLabel(title: nil, systemImage: "book")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("See its files and README on GitHub")
-                    }
-                    button
-                }
-                Text(item.summary)
-                    .settingsSecondaryText()
-                    .lineLimit(2, reservesSpace: true)
+        VStack(alignment: .leading, spacing: 8) {
+            ScreenshotPager(
+                screenshots: screenshots,
+                icon: item.icon,
+                loader: loader,
+                page: $page,
+                maxPixelSize: ScreenshotPager.cardPixelSize,
+                enlarge: enlarge
+            )
+            HStack(alignment: .center, spacing: 8) {
+                PaletteIconImage(icon: item.icon, side: 20)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                Text(item.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 4)
+                // Use a Button, not a `Link`. A bordered `Link` has its
+                // own height, which is not the height of the Install button.
+                if let link {
+                    Button { openURL(link) } label: {
+                        ButtonLabel(title: nil, systemImage: "book")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("See its files and README on GitHub")
+                }
+                button
             }
-            .padding(4)
+            Text(item.summary)
+                .settingsSecondaryText()
+                .lineLimit(2, reservesSpace: true)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
