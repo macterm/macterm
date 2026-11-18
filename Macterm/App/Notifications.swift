@@ -16,6 +16,10 @@ extension Notification.Name {
     /// destination, `RemoteHosts`). The other lost panes of that host can
     /// attach with no login: `AppState.reconnectDroppedRemotePanes`.
     static let remoteHostDidConnect = Notification.Name("MactermRemoteHostDidConnect")
+    /// A quiet roaming link heard its host again (`object` is the
+    /// destination, `RemoteHosts`). The lost panes of that host try now,
+    /// with no backoff: `AppState.reconnectDroppedRemotePanes`.
+    static let remoteHostDidAnswer = Notification.Name("MactermRemoteHostDidAnswer")
     /// A pane's surface received its first real size (`object` is the
     /// surface's id). A leadership claim before it is refused, so the key
     /// window claims again (#345).

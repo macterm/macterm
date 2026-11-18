@@ -8,7 +8,8 @@ import Foundation
 /// - **It never polls hard.** The sweep runs on triggers, and again every
 ///   few seconds while a pane is lost and the app is active. The backoff
 ///   below bounds how often one pane whose host is still unreachable is
-///   tried: at most once a minute after the first few tries.
+///   tried: at most once a minute after the first few tries. Only a sign
+///   that the host answers again (`hostAnswered`) clears it early.
 /// - **Recovery is judged by survival, not by the attempt.** A respawned ssh
 ///   against a silently dead host can sit in TCP connect for ~75s looking
 ///   "alive" (`processExited == false`) before it fails, so a pane only
@@ -52,6 +53,13 @@ struct RemoteReconnectPolicy {
         if now.timeIntervalSince(state.lastAttempt) >= Self.recoveryGrace {
             states[paneID] = nil
         }
+    }
+
+    /// The pane's host answers again (its quiet roaming link heard it): the
+    /// next sweep may try the pane at once. The streak starts again, so a
+    /// try that still fails backs off from the start.
+    mutating func hostAnswered(_ paneID: UUID) {
+        states[paneID] = nil
     }
 
     /// The pane is gone for good — drop its state.

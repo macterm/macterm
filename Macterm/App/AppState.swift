@@ -1702,6 +1702,10 @@ final class AppState {
         case network
         /// A login brought a host's link back (`.remoteHostDidConnect`).
         case hostConnected
+        /// A quiet roaming link heard its host again
+        /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
+        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).
         case linkStopped
@@ -1727,14 +1731,18 @@ final class AppState {
     /// unreachable host is tried at most once a minute. Active project only;
     /// other projects reconnect via `.projectSelected` when opened. A key in
     /// a lost pane connects at once, with no backoff. `destination`: only
-    /// the panes of this host (`.hostConnected`).
+    /// the panes of this host (`.hostConnected`, `.hostAnswered`). A host
+    /// that answers again (`.hostAnswered`) clears the backoff of its panes:
+    /// it is one event for each heal, so it adds no load while the host is
+    /// down.
     func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
         // or a network change while the user is in another app waits for the
         // activation, which is a trigger too.
-        guard trigger == .activate || trigger == .projectSelected || trigger == .hostConnected || NSApp.isActive else { return }
+        guard trigger == .activate || trigger == .projectSelected || trigger == .hostConnected || trigger == .hostAnswered || NSApp.isActive
+        else { return }
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
         let now = Date()
         var sessions: Set<String> = []
@@ -1746,6 +1754,7 @@ final class AppState {
                 continue
             }
             anyLost = true
+            if trigger == .hostAnswered { reconnectPolicy.hostAnswered(pane.id) }
             // A try runs now: the next sweep judges it.
             guard !pane.isRemoteReconnecting, reconnectPolicy.shouldAttempt(pane.id, now: now) else { continue }
             reconnectPolicy.recordAttempt(pane.id, now: now)
