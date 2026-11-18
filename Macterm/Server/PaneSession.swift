@@ -78,6 +78,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     private static let reconnectTries = 12
     private static let reconnectWait: Duration = .milliseconds(500)
+    /// The most attaches again on one channel for a grid that changed before
+    /// the snapshot came. After them the snapshot is drawn as it is.
+    static let attachAgainLimit = 3
     /// The longest time that `heldInput` waits for the shell after an
     /// attach. A shell with no OSC 133 marks (a plain `sh`) gets the input
     /// after this time.
@@ -266,19 +269,14 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 }
                 tries = 0
                 let grid = host.paneGrid()
-                try channel.send(MactermProtocol.Attach(
-                    cols: grid.cols, rows: grid.rows,
-                    xpixel: Self.clamp(grid.widthPx), ypixel: Self.clamp(grid.heightPx),
-                    foreground: wantsForeground,
-                    tty: wantsTty
-                ))
+                try sendAttach(channel, grid)
                 if firstAttach {
                     host.paneFeed(Self.resetScreen)
                     firstAttach = false
                 }
                 if markAttached(channel) { claim(grid: nil) }
                 let started = Date()
-                if await read(channel, reconnected: reconnected) { return }
+                if await read(channel, reconnected: reconnected, attachedAt: grid) { return }
                 reconnected = true
                 // A channel that ends at once counts as a failed try, so a
                 // server that drops each channel does not make a tight loop.
@@ -315,14 +313,45 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         }
     }
 
+    private func sendAttach(_ channel: PaneChannel, _ grid: PaneGrid) throws {
+        try channel.send(MactermProtocol.Attach(
+            cols: grid.cols, rows: grid.rows,
+            xpixel: Self.clamp(grid.widthPx), ypixel: Self.clamp(grid.heightPx),
+            foreground: wantsForeground,
+            tty: wantsTty
+        ))
+    }
+
     /// Reads events until the channel ends. True when the session ended (an
     /// exit) or the reading was cancelled.
-    private func read(_ channel: PaneChannel, reconnected: Bool) async -> Bool {
+    ///
+    /// The snapshot that answers an attach is laid out at the grid of the
+    /// attach, with the cursor at an absolute row and column. A restored pane
+    /// attaches in the incubator and then moves into its tile, often before
+    /// the snapshot comes. Drawn at another grid, the snapshot wraps on other
+    /// rows, the cursor lands on the wrong line, and the shell's redraw for
+    /// the resize writes over lines or erases the last ones. So the snapshot
+    /// is held until its end, and when the grid changed while this client
+    /// leads, it is dropped and the client attaches again at the new grid.
+    /// The output between the two snapshots is dropped too: the second
+    /// snapshot has it.
+    private func read(_ channel: PaneChannel, reconnected: Bool, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
+        var leads = false
+        /// The grid of the last attach, while its snapshot has not come.
+        var attachGrid: PaneGrid? = grid
+        var attachesAgain = 0
+        /// The bytes of the snapshot that is in progress.
+        var held: Data?
+        var dropsOutput = false
         for await event in channel.events {
             switch event {
             case let .output(data):
-                host.paneFeed(data)
+                if held != nil {
+                    held?.append(data)
+                } else if !dropsOutput {
+                    host.paneFeed(data)
+                }
             case .snapshotStart:
                 // The first snapshot comes over the cleared screen. One after
                 // a lost link comes over the old screen: clear it first.
@@ -330,10 +359,34 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     host.paneFeed(Self.resetScreen)
                     needsReset = false
                 }
-                host.paneSnapshot(started: true)
+                dropsOutput = false
+                held = Data()
             case .snapshotEnd:
+                let bytes = held ?? Data()
+                held = nil
+                let now = host.paneGrid()
+                if leads, let laidOut = attachGrid, laidOut.cols != now.cols || laidOut.rows != now.rows,
+                   attachesAgain < Self.attachAgainLimit
+                {
+                    attachesAgain += 1
+                    attachGrid = now
+                    dropsOutput = true
+                    logger.info(
+                        "pane \(self.name, privacy: .public): grid \(laidOut.cols, privacy: .public)x\(laidOut.rows, privacy: .public) became \(now.cols, privacy: .public)x\(now.rows, privacy: .public) before the snapshot, attach again"
+                    )
+                    // On the queue of the sizes, so that it goes after a
+                    // resize that waits there.
+                    send { [self] in try sendAttach($0, now) }
+                    continue
+                }
+                attachGrid = nil
+                host.paneSnapshot(started: true)
+                if !bytes.isEmpty { host.paneFeed(bytes) }
                 host.paneSnapshot(started: false)
+            case .resumed:
+                attachGrid = nil
             case let .lead(leader):
+                leads = leader
                 // A client that starts to lead sends its size.
                 if leader { sendSize(nil) }
                 host.paneLead(leader)
@@ -353,7 +406,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 releaseHeldInput()
             case .mark,
                  .state,
-                 .resumed,
                  .title,
                  .other:
                 break
