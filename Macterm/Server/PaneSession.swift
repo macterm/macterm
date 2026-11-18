@@ -78,8 +78,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     private static let reconnectTries = 12
     private static let reconnectWait: Duration = .milliseconds(500)
-    /// The most attaches again on one channel for a grid that changed before
-    /// the snapshot came. After them the snapshot is drawn as it is.
+    /// The limit of new attaches on one channel for a grid that changes
+    /// before its snapshot. After the limit, the snapshot is drawn.
     static let attachAgainLimit = 3
     /// The longest time that `heldInput` waits for the shell after an
     /// attach. A shell with no OSC 133 marks (a plain `sh`) gets the input
@@ -325,20 +325,17 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// Reads events until the channel ends. True when the session ended (an
     /// exit) or the reading was cancelled.
     ///
-    /// The snapshot that answers an attach is laid out at the grid of the
-    /// attach, with the cursor at an absolute row and column. A restored pane
-    /// attaches in the incubator and then moves into its tile, often before
-    /// the snapshot comes. Drawn at another grid, the snapshot wraps on other
-    /// rows, the cursor lands on the wrong line, and the shell's redraw for
-    /// the resize writes over lines or erases the last ones. So the snapshot
-    /// is held until its end, and when the grid changed while this client
-    /// leads, it is dropped and the client attaches again at the new grid.
-    /// The output between the two snapshots is dropped too: the second
-    /// snapshot has it.
+    /// The snapshot of an attach is laid out at the attach's grid, with the
+    /// cursor at an absolute row. Drawn at another grid, it puts the cursor
+    /// on the wrong line, and the shell's redraw writes over lines (0430).
+    /// So it is held until its end. When the grid changed while this client
+    /// leads, it is dropped with the output after it, and the client attaches
+    /// again at the new grid. The second snapshot has that output.
     private func read(_ channel: PaneChannel, reconnected: Bool, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
         var leads = false
-        // The grid of the last attach, while its snapshot has not come.
+        // The grid of the last attach, until its snapshot or the first
+        // output: an attach to a session with no output gets no snapshot.
         var attachGrid: PaneGrid? = grid
         var attachesAgain = 0
         // The bytes of the snapshot that is in progress.
@@ -350,6 +347,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 if held != nil {
                     held?.append(data)
                 } else if !dropsOutput {
+                    attachGrid = nil
                     host.paneFeed(data)
                 }
             case .snapshotStart:
@@ -365,8 +363,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 let bytes = held ?? Data()
                 held = nil
                 let now = host.paneGrid()
+                // The server ignores an attach of size 0.
                 if leads, let laidOut = attachGrid, laidOut.cols != now.cols || laidOut.rows != now.rows,
-                   attachesAgain < Self.attachAgainLimit
+                   now.cols > 0, now.rows > 0, attachesAgain < Self.attachAgainLimit
                 {
                     attachesAgain += 1
                     attachGrid = now
@@ -382,8 +381,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 host.paneSnapshot(started: true)
                 if !bytes.isEmpty { host.paneFeed(bytes) }
                 host.paneSnapshot(started: false)
-            case .resumed:
-                attachGrid = nil
             case let .lead(leader):
                 leads = leader
                 // A client that starts to lead sends its size.
@@ -405,6 +402,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 releaseHeldInput()
             case .mark,
                  .state,
+                 .resumed,
                  .title,
                  .other:
                 break
