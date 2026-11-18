@@ -402,7 +402,7 @@ final class PreviewSurfaceContainer: NSView {
         configObserver = NotificationCenter.default.addObserver(
             forName: .mactermConfigDidChange, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.paintBackground() }
+            MainActor.assumeIsolated { self?.paintTheme() }
         }
     }
 
@@ -420,10 +420,10 @@ final class PreviewSurfaceContainer: NSView {
     }
 
     override func updateLayer() {
-        paintBackground()
+        paintTheme()
     }
 
-    private func paintBackground() {
+    private func paintTheme() {
         layer?.backgroundColor = GhosttyApp.shared.backgroundColor.cgColor
         layer?.borderColor = MactermTheme.nsBorder.cgColor
     }
@@ -431,6 +431,8 @@ final class PreviewSurfaceContainer: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverTracking { removeTrackingArea(hoverTracking) }
+        // Only the scroll preview has a scroller to show.
+        guard preview.kind == .scroll else { return }
         let area = NSTrackingArea(
             rect: .zero,
             options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],

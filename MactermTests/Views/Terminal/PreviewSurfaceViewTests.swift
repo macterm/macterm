@@ -84,6 +84,7 @@ struct PreviewSurfaceViewTests {
     func containerRepaintsOnAConfigChange() async throws {
         let container = PreviewSurfaceContainer(kind: .cursor)
         container.layer?.backgroundColor = nil
+        container.layer?.borderColor = nil
         NotificationCenter.default.post(name: .mactermConfigDidChange, object: nil)
         // The observer runs on the main queue: wait for it, with a sleep so
         // the queue gets its turn.
@@ -98,6 +99,7 @@ struct PreviewSurfaceViewTests {
         let container = PreviewSurfaceContainer(kind: .cursor)
         container.updateLayer()
         #expect(container.layer?.backgroundColor == GhosttyApp.shared.backgroundColor.cgColor)
+        #expect(container.layer?.borderColor == MactermTheme.nsBorder.cgColor)
     }
 
     @Test
