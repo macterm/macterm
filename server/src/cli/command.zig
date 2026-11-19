@@ -23,17 +23,30 @@ pub const Argument = struct {
     name: []const u8,
     abstract: []const u8,
     optional: bool = false,
+    /// Takes every word that is left. Only the last argument repeats.
+    repeating: bool = false,
+    /// Takes the words that are not options of the command, too, and the
+    /// first `--` (ArgumentParser's `.allUnrecognized`): the command reads
+    /// them itself (`pane run`).
+    unrecognized: bool = false,
 };
 
 pub const Command = struct {
     name: []const u8,
     abstract: []const u8,
+    /// Paragraphs after the overview in the help. A line that starts with a
+    /// space is written as it is; another line is wrapped.
+    discussion: ?[]const u8 = null,
+    /// The usage line, in place of the one made from the options.
+    usage: ?[]const u8 = null,
     /// Not in the help of its parent.
     hidden: bool = false,
     /// Every command also takes `-h` and `--help` (`help_option`).
     options: []const Option = &.{},
     arguments: []const Argument = &.{},
     subcommands: []const *const Command = &.{},
+    /// The subcommand that runs when a group is given alone.
+    default: ?*const Command = null,
 
     pub fn subcommand(c: *const Command, name: []const u8) ?*const Command {
         for (c.subcommands) |sub| {
@@ -95,7 +108,17 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
     if (path.items.len == 2 and std.mem.eql(u8, path.items[1].name, "help") and path.items[1].hidden)
         return helpCommand(arena, root, words[i..]);
 
+    // A group with a default runs it, unless the words ask for the
+    // group's help.
+    if (path.items[path.items.len - 1].default) |d| {
+        for (words[i..]) |word| {
+            if (std.mem.eql(u8, word, "--")) break;
+            if (std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help")) return .{ .help = path.items };
+        }
+        try path.append(arena, d);
+    }
     const command = path.items[path.items.len - 1];
+    const unrecognized = command.arguments.len > 0 and command.arguments[command.arguments.len - 1].unrecognized;
 
     const values = try arena.alloc(?[]const u8, command.options.len);
     @memset(values, null);
@@ -105,14 +128,20 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
         const word = words[i];
         if (!only_positionals and std.mem.eql(u8, word, "--")) {
             only_positionals = true;
+            if (unrecognized) try positionals.append(arena, word);
             continue;
         }
         if (!only_positionals and isOption(word)) {
             if (std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help")) return .{ .help = path.items };
             const eq = std.mem.indexOfScalar(u8, word, '=');
             const name = if (eq) |e| word[0..e] else word;
-            const index = optionIndex(command, name) orelse
+            const index = optionIndex(command, name) orelse {
+                if (unrecognized) {
+                    try positionals.append(arena, word);
+                    continue;
+                }
                 return usageError(arena, path.items, "Unknown option '{s}'", .{name});
+            };
             const o = command.options[index];
             if (o.value == null) {
                 if (eq != null) return usageError(arena, path.items, "Unknown option '{s}'", .{word});
@@ -136,9 +165,10 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
         // A group given alone prints its help, as ArgumentParser does.
         return .{ .help = path.items };
     }
-    if (positionals.items.len > command.arguments.len)
+    const repeats = command.arguments.len > 0 and command.arguments[command.arguments.len - 1].repeating;
+    if (!repeats and positionals.items.len > command.arguments.len)
         return usageError(arena, path.items, "Unexpected argument '{s}'", .{positionals.items[command.arguments.len]});
-    for (command.arguments[positionals.items.len..]) |a| {
+    for (command.arguments[@min(positionals.items.len, command.arguments.len)..]) |a| {
         if (!a.optional) return usageError(arena, path.items, "Missing expected argument '<{s}>'", .{a.name});
     }
     return .{ .run = .{ .path = path.items, .values = values, .positionals = positionals.items } };
@@ -184,6 +214,9 @@ fn usageError(arena: std.mem.Allocator, path: []const *const Command, comptime f
 
 /// The width that help wraps at, as the v1 CLI with `COLUMNS=80`.
 const width = 80;
+/// A line of the discussion or of a subcommand row is one column shorter, as
+/// ArgumentParser wraps them.
+const short_width = width - 1;
 /// The column where the abstract of a row starts.
 const abstract_column = 26;
 
@@ -198,10 +231,12 @@ pub fn writeCommandLine(w: *std.Io.Writer, path: []const *const Command) std.Io.
 /// The usage line, without `USAGE: `.
 pub fn writeUsage(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
+    if (c.usage) |u| return w.writeAll(u);
     try writeCommandLine(w, path);
     if (c.subcommands.len > 0) return w.writeAll(" <subcommand>");
     for (c.arguments) |a| {
-        if (a.optional) try w.print(" [<{s}>]", .{a.name}) else try w.print(" <{s}>", .{a.name});
+        const dots: []const u8 = if (a.repeating) " ..." else "";
+        if (a.optional) try w.print(" [<{s}>{s}]", .{ a.name, dots }) else try w.print(" <{s}>{s}", .{ a.name, dots });
     }
     for (c.options) |o| {
         if (o.value) |v| try w.print(" [{s} <{s}>]", .{ o.long(), v }) else try w.print(" [{s}]", .{o.long()});
@@ -220,8 +255,18 @@ pub fn writeUsageError(w: *std.Io.Writer, path: []const *const Command, message:
 /// The `--help` text of the last command of `path`.
 pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
-    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0);
+    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, width);
     try w.writeByte('\n');
+    if (c.discussion) |d| {
+        var lines = std.mem.splitScalar(u8, d, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0 or line[0] == ' ') {
+                try w.writeAll(line);
+                try w.writeByte('\n');
+            } else try writeWrapped(w, "", line, 0, short_width);
+        }
+        try w.writeByte('\n');
+    }
     try w.writeAll("USAGE: ");
     try writeUsage(w, path);
     try w.writeAll("\n\n");
@@ -230,7 +275,7 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
         try w.writeAll("ARGUMENTS:\n");
         for (c.arguments) |a| {
             var label: [64]u8 = undefined;
-            try writeRow(w, std.fmt.bufPrint(&label, "<{s}>", .{a.name}) catch a.name, a.abstract);
+            try writeRow(w, std.fmt.bufPrint(&label, "<{s}>", .{a.name}) catch a.name, a.abstract, width);
         }
         try w.writeByte('\n');
     }
@@ -244,7 +289,9 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
         try w.writeAll("SUBCOMMANDS:\n");
         for (c.subcommands) |sub| {
             if (sub.hidden) continue;
-            try writeRow(w, sub.name, sub.abstract);
+            var label: [64]u8 = undefined;
+            const name = if (c.default == sub) std.fmt.bufPrint(&label, "{s} (default)", .{sub.name}) catch sub.name else sub.name;
+            try writeRow(w, name, sub.abstract, short_width);
         }
         try w.writeAll("\n  See '");
         try w.writeAll(path[0].name);
@@ -262,12 +309,12 @@ fn writeOption(w: *std.Io.Writer, o: Option) std.Io.Writer.Error!void {
         label.writeAll(n) catch {};
     }
     if (o.value) |v| label.print(" <{s}>", .{v}) catch {};
-    try writeRow(w, label.buffered(), o.abstract);
+    try writeRow(w, label.buffered(), o.abstract, width);
 }
 
 /// One row of a section: the label at column 2 and the abstract at column
 /// 26, on the next line when the label does not leave room.
-fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8) std.Io.Writer.Error!void {
+fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8, max: usize) std.Io.Writer.Error!void {
     try w.writeAll("  ");
     try w.writeAll(label);
     if (2 + label.len + 2 > abstract_column) {
@@ -276,19 +323,21 @@ fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8) std.Io.W
     } else {
         try w.splatByteAll(' ', abstract_column - 2 - label.len);
     }
-    try writeWrapped(w, "", abstract, abstract_column);
+    try writeWrapped(w, "", abstract, abstract_column, max);
 }
 
-/// Writes `prefix` and `text`, wrapped at `width` on spaces, and a newline.
+/// Writes `prefix` and `text`, wrapped on spaces so that a line holds at
+/// most `max` columns, and a newline.
 /// A line after the first starts with `indent` spaces; the caller wrote the
 /// first `indent` columns of the first line.
-fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent: usize) std.Io.Writer.Error!void {
+fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent: usize, max: usize) std.Io.Writer.Error!void {
     try w.writeAll(prefix);
     var column = indent + prefix.len;
     var words = std.mem.tokenizeScalar(u8, text, ' ');
     var line_start = true;
     while (words.next()) |word| {
-        if (!line_start and column + 1 + word.len > width) {
+        const cells = std.unicode.utf8CountCodepoints(word) catch word.len;
+        if (!line_start and column + 1 + cells > max) {
             try w.writeByte('\n');
             try w.splatByteAll(' ', indent);
             column = indent;
@@ -299,7 +348,7 @@ fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent:
             column += 1;
         }
         try w.writeAll(word);
-        column += word.len;
+        column += cells;
         line_start = false;
     }
     try w.writeByte('\n');
@@ -380,8 +429,8 @@ test "a usage error prints the usage line and where to find help" {
 test "a long abstract wraps at column 80 under column 26" {
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
-    try writeRow(&w, "status", "Show whether Macterm is running and which project is active.");
-    try writeRow(&w, "--a-very-long-option <value>", "Text.");
+    try writeRow(&w, "status", "Show whether Macterm is running and which project is active.", short_width);
+    try writeRow(&w, "--a-very-long-option <value>", "Text.", width);
     try testing.expectEqualStrings(
         \\  status                  Show whether Macterm is running and which project is
         \\                          active.

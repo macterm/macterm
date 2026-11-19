@@ -21,6 +21,7 @@ const runtime = @import("runtime.zig");
 const terminal = @import("terminal.zig");
 const events = @import("events.zig");
 const foreground = @import("foreground.zig");
+const chord = @import("chord.zig");
 const protocol = @import("protocol/protocol.zig");
 const ghostty_vt = terminal.ghostty_vt;
 const frame = protocol.frame;
@@ -56,6 +57,8 @@ pub const max_cells = 1000;
 
 /// A snapshot goes out in `bytes` frames of at most this size.
 const snapshot_chunk = 64 * 1024;
+/// The most text that `history` holds: it must fit the server's frame.
+const history_max = 960 * 1024;
 
 pub const Options = struct {
     name: []const u8,
@@ -695,6 +698,20 @@ const Session = struct {
         } else if (std.mem.eql(u8, msg.t, m.Seen.name)) {
             s.watch.seen();
             s.sendEvents();
+        } else if (std.mem.eql(u8, msg.t, m.Key.name)) {
+            const k = try m.decodePane(m.Key, arena, msg);
+            const parsed = chord.parse(k.chord) orelse return;
+            var buf: [128]u8 = undefined;
+            var w: std.Io.Writer = .fixed(&buf);
+            chord.encode(&w, parsed, &s.watch.term) catch return;
+            s.queueInput(w.buffered());
+        } else if (std.mem.eql(u8, msg.t, m.HistoryRead.name)) {
+            const r = try m.decodePane(m.HistoryRead, arena, msg);
+            const text = terminal.plainText(arena, &s.watch.term, r.scrollback, history_max) catch
+                terminal.PlainText{ .text = "", .truncated = false };
+            s.sendPane(c, m.History, .{ .text = .{ .bytes = text.text }, .truncated = text.truncated });
+        } else if (std.mem.eql(u8, msg.t, m.InspectRead.name)) {
+            s.sendPane(c, m.Inspect, .{ .terminal = s.terminalState(arena) });
         } else if (std.mem.eql(u8, msg.t, m.Take.name)) {
             if (s.exited() != null) {
                 std.log.info("session {s}: exit status taken", .{s.name});
@@ -955,6 +972,39 @@ const Session = struct {
         }
     }
 
+    /// What `session.inspect` answers.
+    fn terminalState(s: *Session, arena: std.mem.Allocator) m.TerminalState {
+        const term = &s.watch.term;
+        const bar = term.screens.active.pages.scrollbar();
+        var out: m.TerminalState = .{
+            .cols = term.cols,
+            .rows = term.rows,
+            .scrollback_total = bar.total,
+            .scrollback_offset = bar.offset,
+            .scrollback_len = bar.len,
+            .alt_screen = term.screens.active_key == .alternate,
+            .exited = s.exited() != null,
+        };
+        if (s.pty_closed) return out;
+        var pgrp: lib_posix.pid_t = 0;
+        if (cross.ioctl(s.pty_fd, cross.TIOCGPGRP, &pgrp) != 0 or pgrp <= 0) return out;
+        out.foreground_pid = pgrp;
+        out.busy = pgrp != s.shell_pid;
+        if (!foreground.supported) return out;
+        var comm_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var args_buf: [foreground.args_max]u8 = undefined;
+        var scratch: [8192]u8 = undefined;
+        const process = foreground.readProcess(s.gpa, pgrp, &comm_buf, &args_buf, &scratch, 0) orelse return out;
+        var argv: std.ArrayList(msgpack.Bin) = .empty;
+        var words = std.mem.splitScalar(u8, process.args, 0);
+        while (words.next()) |word| {
+            const copy = arena.dupe(u8, word) catch return out;
+            argv.append(arena, .{ .bytes = copy }) catch return out;
+        }
+        if (process.args.len > 0) out.foreground_argv = argv.items;
+        return out;
+    }
+
     /// Reads the pty's foreground process group and, when it changed, sends
     /// `foreground` to every client that asked for it. One ioctl when nothing
     /// changed. With no such client, nothing is read: a client that asks
@@ -987,7 +1037,7 @@ const Session = struct {
         var comm_buf: [std.fs.max_path_bytes]u8 = undefined;
         var args_buf: [foreground.args_max]u8 = undefined;
         var scratch: [8192]u8 = undefined;
-        const process = foreground.readProcess(s.gpa, pgrp, &comm_buf, &args_buf, &scratch) orelse {
+        const process = foreground.readProcess(s.gpa, pgrp, &comm_buf, &args_buf, &scratch, ' ') orelse {
             std.log.info("session {s}: foreground pgid={d} has no readable leader", .{ s.name, pgrp });
             return;
         };

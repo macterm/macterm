@@ -43,6 +43,12 @@ The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resource
 
   The CLI does not read `MACTERM_SOCKET`, because that variable names the app's `control.sock`.
 - The CLI sends `hello` with the role `cli`. A server of another build refuses it. The CLI then exits with 1 and shows the two builds. The server's pid comes from the socket (`runtime.peerPid`), not from the server.
+- **The pane verbs act on one session.** `--session` names it. With no `--session`, `MACTERM_SESSION` names it, but not when `--tab` or `--pane` is given (v1's rule). `--project`, `--tab` and `--pane` name a pane in the model (design/010): until the model moves to the server, they fail with exit 1.
+- **The session methods need no GUI.** `pane run` sends `session.send`, `pane key` sends `session.key`, `pane dump` sends `session.history` and `pane inspect` sends `session.inspect`. The server gives each one to the session process, which answers from its own terminal.
+  - `session.send` types the text as it is, with no paste brackets, as v1 typed it. Before `--`, `pane run` refuses a word that starts with a dash (exit 64).
+  - The session encodes the chord of `session.key` with the key modes of its terminal (`chord.zig`, ghostty-vt's key encoder). The grammar is the keybind grammar of the app (`HotkeyRegistry.parseShortcut`).
+  - `session.history` holds at most 960 KiB, because a session's frame to the server is at most 1 MiB. Longer text keeps its end, and the CLI says so on stderr.
+  - The cell size, the surface size, the content scale and read-only are the GUI's: `pane inspect` prints `-` for them, and `pane run` refuses no read-only pane yet. `session.key` treats Option as Alt, Macterm's default. The pane column of `session list` is `-` until the model.
 - **Use a streaming writer for output** (`writerStreaming`). A positional writer writes at the start of a file, also when the shell opened the file to append.
 
 ## The roaming link (design/009, issue 0201)

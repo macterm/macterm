@@ -232,6 +232,10 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
             registry.wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .info });
         },
         m.SessionKill => registry.kill(s, p, re, args.id),
+        m.SessionSend => registry.send(s, p, re, args),
+        m.SessionKey => registry.sendKey(s, p, re, args),
+        m.SessionHistory => registry.readHistory(s, p, re, args),
+        m.SessionInspect => registry.readInspect(s, p, re, args.id),
         m.PaneSeen => {
             const e = registry.findEntry(s, args.id) orelse
                 return replyError(s, p.id, re, .not_found, "No session has this id.");

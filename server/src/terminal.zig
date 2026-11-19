@@ -202,6 +202,34 @@ pub fn serializeTerminalState(alloc: std.mem.Allocator, term: *ghostty_vt.Termin
     return serializeState(alloc, term, true);
 }
 
+pub const PlainText = struct { text: []const u8, truncated: bool };
+
+/// The text of the active screen (`session.history`): the viewport, or the
+/// scrollback and the screen. Soft-wrapped rows are one line, and trailing
+/// spaces go, as the app's `readText` gives them. Text over `max` bytes
+/// keeps its end, from the start of a line.
+pub fn plainText(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal, scrollback: bool, max: usize) !PlainText {
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    var fmt = ghostty_vt.formatter.TerminalFormatter.init(term, .plain);
+    fmt.opts.unwrap = true;
+    if (!scrollback) {
+        const pages = &term.screens.active.pages;
+        const tl = pages.pin(.{ .viewport = .{ .x = 0, .y = 0 } });
+        const br = pages.pin(.{ .viewport = .{ .x = @intCast(pages.cols - 1), .y = @intCast(pages.rows - 1) } });
+        if (tl != null and br != null) fmt.content = .{ .selection = ghostty_vt.Selection.init(tl.?, br.?, false) };
+    }
+    try fmt.format(&out.writer);
+    const text = out.written();
+    if (text.len <= max) return .{ .text = text, .truncated = false };
+    var start = text.len - max;
+    if (text[start - 1] != '\n') if (std.mem.indexOfScalarPos(u8, text, start, '\n')) |nl| {
+        start = nl + 1;
+    };
+    // A UTF-8 continuation byte is never a start.
+    while (start < text.len and text[start] & 0xC0 == 0x80) start += 1;
+    return .{ .text = text[start..], .truncated = true };
+}
+
 /// The visible screen and the terminal's modes, with no scrollback. A client
 /// that fell behind already has the scrollback up to the point where its
 /// output was dropped; the rows that it missed are read by range. The screen
@@ -1165,4 +1193,38 @@ test "serializeTerminalState keeps a soft-wrapped line on the visible screen who
     const screen = try wide.plainString(alloc);
     defer alloc.free(screen);
     try testing.expect(std.mem.indexOf(u8, screen, "abcdefghijklmnopqrstuvwxy\n") != null);
+}
+
+test "plainText: the viewport alone, or the scrollback too" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var term = try testCreateTerminal(testing.allocator, testing.io, 10, 3, "one\r\ntwo\r\nthree\r\nfour   \r\n$ ");
+    defer term.deinit(testing.allocator);
+    const screen = try plainText(a, &term, false, 1024);
+    try testing.expectEqualStrings("three\nfour\n$", screen.text);
+    try testing.expect(!screen.truncated);
+    const all = try plainText(a, &term, true, 1024);
+    try testing.expectEqualStrings("one\ntwo\nthree\nfour\n$", all.text);
+}
+
+test "plainText: a soft-wrapped row is one line" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var term = try testCreateTerminal(testing.allocator, testing.io, 5, 3, "abcdefgh");
+    defer term.deinit(testing.allocator);
+    try testing.expectEqualStrings("abcdefgh", (try plainText(arena.allocator(), &term, false, 1024)).text);
+}
+
+test "plainText: text over the limit keeps its end from a line start" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var term = try testCreateTerminal(testing.allocator, testing.io, 10, 5, "line1\r\nline2\r\nline3\r\nline4");
+    defer term.deinit(testing.allocator);
+    const cut = try plainText(arena.allocator(), &term, true, 13);
+    try testing.expect(cut.truncated);
+    try testing.expectEqualStrings("line3\nline4", cut.text);
+    // A cut at a line start keeps that line.
+    const exact = try plainText(arena.allocator(), &term, true, 11);
+    try testing.expectEqualStrings("line3\nline4", exact.text);
 }
