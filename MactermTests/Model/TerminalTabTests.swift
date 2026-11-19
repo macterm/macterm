@@ -657,12 +657,12 @@ struct TerminalTabTests {
     func split_threads_command_into_new_pane() throws {
         let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
         let aID = try #require(ids["a"])
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: aID, direction: .vertical, command: "btop"))
+        let newID = try #require(ModelWriter.paneSplit(tab, paneID: aID, direction: .vertical, command: .typed("btop")))
         let newPane = try #require(tab.splitRoot.findPane(id: newID))
-        #expect(newPane.command == "btop")
+        #expect(newPane.start == .typed("btop"))
         // The source pane's command is untouched.
         let sourcePane = try #require(tab.splitRoot.findPane(id: aID))
-        #expect(sourcePane.command == nil)
+        #expect(sourcePane.start == nil)
     }
 
     // MARK: - makeGrid
@@ -671,16 +671,16 @@ struct TerminalTabTests {
     func makeGrid_creates_rows_times_cols_panes() throws {
         let tab = TerminalTab(projectPath: "/", projectID: UUID())
         let source = try #require(tab.focusedPaneID)
-        let created = ModelWriter.paneGrid(tab, paneID: source, rows: 2, columns: 3, command: "yes")
+        let created = ModelWriter.paneGrid(tab, paneID: source, rows: 2, columns: 3, command: .typed("yes"))
         #expect(created.count == 5)
         #expect(tab.splitRoot.allPanes().count == 6)
         // Every NEW pane carries the command; the source pane doesn't.
         for id in created {
             let newPane = try #require(tab.splitRoot.findPane(id: id))
-            #expect(newPane.command == "yes")
+            #expect(newPane.start == .typed("yes"))
         }
         let sourcePane = try #require(tab.splitRoot.findPane(id: source))
-        #expect(sourcePane.command == nil)
+        #expect(sourcePane.start == nil)
         // Focus returns to the source (top-left) pane.
         #expect(tab.focusedPaneID == source)
     }

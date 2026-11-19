@@ -234,6 +234,49 @@ struct PaneSessionTests {
         }
     }
 
+    @Test
+    func a_grid_that_changes_before_the_snapshot_gets_a_snapshot_for_the_new_grid() async throws {
+        // A restored pane attaches in the incubator, then moves into its
+        // tile before the snapshot comes. A snapshot laid out for the
+        // incubator puts the cursor on the wrong row of the tile.
+        try await withServer { server in
+            let name = "ps-regrid-\(UInt32.random(in: 0 ... .max))"
+            let wide = PaneGrid(cols: 100, rows: 10)
+            let first = RecordingPaneHost(grid: wide)
+            let a = PaneSession(
+                name: name,
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf '%060d\\n' 0; printf END; sleep 60"],
+                    env: []
+                ),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.screen.contains("END") }
+            a.stop()
+
+            let narrow = PaneGrid(cols: 30, rows: 10)
+            let box = SessionBox()
+            let second = RecordingPaneHost(grid: wide) { [box] in
+                box.host?.setGrid(narrow)
+                box.session?.sendSize(narrow)
+            }
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            box.set(session: b, host: second)
+            b.start()
+            try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
+            // At 30 columns the line of 60 takes rows 1 and 2, and END is on
+            // row 3. At 100 columns it would be on row 2.
+            let drawn = second.snapshot().snapshots
+            #expect(drawn.count == 1)
+            #expect(drawn.last?.contains("\u{1B}[3;4H") == true, "\(drawn.last.debugDescription)")
+            b.stop()
+        }
+    }
+
     // MARK: - Input before the shell starts
 
     /// A shell that prints its prompt mark after a delay, as a login shell
@@ -407,6 +450,29 @@ struct PaneSessionTests {
     }
 
     // MARK: - Support
+
+    /// The session and host of a test, for a host's hook.
+    final class SessionBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: (PaneSession, RecordingPaneHost)?
+        var session: PaneSession? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored?.0
+        }
+
+        var host: RecordingPaneHost? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored?.1
+        }
+
+        func set(session: PaneSession, host: RecordingPaneHost) {
+            lock.lock()
+            stored = (session, host)
+            lock.unlock()
+        }
+    }
 
     /// Holds the connection that a session got, so that a test can end it.
     final class ConnectionBox: @unchecked Sendable {

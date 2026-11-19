@@ -69,7 +69,7 @@ struct DesktopWidgetTests {
         let after = try #require(widget.pane)
         #expect(after !== before)
         #expect(after.sessionName != before.sessionName)
-        #expect(after.command == "htop")
+        #expect(after.start == .typed("htop"))
         #expect(widget.tab.splitRoot.allPanes().count == 1)
     }
 

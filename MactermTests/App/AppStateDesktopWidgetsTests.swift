@@ -325,7 +325,7 @@ struct AppStateDesktopWidgetsTests {
         #expect(await killed.names == [oldSession])
         let newSession = try #require(widget.pane?.sessionName)
         #expect(newSession != oldSession)
-        #expect(widget.pane?.command == "htop")
+        #expect(widget.pane?.start == .typed("htop"))
         let saved = try #require(savedWidgets(storeURL).first)
         let restored = WorkspaceSerializer.restoreTab(saved.tab, projectID: DesktopWidget.projectID)
         #expect(restored.splitRoot.allPanes().map(\.sessionName) == [newSession])
@@ -673,7 +673,7 @@ extension AppStateDesktopWidgetsTests {
         let added = try #require(state.desktopWidgets.last)
         #expect(added.span == DesktopWidgetSpan.small)
         #expect(added.topLeft == DesktopWidgetGrid.topLeft(column: 5, row: 2, in: Self.screen))
-        #expect(added.pane?.command == "htop")
+        #expect(added.pane?.start == .typed("htop"))
         await killed.settle(expecting: 1)
         #expect(await killed.names.contains(droppedSession))
     }
@@ -767,7 +767,7 @@ extension AppStateDesktopWidgetsTests {
         #expect(state.desktopWidget(id: survivor.id)?.pane?.sessionName == survivorSession)
         let respawned = try #require(state.desktopWidget(id: lost.id)?.pane)
         #expect(respawned.sessionName != lostSession)
-        #expect(respawned.command == "htop")
+        #expect(respawned.start == .typed("htop"))
         #expect(presenter.syncs.last?.ids == [survivor.id, lost.id])
     }
 

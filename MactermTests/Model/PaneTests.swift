@@ -82,7 +82,7 @@ struct PaneTests {
 
     @Test
     func layoutCommand_tracksInitialForegroundBeforeUserInteraction() {
-        let p = Pane(projectPath: "/", projectID: UUID(), command: "npm test")
+        let p = Pane(projectPath: "/", projectID: UUID(), start: .typed("npm test"))
         p.applyForegroundRefresh(name: "npm", foregroundPID: 42)
         #expect(p.executionState == .running)
     }

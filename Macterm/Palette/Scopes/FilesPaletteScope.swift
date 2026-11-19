@@ -229,7 +229,7 @@ enum FilesPaletteActions {
         // A directory URL's path ends in `/`; stored as every project path
         // is, without it (a trailing slash in `$PWD` is fatal to nushell).
         let path = ProjectPath.normalizedForStorage(url.path(percentEncoded: false))
-        let command: String? = isDirectory ? nil : TextFileEditor.typedCommand
+        let command: PaneStartCommand? = isDirectory ? nil : .typed(TextFileEditor.typedCommand)
         let env: [String: String]? = isDirectory ? nil : TextFileEditor.environment(path: path, line: nil)
         let directory = isDirectory ? path : nil
         guard let pane = appState.focusedPane(for: project.id) else {

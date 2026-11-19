@@ -3,8 +3,9 @@ import os
 
 private let logger = Logger(subsystem: appBundleID, category: "ExtensionAutoUpdater")
 
-/// Settings → Extensions → Update extensions automatically
-/// (`Preferences.autoUpdateExtensions`, on by default).
+/// Updates the installed extensions with no click. There is no setting:
+/// it always runs, and Macterm ignores a stored value of the old
+/// `macterm.extensions.autoUpdate` key.
 ///
 /// It applies only the updates that the card would apply with no question
 /// (`ExtensionGalleryItem.Update.available`): copies that the user did not
@@ -12,18 +13,16 @@ private let logger = Logger(subsystem: appBundleID, category: "ExtensionAutoUpda
 /// a copy with no record, waits for a click on its card, as before. So an
 /// automatic update never discards changes of the user's own.
 ///
-/// It reads the repository at launch, once a day after that, and at once
-/// when the user turns the setting on. This is the one read of the
-/// repository outside Settings → Extensions, and only when the setting is
-/// on. Each update moves the old folder to the Trash, as a click does, and
-/// a toast names what changed.
+/// It reads the repository at launch and once a day after that. This is
+/// the one read of the repository outside Settings → Extensions. Each
+/// update moves the old folder to the Trash, as a click does, and a toast
+/// names what changed.
 @MainActor
 final class ExtensionAutoUpdater {
     static let interval: Duration = .seconds(24 * 60 * 60)
 
     private let registry: PaletteRegistry
     private let store: CustomPaletteStore
-    private let isEnabled: () -> Bool
     private let announce: ([String]) -> Void
     private var loop: Task<Void, Never>?
     private var isRunning = false
@@ -31,12 +30,10 @@ final class ExtensionAutoUpdater {
     init(
         registry: PaletteRegistry,
         store: CustomPaletteStore,
-        isEnabled: @escaping () -> Bool = { Preferences.shared.autoUpdateExtensions },
         announce: @escaping ([String]) -> Void
     ) {
         self.registry = registry
         self.store = store
-        self.isEnabled = isEnabled
         self.announce = announce
     }
 
@@ -71,11 +68,10 @@ final class ExtensionAutoUpdater {
         loop = nil
     }
 
-    /// Reads the repository and applies each pending update, when the
-    /// setting is on. Returns the names of the extensions that it updated.
+    /// Reads the repository and applies each pending update. Returns the names of the extensions that it updated.
     @discardableResult
     func runOnce() async -> [String] {
-        guard isEnabled(), !isRunning else { return [] }
+        guard !isRunning else { return [] }
         isRunning = true
         defer { isRunning = false }
         await registry.refreshAndWait()

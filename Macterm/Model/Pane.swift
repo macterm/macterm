@@ -79,12 +79,9 @@ final class Pane: Identifiable {
         return isRemoteReconnecting ? .reconnecting : .lost
     }
 
-    /// Process the pane launches on first surface creation, injected into the
-    /// shell as `command + "\n"`. Set from a declarative layout; nil for an
-    /// interactively-created pane (plain shell). Recorded here so a layout
-    /// `apply` can match a live pane by its declared command even after the
-    /// process has exited (see LayoutReconciler).
-    let command: String?
+    /// The command the pane runs when its shell starts (`PaneStartCommand`).
+    /// nil for a plain shell.
+    let start: PaneStartCommand?
     /// Shell binary to launch as the pane's program. nil → resolved from the
     /// ghostty config / login shell at surface-creation time.
     let shell: String?
@@ -839,7 +836,7 @@ final class Pane: Identifiable {
         id: UUID = UUID(),
         sessionSlug: String? = nil,
         sessionName persistedSessionName: String? = nil,
-        command: String? = nil,
+        start: PaneStartCommand? = nil,
         shell: String? = nil,
         env: [String: String]? = nil,
         activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay,
@@ -872,13 +869,11 @@ final class Pane: Identifiable {
             self.sessionSlug = slug
             sessionName = ZmxSessionName.make(projectName: slug, paneSessionID: id)
         }
-        self.command = command
+        self.start = start
         self.shell = shell
         self.env = env
         self.activityQuietPollDelay = activityQuietPollDelay
-        executionTracker = TerminalExecutionTracker(
-            hasUserInteraction: command != nil || env?[CustomPaletteScript.commandVariable] != nil
-        )
+        executionTracker = TerminalExecutionTracker(hasUserInteraction: start != nil)
     }
 
     /// Re-point this pane at a new workspace after its tab is moved between

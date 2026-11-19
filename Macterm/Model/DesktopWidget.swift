@@ -147,7 +147,7 @@ final class DesktopWidget: Identifiable {
             projectPath: directory,
             projectID: projectID,
             sessionSlug: ZmxSessionName.desktopWidgetSlug,
-            command: command
+            command: command.map(PaneStartCommand.typed)
         )
     }
 }

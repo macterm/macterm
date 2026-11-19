@@ -112,7 +112,7 @@ struct AppStateTests {
         let created: Pane
         if kind == "tab" {
             let tabID = try #require(state.createTab(
-                projectID: project.id, projects: [project], command: "test-command",
+                projectID: project.id, projects: [project], command: .typed("test-command"),
                 env: environment, focus: focus
             ))
             let tab = try #require(workspace.tabs.first { $0.id == tabID })
@@ -121,14 +121,14 @@ struct AppStateTests {
         } else {
             let paneID = try #require(state.splitPane(
                 source.id, direction: .horizontal, projectID: project.id,
-                projectDirectory: project.path, command: "test-command",
+                projectDirectory: project.path, command: .typed("test-command"),
                 env: environment, focus: focus
             ))
             created = try #require(originalTab.splitRoot.findPane(id: paneID))
             #expect(originalTab.focusedPaneID == (focus ? paneID : source.id))
         }
         #expect(created.env == environment)
-        #expect(created.command == "test-command")
+        #expect(created.start == .typed("test-command"))
         #expect(warmed.map(\.id) == (focus ? [] : [created.id]))
     }
 

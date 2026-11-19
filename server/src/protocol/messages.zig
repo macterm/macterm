@@ -367,6 +367,100 @@ pub const PaneSeen = struct {
     pub const Result = struct {};
 };
 
+/// The most bytes that `session.send` types at a time.
+pub const send_max = 64 * 1024;
+
+/// Types text into a session's pty, as it is: no paste brackets, as v1's
+/// `pane run` typed it (`macterm pane run`, design/011 §1). With `submit`,
+/// a newline follows. The reply goes when the server gave the bytes to the
+/// session. A client that may create a session may type into one, so this
+/// gives no new access.
+pub const SessionSend = struct {
+    pub const name = "session.send";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        /// At most `send_max` bytes.
+        text: msgpack.Bin,
+        submit: bool = true,
+    };
+    pub const Result = struct {};
+};
+
+/// Sends one key press to a session (`macterm pane key`). The session
+/// encodes the chord with the key modes of its own terminal (cursor keys,
+/// the kitty flags), so a program gets what a keyboard would send it. The
+/// chord grammar is that of keybinds (`chord.zig`).
+pub const SessionKey = struct {
+    pub const name = "session.key";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        /// `ctrl+c`, `escape`, `up`, `shift+1`.
+        chord: []const u8,
+    };
+    pub const Result = struct {};
+};
+
+/// The text of a session's terminal (`macterm pane dump`): the screen, or
+/// the scrollback and the screen. It needs no client that shows the pane.
+pub const SessionHistory = struct {
+    pub const name = "session.history";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        scrollback: bool = false,
+    };
+    pub const Result = struct {
+        text: msgpack.Bin,
+        /// The text was longer than a frame holds: `text` is its end.
+        truncated: bool = false,
+    };
+};
+
+/// The state of a session's terminal (`macterm pane inspect`).
+pub const SessionInspect = struct {
+    pub const name = "session.inspect";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: []const u8 };
+    pub const Result = struct { terminal: TerminalState };
+};
+
+/// What a session knows of its terminal. The cell and surface sizes are the
+/// GUI's, and not here.
+pub const TerminalState = struct {
+    pub const since = 3;
+
+    cols: u16,
+    rows: u16,
+    /// The rows of the screen and the scrollback, the row of the viewport's
+    /// top in them, and the rows of the viewport (ghostty's scrollbar).
+    scrollback_total: u64,
+    scrollback_offset: u64,
+    scrollback_len: u64,
+    /// The alternate screen is active.
+    alt_screen: bool,
+    /// The process group that holds the pty. Null when the session cannot
+    /// read it.
+    foreground_pid: ?i64 = null,
+    /// The arguments of the group's leader, cut at 1 KiB in all. Null when
+    /// they cannot be read.
+    foreground_argv: ?[]const msgpack.Bin = null,
+    /// A program other than the shell holds the pty. Null when the
+    /// session cannot read it.
+    busy: ?bool = null,
+    /// The shell exited.
+    exited: bool = false,
+};
+
 /// The server exits and leaves every session running, so that a newer app
 /// can start its own server (design/002).
 pub const ServerExit = struct {
@@ -447,7 +541,7 @@ pub const LinkClose = struct {
 };
 
 /// Every request method. A new method goes here.
-pub const methods = .{ ControlResume, ChannelOpen, ChannelClose, ChannelPause, ChannelResume, Ping, SessionCreate, SessionList, SessionInfo, SessionKill, PaneSeen, ServerExit, CommandRun, LinkOpen, LinkClose };
+pub const methods = .{ ControlResume, ChannelOpen, ChannelClose, ChannelPause, ChannelResume, Ping, SessionCreate, SessionList, SessionInfo, SessionKill, PaneSeen, SessionSend, SessionKey, SessionHistory, SessionInspect, ServerExit, CommandRun, LinkOpen, LinkClose };
 
 // ── Events ──────────────────────────────────────────────────────────────────
 
@@ -750,6 +844,51 @@ pub const Foreground = struct {
     args: msgpack.Bin,
 };
 
+/// The server asks the session for one key press (`session.key`). The
+/// session ignores a chord that does not parse.
+pub const Key = struct {
+    pub const name = "key";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    chord: []const u8,
+};
+
+/// The server asks for the terminal's text (`session.history`). The session
+/// answers with `History`, in the order of the requests.
+pub const HistoryRead = struct {
+    pub const name = "history_read";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    scrollback: bool = false,
+};
+
+pub const History = struct {
+    pub const name = "history";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    text: msgpack.Bin,
+    truncated: bool = false,
+};
+
+/// The server asks for the terminal's state (`session.inspect`). The session
+/// answers with `Inspect`, in the order of the requests.
+pub const InspectRead = struct {
+    pub const name = "inspect_read";
+    pub const since = 3;
+    pub const senders = from_client;
+};
+
+pub const Inspect = struct {
+    pub const name = "inspect";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    terminal: TerminalState,
+};
+
 /// How the pty reads input (`termios` `ICANON` and `ECHO`). A password read
 /// is canonical with echo off. Sent when a mode changes, and to a client
 /// that connects or catches up, if its `attach` asked for it.
@@ -946,9 +1085,9 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State, Attach, Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End, Refresh,
-    Title, Cwd,    Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode,
+    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
+    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

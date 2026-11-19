@@ -17,6 +17,7 @@ enum ProjectMemoryActions {
         // A recorded directory is a path on this Mac. A remote project's
         // terminals are on the host, so they start where the project does.
         let localDirectory = project.isRemote ? nil : existingDirectory(directory) ?? project.path
+        let start = PaneStartCommand.typed(command)
         if let pane = appState.focusedPane(for: project.id) {
             let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: pane)?.bounds.size ?? .zero)
             if let localDirectory {
@@ -24,16 +25,16 @@ enum ProjectMemoryActions {
                     pane.id,
                     direction: direction,
                     projectID: project.id,
-                    command: command,
+                    command: start,
                     newPaneWorkingDirectory: localDirectory
                 )
             } else {
-                appState.splitPane(pane.id, direction: direction, projectID: project.id, projectDirectory: project.path, command: command)
+                appState.splitPane(pane.id, direction: direction, projectID: project.id, projectDirectory: project.path, command: start)
             }
         } else if let localDirectory {
-            appState.createTab(projectID: project.id, projects: projects, workingDirectory: localDirectory, command: command)
+            appState.createTab(projectID: project.id, projects: projects, workingDirectory: localDirectory, command: start)
         } else {
-            appState.createTab(projectID: project.id, projects: projects, command: command)
+            appState.createTab(projectID: project.id, projects: projects, command: start)
         }
     }
 

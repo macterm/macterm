@@ -469,7 +469,7 @@ pub const Server = struct {
                 defer s.gpa.free(waiters);
                 for (waiters) |w| switch (w.kind) {
                     .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session does not answer."),
-                    .info, .list, .seen => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
+                    .info, .list, .seen, .history, .inspect => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
                     .kill => registry.wait(s, &e.waiters, w),
                 };
             }

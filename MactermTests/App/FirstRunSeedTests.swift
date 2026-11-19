@@ -163,7 +163,7 @@ struct FirstRunSeedTests {
         let ws = try #require(state.workspaces[project.id])
         #expect(ws.tabs.count == 1)
         let pane = try #require(ws.tabs.first?.splitRoot.allPanes().first)
-        #expect(pane.command == projectRun)
+        #expect(pane.start == projectRun.map(PaneStartCommand.typed))
         // And one pinned record — unloaded, so the materialize path builds it.
         #expect(state.pinnedRecords.count == 1)
         #expect(state.pinnedRecords.first?.declaration == FirstRunSeed.pinnedDeclaration)

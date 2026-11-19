@@ -70,7 +70,7 @@ extension AppState {
     /// workspace becomes the active one first, so the key window follows
     /// the new tab as it does for Cmd+T in a project.
     @discardableResult
-    func createScratchTab(command: String? = nil, env: [String: String]? = nil, focus: Bool = true) -> UUID? {
+    func createScratchTab(command: PaneStartCommand? = nil, env: [String: String]? = nil, focus: Bool = true) -> UUID? {
         ensureScratchWorkspace()
         if focus, activeProjectID != ScratchTabs.workspaceID {
             activeProjectID = ScratchTabs.workspaceID

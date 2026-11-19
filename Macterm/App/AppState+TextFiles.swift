@@ -63,14 +63,14 @@ extension AppState {
                 direction: SplitDirection.auto(for: displayedSize(of: pane)),
                 projectID: projectID,
                 projectDirectory: projectDirectory,
-                command: TextFileEditor.typedCommand,
+                command: .typed(TextFileEditor.typedCommand),
                 env: env
             )
         }
         guard let tabID = createTab(
             projectID: projectID,
             projects: projects,
-            command: TextFileEditor.typedCommand,
+            command: .typed(TextFileEditor.typedCommand),
             env: env
         )
         else { return nil }
@@ -113,7 +113,7 @@ extension AppState {
     ) -> Bool {
         let placement = textFilePlacement()
         let env = TextFileEditor.environment(path: path, line: line)
-        let command = TextFileEditor.typedCommand
+        let command = PaneStartCommand.typed(TextFileEditor.typedCommand)
         // The size of the pane's view picks the axis of the split.
         let direction = SplitDirection.auto(for: SurfaceRegistry.shared.view(of: clicked)?.bounds.size ?? .zero)
         switch anchor {

@@ -108,9 +108,9 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
 
     nonisolated(unsafe) private(set) var surface: ghostty_surface_t?
     private let workingDirectory: String
-    /// Command to type into the shell once the surface is created (the pane's
-    /// declared `run`). nil → no injected input.
-    let command: String?
+    /// The command the shell runs when it starts (`PaneStartCommand`). nil
+    /// for a plain shell.
+    let start: PaneStartCommand?
     /// Shell binary to launch as the surface's program. nil → libghostty's
     /// default (resolved from the ghostty config / login shell).
     private let shell: String?
@@ -400,6 +400,15 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// pane's program runs behind the daemon's pty, not this view's, and this
     /// view has no back-reference to its pane. See `KeybindPassthrough`.
     var yieldsToProgram: ((NSEvent) -> Bool)?
+    /// The bundled CLI, which runs a wrapped start command
+    /// (`PaneStartCommand.Mode.wrapped`). nil when the bundle has none.
+    static var bundledCLI: String? {
+        guard let cli = Bundle.main.resourceURL?.appendingPathComponent("bin/macterm").path,
+              FileManager.default.isExecutableFile(atPath: cli)
+        else { return nil }
+        return cli
+    }
+
     /// A remote pane in the unit-test host: one line, then a wait for the close.
     static let noRemoteClientCommand =
         "/bin/sh -c 'echo \"macterm: this build cannot connect remote panes\"; exec cat >/dev/null'"
@@ -594,7 +603,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         paneID: UUID,
         workingDirectory: String,
         sessionName: String,
-        command: String? = nil,
+        start: PaneStartCommand? = nil,
         shell: String? = nil,
         env: [String: String]? = nil,
         remoteSpec: ProjectPath? = nil
@@ -602,7 +611,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         self.paneID = paneID
         self.workingDirectory = workingDirectory
         self.sessionName = sessionName
-        self.command = command
+        self.start = start
         self.shell = shell
         self.env = env
         self.remoteSpec = remoteSpec
@@ -626,9 +635,37 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// from a stray updateNSView during SwiftUI teardown).
     private var isDestroyed = false
 
+    /// True while a split animation slides this pane in (`AnimatedSplitView`):
+    /// the surface, and with it the shell, waits for the final size. Each
+    /// frame of the slide is a resize. zsh draws its prompt again after each
+    /// one, from where the old width put it, and garbled the first lines of
+    /// the pane (issue 0426).
+    private(set) var holdsSurfaceCreation = false
+
+    /// Holds the surface creation until `releaseSurfaceCreation()`. No effect
+    /// on a view that has a surface.
+    func holdSurfaceCreation() {
+        guard surface == nil, !isDestroyed else { return }
+        holdsSurfaceCreation = true
+        logger.debug("hold surface creation for \(self.sessionName, privacy: .public)")
+    }
+
+    /// Ends the hold and creates the surface, if a creation waited for it.
+    func releaseSurfaceCreation() {
+        guard holdsSurfaceCreation else { return }
+        holdsSurfaceCreation = false
+        let size = "\(Int(bounds.width))x\(Int(bounds.height))"
+        logger.debug("release surface creation at \(size, privacy: .public)pt for \(self.sessionName, privacy: .public)")
+        if pendingSurfaceCreation { createSurface() }
+    }
+
     func createSurface() {
         guard !isDestroyed else { return }
         guard surface == nil, let app = GhosttyApp.shared.app else { return }
+        guard !holdsSurfaceCreation else {
+            pendingSurfaceCreation = true
+            return
+        }
         let backingSize = convertToBacking(bounds).size
         guard backingSize.width > 0, backingSize.height > 0 else {
             pendingSurfaceCreation = true
@@ -727,38 +764,23 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         // The argv element buffers come from `cString` (freed in
         // destroySurface); the pointer array is bound around the spawn below.
         let channelMode = remoteSpec == nil && SessionClient.live.runsSessions()
-        var wrapper: [String] = []
-
-        // A palette `run:` action's command, carried in the environment
-        // (`CustomPaletteLaunch`): run before the shell by the bundled CLI,
-        // inside the session, so it is never typed and never reaches the
-        // shell's history. Without the CLI, the fixed line that runs it is
-        // typed instead — it reads the command from the same variable.
-        var typedInput = command
-        if remoteSpec == nil, env?[CustomPaletteScript.commandVariable] != nil {
-            if let cli = Bundle.main.resourceURL?.appendingPathComponent("bin/macterm").path,
-               FileManager.default.isExecutableFile(atPath: cli)
-            {
-                wrapper += CustomPaletteLaunch.wrapperArgv(cli: cli, shell: shell ?? CustomPaletteRunner.loginShell)
-            } else {
-                typedInput = CustomPaletteScript.trampoline
-            }
-        }
-        let wrapperArgv: [UnsafePointer<CChar>?] = wrapper.map { cString($0) }
-
-        // Declared `run` is typed into the shell verbatim, as if the
-        // user had entered it at the prompt. No shell-syntax handling: cwd is
-        // set above, not via an injected `cd`. A pane on a session sends it
-        // after the shell's first prompt (`PaneSession.heldInput`).
-        if let typedInput, !typedInput.isEmpty {
-            config.initial_input = cString(typedInput + "\n")
+        let launch = PaneStartCommand.launch(
+            start,
+            remote: remoteSpec != nil,
+            cli: Self.bundledCLI,
+            shell: shell ?? CustomPaletteRunner.loginShell
+        )
+        let wrapperArgv: [UnsafePointer<CChar>?] = launch.wrapper.map { cString($0) }
+        if let input = launch.input {
+            config.initial_input = cString(input)
         }
 
         // Extra environment variables. The array of key/value structs points at
         // buffers owned above; hold it in a local that outlives the call.
         var envVars: [ghostty_env_var_s] = []
-        if let env, !env.isEmpty {
-            for (key, value) in env {
+        let environment = (env ?? [:]).merging(launch.environment) { _, new in new }
+        if !environment.isEmpty {
+            for (key, value) in environment {
                 guard let k = cString(key), let v = cString(value) else { continue }
                 envVars.append(ghostty_env_var_s(key: k, value: v))
             }

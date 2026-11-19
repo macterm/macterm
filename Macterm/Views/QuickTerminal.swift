@@ -459,7 +459,7 @@ final class QuickTerminalSplitState {
     /// `command`/`env` spawn in the new pane, as in `ModelWriter.paneSplit` —
     /// the text-file editor's path (`AppState.openTextFile`).
     @discardableResult
-    func autoSplit(paneID: UUID, command: String? = nil, env: [String: String]? = nil) -> UUID? {
+    func autoSplit(paneID: UUID, command: PaneStartCommand? = nil, env: [String: String]? = nil) -> UUID? {
         let size = tab.splitRoot.findPane(id: paneID)
             .flatMap { SurfaceRegistry.shared.existingSurface(for: $0, in: .quickTerminal)?.nsView }?.bounds.size
         let newID = ModelWriter.paneAutoSplit(tab, paneID: paneID, drawnSize: size ?? .zero, command: command, env: env)

@@ -49,7 +49,7 @@ struct ControlHandlerWidgetTests {
         #expect(info.size == "4x2")
         #expect((info.columns, info.rows) == (4, 2))
         #expect(info.command == "htop")
-        #expect(state.desktopWidgets.first?.pane?.command == "htop")
+        #expect(state.desktopWidgets.first?.pane?.start == .typed("htop"))
     }
 
     @Test

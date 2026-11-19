@@ -15,14 +15,27 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         var leads: [Bool?] = []
         /// Each set of attention flags, in order.
         var attention: [MactermProtocol.Attention] = []
+        /// The bytes of each snapshot that was drawn, in order.
+        var snapshots: [String] = []
     }
 
     private let lock = NSLock()
     private var state = State()
-    private let grid: PaneGrid
+    private var grid: PaneGrid
+    private var inSnapshot = false
+    /// Runs once, at the first `lead` of true: a pane that moves from the
+    /// incubator into its tile after the attach.
+    private var onFirstLead: (@Sendable () -> Void)?
 
-    init(grid: PaneGrid = PaneGrid(cols: 80, rows: 24)) {
+    init(grid: PaneGrid = PaneGrid(cols: 80, rows: 24), onFirstLead: (@Sendable () -> Void)? = nil) {
         self.grid = grid
+        self.onFirstLead = onFirstLead
+    }
+
+    func setGrid(_ new: PaneGrid) {
+        lock.lock()
+        grid = new
+        lock.unlock()
     }
 
     func snapshot() -> State {
@@ -49,15 +62,25 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
             state.resets += 1
             state.screen = ""
         } else {
-            state.screen += String(decoding: data, as: UTF8.self)
+            let text = String(decoding: data, as: UTF8.self)
+            state.screen += text
+            if inSnapshot { state.snapshots[state.snapshots.count - 1] += text }
         }
     }
 
     func paneGrid() -> PaneGrid {
-        grid
+        lock.lock()
+        defer { lock.unlock() }
+        return grid
     }
 
-    func paneSnapshot(started _: Bool) {}
+    func paneSnapshot(started: Bool) {
+        lock.lock()
+        inSnapshot = started
+        if started { state.snapshots.append("") }
+        lock.unlock()
+    }
+
     func paneTtyMode(_: MactermProtocol.TtyMode) {}
     func paneAttention(_ flags: MactermProtocol.Attention) {
         lock.lock()
@@ -68,7 +91,10 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     func paneLead(_ leader: Bool?) {
         lock.lock()
         state.leads.append(leader)
+        let hook = leader == true ? onFirstLead : nil
+        if hook != nil { onFirstLead = nil }
         lock.unlock()
+        hook?()
     }
 
     func paneForeground(_ foreground: MactermProtocol.Foreground) {

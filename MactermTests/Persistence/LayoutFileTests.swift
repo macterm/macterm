@@ -96,9 +96,9 @@ struct LayoutFileTests {
         #expect(plan.tabs.count == 1)
         let panes = plan.tabs[0].root.allPanes()
         #expect(panes.count == 2)
-        #expect(panes[0].command == "npm run dev")
+        #expect(panes[0].start == .typed("npm run dev"))
         #expect(panes[0].projectPath == "/proj/api")
-        #expect(panes[1].command == nil)
+        #expect(panes[1].start == nil)
         #expect(panes[1].projectPath == "/proj")
     }
 

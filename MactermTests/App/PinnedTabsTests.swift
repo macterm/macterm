@@ -271,7 +271,7 @@ struct PinnedTabsTests {
         #expect(tab.id == recordID)
         #expect(tab.customTitle == "dev")
         let pane = try #require(tab.splitRoot.allPanes().first)
-        #expect(pane.command == "npm run dev")
+        #expect(pane.start == .typed("npm run dev"))
         #expect(pane.projectPath == "/tmp")
         #expect(fx.state.activeProjectID == pinnedID)
         #expect(fx.state.pinnedWorkspace?.activeTabID == recordID)
@@ -361,7 +361,7 @@ struct PinnedTabsTests {
 
         #expect(fx.state.isPinnedTabLoaded(recordID))
         let pane = try #require(fx.state.pinnedWorkspace?.tabs.first?.splitRoot.allPanes().first)
-        #expect(pane.command == "npm run dev")
+        #expect(pane.start == .typed("npm run dev"))
         #expect(warmed == [pane.id])
     }
 
@@ -569,7 +569,7 @@ struct PinnedTabsTests {
 
         #expect(fx.state.pinnedRecords.isEmpty)
         let moved = try #require(fx.state.workspaces[p.id]?.tabs.first { $0.id == recordID })
-        #expect(moved.splitRoot.allPanes().first?.command == "btop")
+        #expect(moved.splitRoot.allPanes().first?.start == .typed("btop"))
         #expect(moved.splitRoot.allPanes().first?.projectID == p.id)
     }
 

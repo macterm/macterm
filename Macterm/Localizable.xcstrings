@@ -683,22 +683,6 @@
         }
       }
     },
-    "A pane shows a badge when its session runs from an older Macterm version." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션이 이전 Macterm 버전으로 실행 중이면 패널에 배지가 표시됩니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会话运行于旧版 Macterm 时，窗格会显示徽章。"
-          }
-        }
-      }
-    },
     "A pane there has a running program. Close it in %@ instead." : {
       "localizations" : {
         "ko" : {
@@ -1856,6 +1840,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法捕捉窗格"
+          }
+        }
+      }
+    },
+    "Cannot create the project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트를 생성할 수 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建项目"
           }
         }
       }
@@ -9689,22 +9689,6 @@
         }
       }
     },
-    "Show outdated session badge" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이전 버전 세션 배지 표시"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示旧版会话徽章"
-          }
-        }
-      }
-    },
     "Show spinner over agent icons" : {
       "localizations" : {
         "ko" : {
@@ -11682,22 +11666,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新频道"
-          }
-        }
-      }
-    },
-    "Update extensions automatically" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "확장 프로그램 자동 업데이트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动更新扩展"
           }
         }
       }

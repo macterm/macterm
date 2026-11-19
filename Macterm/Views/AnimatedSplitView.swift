@@ -313,7 +313,7 @@ struct AnimatedSplitView: View {
                         // same frame its ghost appears rather than linger
                         // over it.
                         .transition(.identity)
-                        .onAppear { settle(leaf.id) }
+                        .onAppear { settle(leaf.id, pane: leaf.pane) }
                         .onChange(of: leaf.hidden, initial: true) { _, hidden in
                             SurfaceRegistry.shared.existingSurface(for: leaf.pane, in: host)?.nsView?.hiddenInLayout = hidden
                         }
@@ -572,10 +572,29 @@ struct AnimatedSplitView: View {
     /// split animation. No-op before the first body has recorded what was
     /// present at appearance (see `settledIDs`), and for anything already
     /// settled.
-    private func settle(_ id: UUID) {
+    ///
+    /// A new pane (`pane`, with no surface yet) starts its shell when the
+    /// slide stops (`GhosttyTerminalNSView.holdSurfaceCreation`).
+    private func settle(_ id: UUID, pane: Pane? = nil) {
         guard let settled = settledIDs, !settled.contains(id) else { return }
-        withAnimation(animation) {
+        guard let animation, let pane else {
+            withAnimation(animation) {
+                _ = settledIDs?.insert(id)
+            }
+            return
+        }
+        let view = SurfaceRegistry.shared.surface(for: pane, in: host).ensureNSView()
+        view.holdSurfaceCreation()
+        withAnimation(animation, completionCriteria: .removed) {
             _ = settledIDs?.insert(id)
+        } completion: {
+            view.releaseSurfaceCreation()
+        }
+        // A pane must never stay without its shell, also if the completion
+        // does not come.
+        Task { @MainActor [weak view] in
+            try? await Task.sleep(for: .seconds(SplitAnimation.duration * 2))
+            view?.releaseSurfaceCreation()
         }
     }
 }
