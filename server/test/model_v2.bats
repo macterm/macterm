@@ -248,3 +248,89 @@ c.wait_event("session.exit", lambda a: a["id"] == "macterm-x-a")
 wait_dead(s["pid"])
 PY
 }
+
+@test "model: a session that another pane names, and a remote pane's session, stay" {
+  "$ZMX" server
+  python3 - <<'PY'
+import time
+from v2client import ServerClient, alive
+c = ServerClient(level=3)
+s = c.call("session.create", id="shared", command=[b"/bin/sh"])["session"]
+r = c.call("session.create", id="remote-name", command=[b"/bin/sh"])["session"]
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "shared"}})
+c.call("tab.create", workspace="p1", id="t2", root={"t": "pane", "a": {"id": "b", "session": "shared"}})
+c.call("tab.create", workspace="p1", id="t3", root={"t": "pane", "a": {"id": "c", "session": "remote-name", "host": "me@host"}})
+assert [p["id"] for p in c.call("pane.close", id="b")["panes"]] == ["b"]
+res = c.call("tab.close", id="t3")
+assert res["panes"] == [{"id": "c", "session": "remote-name", "host": "me@host"}], res
+time.sleep(0.5)
+assert alive(s["pid"]) and alive(r["pid"])
+assert set(c.sessions()) == {"shared", "remote-name"}
+PY
+}
+
+@test "model: tabs and panes move between tabs and workspaces with no pane lost" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("workspace.create", id="pin", kind="pinned")
+assert c.request("workspace.create", id="p1", kind="quick")["err"]["code"] == "duplicate_id"
+c.call("tab.create", workspace="p1", id="t1", root=pane("a"))
+c.call("tab.create", workspace="p1", id="t2", root=pane("b"))
+c.call("tab.move", id="t2", to_workspace="pin")
+c.call("pane.move", id="a", dest="b", zone="left", split_id="s1")
+c.call("pane.separate", id="a", tab_id="t3")
+c.call("tab.merge", src="t3", dst="t2", target_pane="b", zone="bottom", split_id="s2")
+m = c.call("state.subscribe")["model"]
+pin = next(w for w in m["workspaces"] if w["id"] == "pin")
+assert [t["id"] for t in pin["tabs"]] == ["t2"] and pin["active_tab"] == "t2", pin
+root = pin["tabs"][0]["root"]
+assert root["t"] == "split" and root["a"]["dir"] == "vertical", root
+assert next(w for w in m["workspaces"] if w["id"] == "p1")["tabs"] == []
+assert "pane.removed" not in [e["e"] for e in c.events()]
+res = c.call("workspace.remove", id="pin")
+assert sorted(p["id"] for p in res["panes"]) == ["a", "b"], res
+c.wait_event("workspace.remove", lambda a: a["id"] == "pin")
+PY
+}
+
+@test "model: model.options sets the rebalance of a request that does not say" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+pane = lambda pid: {"id": pid, "session": "macterm-x-" + pid}
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": pane("a")})
+c.call("pane.split", tab="t1", target="a", new=pane("b"), split_id="s1", dir="horizontal")
+c.call("pane.split", tab="t1", target="b", new=pane("c"), split_id="s2", dir="horizontal")
+root = c.call("state.subscribe")["model"]["workspaces"][0]["tabs"][0]["root"]
+assert root["a"]["ratio"] == 0.5, root
+c.call("model.options", auto_tiling=True)
+c.call("pane.split", tab="t1", target="c", new=pane("d"), split_id="s3", dir="horizontal")
+root = c.call("state.subscribe")["model"]["workspaces"][0]["tabs"][0]["root"]
+assert abs(root["a"]["ratio"] - 0.25) < 1e-9, root
+PY
+}
+
+@test "model: a file that does not parse is read-only and stays as it was" {
+  mkdir -p "$RT/state"
+  printf 'not json\n' > "$RT/state/model.json"
+  "$ZMX" server
+  python3 - <<'PY'
+import os, signal
+from v2client import ServerClient, wait_dead
+c = ServerClient(level=3)
+assert c.call("state.subscribe")["readonly"] is True
+assert c.request("model.import", model={}, source="test")["err"]["code"] == "model_readonly"
+assert c.call("model.options", auto_tiling=True) == {}
+pid = c.peer_pid()
+os.kill(pid, signal.SIGTERM)
+wait_dead(pid)
+PY
+  [ "$(cat "$RT/state/model.json")" = "not json" ]
+}

@@ -211,7 +211,7 @@ pub fn handleRequest(s: *Server, p: *Peer, arena: std.mem.Allocator, req: m.Requ
             }
             const args = m.decodeArgs(M, arena, req) catch
                 return replyError(s, p.id, req.id, .invalid_args, "The arguments do not decode.");
-            if (comptime model_ipc.isWrite(M)) return model_ipc.call(s, M, p, req.id, args);
+            if (comptime model_ipc.isWrite(M)) return model_ipc.call(s, M, p, req.id, req.a, args);
             return call(s, M, p, req.id, args);
         }
     }

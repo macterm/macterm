@@ -582,6 +582,22 @@ test "remove a project removes its workspace and lists its panes" {
     try expectValid(&m);
 }
 
+test "remove a workspace that is not a project's, with its tabs and their history" {
+    var m = try newModel();
+    defer m.deinit();
+    try m.addWorkspace(.of("pin"), .pinned);
+    try m.createTab(.of("pin"), .of("t1"), null, pane("a"), null, true);
+    try m.createTab(.of("pin"), .of("t2"), null, pane("b"), null, true);
+    try testing.expectError(error.BadRequest, m.removeWorkspace(.of("p")));
+    const gone = try m.removeWorkspace(.of("pin"));
+    try testing.expectEqual(@as(usize, 2), gone.len);
+    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("pin")));
+    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t1")));
+    try testing.expect(m.tab_history.get(.of("pin")) == null);
+    try testing.expectError(error.NotFound, m.removeWorkspace(.of("pin")));
+    try expectValid(&m);
+}
+
 test "a project id is not reused, and workspaces other than projects need a kind" {
     var m = try newModel();
     defer m.deinit();
@@ -654,7 +670,7 @@ test "attention and rename" {
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     try m.setAttention(.of("b"), .failed);
-    try testing.expectEqual(tree.Attention.failed, m.findPane(.of("b")).?.attention);
+    try testing.expectEqual(tree.ModelAttention.failed, m.findPane(.of("b")).?.attention);
     try m.renameTab(.of("t1"), "build");
     try testing.expectEqualStrings("build", m.findTab(.of("t1")).?.custom_title.?);
     try m.renameTab(.of("t1"), null);
@@ -803,7 +819,7 @@ test "a model writes and reads back the same" {
     defer back.deinit();
     try testing.expect(back.data.imported_v1);
     try testing.expectEqualStrings("build \"it\"", back.findTab(.of("t1")).?.custom_title.?);
-    try testing.expectEqual(tree.Attention.done, back.findPane(.of("c")).?.attention);
+    try testing.expectEqual(tree.ModelAttention.done, back.findPane(.of("c")).?.attention);
     try testing.expectEqualStrings("p", back.data.selection.active_project.?.text);
     try testing.expectEqual(@as(usize, 2), back.data.workspaces.len);
     try expectOrder(&back, "t1", &.{ "a", "b", "c" });

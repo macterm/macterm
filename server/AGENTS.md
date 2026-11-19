@@ -15,14 +15,13 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 
 ## The model (design/010, `src/model/`, `src/model_ipc.zig`)
 
-The projects, workspaces, tabs and split trees move from the app to the Mac server. Nothing calls the messages yet, so nothing that a user sees changes.
-
-- **Only a server with `MACTERM_STATE_DIR` has a model.** The app sets it to the folder of its v1 files. A host's server never gets it: it answers `state.subscribe` with no model, refuses each model request with `unavailable`, and writes no file.
-- **`model.json` is in that folder.** The server writes it 100 ms after the first change that is not on disk, before it answers `server.exit` (a newer server that starts after the reply reads the last state), and when it stops (SIGTERM, idle exit). A file that does not read, or that a newer build wrote, makes the model read-only: each model request fails with `model_readonly`, and the server never writes over that file.
-- **The events come from a compare** (`Snapshot`, `diff`). The server encodes each project, workspace, tab and pane before and after a request, and sends one batch with an event for each change, before the reply. The requester's copy of the batch has `cause`, the request's id. A request that fails changes nothing and sends no batch.
-- **A pane that leaves the model ends its local session** (`registry.endSession`). The `pane.removed` event and the reply name every pane that left, so that the app ends a remote session. `model.import` ends no session.
-- **The ring of request ids** keeps the last 256 answers to model requests (`model_ipc.request_ring`), by the client's key and the request id. A request id is unique only on its connection, so the key is the connection's: `state.subscribe` gives it as `client`, and a client that resumes on a new connection sends it in `control.resume`.
-- **The schema reads the model through `src/wire.zig`.** `messages.zig` imports the model, and a file can be in one module only. A type that only messages of a level carry has that level (`carriedSince` in the generator).
+- **Only a server with `MACTERM_STATE_DIR` has a model.** A host's server answers `state.subscribe` with no model, refuses each model request with `unavailable`, and writes no file.
+- **The server writes `model.json`** 100 ms after a change, before the reply to `server.exit`, and when it stops. A file that does not read, or that a newer build wrote, makes the model read-only (`model_readonly`), and the server never writes over it.
+- **One request, one batch, before the reply.** The server makes the events from a compare of the model before and after the request (`Snapshot`, `diff`). The requester's copy has `cause`. A request that fails sends no batch.
+- **A pane that leaves the model ends its local session**, unless another pane of the model names the session. `pane.removed` and the reply name every pane that left. `model.import` ends no session.
+- **The ring of request ids** keeps 256 answers by client key, request id and a hash of the arguments. `state.subscribe` gives the key as `client`; `control.resume` takes it. `split.ratio` and failures for lack of memory are not kept.
+- **The model and each batch must fit in one frame** (`server.frame_max`, 1 MiB).
+- **The schema reads the model through `src/wire.zig`**, because a file can be in one module only.
 
 ## The macterm CLI (design/011)
 

@@ -206,7 +206,9 @@ pub const ControlResume = struct {
         seq: u64,
         /// The `client` that `state.subscribe` gave the lost connection.
         /// With the same epoch, this connection takes it, so that a model
-        /// request sent again gets its first reply (`request_ring`).
+        /// request sent again gets its first reply. A client that sends
+        /// it keeps the request ids of the lost connection, and counts on
+        /// from them.
         client: ?u64 = null,
     };
     pub const Result = struct { replayed: bool, seq: u64 };

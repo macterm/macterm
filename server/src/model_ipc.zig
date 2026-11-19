@@ -1,27 +1,12 @@
 //! The model on the server's socket (design/010 §2, §3): `state.subscribe`,
-//! the requests that change the model, their events, the ring of request
-//! ids, and `model.json`.
+//! the model requests and their events, the ring of request ids, and
+//! `model.json`.
 //!
-//! Only a server that the app gave `MACTERM_STATE_DIR` has a model. A host's
-//! server never gets the variable, so it answers `state.subscribe` with no
-//! model and refuses every model request (`unavailable`), and it writes no
-//! file.
-//!
-//! **The events come from a compare.** Before a request, the server encodes
-//! each project, workspace, tab and pane of the model; after it, it encodes
-//! them again and sends an event for each one that changed. So the events
-//! always match the model, and no request has its own event code. A request
-//! that fails changes nothing (`model.zig`) and sends no event.
-//!
-//! **The file.** The server writes `model.json` 100 ms after the first change
-//! that is not on disk, before it answers `server.exit` (so a newer server
-//! that starts after the reply reads the last state), and when it stops. A
-//! file that the server could not read, or that a newer build wrote, makes
-//! the model read-only: no request changes it, and the server never writes
-//! over that file.
+//! The events come from a compare: the server encodes each object of the
+//! model before and after a request, and sends an event for each one that
+//! changed. So the events always match the model.
 
 const std = @import("std");
-const lib_posix = @import("posix.zig");
 const protocol = @import("protocol/protocol.zig");
 const msgpack = protocol.msgpack;
 const m = protocol.messages;
@@ -53,6 +38,9 @@ const Answer = struct {
     client: u64,
     re: u64,
     method: []const u8,
+    /// The hash of the request's arguments: the same id with other
+    /// arguments is a new request.
+    args: u64,
     /// The encoded response, as it went on channel 0.
     body: []u8,
 };
@@ -130,6 +118,8 @@ pub fn flush(s: *Server) void {
     ensureParent(path);
     file.save(s.gpa, s.io, mo, path) catch |err| {
         std.log.err("server: cannot write {s}: {s}", .{ path, @errorName(err) });
+        // Try again after the delay.
+        st.dirty_since = s.now();
     };
 }
 
@@ -196,8 +186,9 @@ fn fail(code: m.ErrorCode, message: []const u8) Outcome {
 
 /// Handles a request of `m.model_writes`. The ring answers a request that
 /// this client sent before, and nothing happens again.
-pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void {
-    if (findAnswer(s, p.client, re, M.name)) |body| {
+pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, raw: ?msgpack.Raw, args: M.Args) void {
+    const hash = std.hash.Wyhash.hash(0, if (raw) |r| r.bytes else "");
+    if (findAnswer(s, p.client, re, M.name, hash)) |body| {
         std.log.info("server: {s} sent again, answered from the ring", .{M.name});
         return peers.sendBody(s, p, body);
     }
@@ -207,8 +198,8 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
 
     const outcome: Outcome = if (s.model.model == null)
         fail(.unavailable, "This server has no model.")
-    else if (s.model.readonly)
-        fail(.model_readonly, "The server could not read its model file, so it changes no model.")
+    else if (s.model.readonly and M != m.ModelOptions)
+        fail(.model_readonly, "The model file did not read. The model is read-only.")
     else
         change(s, M, a, p, re, args) catch fail(.unavailable, "The server is out of memory.");
 
@@ -222,9 +213,13 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
             unreachable,
         .err => |e| msgpack.encode(&out.writer, m.Response{ .re = re, .err = .{ .code = @tagName(e.code), .message = e.message } }),
     };
-    encoded catch return;
+    encoded catch return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
     peers.sendBody(s, p, out.written());
-    keepAnswer(s, p.client, re, M.name, out.written());
+    // A drag sends many ratios, and each one is complete in itself: they
+    // would push the answers that matter out of the ring. A failure for
+    // lack of memory can work when sent again.
+    const transient = outcome == .err and outcome.err.code == .unavailable;
+    if (M != m.SplitRatio and !transient) keepAnswer(s, p.client, re, M.name, hash, out.written());
 }
 
 /// Applies a request to the model and sends its events. The batch goes
@@ -238,14 +233,15 @@ fn change(s: *Server, comptime M: type, a: std.mem.Allocator, p: *Peer, re: u64,
     const before = try Snapshot.take(a, mo);
     const outcome = try apply(s, M, mo, a, args);
     if (outcome == .err) return outcome;
+    s.model.dirty_since = s.model.dirty_since orelse s.now();
     const now_model = &s.model.model.?;
     const after = try Snapshot.take(a, now_model);
     var events: std.ArrayList(m.Event) = .empty;
     var removed: std.ArrayList(m.RemovedPane) = .empty;
     try diff(a, &before, &after, &events, &removed, M != m.ModelImport);
-    s.model.dirty_since = s.model.dirty_since orelse s.now();
     if (events.items.len > 0) peers.emitBatch(s, events.items, .{ .peer = p.id, .re = re });
-    for (removed.items) |pane| if (pane.host == null) registry.endSession(s, pane.session);
+    // A session that a pane of the model still names stays (fail closed).
+    for (removed.items) |pane| if (pane.host == null and !after.sessions.contains(pane.session)) registry.endSession(s, pane.session);
     return switch (outcome) {
         .removed => .{ .removed = removed.items },
         else => outcome,
@@ -254,9 +250,9 @@ fn change(s: *Server, comptime M: type, a: std.mem.Allocator, p: *Peer, re: u64,
 
 fn modelError(err: model.Error) Outcome {
     return switch (err) {
-        error.NotFound => fail(.not_found, "The model has no object with this id."),
-        error.DuplicateId => fail(.duplicate_id, "The model already has an object with this id."),
-        error.BadRequest => fail(.invalid_args, "The model cannot do this request."),
+        error.NotFound => fail(.not_found, "No object has this id."),
+        error.DuplicateId => fail(.duplicate_id, "An object has this id."),
+        error.BadRequest => fail(.invalid_args, "The model refuses this change."),
         error.OutOfMemory => fail(.unavailable, "The server is out of memory."),
     };
 }
@@ -291,14 +287,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         m.ProjectReorder => mo.reorderProjects(args.parent, args.ids) catch |err| return modelError(err),
         m.ProjectRemove => _ = mo.removeProject(args.id) catch |err| return modelError(err),
         m.WorkspaceCreate => mo.addWorkspace(args.id, args.kind) catch |err| return modelError(err),
-        m.WorkspaceRemove => {
-            const ws = mo.findWorkspace(args.id) orelse return modelError(error.NotFound);
-            if (ws.kind == .project) return modelError(error.BadRequest);
-            while (ws.tabs.len > 0) _ = mo.closeTab(ws.tabs[0].id) catch |err| return modelError(err);
-            var kept: std.ArrayList(model.Workspace) = .empty;
-            for (mo.data.workspaces) |w| if (!w.id.eql(args.id)) try kept.append(mo.arena.allocator(), w);
-            mo.data.workspaces = kept.items;
-        },
+        m.WorkspaceRemove => _ = mo.removeWorkspace(args.id) catch |err| return modelError(err),
         m.TabCreate => mo.createTab(args.workspace, args.id, if (args.index) |i| @as(usize, i) else null, args.root, args.title, args.focus) catch |err| return modelError(err),
         m.TabClose => _ = mo.closeTab(args.id) catch |err| return modelError(err),
         m.TabSet => mo.renameTab(args.id, args.title) catch |err| return modelError(err),
@@ -311,7 +300,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         m.TabMove => mo.moveTab(args.id, args.to_workspace, if (args.index) |i| @as(usize, i) else null) catch |err| return modelError(err),
         m.TabMerge => mo.mergeTab(args.src, args.dst, args.target_pane, args.zone, args.split_id, rebalance(s, args.rebalance)) catch |err| return modelError(err),
         m.PaneSplit => {
-            const dir = splitDir(s, mo, args.target, args.dir) orelse return fail(.invalid_args, "The split has no direction that this server knows.");
+            const dir = splitDir(s, mo, args.target, args.dir) orelse return fail(.invalid_args, "Unknown split direction.");
             mo.splitPane(args.tab, args.target, args.new, args.split_id, dir, args.position, args.ratio, args.focus, rebalance(s, args.rebalance)) catch |err| return modelError(err);
         },
         m.PaneClose => _ = mo.closePane(args.id, rebalance(s, args.rebalance)) catch |err| return modelError(err),
@@ -374,7 +363,7 @@ fn splitDir(s: *Server, mo: *const Model, target: model.PaneId, dir: m.SplitDir)
 /// `model.import`: the client's model in place of this one, once.
 fn importModel(s: *Server, a: std.mem.Allocator, args: m.ModelImport.Args) !Outcome {
     const st = &s.model;
-    if (st.model.?.data.imported_v1) return fail(.refused, "The model already holds an import.");
+    if (st.model.?.data.imported_v1) return fail(.refused, "The model has an import.");
     // Through JSON: the file's reader copies, validates and refuses a newer
     // version, so an import is checked as `model.json` is.
     var json: std.Io.Writer.Allocating = .init(a);
@@ -383,7 +372,7 @@ fn importModel(s: *Server, a: std.mem.Allocator, args: m.ModelImport.Args) !Outc
     var fresh = file.parse(s.gpa, json.written(), &fault) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.Invalid => return fail(.invalid_args, try std.fmt.allocPrint(a, "The model is not valid: {s}", .{fault.text()})),
-        error.NewerVersion => return fail(.invalid_args, "The model has a version that this server does not know."),
+        error.NewerVersion => return fail(.invalid_args, "The model version is newer than this server."),
         error.Syntax => return fail(.invalid_args, "The model does not decode."),
     };
     fresh.data.imported_v1 = true;
@@ -410,6 +399,8 @@ const Snapshot = struct {
     tabs: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     tab_workspaces: std.StringHashMapUnmanaged([]const u8) = .empty,
     panes: std.StringArrayHashMapUnmanaged(m.RemovedPane) = .empty,
+    /// The sessions of the local panes.
+    sessions: std.StringHashMapUnmanaged(void) = .empty,
     selection: []const u8 = "",
 
     fn take(a: std.mem.Allocator, mo: *const Model) !Snapshot {
@@ -438,11 +429,15 @@ const Snapshot = struct {
                 try snap.tab_workspaces.put(a, tkey, key);
                 var list: std.ArrayList(*const model.Pane) = .empty;
                 try tree.collectPanes(a, &t.root, &list);
-                for (list.items) |pane| try snap.panes.put(a, try a.dupe(u8, pane.id.text), .{
-                    .id = .of(try a.dupe(u8, pane.id.text)),
-                    .session = try a.dupe(u8, pane.session),
-                    .host = if (pane.host) |h| try a.dupe(u8, h) else null,
-                });
+                for (list.items) |pane| {
+                    const session = try a.dupe(u8, pane.session);
+                    try snap.panes.put(a, try a.dupe(u8, pane.id.text), .{
+                        .id = .of(try a.dupe(u8, pane.id.text)),
+                        .session = session,
+                        .host = if (pane.host) |h| try a.dupe(u8, h) else null,
+                    });
+                    if (pane.host == null) try snap.sessions.put(a, session, {});
+                }
             }
         }
         snap.selection = try msgpack.encodeAlloc(a, m.SelectionChanged{ .active_project = mo.data.selection.active_project });
@@ -528,17 +523,17 @@ fn diff(
 
 // ── The ring of request ids ─────────────────────────────────────────────────
 
-fn findAnswer(s: *Server, client: u64, re: u64, method: []const u8) ?[]const u8 {
+fn findAnswer(s: *Server, client: u64, re: u64, method: []const u8, args: u64) ?[]const u8 {
     for (s.model.answers.items) |ans| {
-        if (ans.client == client and ans.re == re and std.mem.eql(u8, ans.method, method)) return ans.body;
+        if (ans.client == client and ans.re == re and ans.args == args and std.mem.eql(u8, ans.method, method)) return ans.body;
     }
     return null;
 }
 
-fn keepAnswer(s: *Server, client: u64, re: u64, method: []const u8, body: []const u8) void {
+fn keepAnswer(s: *Server, client: u64, re: u64, method: []const u8, args: u64, body: []const u8) void {
     const st = &s.model;
     const copy = s.gpa.dupe(u8, body) catch return;
-    st.answers.append(s.gpa, .{ .client = client, .re = re, .method = method, .body = copy }) catch {
+    st.answers.append(s.gpa, .{ .client = client, .re = re, .method = method, .args = args, .body = copy }) catch {
         s.gpa.free(copy);
         return;
     };

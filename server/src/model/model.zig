@@ -88,8 +88,6 @@ pub const ModelData = struct {
     selection: Selection = .{},
 };
 
-pub const Data = ModelData;
-
 pub const Error = error{
     OutOfMemory,
     /// An id in the request is not in the model.
@@ -149,7 +147,7 @@ pub const CloseResult = enum { pane_removed, tab_closed };
 
 pub const Model = struct {
     arena: std.heap.ArenaAllocator,
-    data: Data = .{},
+    data: ModelData = .{},
     /// Tab id to its zoomed pane id.
     zoomed: ids.Map(TabId, PaneId) = .empty,
     /// Tab id to its earlier focus, newest first (design/010 §1).
@@ -400,6 +398,21 @@ pub const Model = struct {
         if (kind == .project or id.isEmpty()) return error.BadRequest;
         if (m.findWorkspace(id) != null or m.findProject(.of(id.text)) != null) return error.DuplicateId;
         m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = try id.dupe(a), .kind = kind });
+    }
+
+    /// Removes a workspace that is not a project's, with its tabs. Returns
+    /// the panes that left the model.
+    pub fn removeWorkspace(m: *Model, id: WorkspaceId) Error![]const Pane {
+        const a = m.alloc();
+        const wi = indexOf(Workspace, m.data.workspaces, id) orelse return error.NotFound;
+        if (m.data.workspaces[wi].kind == .project) return error.BadRequest;
+        var gone: std.ArrayList(Pane) = .empty;
+        for (m.data.workspaces[wi].tabs) |*t| try appendPanes(a, &t.root, &gone);
+        const workspaces = try removeAt(Workspace, a, m.data.workspaces, wi);
+        for (m.data.workspaces[wi].tabs) |t| m.forgetTab(t.id);
+        _ = m.tab_history.remove(id);
+        m.data.workspaces = workspaces;
+        return gone.items;
     }
 
     /// Removes a project and its workspace. Returns the panes that left the
@@ -709,7 +722,7 @@ pub const Model = struct {
         if (!tree.swap(&tab.root, x, y)) return error.BadRequest;
     }
 
-    pub fn setAttention(m: *Model, pane_id: PaneId, attention: tree.Attention) Error!void {
+    pub fn setAttention(m: *Model, pane_id: PaneId, attention: tree.ModelAttention) Error!void {
         const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
         tree.findPaneMut(&tab.root, pane_id).?.attention = attention;
     }
@@ -842,7 +855,7 @@ pub const Model = struct {
 
 // ── Copies for `compact` ───────────────────────────────────────────────────
 
-fn cloneData(a: Allocator, d: Data) Allocator.Error!Data {
+fn cloneData(a: Allocator, d: ModelData) Allocator.Error!ModelData {
     const projects = try a.alloc(Project, d.projects.len);
     for (d.projects, projects) |p, *out| out.* = .{
         .id = try p.id.dupe(a),
@@ -941,7 +954,7 @@ pub const Fault = struct {
 /// `active_tab` that is in its workspace, and project workspaces that match
 /// their projects. A group has no path, no workspace and no selection.
 /// Returns the first fault, or null.
-pub fn validate(gpa: Allocator, data: *const Data) Allocator.Error!?Fault {
+pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
