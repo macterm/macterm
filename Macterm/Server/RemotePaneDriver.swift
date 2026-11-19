@@ -334,8 +334,16 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneGrid()
         }
 
-        func paneSnapshot(started: Bool) {
-            surface.paneSnapshot(started: started)
+        func paneTitle(_ title: Data) {
+            surface.paneTitle(title)
+        }
+
+        func paneCwd(_ url: Data) {
+            surface.paneCwd(url)
+        }
+
+        func paneMark(_ mark: MactermProtocol.Mark) {
+            surface.paneMark(mark)
         }
 
         func paneLead(_ leader: Bool?) {

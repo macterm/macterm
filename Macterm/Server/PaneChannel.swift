@@ -17,6 +17,8 @@ enum PaneChannelEvent: Equatable {
     case resumed(MactermProtocol.Resumed)
     case exit(MactermProtocol.Exit)
     case title(Data)
+    /// The shell's folder as an OSC 7 URL.
+    case cwd(Data)
     case foreground(MactermProtocol.Foreground)
     case ttyMode(MactermProtocol.TtyMode)
     case attention(MactermProtocol.Attention)
@@ -57,6 +59,7 @@ enum PaneChannelEvent: Equatable {
         case let .resumed(resumed): .resumed(resumed)
         case let .exit(exit): .exit(exit)
         case let .title(title): .title(title.title.bytes)
+        case let .cwd(cwd): .cwd(cwd.url.bytes)
         case let .foreground(foreground): .foreground(foreground)
         case let .ttyMode(mode): .ttyMode(mode)
         case let .attention(flags): .attention(flags)

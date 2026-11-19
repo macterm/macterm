@@ -7,11 +7,8 @@ private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 /// A local v2 session as the server lists it.
 struct LocalSession: Equatable {
     var name: String
-    /// The session's shell, the leader of its pty. Its controlling tty's
-    /// foreground group is the pane's foreground (`ZmxForegroundResolver`).
+    /// The session's shell, the leader of its pty.
     var shellPID: pid_t?
-    /// The session's pty (`/dev/ttysNNN`).
-    var ttyPath: String?
     /// False after the shell exited: the session keeps the status until a
     /// client sends `session.kill`.
     var isRunning: Bool
@@ -24,14 +21,12 @@ struct LocalSession: Equatable {
     init(
         name: String,
         shellPID: pid_t? = nil,
-        ttyPath: String? = nil,
         isRunning: Bool = true,
         clients: Int? = 0,
         buildKey: String? = nil
     ) {
         self.name = name
         self.shellPID = shellPID
-        self.ttyPath = ttyPath
         self.isRunning = isRunning
         self.clients = clients
         self.buildKey = buildKey
@@ -41,7 +36,6 @@ struct LocalSession: Equatable {
         self.init(
             name: session.id,
             shellPID: session.shellPid.flatMap { pid_t(exactly: $0) },
-            ttyPath: session.pty.map { String(decoding: $0.bytes, as: UTF8.self) },
             isRunning: session.state == .running,
             clients: session.clients.map(Int.init),
             buildKey: session.buildKey

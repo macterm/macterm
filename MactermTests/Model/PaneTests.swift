@@ -4,6 +4,13 @@ import Testing
 
 @MainActor
 struct PaneTests {
+    /// A foreground report of the pane's session, with the pty's line mode
+    /// first, as the session sends them.
+    private func report(_ pane: Pane, _ name: String, shell: Bool = false, raw: Bool = false) {
+        pane.lineMode = raw ? .raw : .echoing
+        pane.applyForeground(SessionForeground(comm: name, isIdle: shell, isShell: shell, command: name))
+    }
+
     private func shellName() -> String {
         // Mirror Pane.defaultShellName: the login shell from the password
         // database, not $SHELL (which is the app-launcher's shell).
@@ -68,7 +75,7 @@ struct PaneTests {
     @Test
     func initialForegroundBeforeUserInteraction_staysIdle() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
+        report(p, "sleep")
         p.markTerminalActivity()
         p.settleTerminalActivityIfQuiet(now: Date(timeIntervalSince1970: 3), quietInterval: 3)
         #expect(p.foregroundProcessName == "sleep")
@@ -86,7 +93,7 @@ struct PaneTests {
     @Test
     func layoutCommand_tracksInitialForegroundBeforeUserInteraction() {
         let p = Pane(projectPath: "/", projectID: UUID(), start: .typed("npm test"))
-        p.applyForegroundRefresh(name: "npm", foregroundPID: 42)
+        report(p, "npm")
         #expect(p.executionState == .running)
     }
 
@@ -124,7 +131,7 @@ struct PaneTests {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
         p.markCommandRunning()
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
+        report(p, "sleep")
         p.markTerminalActivity(at: Date(timeIntervalSince1970: 100))
         p.settleTerminalActivityIfQuiet(now: Date(timeIntervalSince1970: 200), quietInterval: 3)
         #expect(p.executionState == .running)
@@ -136,12 +143,12 @@ struct PaneTests {
     func progressFinished_settlesCurrentForegroundProcess() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         p.markCommandRunning()
         #expect(p.executionState == .running)
         p.markProgressFinished()
         #expect(p.executionState == .done)
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         #expect(p.executionState == .done)
     }
 
@@ -152,7 +159,7 @@ struct PaneTests {
         p.markCommandRunning()
         p.markProgressFinished()
         #expect(p.executionState == .done)
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         #expect(p.executionState == .done)
     }
 
@@ -160,7 +167,7 @@ struct PaneTests {
     func progressFinished_ignoresOutputFromSettledForegroundProcess() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         p.markCommandRunning()
         p.markProgressFinished()
         p.markTerminalActivity()
@@ -171,10 +178,10 @@ struct PaneTests {
     func progressFinished_allowsForegroundRestartAfterProcessChanges() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         p.markCommandRunning()
         p.markProgressFinished()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 43)
+        report(p, "python")
         #expect(p.executionState == .running)
     }
 
@@ -284,37 +291,37 @@ struct PaneTests {
     func commandFinishedFromRunning_marksDone() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
+        report(p, "sleep")
         #expect(p.executionState == .running)
         p.markCommandFinished()
         #expect(p.executionState == .done)
     }
 
     @Test
-    func applyForegroundRefresh_marks_nonShell_process_as_running() {
+    func foregroundReport_marks_nonShell_process_as_running() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
+        report(p, "sleep")
         #expect(p.foregroundProcessName == "sleep")
         #expect(p.executionState == .running)
     }
 
     @Test
-    func applyForegroundRefresh_marks_done_when_foreground_returns_to_shell() {
+    func foregroundReport_marks_done_when_foreground_returns_to_shell() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
-        p.applyForegroundRefresh(name: shellName(), foregroundPID: 43, foregroundIsShell: true)
+        report(p, "sleep")
+        report(p, shellName(), shell: true)
         #expect(p.foregroundProcessName == shellName())
         #expect(p.executionState == .done)
     }
 
     @Test
-    func applyForegroundRefresh_marks_longLivedApps_as_running_without_exclusions_when_terminalIsCanonical() {
+    func foregroundReport_marks_longLivedApps_as_running_without_exclusions_when_terminalIsCanonical() {
         for process in ["claude", "pi", "node", "ssh"] {
             let p = Pane(projectPath: "/", projectID: UUID())
             p.recordUserInteraction()
-            p.applyForegroundRefresh(name: process, foregroundPID: 42)
+            report(p, process)
             #expect(p.foregroundProcessName == process)
             #expect(p.executionState == .running)
         }
@@ -323,7 +330,7 @@ struct PaneTests {
     @Test
     func rawForegroundProcess_doesNotStartFromForegroundAlone() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42, terminalInputIsRaw: true)
+        report(p, "node", raw: true)
         #expect(p.foregroundProcessName == "node")
         #expect(p.executionState == .idle)
     }
@@ -337,10 +344,10 @@ struct PaneTests {
         // quiet rather than locking the pane `.done` for the whole session.
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         #expect(p.executionState == .running)
 
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42, terminalInputIsRaw: true)
+        report(p, "node", raw: true)
         #expect(p.executionState == .running)
 
         // No further output: the demoted run quiet-settles like any other
@@ -354,11 +361,11 @@ struct PaneTests {
         let p = Pane(projectPath: "/", projectID: UUID())
         let start = Date(timeIntervalSince1970: 100)
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42, terminalInputIsRaw: true)
+        report(p, "node", raw: true)
         p.markTerminalActivity(at: start)
         #expect(p.executionState == .running)
 
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42, terminalInputIsRaw: true)
+        report(p, "node", raw: true)
         #expect(p.executionState == .running)
         p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
         #expect(p.executionState == .done)
@@ -480,12 +487,12 @@ struct PaneTests {
         let p = Pane(projectPath: "/", projectID: UUID())
         let start = Date(timeIntervalSince1970: 100)
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "node", foregroundPID: 42)
+        report(p, "node")
         p.markTerminalActivity(at: start)
         p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(30), quietInterval: 3)
         #expect(p.executionState == .running)
 
-        p.applyForegroundRefresh(name: shellName(), foregroundPID: 43, foregroundIsShell: true)
+        report(p, shellName(), shell: true)
         #expect(p.executionState == .done)
     }
 
@@ -494,10 +501,10 @@ struct PaneTests {
         let p = Pane(projectPath: "/", projectID: UUID())
         let start = Date(timeIntervalSince1970: 100)
         p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "sleep", foregroundPID: 42)
+        report(p, "sleep")
         p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(30), quietInterval: 3)
         #expect(p.executionState == .running)
-        p.applyForegroundRefresh(name: shellName(), foregroundPID: 43, foregroundIsShell: true)
+        report(p, shellName(), shell: true)
         #expect(p.executionState == .done)
     }
 
@@ -550,34 +557,25 @@ struct PaneTests {
     // MARK: - Agent icon
 
     @Test
-    func pane_caches_agent_across_steady_refreshes() {
+    func pane_matches_an_agent_by_its_invoked_name_and_clears_it_at_the_shell() {
         let pane = Pane(projectPath: "/", projectID: UUID())
-        var argvReads = 0
-        let argv0: () -> String? = { argvReads += 1
-            return "claude"
-        }
-        pane.applyForegroundRefresh(name: "2.1.207", foregroundPID: 42, argv0: argv0)
+        pane.applyForeground(SessionForeground(comm: "2.1.207", isIdle: false, command: "claude"))
         #expect(pane.agentIcon == .claude)
-        #expect(argvReads == 1)
-        // Same pid + comm on the next tick: cached, argv untouched.
-        pane.applyForegroundRefresh(name: "2.1.207", foregroundPID: 42, argv0: argv0)
-        #expect(argvReads == 1)
-        // Agent exits, shell takes the foreground.
-        pane.applyForegroundRefresh(name: "zsh", foregroundPID: 7, argv0: { nil })
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: true, isShell: true, command: "zsh"))
         #expect(pane.agentIcon == nil)
     }
 
     @Test
-    func pane_has_no_agent_without_a_foreground_pid() {
+    func pane_has_no_agent_while_the_shell_is_idle() {
         let pane = Pane(projectPath: "/", projectID: UUID())
-        pane.applyForegroundRefresh(name: nil, foregroundPID: nil, argv0: { "claude" })
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: true, isShell: true, command: "claude"))
         #expect(pane.agentIcon == nil)
     }
 
     @Test
     func remote_pane_matches_an_agent_from_the_report() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "/opt/homebrew/bin/codex", command: "codex --yolo"))
+        pane.applyForeground(SessionForeground(comm: "/opt/homebrew/bin/codex", command: "codex --yolo"))
         #expect(pane.agentIcon == .codex)
     }
 
@@ -586,7 +584,7 @@ struct PaneTests {
         // Claude Code's native install: macOS `ps -o comm=` gives the versioned
         // binary's path, and only args names the CLI.
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(
+        pane.applyForeground(SessionForeground(
             comm: "/Users/me/.local/share/claude/versions/2.1.207",
             isIdle: false,
             command: "claude --resume"
@@ -597,7 +595,7 @@ struct PaneTests {
     @Test
     func remote_pane_matches_an_interpreter_run_agent_by_its_script() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(
+        pane.applyForeground(SessionForeground(
             comm: "node",
             isIdle: false,
             command: "node /usr/local/lib/node_modules/@google/gemini-cli/bin/gemini"
@@ -608,9 +606,9 @@ struct PaneTests {
     @Test
     func remote_pane_loses_its_agent_when_the_shell_returns() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "2.1.207", isIdle: false, command: "claude"))
+        pane.applyForeground(SessionForeground(comm: "2.1.207", isIdle: false, command: "claude"))
         #expect(pane.agentIcon == .claude)
-        pane.applyRemoteForeground(RemoteForeground(comm: "-zsh", isIdle: true, command: "-zsh"))
+        pane.applyForeground(SessionForeground(comm: "-zsh", isIdle: true, command: "-zsh"))
         #expect(pane.agentIcon == nil)
     }
 
@@ -619,15 +617,15 @@ struct PaneTests {
         // nil (an empty report) changes nothing, as
         // for the name and the command.
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "2.1.207", isIdle: false, command: "claude"))
-        pane.applyRemoteForeground(nil)
+        pane.applyForeground(SessionForeground(comm: "2.1.207", isIdle: false, command: "claude"))
+        pane.applyForeground(nil)
         #expect(pane.agentIcon == .claude)
     }
 
     @Test
     func remote_pane_shows_no_agent_for_an_ordinary_program() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "btop", isIdle: false, command: "btop --utf-force"))
+        pane.applyForeground(SessionForeground(comm: "btop", isIdle: false, command: "btop --utf-force"))
         #expect(pane.agentIcon == nil)
     }
 
@@ -642,7 +640,7 @@ struct PaneTests {
         #expect(!local.needsConfirmClose)
         let remote = Pane(projectPath: "me@host.example:proj", projectID: UUID())
         remote.executionState = .running
-        remote.applyRemoteForegroundName("hx")
+        remote.applyForegroundName("hx")
         #expect(!remote.needsConfirmClose)
     }
 
@@ -661,7 +659,7 @@ struct PaneTests {
         // exact case that must NOT warn (an idle local pane doesn't). `-zsh`
         // is the login form the host actually reports.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForegroundName("-zsh")
+        p.applyForegroundName("-zsh")
         #expect(p.remoteNeedsConfirmClose == false)
         #expect(!p.needsConfirmClose)
     }
@@ -671,7 +669,7 @@ struct PaneTests {
         // A reported program is busy even when the execution tracker has
         // quiet-settled (a silent editor produces no heartbeats).
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForegroundName("hx")
+        p.applyForegroundName("hx")
         #expect(p.executionState != .running)
         #expect(p.remoteNeedsConfirmClose == true)
     }
@@ -681,8 +679,8 @@ struct PaneTests {
         // A remote-only login shell the local /etc/shells doesn't list: the
         // host says its group owns the tty, so an idle prompt must not warn.
         let remote = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "-exotic-shell", isIdle: true, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "-exotic-shell", isIdle: true, command: nil)
         )
         #expect(remote.foregroundProcessName == "exotic-shell")
         #expect(remote.remoteNeedsConfirmClose == false)
@@ -691,15 +689,15 @@ struct PaneTests {
         // as a shell name locally, but the host sees a different foreground
         // group — closing kills it, so it warns (matching libghostty's
         // local surface semantics, where a nested shell is a running child).
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "zsh", isIdle: false, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "zsh", isIdle: false, command: nil)
         )
         #expect(remote.remoteNeedsConfirmClose == true)
 
         // No host verdict (pgid read failure): fall back to
         // the local database heuristic.
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "zsh", isIdle: nil, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "zsh", isIdle: nil, command: nil)
         )
         #expect(remote.remoteNeedsConfirmClose == false)
     }
@@ -718,7 +716,7 @@ struct PaneTests {
     @Test
     func remoteForegroundCommand_records_a_running_programs_full_command_line() {
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
         #expect(p.remoteForegroundCommand == "btop --utf-force")
     }
 
@@ -728,8 +726,8 @@ struct PaneTests {
         // no run" contract local panes get. `-zsh` is the login form the
         // host actually reports; its args carry the same dash.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop"))
-        p.applyRemoteForeground(RemoteForeground(comm: "-zsh", command: "-zsh"))
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop"))
+        p.applyForeground(SessionForeground(comm: "-zsh", command: "-zsh"))
         #expect(p.remoteForegroundCommand == nil)
     }
 
@@ -738,7 +736,7 @@ struct PaneTests {
         // A report with no args field (a ps that reported
         // nothing) still yields a usable `run:` — the short name.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "/usr/local/bin/hx", command: nil))
+        p.applyForeground(SessionForeground(comm: "/usr/local/bin/hx", command: nil))
         #expect(p.remoteForegroundCommand == "hx")
     }
 
@@ -747,8 +745,8 @@ struct PaneTests {
         // nil (an empty report) keeps the last-known
         // command, mirroring the name-freeze contract.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
-        p.applyRemoteForeground(nil)
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
+        p.applyForeground(nil)
         #expect(p.remoteForegroundCommand == "btop --utf-force")
     }
 }

@@ -5,10 +5,9 @@ import Testing
 struct ForegroundSampleTests {
     private func sample(
         name: String?,
-        isIdleShell: Bool = false,
-        origin: ForegroundSample.Origin = .remoteEvent
+        isIdleShell: Bool = false
     ) -> ForegroundSample {
-        ForegroundSample(name: name, isIdleShell: isIdleShell, origin: origin, sampledAt: Date())
+        ForegroundSample(name: name, isIdleShell: isIdleShell, sampledAt: Date())
     }
 
     // MARK: - needsConfirmClose (the full verdict)
@@ -26,12 +25,12 @@ struct ForegroundSampleTests {
         // libghostty's own verdict is authoritative locally — the sample is
         // naming state, never a busy override.
         #expect(ForegroundPolicy.needsConfirmClose(
-            sample: sample(name: "zsh", isIdleShell: true, origin: .processTable(pid: 1)),
+            sample: sample(name: "zsh", isIdleShell: true),
             executionState: .idle, isRemote: false,
             hasSurface: true, surfaceBusy: true
         ))
         #expect(!ForegroundPolicy.needsConfirmClose(
-            sample: sample(name: "btop", origin: .processTable(pid: 1)),
+            sample: sample(name: "btop"),
             executionState: .idle, isRemote: false,
             hasSurface: true, surfaceBusy: false
         ))
