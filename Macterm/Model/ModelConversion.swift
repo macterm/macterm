@@ -77,11 +77,8 @@ enum ModelConversion {
         case let .remote(user, host, _): user.map { "\($0)@\(host)" } ?? host
         default: nil
         }
-        let attention: MactermProtocol.ModelAttention = if p.needsAttention == true {
-            p.completionFailed == true ? .failed : .done
-        } else {
-            .none
-        }
+        // The session keeps a pane's attention flags (`Pane.attention`), so
+        // the model's `attention` stays `none`.
         return .init(
             id: id(p.sessionID ?? p.id),
             session: p.sessionName ?? "",
@@ -89,8 +86,7 @@ enum ModelConversion {
             slug: p.sessionName.flatMap(ZmxSessionName.slug(fromName:)) ?? "",
             originPath: p.projectPath,
             cwd: p.workingDirectory,
-            hostSessionDir: p.hostSessionDirectory,
-            attention: attention
+            hostSessionDir: p.hostSessionDirectory
         )
     }
 

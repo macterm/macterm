@@ -6,13 +6,11 @@ import Testing
 @MainActor
 struct ModelConversionTests {
     @Test
-    func a_pane_takes_its_session_id_its_host_and_its_attention() {
+    func a_pane_takes_its_session_id_and_its_host() {
         let sessionID = UUID()
         let pane = ModelConversion.pane(PaneSnapshot(
             id: UUID(),
             projectPath: "bob@box:/srv",
-            needsAttention: true,
-            completionFailed: true,
             sessionID: sessionID,
             sessionName: "macterm-srv-0011aabb",
             hostSessionDirectory: "/srv/app"
@@ -23,12 +21,11 @@ struct ModelConversionTests {
         #expect(pane.host == "bob@box")
         #expect(pane.originPath == "bob@box:/srv")
         #expect(pane.hostSessionDir == "/srv/app")
-        #expect(pane.attention == .failed)
+        #expect(pane.attention == .none)
 
-        let local = ModelConversion.pane(PaneSnapshot(id: sessionID, projectPath: "/tmp", needsAttention: false))
+        let local = ModelConversion.pane(PaneSnapshot(id: sessionID, projectPath: "/tmp"))
         #expect(local.id == sessionID.uuidString)
         #expect(local.host == nil)
-        #expect(local.attention == .none)
     }
 
     @Test
