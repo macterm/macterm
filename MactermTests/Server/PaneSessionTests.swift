@@ -152,6 +152,64 @@ struct PaneSessionTests {
         }
     }
 
+    /// The session's flags reach every client, and a `seen` from one client
+    /// clears them for both.
+    @Test
+    func the_attention_flags_reach_each_client_and_seen_clears_them() async throws {
+        try await withServer { server in
+            let name = "ps-seen-\(UInt32.random(in: 0 ... .max))"
+            let first = RecordingPaneHost()
+            let a = PaneSession(
+                name: name,
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "read l; printf '\\a'; sleep 60"], env: []),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.leads == [true] }
+            let second = RecordingPaneHost()
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            b.start()
+            try await second.waitFor { $0.leads == [false] }
+
+            a.sendInput(Data("\n".utf8))
+            let bell = MactermProtocol.Attention(bell: true)
+            try await first.waitFor { $0.attention.last == bell }
+            try await second.waitFor { $0.attention.last == bell }
+
+            b.seen()
+            try await first.waitFor { $0.attention.last == MactermProtocol.Attention() }
+            try await second.waitFor { $0.attention.last == MactermProtocol.Attention() }
+            a.stop()
+            b.stop()
+        }
+    }
+
+    /// The session sends its flags at an attach only when one is set, so a
+    /// channel that ends clears the host's copy.
+    @Test
+    func a_lost_link_clears_the_attention_flags() async throws {
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let connections = ConnectionBox()
+            let session = PaneSession(
+                name: "ps-flags-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf '\\a'; sleep 60"], env: []),
+                wantsForeground: false,
+                reconnects: false,
+                host: host,
+                connect: { try await connections.next(server) }
+            )
+            session.start()
+            try await host.waitFor { $0.attention.last == MactermProtocol.Attention(bell: true) }
+            connections.current?.close()
+            try await host.waitFor { $0.linkLost > 0 }
+            #expect(host.snapshot().attention.last == MactermProtocol.Attention())
+            session.stop()
+        }
+    }
+
     @Test
     func a_session_that_was_killed_ends_the_pane_and_is_not_made_again() async throws {
         try await withServer { server in

@@ -220,6 +220,10 @@ final class RemotePaneDriver: PaneInputRoute {
         DispatchQueue.main.async { MainActor.assumeIsolated { self.currentRoute()?.sendSize(grid) } }
     }
 
+    nonisolated func seen() {
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.currentRoute()?.seen() } }
+    }
+
     private func currentRoute() -> (any PaneInputRoute)? {
         switch state {
         case let .running(session): session
@@ -319,6 +323,10 @@ final class RemotePaneDriver: PaneInputRoute {
 
         func paneTtyMode(_ mode: MactermProtocol.TtyMode) {
             surface.paneTtyMode(mode)
+        }
+
+        func paneAttention(_ flags: MactermProtocol.Attention) {
+            surface.paneAttention(flags)
         }
 
         func paneExited(code: UInt8?, signal: UInt8?) {

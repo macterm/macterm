@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+import os
+
+private let logger = Logger(subsystem: appBundleID, category: "Pane")
 
 /// A pane is the leaf of the split tree — one terminal surface.
 @MainActor @Observable
@@ -145,39 +148,40 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private var agentIconPID: pid_t?
 
-    /// The pane rang BEL and nobody has looked at it since. Set by `ringBell`
-    /// (the `GHOSTTY_ACTION_RING_BELL` route), cleared by `acknowledgeBell` —
-    /// which the same events that acknowledge a finished command drive: the
-    /// tab being selected or already on screen in the active app, the pane
-    /// taking focus, any user interaction with it. Feeds the Dock badge
-    /// (`BellBadge`); like ghostty's per-surface flag it is live state only,
-    /// never persisted. Every change is announced on
-    /// `.terminalBellStateDidChange` so `AppState` can re-derive the badge.
-    private(set) var hasUnacknowledgedBell = false {
+    /// The session's attention flags (design/004 §6). `unseen`: a run ended
+    /// and no client showed the pane since. `failed`: that run failed.
+    /// `bell`: the bell rang. The session keeps them, also while the app is
+    /// quit. It sends them on the pane's channel (`receiveAttention`). The
+    /// dots and the Dock badge read them. Each change posts
+    /// `.paneAttentionDidChange`.
+    private(set) var attention = MactermProtocol.Attention() {
         didSet {
-            guard hasUnacknowledgedBell != oldValue else { return }
-            NotificationCenter.default.post(name: .terminalBellStateDidChange, object: id)
+            guard attention != oldValue else { return }
+            NotificationCenter.default.post(name: .paneAttentionDidChange, object: id)
         }
     }
 
-    func ringBell() {
-        hasUnacknowledgedBell = true
+    func receiveAttention(_ flags: MactermProtocol.Attention) {
+        guard flags != attention else { return }
+        let text = "unseen=\(flags.unseen) failed=\(flags.failed) bell=\(flags.bell)"
+        logger.info("pane \(self.id, privacy: .public) attention: \(text, privacy: .public)")
+        attention = flags
     }
 
-    @discardableResult
-    func acknowledgeBell() -> Bool {
-        guard hasUnacknowledgedBell else { return false }
-        hasUnacknowledgedBell = false
-        return true
+    /// The user looked at the pane. The flags clear here at once, and the
+    /// session clears its own (`sendSeenToSession`). A `.done` run state
+    /// goes back to `.idle`.
+    func markSeen() {
+        acknowledgeCommandCompletion()
+        guard attention != MactermProtocol.Attention() else { return }
+        logger.info("pane \(self.id, privacy: .public) seen")
+        attention = MactermProtocol.Attention()
+        sendSeenToSession()
     }
 
     var executionState: TerminalExecutionState = .idle {
         didSet {
             guard executionState != oldValue else { return }
-            // A failure describes the `.done` it was recorded on, so it goes
-            // the moment the pane leaves `.done` — acknowledged, or a new run
-            // started — exactly when the green dot would.
-            if oldValue == .done, completionFailed { completionFailed = false }
             // A remote pane's OSC title expires when its command ends — the
             // execution edge is the pid-change analogue local panes get from
             // the poll (see `receiveRemoteReportedTitle`). An agent that
@@ -194,17 +198,6 @@ final class Pane: Identifiable {
             NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
         }
     }
-
-    /// Whether the run that left this pane `.done` reported a failure — an
-    /// OSC 9;4 ERROR (`markProgressFinished(failed:)`) — so its status dot is
-    /// red instead of green. It means something only while `executionState`
-    /// is `.done`: it is set only as the pane lands on `.done`, and cleared
-    /// whenever the state leaves `.done` (`executionState`'s `didSet`), which
-    /// is what makes every acknowledgement path clear red exactly as it
-    /// clears green. A flag rather than a fourth `TerminalExecutionState`,
-    /// because the tracker's guards compare against `.done` and a new case
-    /// would slip past them all.
-    private(set) var completionFailed = false
 
     /// A snapshot of the remote pane's session starts or ends
     /// (`PaneChannelEvent`). Its replay is not new output.
@@ -379,22 +372,10 @@ final class Pane: Identifiable {
         if isRemote { programTitle = nil }
     }
 
-    /// A progress report ended the pane's run: REMOVE or PAUSE, or ERROR when
-    /// `failed`. The failure lands on whatever `.done` results rather than only
-    /// on a transition made here, because the caller (`TerminalSurface`)
-    /// reports only for a pane that was `.running` when the report arrived and
-    /// refreshes the foreground first — which has already settled the run when
-    /// the program exited straight after its ERROR. A report that finds the
-    /// pane already `.done` never clears a failure: that is the REMOVE a
-    /// program sends after its ERROR, so SET → ERROR → REMOVE stays red.
-    ///
-    /// The flag is set before the state is published, because publishing
-    /// wakes the poll synchronously and the poll can save the workspace (or
-    /// acknowledge the pane) on the spot — it has to see how the run ended.
-    func markProgressFinished(failed: Bool = false) {
-        let next = executionTracker.markProgressFinished(currentState: executionState)
-        if failed, next == .done { completionFailed = true }
-        executionState = next
+    /// A progress report ended the pane's run: REMOVE, PAUSE or ERROR. Whether
+    /// the run failed is the session's to say (`attention.failed`).
+    func markProgressFinished() {
+        executionState = executionTracker.markProgressFinished(currentState: executionState)
         cancelActivityQuietPollIfNeeded()
     }
 
@@ -446,8 +427,8 @@ final class Pane: Identifiable {
             activityQuietPollWork = nil
             // This dedicated deadline bypasses ordinary event coalescing: if
             // every window is occluded there may be no timer left to retry.
-            // AppState still performs the settle so acknowledgement and
-            // persistence stay central.
+            // AppState still performs the settle, so that the poll's other
+            // work stays in one place.
             NotificationCenter.default.post(name: .terminalQuietSettleDeadline, object: self)
         }
         activityQuietPollWork = work
@@ -467,24 +448,11 @@ final class Pane: Identifiable {
         return true
     }
 
-    /// Restore the persisted "done / needs attention" state after a relaunch,
-    /// and whether that run failed (`completionFailed`), so a red dot comes
-    /// back red. Only the user-visible dot is restored; the live tracker starts
-    /// idle, so the first real foreground/output signal behaves normally and
-    /// a user interaction (or focusing the tab) clears it via
-    /// `acknowledgeCommandCompletion`.
-    func restoreNeedsAttention(failed: Bool = false) {
-        // Flag first, for the reason `markProgressFinished` gives.
-        completionFailed = failed
-        executionState = .done
-    }
-
     func recordUserInteraction() {
         executionTracker.recordUserInteraction()
-        acknowledgeCommandCompletion()
         // Typing into or clicking the pane is the user looking at it — the
         // same event ghostty clears its bell on (`keyDown`).
-        acknowledgeBell()
+        markSeen()
         // Keystrokes are the strongest "about to launch something" signal —
         // and the only one available while the non-activating quick terminal
         // has keyboard focus without app focus.
@@ -799,12 +767,11 @@ final class Pane: Identifiable {
     /// `SurfaceRegistry.destroySurfaces` destroys the views. Safe to call
     /// more than once.
     func surfacesWillTearDown(hadView: Bool) {
-        // A pane with no surface has nothing left to acknowledge — an unloaded
-        // pinned tab's panes stay in the tree, and their bells must not keep the
-        // Dock badged for shells that no longer exist (ghostty's window-close
-        // analogue: a final bell-off transition). Before the guard, so a pane
-        // torn down before its view ever existed still settles.
-        acknowledgeBell()
+        // A pane with no surface shows nothing. The panes of an unloaded
+        // pinned tab stay in the tree, and must keep no dot and no badge.
+        // Only the copy here clears. Before the guard, so that a pane with
+        // no view also clears.
+        attention = MactermProtocol.Attention()
         cancelHeldTitle()
         guard hadView else { return }
         isReceivingRemoteSnapshot = false

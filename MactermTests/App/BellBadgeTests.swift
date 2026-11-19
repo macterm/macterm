@@ -11,7 +11,7 @@ struct BellBadgeTests {
         let tree = build(H(pane("a"), pane("b"))).tree
         let tab = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: tree.allPanes().first?.id)
         for p in tab.splitRoot.allPanes().prefix(ringing) {
-            p.ringBell()
+            p.receiveAttention(MactermProtocol.Attention(bell: true))
         }
         return tab
     }
@@ -48,37 +48,35 @@ struct BellBadgeTests {
     func counts_tabs_not_panes() {
         let twoRinging = tab(ringing: 2)
         #expect(twoRinging.splitRoot.allPanes().count == 2)
-        #expect(twoRinging.hasUnacknowledgedBell)
+        #expect(twoRinging.hasUnseenBell)
         #expect(BellBadge.tabCount([twoRinging]) == 1)
     }
 
     @Test
-    func counts_only_tabs_with_an_unacknowledged_bell() {
+    func counts_only_tabs_with_an_unseen_bell() {
         let quiet = tab()
         let ringing = tab(ringing: 1)
-        let acknowledged = tab(ringing: 1)
-        acknowledged.acknowledgeBell()
-        #expect(BellBadge.tabCount([quiet, ringing, acknowledged]) == 1)
+        let seen = tab(ringing: 1)
+        seen.markSeen()
+        #expect(BellBadge.tabCount([quiet, ringing, seen]) == 1)
         #expect(BellBadge.tabCount([TerminalTab]()) == 0)
     }
 
     // MARK: - Acknowledgment
 
     @Test
-    func looking_at_the_pane_acknowledges_its_bell() throws {
+    func looking_at_the_pane_marks_its_bell_seen() throws {
         let ringing = tab(ringing: 1)
         let pane = try #require(ringing.splitRoot.allPanes().first)
         pane.recordUserInteraction()
-        #expect(!ringing.hasUnacknowledgedBell)
+        #expect(!ringing.hasUnseenBell)
     }
 
     @Test
-    func a_tab_acknowledges_every_pane_that_rang_not_just_the_focused_one() {
+    func a_tab_marks_every_pane_that_rang_seen_not_just_the_focused_one() {
         let ringing = tab(ringing: 2)
-        #expect(ringing.acknowledgeBell())
-        #expect(ringing.splitRoot.allPanes().allSatisfy { !$0.hasUnacknowledgedBell })
-        // Idempotent: nothing left to acknowledge reports no change.
-        #expect(!ringing.acknowledgeBell())
+        ringing.markSeen()
+        #expect(ringing.splitRoot.allPanes().allSatisfy { !$0.attention.bell })
     }
 
     @Test
@@ -87,11 +85,11 @@ struct BellBadgeTests {
         for pane in ringing.splitRoot.allPanes() {
             SurfaceRegistry.shared.destroySurfaces(of: pane)
         }
-        #expect(!ringing.hasUnacknowledgedBell)
+        #expect(!ringing.hasUnseenBell)
     }
 }
 
-/// The `AppState` half: which events acknowledge a bell, and the one write.
+/// The `AppState` half: which events mark a bell seen, and the one write.
 @MainActor
 struct BellBadgeAppStateTests {
     /// An AppState with a temp-file store, both badge seams stubbed, and one
@@ -116,6 +114,8 @@ struct BellBadgeAppStateTests {
         state.bellFeatures = { features }
         state.dockBadgeWriter = { recorder.labels.append($0) }
         state.isAppActive = { appActive }
+        // No views in tests: the active tab counts as drawn in the key window.
+        state.paneIsInKeyWindow = { _ in true }
         let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         return (state, recorder, project)
@@ -123,7 +123,7 @@ struct BellBadgeAppStateTests {
 
     private func ringingPane(_ state: AppState, _ project: Project) throws -> Pane {
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
-        pane.ringBell()
+        pane.receiveAttention(MactermProtocol.Attention(bell: true))
         return pane
     }
 
@@ -132,9 +132,9 @@ struct BellBadgeAppStateTests {
         let (state, recorder, project) = makeAppState(appActive: true)
         let pane = try ringingPane(state, project)
 
-        state.paneBellStateDidChange(paneID: pane.id)
+        state.paneAttentionDidChange(paneID: pane.id)
 
-        #expect(!pane.hasUnacknowledgedBell)
+        #expect(!pane.attention.bell)
         #expect(state.dockBadgeLabel == nil)
         // Nothing was ever badged, so nothing needed writing back down.
         #expect(recorder.labels.isEmpty)
@@ -149,17 +149,17 @@ struct BellBadgeAppStateTests {
         #expect(foreground.id != background.id)
 
         let pane = try #require(background.focusedPane)
-        pane.ringBell()
-        state.paneBellStateDidChange(paneID: pane.id)
+        pane.receiveAttention(MactermProtocol.Attention(bell: true))
+        state.paneAttentionDidChange(paneID: pane.id)
 
-        #expect(background.hasUnacknowledgedBell)
+        #expect(background.hasUnseenBell)
         #expect(state.dockBadgeLabel == "1")
         #expect(recorder.labels == ["1"])
 
         state.selectTab(background.id, projectID: project.id)
         state.syncDockBadge()
 
-        #expect(!background.hasUnacknowledgedBell)
+        #expect(!background.hasUnseenBell)
         #expect(state.dockBadgeLabel == nil)
         #expect(recorder.labels == ["1", nil])
     }
@@ -169,15 +169,17 @@ struct BellBadgeAppStateTests {
         let (state, recorder, project) = makeAppState(appActive: false)
         let pane = try ringingPane(state, project)
 
-        state.paneBellStateDidChange(paneID: pane.id)
+        state.paneAttentionDidChange(paneID: pane.id)
 
-        #expect(pane.hasUnacknowledgedBell)
+        #expect(pane.attention.bell)
         #expect(recorder.labels == ["1"])
 
-        state.acknowledgeBellsInActiveTab()
+        // The app comes to the front.
+        state.isAppActive = { true }
+        state.markActiveTabSeenOnActivation()
         state.syncDockBadge()
 
-        #expect(!pane.hasUnacknowledgedBell)
+        #expect(!pane.attention.bell)
         #expect(recorder.labels == ["1", nil])
     }
 
@@ -191,8 +193,8 @@ struct BellBadgeAppStateTests {
 
         state.syncDockBadge()
 
-        #expect(firstPane.hasUnacknowledgedBell)
-        #expect(secondPane.hasUnacknowledgedBell)
+        #expect(firstPane.attention.bell)
+        #expect(secondPane.attention.bell)
         #expect(state.dockBadgeLabel == "2")
     }
 

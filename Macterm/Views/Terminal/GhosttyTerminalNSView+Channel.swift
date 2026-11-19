@@ -191,6 +191,10 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         DispatchQueue.main.async { [weak view] in view?.onRemoteTtyMode?(lineMode) }
     }
 
+    func paneAttention(_ flags: MactermProtocol.Attention) {
+        DispatchQueue.main.async { [weak view] in view?.onAttention?(flags) }
+    }
+
     func paneLead(_ leader: Bool?) {
         DispatchQueue.main.async { [weak view] in view?.onLead?(leader) }
     }

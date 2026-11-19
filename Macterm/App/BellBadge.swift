@@ -16,7 +16,7 @@ enum BellBadge {
     /// matter how many of its panes rang.
     @MainActor
     static func tabCount(_ tabs: some Sequence<TerminalTab>) -> Int {
-        tabs.reduce(0) { $0 + ($1.hasUnacknowledgedBell ? 1 : 0) }
+        tabs.reduce(0) { $0 + ($1.hasUnseenBell ? 1 : 0) }
     }
 
     /// The badge text for `bellTabCount` ringing tabs under `features`: nil —
