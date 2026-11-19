@@ -1860,6 +1860,22 @@
         }
       }
     },
+    "Cannot create the project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트를 생성할 수 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建项目"
+          }
+        }
+      }
+    },
     "Cannot install %@: %@" : {
       "localizations" : {
         "en" : {
@@ -1926,22 +1942,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取 Macterm 的扩展：%@"
-          }
-        }
-      }
-    },
-    "Cannot create the project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트를 생성할 수 없음"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法创建项目"
           }
         }
       }
