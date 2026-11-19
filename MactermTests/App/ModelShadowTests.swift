@@ -32,6 +32,8 @@ struct ModelShadowTests {
             let pinned = try #require(state.workspaces[a.id]?.activeTab)
             state.pinTab(pinned.id, fromProject: a.id)
             _ = try #require(state.createScratchTab(focus: false))
+            // A pin selects the pinned row: select the project again.
+            state.selectProject(a)
 
             let sessions = LocalSessions(server: server)
             let shadow = ModelShadow(projectStore: store, sessions: sessions)

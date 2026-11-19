@@ -8,15 +8,16 @@ struct ModelConversionTests {
     @Test
     func a_pane_takes_its_session_id_and_its_host() {
         let sessionID = UUID()
+        let name = ZmxSessionName.make(projectName: "srv", paneSessionID: sessionID)
         let pane = ModelConversion.pane(PaneSnapshot(
             id: UUID(),
             projectPath: "bob@box:/srv",
             sessionID: sessionID,
-            sessionName: "macterm-srv-0011aabb",
+            sessionName: name,
             hostSessionDirectory: "/srv/app"
         ))
         #expect(pane.id == sessionID.uuidString)
-        #expect(pane.session == "macterm-srv-0011aabb")
+        #expect(pane.session == name)
         #expect(pane.slug == "srv")
         #expect(pane.host == "bob@box")
         #expect(pane.originPath == "bob@box:/srv")
