@@ -1,0 +1,14 @@
+Macterm agent skills
+
+Skills for AI coding agents that use Macterm through its `macterm` CLI. They
+use the Agent Skills format: one folder for each skill, with a SKILL.md file
+in it. Install each skill below into your skills directory as
+<name>/SKILL.md, exactly as printed. The file of a skill is everything after
+its "==> <name>/SKILL.md <==" line. It ends at the next such line, or at the
+end of this output. Each skill stands alone.
+
+`macterm skills <name>` prints one skill by itself, ready to redirect into
+place. `macterm skills --list` shows the names. The text comes from the CLI
+that printed it. Print and install the skills again after you update
+Macterm. They replace the single "macterm" skill from the Macterm Cookbook.
+If you installed that skill, remove it.

@@ -255,7 +255,7 @@ pub fn writeUsageError(w: *std.Io.Writer, path: []const *const Command, message:
 /// The `--help` text of the last command of `path`.
 pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
-    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, width);
+    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, short_width);
     try w.writeByte('\n');
     if (c.discussion) |d| {
         var lines = std.mem.splitScalar(u8, d, '\n');

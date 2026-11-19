@@ -91,6 +91,26 @@ struct AgentSkillsTests {
         }
     }
 
+    // MARK: - The Zig CLI's copy
+
+    /// The Zig CLI embeds `server/src/cli/skills/` (design 011 §2). Until the
+    /// swap removes the Swift CLI, those files must be this text.
+    @Test
+    func the_zig_cli_files_are_this_text() throws {
+        let directory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("server/src/cli/skills")
+        let header = try String(contentsOf: directory.appendingPathComponent("header.txt"), encoding: .utf8)
+        #expect(header == AgentSkills.header)
+        for skill in AgentSkills.all {
+            let text = try String(contentsOf: directory.appendingPathComponent(skill.path), encoding: .utf8)
+            #expect(text == skill.fileText, "server/src/cli/skills/\(skill.path) is not the text of AgentSkills")
+        }
+        let folders = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0 != "header.txt" }
+        #expect(Set(folders) == Set(AgentSkills.all.map(\.name)))
+    }
+
     // MARK: - The bundled CLI
 
     @Test
