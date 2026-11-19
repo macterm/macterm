@@ -1313,6 +1313,84 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         try list.append(arena, fixture);
     }
 
+    // The model (design/010): a split tree with an f64 ratio and both cases
+    // of the Node union, in a reply, a request, a batch and an import.
+    const project_id = model.ProjectId.of("p-1");
+    const workspace_id = model.WorkspaceId.ofProject(project_id);
+    const tab_id = model.TabId.of("t-1");
+    const left: model.Pane = .{
+        .id = model.PaneId.of("pane-1"),
+        .session = "macterm-1",
+        .slug = "api",
+        .origin_path = "/src/api",
+        .cwd = "/src/api/cmd",
+        .attention = .done,
+    };
+    const right: model.Pane = .{
+        .id = model.PaneId.of("pane-2"),
+        .session = "macterm-2",
+        .host = "me@box",
+        .host_session_dir = "/run/macterm",
+    };
+    var split: model.tree.Split = .{
+        .id = model.SplitId.of("s-1"),
+        .dir = .horizontal,
+        .ratio = 0.3,
+        .first = .{ .pane = left },
+        .second = .{ .pane = right },
+    };
+    const tab: model.Tab = .{
+        .id = tab_id,
+        .custom_title = "build",
+        .root = .{ .split = &split },
+        .focused = right.id,
+    };
+    var tabs = [_]model.Tab{tab};
+    var projects = [_]model.Project{.{
+        .id = project_id,
+        .name = "api",
+        .path = "/src/api",
+        .color = "blue",
+        .sort_order = 2,
+        .created_at = 1_700_000_000_000,
+    }};
+    var workspaces = [_]model.Workspace{.{
+        .id = workspace_id,
+        .kind = .project,
+        .tabs = &tabs,
+        .active_tab = tab_id,
+    }};
+    const model_data: model.ModelData = .{
+        .epoch_hint = 5,
+        .imported_v1 = true,
+        .projects = &projects,
+        .workspaces = &workspaces,
+        .selection = .{ .active_project = project_id },
+    };
+
+    try m.encodeResult(&buf.writer, 10, m.StateSubscribe, .{
+        .epoch = 5,
+        .seq = 12,
+        .model = model_data,
+        .zoomed = &.{.{ .tab = tab_id, .pane = right.id }},
+        .sessions = &.{.{ .id = "macterm-1", .state = .running, .build = "2.0.0", .level = 3, .pid = 501 }},
+        .client = 77,
+    });
+    try list.append(arena, try control(arena, "state.subscribe result", Raw{ .bytes = try buf.toOwnedSlice() }, true));
+    try m.encodeRequest(&buf.writer, 11, m.TabCreate, .{
+        .workspace = workspace_id,
+        .id = tab_id,
+        .root = .{ .split = &split },
+        .title = "build",
+    });
+    try list.append(arena, try control(arena, "tab.create request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
+    try list.append(arena, try control(arena, "model events", m.EventBatch{ .seq = 13, .cause = 11, .ev = &.{
+        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .workspace = workspace_id, .tab = tab, .zoomed = right.id }) } },
+        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .workspace = workspace_id, .kind = .project, .ids = &.{tab_id}, .active_tab = tab_id }) } },
+    } }, true));
+    try m.encodeRequest(&buf.writer, 12, m.ModelImport, .{ .model = model_data, .source = "workspaces_v3.json" });
+    try list.append(arena, try control(arena, "model.import request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
+
     try m.encodePane(&buf.writer, m.Attach, .{ .cols = 120, .rows = 40 });
     try list.append(arena, try pane(arena, "attach", try buf.toOwnedSlice()));
     try m.encodePane(&buf.writer, m.Exit, .{ .code = 130 });
@@ -1569,7 +1647,7 @@ test "every fixture decodes as the message it names" {
             .request
         else if (std.mem.endsWith(u8, f.name, "result") or std.mem.eql(u8, f.name, "error"))
             .response
-        else if (std.mem.eql(u8, f.name, "events"))
+        else if (std.mem.endsWith(u8, f.name, "events"))
             .events
         else if (std.mem.eql(u8, f.name, "refuse"))
             .refuse

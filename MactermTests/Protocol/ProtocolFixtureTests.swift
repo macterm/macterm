@@ -65,6 +65,7 @@ struct ProtocolFixtureTests {
             "channel.close request", "channel.close result",
             "error", "events", "later hello", "pane bytes",
             "attach", "exit", "claim",
+            "state.subscribe result", "tab.create request", "model events", "model.import request",
             "replace: a lower level", "replace: a higher level",
             "replace: another build of the app", "replace: another build of another app",
             "replace: the same build", "replace: a build with no key", "replace: an app with no key",
@@ -195,6 +196,93 @@ struct ProtocolFixtureTests {
         #expect(hello.level == 9)
         #expect(hello.role == .unknown)
         #expect(hello.caps == ["tcc", "teleport"])
+    }
+
+    /// The model that `fixtures` in `schema.zig` builds: a project's tab
+    /// with a split of a local and a remote pane.
+    private static let tab = MactermProtocol.Tab(
+        id: "t-1",
+        customTitle: "build",
+        root: .split(.init(
+            id: "s-1",
+            dir: .horizontal,
+            ratio: 0.3,
+            first: .pane(.init(
+                id: "pane-1",
+                session: "macterm-1",
+                slug: "api",
+                originPath: "/src/api",
+                cwd: "/src/api/cmd",
+                attention: .done
+            )),
+            second: .pane(.init(id: "pane-2", session: "macterm-2", host: "me@box", hostSessionDir: "/run/macterm"))
+        )),
+        focused: "pane-2"
+    )
+
+    private static let model = MactermProtocol.ModelData(
+        epochHint: 5,
+        importedV1: true,
+        projects: [.init(id: "p-1", name: "api", path: "/src/api", color: "blue", sortOrder: 2, createdAt: 1_700_000_000_000)],
+        workspaces: [.init(id: "p-1", kind: .project, tabs: [tab], activeTab: "t-1")],
+        selection: .init(activeProject: "p-1")
+    )
+
+    /// Each typed value is also encoded here, and the frame must hold the
+    /// same bytes: `Request` and `Response` compare their raw arguments.
+    @Test
+    func the_model_decodes_from_a_subscribe_result() throws {
+        guard case let .response(response) = try Self.control("state.subscribe result") else {
+            Issue.record("not a response")
+            return
+        }
+        let result = MactermProtocol.StateSubscribe.Result(
+            epoch: 5,
+            seq: 12,
+            model: Self.model,
+            zoomed: [.init(tab: "t-1", pane: "pane-2")],
+            sessions: [.init(id: "macterm-1", state: .running, build: "2.0.0", level: 3, pid: 501)],
+            client: 77
+        )
+        #expect(try response.result(of: MactermProtocol.StateSubscribe.self) == result)
+        #expect(response == .init(re: 10, method: MactermProtocol.StateSubscribe.self, result: result))
+    }
+
+    @Test
+    func a_tab_with_a_split_tree_decodes_from_a_create_request() throws {
+        guard case let .request(request) = try Self.control("tab.create request") else {
+            Issue.record("not a request")
+            return
+        }
+        let args = MactermProtocol.TabCreate.Args(workspace: "p-1", id: "t-1", root: Self.tab.root, title: "build")
+        #expect(try request.args(of: MactermProtocol.TabCreate.self) == args)
+        #expect(request == .init(id: 11, method: MactermProtocol.TabCreate.self, args: args))
+    }
+
+    @Test
+    func a_model_batch_keeps_its_cause_and_its_events_decode() throws {
+        guard case let .events(batch) = try Self.control("model events") else {
+            Issue.record("not an event batch")
+            return
+        }
+        let changed = MactermProtocol.TabChanged(workspace: "p-1", tab: Self.tab, zoomed: "pane-2")
+        let order = MactermProtocol.TabOrder(workspace: "p-1", kind: .project, ids: ["t-1"], activeTab: "t-1")
+        #expect(batch == .init(seq: 13, ev: [
+            .init(e: MactermProtocol.TabChanged.name, a: ProtocolRaw(encoding: changed)),
+            .init(e: MactermProtocol.TabOrder.name, a: ProtocolRaw(encoding: order)),
+        ], cause: 11))
+        #expect(try batch.ev.map { try $0.decoded() } == [.tabChanged(changed), .tabOrder(order)])
+    }
+
+    @Test
+    func the_model_decodes_from_an_import_request() throws {
+        guard case let .request(request) = try Self.control("model.import request") else {
+            Issue.record("not a request")
+            return
+        }
+        let args = MactermProtocol.ModelImport.Args(model: Self.model, source: "workspaces_v3.json")
+        #expect(try request.args(of: MactermProtocol.ModelImport.self) == args)
+        #expect(request == .init(id: 12, method: MactermProtocol.ModelImport.self, args: args))
     }
 
     /// Decodes a pane message and its fields, and builds it again from them.
