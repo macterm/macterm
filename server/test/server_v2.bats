@@ -62,7 +62,7 @@ cli.wait_closed()
 assert cli.control()[1]["reason"] == "build_mismatch", cli.control()
 
 # A method that the server does not have: an error, and the link stays.
-res = c.request("pane.split")
+res = c.request("pane.teleport")
 assert res["err"]["code"] == "unknown_method", res
 assert c.call("session.list") == {"sessions": []}
 
