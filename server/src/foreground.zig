@@ -144,14 +144,15 @@ pub const Process = struct {
 /// data holds the environment too, and a process whose data is longer than
 /// `scratch` is read into a buffer from `gpa`. null when the process is
 /// gone or cannot be read; a process whose command line alone cannot be
-/// read gets an empty `args`.
-pub fn readProcess(gpa: std.mem.Allocator, pid: lib_posix.pid_t, comm_buf: []u8, args_buf: []u8, scratch: []u8) ?Process {
+/// read gets an empty `args`. `sep` goes between two arguments: a space for
+/// a report, NUL to split them again.
+pub fn readProcess(gpa: std.mem.Allocator, pid: lib_posix.pid_t, comm_buf: []u8, args_buf: []u8, scratch: []u8, sep: u8) ?Process {
     switch (builtin.os.tag) {
         .macos => {
             const n = macos.proc_pidpath(@intCast(pid), comm_buf.ptr, @intCast(comm_buf.len));
             if (n <= 0) return null;
             const comm = comm_buf[0..@intCast(n)];
-            return .{ .comm = comm, .args = macos.procArgs(gpa, pid, args_buf, scratch) };
+            return .{ .comm = comm, .args = macos.procArgs(gpa, pid, args_buf, scratch, sep) };
         },
         .linux => {
             var path_buf: [64]u8 = undefined;
@@ -160,11 +161,11 @@ pub fn readProcess(gpa: std.mem.Allocator, pid: lib_posix.pid_t, comm_buf: []u8,
             const comm = std.mem.trimEnd(u8, comm_raw, "\n");
             if (comm.len == 0) return null;
             const cmdline_path = std.fmt.bufPrint(&path_buf, "/proc/{d}/cmdline", .{pid}) catch return null;
-            const args = if (readFile(cmdline_path, scratch)) |raw| joinCmdline(raw, args_buf) else "";
+            const args = if (readFile(cmdline_path, scratch)) |raw| joinCmdline(raw, args_buf, sep) else "";
             return .{ .comm = comm, .args = args };
         },
         else => {
-            _ = .{ gpa, pid, comm_buf, args_buf, scratch };
+            _ = .{ gpa, pid, comm_buf, args_buf, scratch, sep };
             return null;
         },
     }
@@ -181,7 +182,7 @@ const macos = struct {
     /// data, so the size is asked first. The buffer is one byte longer than
     /// that size: a read that fills it was cut short (the process ran a new
     /// program in between), and gets no args rather than wrong ones.
-    fn procArgs(gpa: std.mem.Allocator, pid: lib_posix.pid_t, args_buf: []u8, scratch: []u8) []const u8 {
+    fn procArgs(gpa: std.mem.Allocator, pid: lib_posix.pid_t, args_buf: []u8, scratch: []u8, sep: u8) []const u8 {
         var mib = [_]c_int{ CTL_KERN, KERN_PROCARGS2, @intCast(pid) };
         var size: usize = 0;
         if (std.c.sysctl(&mib, mib.len, null, &size, null, 0) != 0) return "";
@@ -191,15 +192,15 @@ const macos = struct {
         var len: usize = raw.len;
         if (std.c.sysctl(&mib, mib.len, @as(*anyopaque, @ptrCast(raw.ptr)), &len, null, 0) != 0) return "";
         if (len == raw.len) return "";
-        return parseProcArgs2(raw[0..len], args_buf);
+        return parseProcArgs2(raw[0..len], args_buf, sep);
     }
 };
 
 /// The command line from a `KERN_PROCARGS2` buffer: the argument count,
 /// the executable path, NUL padding, then the arguments, each NUL
 /// terminated (the environment follows and is not read). Returns the
-/// arguments joined by spaces, in `out`, cut at its length.
-pub fn parseProcArgs2(raw: []const u8, out: []u8) []const u8 {
+/// arguments joined by `sep`, in `out`, cut at its length.
+pub fn parseProcArgs2(raw: []const u8, out: []u8, sep: u8) []const u8 {
     if (raw.len < 4) return "";
     const argc = std.mem.readInt(u32, raw[0..4], builtin.cpu.arch.endian());
     var i: usize = 4;
@@ -212,7 +213,7 @@ pub fn parseProcArgs2(raw: []const u8, out: []u8) []const u8 {
         const end = std.mem.indexOfScalarPos(u8, raw, i, 0) orelse raw.len;
         if (taken > 0) {
             if (n >= out.len) break;
-            out[n] = ' ';
+            out[n] = sep;
             n += 1;
         }
         const take = @min(end - i, out.len - n);
@@ -225,11 +226,11 @@ pub fn parseProcArgs2(raw: []const u8, out: []u8) []const u8 {
 }
 
 /// The command line from `/proc/<pid>/cmdline`: NUL-separated arguments,
-/// joined by spaces, in `out`, cut at its length.
-pub fn joinCmdline(raw: []const u8, out: []u8) []const u8 {
+/// joined by `sep`, in `out`, cut at its length.
+pub fn joinCmdline(raw: []const u8, out: []u8, sep: u8) []const u8 {
     const trimmed = std.mem.trimEnd(u8, raw, "\x00");
     const n = @min(trimmed.len, out.len);
-    for (trimmed[0..n], 0..) |c, i| out[i] = if (c == 0) ' ' else c;
+    for (trimmed[0..n], 0..) |c, i| out[i] = if (c == 0) sep else c;
     return out[0..n];
 }
 
@@ -304,7 +305,8 @@ test "foreground: parseProcArgs2 joins argv after the executable path" {
     const rest = "/usr/bin/hx\x00\x00\x00hx\x00--vsplit\x00README.md\x00TERM=xterm\x00";
     @memcpy(raw[4 .. 4 + rest.len], rest);
     var out: [64]u8 = undefined;
-    try testing.expectEqualStrings("hx --vsplit README.md", parseProcArgs2(raw[0 .. 4 + rest.len], &out));
+    try testing.expectEqualStrings("hx --vsplit README.md", parseProcArgs2(raw[0 .. 4 + rest.len], &out, ' '));
+    try testing.expectEqualStrings("hx\x00--vsplit\x00README.md", parseProcArgs2(raw[0 .. 4 + rest.len], &out, 0));
 }
 
 test "foreground: parseProcArgs2 cuts at the output buffer" {
@@ -313,12 +315,12 @@ test "foreground: parseProcArgs2 cuts at the output buffer" {
     const rest = "/bin/x\x00x\x00abcdefgh\x00";
     @memcpy(raw[4 .. 4 + rest.len], rest);
     var out: [5]u8 = undefined;
-    try testing.expectEqualStrings("x abc", parseProcArgs2(raw[0 .. 4 + rest.len], &out));
-    try testing.expectEqualStrings("", parseProcArgs2("ab", &out));
+    try testing.expectEqualStrings("x abc", parseProcArgs2(raw[0 .. 4 + rest.len], &out, ' '));
+    try testing.expectEqualStrings("", parseProcArgs2("ab", &out, ' '));
 }
 
 test "foreground: joinCmdline turns NUL separators into spaces" {
     var out: [32]u8 = undefined;
-    try testing.expectEqualStrings("hx --vsplit README.md", joinCmdline("hx\x00--vsplit\x00README.md\x00", &out));
-    try testing.expectEqualStrings("", joinCmdline("", &out));
+    try testing.expectEqualStrings("hx --vsplit README.md", joinCmdline("hx\x00--vsplit\x00README.md\x00", &out, ' '));
+    try testing.expectEqualStrings("", joinCmdline("", &out, ' '));
 }

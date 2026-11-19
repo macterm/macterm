@@ -20,6 +20,7 @@ const m = protocol.messages;
 const server = @import("server.zig");
 const runs = @import("runs.zig");
 const peers = @import("peers.zig");
+const chord = @import("chord.zig");
 const Server = server.Server;
 
 const Peer = peers.Peer;
@@ -35,7 +36,7 @@ const fresh_build_ms = 60_000;
 pub const Waiter = struct {
     peer: u64,
     re: u64,
-    kind: enum { create, info, kill, list, seen },
+    kind: enum { create, info, kill, list, seen, history, inspect },
 };
 
 /// The server's connection to one session process.
@@ -243,6 +244,14 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
             _ = e.waiters.orderedRemove(i);
             peers.reply(s, w.peer, w.re, m.PaneSeen, .{});
         }
+    } else if (std.mem.eql(u8, msg.t, m.History.name)) {
+        const h = m.decodePane(m.History, arena, msg) catch return brokenEntry(s, e, "a bad history");
+        const w = takeWaiter(e, .history) orelse return;
+        peers.reply(s, w.peer, w.re, m.SessionHistory, .{ .text = h.text, .truncated = h.truncated });
+    } else if (std.mem.eql(u8, msg.t, m.Inspect.name)) {
+        const i = m.decodePane(m.Inspect, arena, msg) catch return brokenEntry(s, e, "a bad inspect");
+        const w = takeWaiter(e, .inspect) orelse return;
+        peers.reply(s, w.peer, w.re, m.SessionInspect, .{ .terminal = i.terminal });
     } else if (std.mem.eql(u8, msg.t, m.Exit.name)) {
         const x = m.decodePane(m.Exit, arena, msg) catch return brokenEntry(s, e, "a bad exit");
         if (e.exit != null) return;
@@ -262,8 +271,21 @@ pub fn settle(s: *Server, e: *Entry) void {
         .create => peers.reply(s, w.peer, w.re, m.SessionCreate, .{ .session = e.info() }),
         .info => peers.reply(s, w.peer, w.re, m.SessionInfo, .{ .session = e.info() }),
         .kill, .list, .seen => wait(s, &e.waiters, w),
+        // A session asked for its text or state answers, unless it was
+        // refused: then its connection is closed.
+        .history, .inspect => if (e.refused)
+            peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.")
+        else
+            wait(s, &e.waiters, w),
     };
     answerLists(s);
+}
+
+/// The first waiter of `kind`, out of the list. The session answers
+/// `history_read` and `inspect_read` in order.
+fn takeWaiter(e: *Entry, kind: @FieldType(Waiter, "kind")) ?Waiter {
+    for (e.waiters.items, 0..) |w, i| if (w.kind == kind) return e.waiters.orderedRemove(i);
+    return null;
 }
 
 /// A session that breaks the protocol. Its connection closes, and it is
@@ -304,7 +326,7 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     for (e.waiters.items) |w| switch (w.kind) {
         .kill => peers.reply(s, w.peer, w.re, m.SessionKill, .{}),
         .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session ended before it was ready."),
-        .info, .list, .seen => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .info, .list, .seen, .history, .inspect => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
@@ -519,6 +541,59 @@ pub fn kill(s: *Server, p: *Peer, re: u64, id: []const u8) void {
         std.log.info("server: kill session {s} pid={d}", .{ e.id, st.pid });
         sendEntryPane(s, e, m.End, .{});
     }
+}
+
+/// The session that a request about its terminal names, or null after the
+/// error reply. `running`: the shell must not have exited (input).
+fn terminalEntry(s: *Server, p: *Peer, re: u64, id: []const u8, running: bool) ?*Entry {
+    const e = findEntry(s, id) orelse {
+        peers.replyError(s, p.id, re, .not_found, "No session has this id.");
+        return null;
+    };
+    if (e.refused) {
+        peers.replyError(s, p.id, re, .refused, "The session runs a build that this server cannot speak to.");
+        return null;
+    }
+    if (!e.listed()) {
+        peers.replyError(s, p.id, re, .starting, "The session is not ready.");
+        return null;
+    }
+    if (running and e.exit != null) {
+        peers.replyError(s, p.id, re, .exited, "The session's shell exited.");
+        return null;
+    }
+    return e;
+}
+
+/// `session.send`: the text goes to the session as input of a client that
+/// does not show the pane, so the leader stays.
+pub fn send(s: *Server, p: *Peer, re: u64, args: m.SessionSend.Args) void {
+    if (args.text.bytes.len > m.send_max)
+        return peers.replyError(s, p.id, re, .invalid_args, "The text is over 64 KiB.");
+    const e = terminalEntry(s, p, re, args.id, true) orelse return;
+    if (args.text.bytes.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, args.text.bytes) catch return entryGone(s, e);
+    if (args.submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return entryGone(s, e);
+    peers.reply(s, p.id, re, m.SessionSend, .{});
+}
+
+pub fn sendKey(s: *Server, p: *Peer, re: u64, args: m.SessionKey.Args) void {
+    if (chord.parse(args.chord) == null)
+        return peers.replyError(s, p.id, re, .invalid_args, "The key combination does not parse.");
+    const e = terminalEntry(s, p, re, args.id, true) orelse return;
+    sendEntryPane(s, e, m.Key, .{ .chord = args.chord });
+    if (!e.conn.dead) peers.reply(s, p.id, re, m.SessionKey, .{});
+}
+
+pub fn readHistory(s: *Server, p: *Peer, re: u64, args: m.SessionHistory.Args) void {
+    const e = terminalEntry(s, p, re, args.id, false) orelse return;
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history });
+    sendEntryPane(s, e, m.HistoryRead, .{ .scrollback = args.scrollback });
+}
+
+pub fn readInspect(s: *Server, p: *Peer, re: u64, id: []const u8) void {
+    const e = terminalEntry(s, p, re, id, false) orelse return;
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .inspect });
+    sendEntryPane(s, e, m.InspectRead, .{});
 }
 
 /// Adds a waiter, or answers it at once when there is no memory for it.
