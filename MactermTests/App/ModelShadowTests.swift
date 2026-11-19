@@ -39,7 +39,7 @@ struct ModelShadowTests {
             await shadow.start()
             await sessions.prepare()
             state.saveWorkspaces()
-            let first = try await agreement(shadow)
+            let first = try await agreement(shadow, after: nil)
 
             // Every project, the group and the one with no workspace too.
             #expect(Set(first.projects.map(\.id)) == Set([group, a, b, remote].map(\.id.uuidString)))
@@ -71,18 +71,24 @@ struct ModelShadowTests {
             // A change after the first save comes back as events.
             state.closeTab(tabs[0].id, projectID: a.id)
             state.saveWorkspaces()
-            let second = try await agreement(shadow)
+            let second = try await agreement(shadow, after: first)
             #expect(second.workspaces.first { $0.id == a.id.uuidString }?.tabs.map(\.id) == tabs.dropFirst().map(\.id.uuidString))
             #expect(shadow.mirror.seq > 0)
+
+            // The pinned row is no project of the model: no selection.
+            state.activeProjectID = PinnedTabs.workspaceID
+            state.saveWorkspaces()
+            let third = try await agreement(shadow, after: second)
+            #expect(third.selection.activeProject == nil)
         }
     }
 
-    /// Waits until the server took the newest save and the mirror agrees
-    /// with it.
-    private func agreement(_ shadow: ModelShadow) async throws -> MactermProtocol.ModelData {
-        var differences = ["nothing sent"]
+    /// Waits until the server took a save other than `previous` and the
+    /// mirror agrees with it.
+    private func agreement(_ shadow: ModelShadow, after previous: MactermProtocol.ModelData?) async throws -> MactermProtocol.ModelData {
+        var differences = ["nothing new sent"]
         for _ in 0 ..< 100 {
-            if let sent = shadow.lastSent, let data = shadow.mirror.data {
+            if let sent = shadow.lastSent, sent != previous, let data = shadow.mirror.data {
                 differences = ModelConversion.differences(mirror: data, sent: sent)
                 if differences.isEmpty { return data }
             }

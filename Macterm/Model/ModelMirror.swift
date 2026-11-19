@@ -92,12 +92,9 @@ final class ModelMirror {
                 model.workspaces.removeAll { $0.id == e.id }
             case let .selectionChanged(e):
                 model.selection = .init(activeProject: e.activeProject)
-            case .projectOrder,
-                 .paneRemoved:
-                // The order of projects is in each project's `sort_order`,
-                // and a removed pane is in its tab's event.
-                break
             default:
+                // `project.order`: each project's `sort_order` has the
+                // order. `pane.removed`: the pane's tab event has it.
                 break
             }
         }

@@ -938,8 +938,8 @@ pub const ModelImport = struct {
     pub const Result = struct {};
 };
 
-/// Puts the client's copy of its own model in place of this one, as many
-/// times as it likes (design/010 §9, step 3: the shadow stage). The app
+/// Puts the client's copy of its own model in place of this one, any number
+/// of times (design/010 §9, step 3: the shadow stage). The app
 /// sends it after each save while it still owns the model, so that the
 /// server's model, its file and its events follow the app's. It ends no
 /// session and leaves `imported_v1` false. The server refuses it with

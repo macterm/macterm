@@ -252,7 +252,7 @@ final class ServerConnection: @unchecked Sendable {
             waiting?.resume(returning: response)
         case let .events(batch):
             let events = batch.ev.compactMap(ServerEvent.init)
-            if !events.isEmpty { eventSink.yield(ServerEventBatch(seq: batch.seq, cause: batch.cause, events: events)) }
+            if !events.isEmpty { eventSink.yield(ServerEventBatch(seq: batch.seq, events: events)) }
         case .hello,
              .request,
              .refuse:
@@ -309,8 +309,6 @@ final class ServerConnection: @unchecked Sendable {
 struct ServerEventBatch: Equatable {
     /// The batch's number in the server's `epoch` (`StateSubscribe.Result.seq`).
     var seq: UInt64
-    /// The id of this connection's request that made the batch.
-    var cause: UInt64?
     var events: [ServerEvent]
 }
 

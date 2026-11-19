@@ -31,6 +31,8 @@ final class ModelShadow {
     /// The server has a model that it can change.
     private var serverHasModel = false
     private var compare: Task<Void, Never>?
+    /// Counts the connections, so that only the newest subscribe installs.
+    private var connection = 0
     /// The model that the server took last.
     private(set) var lastSent: MactermProtocol.ModelData?
 
@@ -56,15 +58,18 @@ final class ModelShadow {
         case .connected:
             mirror.reset()
             serverHasModel = false
-            Task { await subscribe() }
+            connection += 1
+            let current = connection
+            Task { await subscribe(connection: current) }
         case let .batch(batch):
             mirror.apply(batch)
         }
     }
 
-    private func subscribe() async {
+    private func subscribe(connection current: Int) async {
         do {
             let state = try await sessions.subscribe()
+            guard current == connection else { return }
             mirror.install(state)
             serverHasModel = state.model != nil && !state.readonly
             if state.model == nil {

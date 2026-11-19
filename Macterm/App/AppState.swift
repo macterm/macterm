@@ -1608,7 +1608,9 @@ final class AppState {
     /// Gives `modelShadow` the snapshots that a save wrote, with the pinned
     /// tabs in the order of their workspace.
     private func shadowModel(ordinary: [WorkspaceSnapshot], pinned: [PinnedTabSnapshot]) {
-        guard let modelShadow else { return }
+        // `save` refuses to write over a file that did not load: the copy
+        // would be as empty as the state.
+        guard let modelShadow, !workspaceStore.loadFailed else { return }
         var inputs = ordinary.map { snapshot in
             ModelConversion.WorkspaceInput(
                 id: snapshot.projectID,
@@ -1629,7 +1631,9 @@ final class AppState {
                 activeTabID: pinnedWorkspace.activeTabID
             ))
         }
-        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
+        // The pinned and the scratch rows are not projects of the model.
+        let selected = activeProjectID.flatMap { Project.isSynthetic($0) ? nil : $0 }
+        modelShadow.workspacesDidSave(inputs, activeProjectID: selected)
     }
 
     // MARK: - Project

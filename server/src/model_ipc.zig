@@ -233,12 +233,14 @@ fn change(s: *Server, comptime M: type, a: std.mem.Allocator, p: *Peer, re: u64,
     const before = try Snapshot.take(a, mo);
     const outcome = try apply(s, M, mo, a, args);
     if (outcome == .err) return outcome;
-    s.model.dirty_since = s.model.dirty_since orelse s.now();
     const now_model = &s.model.model.?;
     const after = try Snapshot.take(a, now_model);
     var events: std.ArrayList(m.Event) = .empty;
     var removed: std.ArrayList(m.RemovedPane) = .empty;
     try diff(a, &before, &after, &events, &removed, M != m.ModelImport and M != m.ModelReplace);
+    // The app sends a replace after each save, mostly with no change: such
+    // a replace writes no file.
+    if (M != m.ModelReplace or events.items.len > 0) s.model.dirty_since = s.model.dirty_since orelse s.now();
     if (events.items.len > 0) peers.emitBatch(s, events.items, .{ .peer = p.id, .re = re });
     // A session that a pane of the model still names stays (fail closed).
     for (removed.items) |pane| if (pane.host == null and !after.sessions.contains(pane.session)) registry.endSession(s, pane.session);

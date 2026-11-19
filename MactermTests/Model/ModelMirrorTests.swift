@@ -19,7 +19,7 @@ struct ModelMirrorTests {
     }
 
     private func batch(_ seq: UInt64, _ events: [MactermProtocol.EventKind]) -> ServerEventBatch {
-        ServerEventBatch(seq: seq, cause: nil, events: events.map { .model($0) })
+        ServerEventBatch(seq: seq, events: events.map { .model($0) })
     }
 
     private let project = MactermProtocol.Project(id: "p1", name: "One", path: "/a")
