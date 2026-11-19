@@ -27,7 +27,7 @@ final class PaneSurface: Identifiable {
     var windowID: UUID? { host.windowID }
 
     let searchState = TerminalSearchState()
-    /// What the copy-mode pill says (`Copy Mode`, `Select Mode`), nil while the
+    /// What the copy-mode pill says (`Copy Mode`, `Select Mode`, `Visual`, …), nil while the
     /// mode is off. The view's `CopyModeController` owns the mode and reports
     /// it here. Live UI state only — never persisted.
     var copyModeLabel: String?
