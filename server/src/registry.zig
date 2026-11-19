@@ -19,6 +19,7 @@ const msgpack = protocol.msgpack;
 const m = protocol.messages;
 const server = @import("server.zig");
 const runs = @import("runs.zig");
+const model_ipc = @import("model_ipc.zig");
 const peers = @import("peers.zig");
 const Server = server.Server;
 
@@ -35,7 +36,7 @@ const fresh_build_ms = 60_000;
 pub const Waiter = struct {
     peer: u64,
     re: u64,
-    kind: enum { create, info, kill, list, seen },
+    kind: enum { create, info, kill, list, seen, subscribe },
 };
 
 /// The server's connection to one session process.
@@ -261,7 +262,7 @@ pub fn settle(s: *Server, e: *Entry) void {
     for (waiters) |w| switch (w.kind) {
         .create => peers.reply(s, w.peer, w.re, m.SessionCreate, .{ .session = e.info() }),
         .info => peers.reply(s, w.peer, w.re, m.SessionInfo, .{ .session = e.info() }),
-        .kill, .list, .seen => wait(s, &e.waiters, w),
+        .kill, .list, .seen, .subscribe => wait(s, &e.waiters, w),
     };
     answerLists(s);
 }
@@ -304,7 +305,7 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     for (e.waiters.items) |w| switch (w.kind) {
         .kill => peers.reply(s, w.peer, w.re, m.SessionKill, .{}),
         .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session ended before it was ready."),
-        .info, .list, .seen => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .info, .list, .seen, .subscribe => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
@@ -505,8 +506,22 @@ pub fn create(s: *Server, p: *Peer, re: u64, args: m.SessionCreate.Args) void {
 pub fn kill(s: *Server, p: *Peer, re: u64, id: []const u8) void {
     const e = findEntry(s, id) orelse return peers.replyError(s, p.id, re, .not_found, "No session has this id.");
     if (e.refused) return peers.replyError(s, p.id, re, .refused, "The session runs a build that this server cannot speak to.");
-    const st = e.state orelse return peers.replyError(s, p.id, re, .starting, "The session is not ready.");
+    if (e.state == null) return peers.replyError(s, p.id, re, .starting, "The session is not ready.");
     wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .kill });
+    endEntry(s, e);
+}
+
+/// Ends the session of a pane that left the model (`model_ipc`). Nobody
+/// waits for it. A session that the server does not know, or cannot speak
+/// to, stays as it is.
+pub fn endSession(s: *Server, id: []const u8) void {
+    const e = findEntry(s, id) orelse return;
+    if (e.refused or e.state == null) return;
+    endEntry(s, e);
+}
+
+fn endEntry(s: *Server, e: *Entry) void {
+    const st = e.state.?;
     if (e.killing) return;
     e.killing = true;
     e.kill_deadline = s.now() + kill_grace_ms;
@@ -550,20 +565,31 @@ pub fn answerLists(s: *Server) void {
     if (s.list_waiters.items.len == 0 or !allSettled(s)) return;
     const waiters = s.list_waiters.toOwnedSlice(s.gpa) catch return;
     defer s.gpa.free(waiters);
-    for (waiters) |w| replyList(s, w.peer, w.re);
+    for (waiters) |w| switch (w.kind) {
+        .subscribe => model_ipc.replySubscribe(s, w.peer, w.re),
+        else => replyList(s, w.peer, w.re),
+    };
 }
 
 pub fn replyList(s: *Server, peer: u64, re: u64) void {
+    var list = sessions(s) catch return;
+    defer list.deinit(s.gpa);
+    peers.reply(s, peer, re, m.SessionList, .{ .sessions = list.items });
+}
+
+/// Every session that the server can say something true of, by id. The
+/// caller frees the list.
+pub fn sessions(s: *Server) error{OutOfMemory}!std.ArrayList(m.Session) {
     checkRefused(s);
     var list: std.ArrayList(m.Session) = .empty;
-    defer list.deinit(s.gpa);
-    for (s.entries.items) |e| if (e.listed()) list.append(s.gpa, e.info()) catch return;
+    errdefer list.deinit(s.gpa);
+    for (s.entries.items) |e| if (e.listed()) try list.append(s.gpa, e.info());
     std.mem.sortUnstable(m.Session, list.items, {}, struct {
         fn less(_: void, a: m.Session, b: m.Session) bool {
             return std.mem.order(u8, a.id, b.id) == .lt;
         }
     }.less);
-    peers.reply(s, peer, re, m.SessionList, .{ .sessions = list.items });
+    return list;
 }
 
 /// On a host, removes the file of each server build that no session

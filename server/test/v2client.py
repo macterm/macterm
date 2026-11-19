@@ -26,6 +26,8 @@ def pack(v):
         return b"\xc3"
     if v is False:
         return b"\xc2"
+    if isinstance(v, float):
+        return b"\xcb" + struct.pack(">d", v)
     if isinstance(v, int):
         if 0 <= v < 0x80:
             return bytes([v])
@@ -78,7 +80,7 @@ def unpack(b, i=0):
         i += k
         raw = b[i : i + n]
         return (raw if t <= 0xC6 else raw.decode()), i + n
-    ints = {0xCC: ">B", 0xCD: ">H", 0xCE: ">I", 0xCF: ">Q", 0xD0: ">b", 0xD1: ">h", 0xD2: ">i", 0xD3: ">q"}
+    ints = {0xCC: ">B", 0xCD: ">H", 0xCE: ">I", 0xCF: ">Q", 0xD0: ">b", 0xD1: ">h", 0xD2: ">i", 0xD3: ">q", 0xCA: ">f", 0xCB: ">d"}
     if t in ints:
         f = ints[t]
         k = struct.calcsize(f)

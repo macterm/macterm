@@ -186,6 +186,246 @@
       ],
       "args": "LinkClose.Args",
       "result": "LinkClose.Result"
+    },
+    {
+      "name": "state.subscribe",
+      "type": "StateSubscribe",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "StateSubscribe.Args",
+      "result": "StateSubscribe.Result"
+    },
+    {
+      "name": "project.create",
+      "type": "ProjectCreate",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ProjectCreate.Args",
+      "result": "ProjectCreate.Result"
+    },
+    {
+      "name": "project.set",
+      "type": "ProjectSet",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ProjectSet.Args",
+      "result": "ProjectSet.Result"
+    },
+    {
+      "name": "project.reorder",
+      "type": "ProjectReorder",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ProjectReorder.Args",
+      "result": "ProjectReorder.Result"
+    },
+    {
+      "name": "project.remove",
+      "type": "ProjectRemove",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ProjectRemove.Args",
+      "result": "RemovedPanes"
+    },
+    {
+      "name": "workspace.create",
+      "type": "WorkspaceCreate",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "WorkspaceCreate.Args",
+      "result": "WorkspaceCreate.Result"
+    },
+    {
+      "name": "workspace.remove",
+      "type": "WorkspaceRemove",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "WorkspaceRemove.Args",
+      "result": "RemovedPanes"
+    },
+    {
+      "name": "tab.create",
+      "type": "TabCreate",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabCreate.Args",
+      "result": "TabCreate.Result"
+    },
+    {
+      "name": "tab.close",
+      "type": "TabClose",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabClose.Args",
+      "result": "RemovedPanes"
+    },
+    {
+      "name": "tab.set",
+      "type": "TabSet",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabSet.Args",
+      "result": "TabSet.Result"
+    },
+    {
+      "name": "tab.select",
+      "type": "TabSelect",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabSelect.Args",
+      "result": "TabSelect.Result"
+    },
+    {
+      "name": "tab.reorder",
+      "type": "TabReorder",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabReorder.Args",
+      "result": "TabReorder.Result"
+    },
+    {
+      "name": "tab.move",
+      "type": "TabMove",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabMove.Args",
+      "result": "TabMove.Result"
+    },
+    {
+      "name": "tab.merge",
+      "type": "TabMerge",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabMerge.Args",
+      "result": "TabMerge.Result"
+    },
+    {
+      "name": "pane.split",
+      "type": "PaneSplit",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneSplit.Args",
+      "result": "PaneSplit.Result"
+    },
+    {
+      "name": "pane.close",
+      "type": "PaneClose",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneClose.Args",
+      "result": "RemovedPanes"
+    },
+    {
+      "name": "pane.move",
+      "type": "PaneMove",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneMove.Args",
+      "result": "PaneMove.Result"
+    },
+    {
+      "name": "pane.separate",
+      "type": "PaneSeparate",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneSeparate.Args",
+      "result": "PaneSeparate.Result"
+    },
+    {
+      "name": "pane.focus",
+      "type": "PaneFocus",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneFocus.Args",
+      "result": "PaneFocus.Result"
+    },
+    {
+      "name": "pane.zoom",
+      "type": "PaneZoom",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneZoom.Args",
+      "result": "PaneZoom.Result"
+    },
+    {
+      "name": "split.ratio",
+      "type": "SplitRatio",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SplitRatio.Args",
+      "result": "SplitRatio.Result"
+    },
+    {
+      "name": "select.set",
+      "type": "SelectSet",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SelectSet.Args",
+      "result": "SelectSet.Result"
+    },
+    {
+      "name": "model.import",
+      "type": "ModelImport",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ModelImport.Args",
+      "result": "ModelImport.Result"
+    },
+    {
+      "name": "model.options",
+      "type": "ModelOptions",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ModelOptions.Args",
+      "result": "ModelOptions.Result"
     }
   ],
   "events": [
@@ -203,6 +443,96 @@
       "name": "pane.attention",
       "type": "PaneAttention",
       "since": 1,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "project.set",
+      "type": "ProjectChanged",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "project.remove",
+      "type": "ProjectRemoved",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "project.order",
+      "type": "ProjectOrder",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "tab.set",
+      "type": "TabChanged",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "tab.remove",
+      "type": "TabRemoved",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "tab.order",
+      "type": "TabOrder",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "workspace.remove",
+      "type": "WorkspaceRemoved",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "selection",
+      "type": "SelectionChanged",
+      "since": 3,
+      "senders": [
+        "local",
+        "session",
+        "remote"
+      ]
+    },
+    {
+      "name": "pane.removed",
+      "type": "PaneRemoved",
+      "since": 3,
       "senders": [
         "local",
         "session",
@@ -581,6 +911,12 @@
           "type": "[Event]",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "cause",
+          "type": "u64",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],
@@ -641,6 +977,12 @@
           "type": "u64",
           "optional": false,
           "since": 2
+        },
+        {
+          "name": "client",
+          "type": "u64",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],
@@ -1171,6 +1513,1250 @@
       "variants": []
     },
     {
+      "name": "StateSubscribe.Args",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "StateSubscribe.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "epoch",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "seq",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "model",
+          "type": "ModelData",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "zoomed",
+          "type": "[Zoom]",
+          "optional": false,
+          "default": "[]",
+          "since": 3
+        },
+        {
+          "name": "readonly",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        },
+        {
+          "name": "sessions",
+          "type": "[Session]",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "client",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelData",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "version",
+          "type": "u32",
+          "optional": false,
+          "default": "1",
+          "since": 1
+        },
+        {
+          "name": "epoch_hint",
+          "type": "u64",
+          "optional": false,
+          "default": "0",
+          "since": 1
+        },
+        {
+          "name": "imported_v1",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 1
+        },
+        {
+          "name": "projects",
+          "type": "[Project]",
+          "optional": false,
+          "default": "[]",
+          "since": 1
+        },
+        {
+          "name": "workspaces",
+          "type": "[Workspace]",
+          "optional": false,
+          "default": "[]",
+          "since": 1
+        },
+        {
+          "name": "selection",
+          "type": "Selection",
+          "optional": false,
+          "default": "{}",
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Project",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "color",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "sort_order",
+          "type": "i64",
+          "optional": false,
+          "default": "0",
+          "since": 1
+        },
+        {
+          "name": "created_at",
+          "type": "i64",
+          "optional": false,
+          "default": "0",
+          "since": 1
+        },
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "kind",
+          "type": "ProjectKind",
+          "optional": false,
+          "default": "project",
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectKind",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "project",
+        "group"
+      ],
+      "variants": []
+    },
+    {
+      "name": "Workspace",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "kind",
+          "type": "Kind",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "tabs",
+          "type": "[Tab]",
+          "optional": false,
+          "default": "[]",
+          "since": 1
+        },
+        {
+          "name": "active_tab",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Kind",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "project",
+        "pinned",
+        "scratch",
+        "quick",
+        "widget"
+      ],
+      "variants": []
+    },
+    {
+      "name": "Tab",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "custom_title",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "root",
+          "type": "Node",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "focused",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Node",
+      "kind": "union",
+      "fields": [],
+      "cases": [],
+      "variants": [
+        {
+          "name": "pane",
+          "type": "Pane"
+        },
+        {
+          "name": "split",
+          "type": "Split"
+        }
+      ]
+    },
+    {
+      "name": "Pane",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "session",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "host",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "slug",
+          "type": "str",
+          "optional": false,
+          "default": "\"\"",
+          "since": 1
+        },
+        {
+          "name": "origin_path",
+          "type": "str",
+          "optional": false,
+          "default": "\"\"",
+          "since": 1
+        },
+        {
+          "name": "cwd",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "host_session_dir",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        },
+        {
+          "name": "attention",
+          "type": "ModelAttention",
+          "optional": false,
+          "default": "none",
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelAttention",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "none",
+        "done",
+        "failed"
+      ],
+      "variants": []
+    },
+    {
+      "name": "Split",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "dir",
+          "type": "Dir",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "ratio",
+          "type": "f64",
+          "optional": false,
+          "default": "0.5",
+          "since": 1
+        },
+        {
+          "name": "first",
+          "type": "Node",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "second",
+          "type": "Node",
+          "optional": false,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Dir",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "horizontal",
+        "vertical"
+      ],
+      "variants": []
+    },
+    {
+      "name": "Selection",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "active_project",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Zoom",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tab",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "pane",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectCreate.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "optional": false,
+          "default": "\"\"",
+          "since": 3
+        },
+        {
+          "name": "color",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "kind",
+          "type": "ProjectKind",
+          "optional": false,
+          "default": "project",
+          "since": 3
+        },
+        {
+          "name": "created_at",
+          "type": "i64",
+          "optional": false,
+          "default": "0",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectCreate.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectSet.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "color",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectSet.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectReorder.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "ids",
+          "type": "[str]",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectReorder.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectRemove.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "RemovedPanes",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "RemovedPane",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "session",
+          "type": "str",
+          "optional": false,
+          "since": 1
+        },
+        {
+          "name": "host",
+          "type": "str",
+          "optional": true,
+          "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WorkspaceCreate.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "kind",
+          "type": "Kind",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WorkspaceCreate.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WorkspaceRemove.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabCreate.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "index",
+          "type": "u32",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "root",
+          "type": "Node",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "title",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "focus",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabCreate.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabClose.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabSet.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "title",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabSet.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabSelect.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabSelect.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabReorder.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "index",
+          "type": "u32",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabReorder.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabMove.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "to_workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "index",
+          "type": "u32",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabMove.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabMerge.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "src",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "dst",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "target_pane",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "zone",
+          "type": "Zone",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "split_id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "rebalance",
+          "type": "bool",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Zone",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "left",
+        "right",
+        "top",
+        "bottom"
+      ],
+      "variants": []
+    },
+    {
+      "name": "TabMerge.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSplit.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tab",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "target",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "new",
+          "type": "Pane",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "split_id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "dir",
+          "type": "SplitDir",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "position",
+          "type": "Position",
+          "optional": false,
+          "default": "second",
+          "since": 3
+        },
+        {
+          "name": "ratio",
+          "type": "f64",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "focus",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        },
+        {
+          "name": "rebalance",
+          "type": "bool",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SplitDir",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "horizontal",
+        "vertical",
+        "auto",
+        "unknown"
+      ],
+      "variants": []
+    },
+    {
+      "name": "Position",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "first",
+        "second"
+      ],
+      "variants": []
+    },
+    {
+      "name": "PaneSplit.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneClose.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "rebalance",
+          "type": "bool",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneMove.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "dest",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "zone",
+          "type": "Zone",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "split_id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "rebalance",
+          "type": "bool",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneMove.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSeparate.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "tab_id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSeparate.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneFocus.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneFocus.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneZoom.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tab",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "pane",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneZoom.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SplitRatio.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "ratio",
+          "type": "f64",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SplitRatio.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SelectSet.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "project",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "tab",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SelectSet.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelImport.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "model",
+          "type": "ModelData",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "source",
+          "type": "str",
+          "optional": false,
+          "default": "\"\"",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelImport.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelOptions.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "auto_tiling",
+          "type": "bool",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelOptions.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
       "name": "SessionExit",
       "kind": "struct",
       "fields": [
@@ -1223,6 +2809,186 @@
           "type": "bool",
           "optional": false,
           "since": 1
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectChanged",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "project",
+          "type": "Project",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectRemoved",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectOrder",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "ids",
+          "type": "[str]",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabChanged",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "tab",
+          "type": "Tab",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "zoomed",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabRemoved",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabOrder",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "workspace",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "kind",
+          "type": "Kind",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "ids",
+          "type": "[str]",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "active_tab",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WorkspaceRemoved",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SelectionChanged",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "active_project",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneRemoved",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "session",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "host",
+          "type": "str",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],
@@ -1808,6 +3574,8 @@
     "starting",
     "timeout",
     "unavailable",
-    "unknown_method"
+    "unknown_method",
+    "duplicate_id",
+    "model_readonly"
   ]
 }

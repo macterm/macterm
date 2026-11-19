@@ -19,6 +19,7 @@ const m = protocol.messages;
 const server = @import("server.zig");
 const registry = @import("registry.zig");
 const runs = @import("runs.zig");
+const model_ipc = @import("model_ipc.zig");
 const Server = server.Server;
 
 const frame_max = server.frame_max;
@@ -48,6 +49,9 @@ pub const Batch = struct {
 /// A GUI or a CLI on the server's socket.
 pub const Peer = struct {
     id: u64,
+    /// The key of this client in the ring of request ids (`model_ipc`). It
+    /// is `id`, or the key of a lost connection that `control.resume` names.
+    client: u64,
     /// The connection to the client. A write sends its `out`, and
     /// `relay.fill` moves frames into it from `control` and the channels.
     conn: FrameConn,
@@ -142,7 +146,7 @@ pub fn addPeer(s: *Server, fd: i32) void {
         lib_posix.close(fd);
         return;
     };
-    p.* = .{ .id = s.next_peer, .conn = .{ .fd = fd, .max_frame = frame_max }, .connected_at = s.now() };
+    p.* = .{ .id = s.next_peer, .client = s.next_peer, .conn = .{ .fd = fd, .max_frame = frame_max }, .connected_at = s.now() };
     s.next_peer += 1;
     s.peers.append(s.gpa, p) catch {
         s.gpa.destroy(p);
@@ -207,6 +211,7 @@ pub fn handleRequest(s: *Server, p: *Peer, arena: std.mem.Allocator, req: m.Requ
             }
             const args = m.decodeArgs(M, arena, req) catch
                 return replyError(s, p.id, req.id, .invalid_args, "The arguments do not decode.");
+            if (comptime model_ipc.isWrite(M)) return model_ipc.call(s, M, p, req.id, args);
             return call(s, M, p, req.id, args);
         }
     }
@@ -238,6 +243,9 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
         },
         m.ServerExit => {
             std.log.info("server: server.exit", .{});
+            // On disk before the reply: a newer server that starts after it
+            // reads the last state (design/010 §10).
+            model_ipc.flush(s);
             // Unlinked before the reply, so that a start that follows the
             // reply finds no server (design/002).
             s.closeListen();
@@ -249,6 +257,7 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
             p.conn.closing = true;
         },
         m.ControlResume => resumeControl(s, p, re, args),
+        m.StateSubscribe => model_ipc.subscribe(s, p, re),
         m.ChannelOpen => openChannel(s, p, re, args.session),
         m.ChannelClose => {
             const ch = p.findChannel(args.channel) orelse
@@ -344,9 +353,18 @@ pub fn replyError(s: *Server, peer: u64, re: u64, code: m.ErrorCode, message: []
 pub fn emit(s: *Server, comptime E: type, value: E) void {
     const args = msgpack.encodeAlloc(s.gpa, value) catch return;
     defer s.gpa.free(args);
+    emitBatch(s, &.{.{ .e = E.name, .a = .{ .bytes = args } }}, null);
+}
+
+/// The request that caused a batch, and the client that sent it.
+pub const Cause = struct { peer: u64, re: u64 };
+
+/// Sends one batch of events to every client. The requester's copy carries
+/// `cause`; the ring keeps the copy with none, as every other client gets
+/// it.
+pub fn emitBatch(s: *Server, ev: []const m.Event, cause: ?Cause) void {
     s.seq += 1;
-    const ev = [_]m.Event{.{ .e = E.name, .a = .{ .bytes = args } }};
-    const batch: m.EventBatch = .{ .seq = s.seq, .ev = &ev };
+    const batch: m.EventBatch = .{ .seq = s.seq, .ev = ev };
     const body = msgpack.encodeAlloc(s.gpa, batch) catch {
         // The batch is lost: the ring must not claim to be complete.
         for (s.batches.items) |b| s.gpa.free(b.body);
@@ -355,7 +373,22 @@ pub fn emit(s: *Server, comptime E: type, value: E) void {
     };
     const kept = keepBatch(s, body);
     defer if (!kept) s.gpa.free(body);
-    for (s.peers.items) |p| if (p.conn.greeted and !p.conn.dead) sendBody(s, p, body);
+    var caused: ?[]u8 = null;
+    defer if (caused) |c| s.gpa.free(c);
+    if (cause) |c| {
+        var with = batch;
+        with.cause = c.re;
+        caused = msgpack.encodeAlloc(s.gpa, with) catch null;
+    }
+    for (s.peers.items) |p| if (p.conn.greeted and !p.conn.dead) {
+        const own = if (cause) |c| c.peer == p.id else false;
+        if (own) {
+            // With no memory for the copy with `cause`, the client gets
+            // the batch without it: its state is right, only an animation
+            // is lost.
+            sendBody(s, p, caused orelse body);
+        } else sendBody(s, p, body);
+    };
 }
 
 /// Keeps the batch for `control.resume`, and gives up the oldest ones.
@@ -376,6 +409,11 @@ pub fn keepBatch(s: *Server, body: []u8) bool {
 /// `control.resume`: sends the batches after `args.seq` when the epoch is
 /// this server's and the ring still holds every one of them.
 pub fn resumeControl(s: *Server, p: *Peer, re: u64, args: m.ControlResume.Args) void {
+    // The ring of request ids is of this epoch: an older client key means
+    // nothing to it.
+    if (args.epoch == s.epoch) if (args.client) |c| {
+        p.client = c;
+    };
     const held = s.batches.items;
     const complete = args.epoch == s.epoch and args.seq <= s.seq and
         (args.seq == s.seq or (held.len > 0 and held[0].seq <= args.seq + 1));

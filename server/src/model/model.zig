@@ -76,8 +76,10 @@ pub const Selection = struct {
     active_project: ?ProjectId = null,
 };
 
-/// What `model.json` holds.
-pub const Data = struct {
+/// What `model.json` holds. The protocol carries it too (`state.subscribe`,
+/// `model.import`), so its name is unique in the schema: Swift has its own
+/// `Data`.
+pub const ModelData = struct {
     version: u32 = version,
     epoch_hint: u64 = 0,
     imported_v1: bool = false,
@@ -85,6 +87,8 @@ pub const Data = struct {
     workspaces: []Workspace = &.{},
     selection: Selection = .{},
 };
+
+pub const Data = ModelData;
 
 pub const Error = error{
     OutOfMemory,

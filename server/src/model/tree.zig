@@ -43,7 +43,10 @@ pub const Zone = enum {
     }
 };
 
-pub const Attention = enum { none, done, failed };
+/// A pane's mark in the model. The schema name is not `Attention`: that
+/// is the session's pane message.
+pub const ModelAttention = enum { none, done, failed };
+pub const Attention = ModelAttention;
 
 /// A ratio never goes below this or above `max_ratio` (v1 `settingRatio`).
 pub const min_ratio: f64 = 0.15;
