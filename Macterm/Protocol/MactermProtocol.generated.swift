@@ -2471,13 +2471,13 @@ extension MactermProtocol.ProjectRemove.Args: ProtocolValue {
     }
 }
 
-extension MactermProtocol {
-    struct RemovedPanes: Equatable {
+extension MactermProtocol.ProjectRemove {
+    struct Result: Equatable {
         var panes: [MactermProtocol.RemovedPane] = []
     }
 }
 
-extension MactermProtocol.RemovedPanes: ProtocolValue {
+extension MactermProtocol.ProjectRemove.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         var panes: [MactermProtocol.RemovedPane]?
         try reader.readMap { key, reader in
@@ -2611,6 +2611,32 @@ extension MactermProtocol.WorkspaceRemove.Args: ProtocolValue {
     }
 }
 
+extension MactermProtocol.WorkspaceRemove {
+    struct Result: Equatable {
+        var panes: [MactermProtocol.RemovedPane] = []
+    }
+}
+
+extension MactermProtocol.WorkspaceRemove.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var panes: [MactermProtocol.RemovedPane]?
+        try reader.readMap { key, reader in
+            switch key {
+            case "panes": panes = try [MactermProtocol.RemovedPane](from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.panes = panes ?? []
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("panes")
+        panes.encode(to: &writer)
+    }
+}
+
 extension MactermProtocol.TabCreate {
     struct Args: Equatable {
         var workspace: String
@@ -2711,6 +2737,32 @@ extension MactermProtocol.TabClose.Args: ProtocolValue {
         writer.writeMapHeader(1)
         writer.writeString("id")
         id.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.TabClose {
+    struct Result: Equatable {
+        var panes: [MactermProtocol.RemovedPane] = []
+    }
+}
+
+extension MactermProtocol.TabClose.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var panes: [MactermProtocol.RemovedPane]?
+        try reader.readMap { key, reader in
+            switch key {
+            case "panes": panes = try [MactermProtocol.RemovedPane](from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.panes = panes ?? []
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("panes")
+        panes.encode(to: &writer)
     }
 }
 
@@ -3183,6 +3235,32 @@ extension MactermProtocol.PaneClose.Args: ProtocolValue {
             writer.writeString("rebalance")
             rebalance.encode(to: &writer)
         }
+    }
+}
+
+extension MactermProtocol.PaneClose {
+    struct Result: Equatable {
+        var panes: [MactermProtocol.RemovedPane] = []
+    }
+}
+
+extension MactermProtocol.PaneClose.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var panes: [MactermProtocol.RemovedPane]?
+        try reader.readMap { key, reader in
+            switch key {
+            case "panes": panes = try [MactermProtocol.RemovedPane](from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.panes = panes ?? []
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("panes")
+        panes.encode(to: &writer)
     }
 }
 

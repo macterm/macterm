@@ -504,11 +504,6 @@ pub const RemovedPane = struct {
     host: ?[]const u8 = null,
 };
 
-/// The panes that left the model with a request.
-pub const RemovedPanes = struct {
-    panes: []const RemovedPane = &.{},
-};
-
 /// The full state: the model and the sessions. A client reads it once, then
 /// follows the event batches from `seq`. Every client gets every batch; this
 /// request only reads.
@@ -595,7 +590,8 @@ pub const ProjectRemove = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { id: ProjectId };
-    pub const Result = RemovedPanes;
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
 };
 
 /// Makes a workspace that is not a project's: pinned, scratch, quick or
@@ -616,7 +612,8 @@ pub const WorkspaceRemove = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { id: WorkspaceId };
-    pub const Result = RemovedPanes;
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
 };
 
 /// Makes a tab. `root` is one pane, or a tree (a layout, a grid), with the
@@ -645,7 +642,8 @@ pub const TabClose = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { id: TabId };
-    pub const Result = RemovedPanes;
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
 };
 
 /// Sets the tab's title. Null removes it.
@@ -750,7 +748,8 @@ pub const PaneClose = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { id: PaneId, rebalance: ?bool = null };
-    pub const Result = RemovedPanes;
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
 };
 
 /// Moves a pane next to pane `dest` on `zone`, in its tab or in another.

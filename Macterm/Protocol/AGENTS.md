@@ -17,6 +17,7 @@ The frames and messages between the app, the server and the session processes (d
   - No method result and no event holds a `secret`.
   - No error code is removed. The codes are `ErrorCode` in `messages.zig`; the app compares `ErrorInfo.errorCode`, never the string.
 - A new field in an older type names its level in `field_since`.
+- Each method declares its own `Args` and `Result` structs. A shared type gives Swift no nested `Result`, and the method does not conform to `ProtocolMethod`.
 - Field names and enum tags are snake_case ASCII (`checkName`), so the Swift String compare is the Zig byte compare.
 - `scripts/protocol.sh` needs Zig 0.17 on PATH or in `$ZIG`.
 - The generator also writes `PaneMessage.decoded()` and `Event.decoded()` (`PaneMessageKind`, `EventKind`, with `unknown` for a message of a later build). Read a pane message or an event through them, not with a list of names of your own.

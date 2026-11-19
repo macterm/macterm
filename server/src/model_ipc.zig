@@ -207,7 +207,7 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, raw: ?msgpack.Raw, 
     defer out.deinit();
     const encoded = switch (outcome) {
         .ok => m.encodeResult(&out.writer, re, M, .{}),
-        .removed => |panes| if (M.Result == m.RemovedPanes)
+        .removed => |panes| if (@hasField(M.Result, "panes"))
             m.encodeResult(&out.writer, re, M, .{ .panes = panes })
         else
             unreachable,
@@ -262,7 +262,7 @@ fn rebalance(s: *const Server, wanted: ?bool) bool {
 }
 
 fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M.Args) !Outcome {
-    const removes = M.Result == m.RemovedPanes;
+    const removes = @hasField(M.Result, "panes");
     const done: Outcome = if (removes) .{ .removed = &.{} } else .ok;
     switch (M) {
         m.ProjectCreate => mo.addProject(.{

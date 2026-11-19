@@ -235,7 +235,7 @@
         "local"
       ],
       "args": "ProjectRemove.Args",
-      "result": "RemovedPanes"
+      "result": "ProjectRemove.Result"
     },
     {
       "name": "workspace.create",
@@ -255,7 +255,7 @@
         "local"
       ],
       "args": "WorkspaceRemove.Args",
-      "result": "RemovedPanes"
+      "result": "WorkspaceRemove.Result"
     },
     {
       "name": "tab.create",
@@ -275,7 +275,7 @@
         "local"
       ],
       "args": "TabClose.Args",
-      "result": "RemovedPanes"
+      "result": "TabClose.Result"
     },
     {
       "name": "tab.set",
@@ -345,7 +345,7 @@
         "local"
       ],
       "args": "PaneClose.Args",
-      "result": "RemovedPanes"
+      "result": "PaneClose.Result"
     },
     {
       "name": "pane.move",
@@ -2084,7 +2084,7 @@
       "variants": []
     },
     {
-      "name": "RemovedPanes",
+      "name": "ProjectRemove.Result",
       "kind": "struct",
       "fields": [
         {
@@ -2166,6 +2166,21 @@
       "variants": []
     },
     {
+      "name": "WorkspaceRemove.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
       "name": "TabCreate.Args",
       "kind": "struct",
       "fields": [
@@ -2225,6 +2240,21 @@
           "name": "id",
           "type": "str",
           "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabClose.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
           "since": 3
         }
       ],
@@ -2521,6 +2551,21 @@
           "name": "rebalance",
           "type": "bool",
           "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneClose.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
           "since": 3
         }
       ],
