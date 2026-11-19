@@ -203,12 +203,18 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         DispatchQueue.main.async { [weak view] in view?.onSessionMark?(mark) }
     }
 
-    /// The path of an OSC 7 URL (`file://host/path`, `kitty-shell-cwd://`),
-    /// with its percent escapes decoded. nil for an empty or unreadable URL.
+    /// The path of an OSC 7 URL: what follows the host. A `file://` URL has
+    /// percent escapes, which are decoded. A `kitty-shell-cwd://` URL (the
+    /// shell integration of Ghostty) has the raw path, which can hold `#`,
+    /// `?` and `%`, so it is not parsed as a URL. nil for anything else.
     static func path(ofCwdURL data: Data) -> String? {
-        guard let url = URL(string: String(decoding: data, as: UTF8.self)) else { return nil }
-        let path = url.path(percentEncoded: false)
-        return path.isEmpty ? nil : path
+        let text = String(decoding: data, as: UTF8.self)
+        guard let scheme = text.range(of: "://") else { return nil }
+        let rest = text[scheme.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        let path = String(rest[slash...])
+        guard text.hasPrefix("file://") else { return path }
+        return path.removingPercentEncoding ?? path
     }
 
     func paneTtyMode(_ mode: MactermProtocol.TtyMode) {

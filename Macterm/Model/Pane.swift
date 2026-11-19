@@ -32,7 +32,7 @@ final class Pane: Identifiable {
     let sessionSlug: String
     /// Whether this pane's project is remote (#104) — its `projectPath` is an
     /// scp-style spec and its session lives on the remote host. Cached at
-    /// init: the poll and title paths read it every tick.
+    /// init.
     let isRemote: Bool
     /// The remote host name for display fallback (`processTitle` shows it
     /// while no remote process name is known). nil for local panes.
@@ -180,9 +180,9 @@ final class Pane: Identifiable {
 
     @ObservationIgnored
     private var executionTracker = TerminalExecutionTracker()
-    /// The global foreground poll pauses when the app has no visible window.
-    /// Keep one lightweight wake scheduled from the final IO heartbeat so an
-    /// occluded activity-owned run can still quiet-settle.
+    /// The poll pauses when the app has no visible window. Keep one
+    /// lightweight wake scheduled from the final IO heartbeat so an occluded
+    /// activity-owned run can still quiet-settle.
     @ObservationIgnored
     private var activityQuietPollWork: DispatchWorkItem?
     private let activityQuietPollDelay: TimeInterval
@@ -338,33 +338,52 @@ final class Pane: Identifiable {
         NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
     }
 
+    /// Whether a report must not name the pane: a program in front while the
+    /// shell sits at its prompt (OSC 133;D since the last real submission).
+    /// A hook-heavy shell starts a real process each time it draws a prompt
+    /// (`starship prompt`, `mise hook-env`). nushell gives each one a process
+    /// group of its own, so the session reports it in front for a moment.
+    /// While the shell sits at a prompt nothing the user launched runs, so a
+    /// program in front there is such a hook. A shell is always let through,
+    /// so the return to the prompt names the pane at once. A shell with no
+    /// OSC 133 marks never arms this.
+    private func isPromptHook(isShell: Bool) -> Bool {
+        executionTracker.isShellAtPrompt && !isShell
+    }
+
+    /// The latest report, as the tracker reads it: its name, and whether a
+    /// shell holds the pty (the shell verdict, so a nested shell is no run).
+    @ObservationIgnored
+    private var trackerForeground: (name: String, isShell: Bool)?
+
     /// Feeds the tracker the session's latest foreground and line mode. The
     /// report has no pid, so the tracker keys a foreground by its name.
     private func refreshTrackerForeground() {
-        let sample = foregroundSample
         executionState = executionTracker.refreshForeground(
-            name: sample?.name,
+            name: trackerForeground?.name,
             pid: nil,
-            foregroundIsShell: sample?.isIdleShell ?? true,
+            foregroundIsShell: trackerForeground?.isShell ?? true,
             terminalInputIsRaw: lineMode.map { $0 != .echoing } ?? false,
             currentState: executionState
         )
         cancelActivityQuietPollIfNeeded()
     }
 
-    /// An OSC 0/2 title from the session's `title` message. The session
-    /// sends the foreground before the output that follows it, and the
-    /// current foreground before its current title at an attach, so the
-    /// title is judged against the report that holds the pane now. A title
-    /// that arrives while a command runs (OSC 133, activity, progress) is the
-    /// program that names itself, and shows at once. One that arrives at a
-    /// prompt that OSC 133;D announced is the shell's, and is dropped. Any
-    /// other title shows when a program holds the pty (an agent idle between
-    /// turns: Claude Code's `✳ task`, which no run state covers), and is
-    /// dropped when the shell does or when no report came. It expires at the
-    /// end of a run (`executionState.didSet`), at OSC 133;D
-    /// (`notePromptReturned`), or at a report of the shell
-    /// (`applyForeground`).
+    /// An OSC 0/2 title from the session's `title` message. The session sends
+    /// the foreground before the output that follows it, so the title is
+    /// judged against the report that holds the pane now.
+    /// - A title while a command runs (OSC 133, activity, progress) shows at
+    ///   once: the program names itself.
+    /// - A title at a prompt that OSC 133;D announced is the shell's: dropped.
+    /// - Any other title shows when a program holds the pty (an agent idle
+    ///   between turns: Claude Code's `✳ task`), and is dropped when the
+    ///   shell does or when no report came. The current title that a new
+    ///   channel gets at `hello` comes before its first report, so it is
+    ///   dropped.
+    ///
+    /// It expires at the end of a run (`executionState.didSet`), at OSC
+    /// 133;D (`notePromptReturned`), and at a report of the shell or of
+    /// another program (`applyForeground`).
     func receiveReportedTitle(_ title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -411,9 +430,8 @@ final class Pane: Identifiable {
     /// host's `/etc/shells`. On a host the session starts the shell, so a
     /// nested shell is a running child, as libghostty reads it. A local
     /// session starts login(1), which starts the shell in a group of its own,
-    /// so a local pane uses the shell verdict for both. A prompt hook
-    /// (`starship prompt`, `mise hook-env`) runs in the shell's own process
-    /// group, so it never names the tab.
+    /// so a local pane uses the shell verdict for both (issue 0448). A
+    /// prompt hook never names the pane (`isPromptHook`).
     ///
     /// `remoteForegroundCommand` follows the local `runningCommand` contract:
     /// a shell foreground records no command, anything else records the
@@ -429,17 +447,25 @@ final class Pane: Identifiable {
         // process group is login's, and `isIdle` is false at an idle prompt.
         // A local pane judges by the shell verdict.
         let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
-        if name != foregroundProcessName || isIdleShell != foregroundSample?.isIdleShell {
+        // The tracker gets every report: it has its own gate for a prompt
+        // hook (`TerminalExecutionTracker.shellIsAtPrompt`).
+        trackerForeground = (name, isShell)
+        refreshTrackerForeground()
+        // A prompt hook must not name the tab: see `isPromptHook`.
+        guard !isPromptHook(isShell: isShell) else { return }
+        foregroundReportIsShell = isShell
+        let nameChanged = name != foregroundProcessName
+        if nameChanged || isIdleShell != foregroundSample?.isIdleShell {
             foregroundSample = ForegroundSample(name: name, isIdleShell: isIdleShell, sampledAt: Date())
         }
-        foregroundReportIsShell = isShell
         remoteForegroundCommand = isShell ? nil : (foreground.command ?? name)
+        // Another program took the pty: the title was the last one's.
+        if nameChanged, programTitle != nil { programTitle = nil }
         // The shell is back in front: whatever program titled the pane has
         // gone, and the run-state edge may never have fired (it ended idle).
         if !programHoldsForeground, executionState != .running, programTitle != nil {
             programTitle = nil
         }
-        refreshTrackerForeground()
         // The agent logo: `comm` first, then the invoked name from the
         // report's command line. Matched again only when the report changes.
         guard foreground != lastAppliedForeground else { return }
@@ -460,7 +486,7 @@ final class Pane: Identifiable {
     /// still at work.
     @ObservationIgnored
     var lineMode: TerminalLineMode? {
-        didSet { if lineMode != oldValue, lineMode != nil, foregroundSample != nil { refreshTrackerForeground() } }
+        didSet { if lineMode != oldValue, lineMode != nil, trackerForeground != nil { refreshTrackerForeground() } }
     }
 
     /// The latest report's shell verdict on the foreground (see
@@ -550,6 +576,7 @@ final class Pane: Identifiable {
         remoteForegroundCommand = nil
         foregroundReportIsShell = false
         lastAppliedForeground = nil
+        trackerForeground = nil
         sessionShell = nil
         // A notification whose pane no longer exists routes nowhere on tap, so
         // drop any still sitting in Notification Center. Ghostty does the same

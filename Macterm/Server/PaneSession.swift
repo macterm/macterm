@@ -18,7 +18,7 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneFeed(_ data: Data)
     /// The surface's size now.
     func paneGrid() -> PaneGrid
-    /// A snapshot of the pane starts or ends. Titles inside it are old.
+    /// A snapshot of the pane starts or ends.
     func paneSnapshot(started: Bool)
     /// The session's pid, its shell's pid and its pty: at each attach.
     func paneState(_ state: MactermProtocol.State)

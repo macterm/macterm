@@ -102,6 +102,9 @@ extension Pane {
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
             guard let self, isFeed() else { return }
+            // A surface on a channel gets the shell's 133;D from the session
+            // (`onSessionMark`); a surface with no session has only this one.
+            if view?.channelRuntime == nil { notePromptReturned() }
             // Project memory: off unless the user turned it on, macOS 26+.
             ProjectMemory.shared.commandFinished(
                 pane: self, view: view, exitCode: exitCode, durationNs: durationNs, reportedCommand: command
