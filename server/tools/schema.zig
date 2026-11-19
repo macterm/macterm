@@ -340,7 +340,28 @@ fn fieldSince(comptime T: type, comptime name: []const u8) u32 {
     for (messages.methods) |M| {
         if (T == M.Args or T == M.Result) return M.since;
     }
-    return 1;
+    return carriedSince(T);
+}
+
+/// The lowest `since` of the methods and events that carry `T` (the model's
+/// types come with the messages of level 3). 1 for a type that a message of
+/// level 1 carries, or that no message carries.
+fn carriedSince(comptime T: type) u32 {
+    comptime {
+        @setEvalBranchQuota(2_000_000);
+        var lowest: ?u32 = null;
+        for (messages.methods) |M| {
+            for (collect(M.Result, collect(M.Args, &.{}))) |C| if (C == T) {
+                lowest = @min(lowest orelse M.since, M.since);
+            };
+        }
+        for (messages.events) |E| {
+            for (collect(E, &.{})) |C| if (C == T) {
+                lowest = @min(lowest orelse E.since, E.since);
+            };
+        }
+        return lowest orelse 1;
+    }
 }
 
 /// Names that the generated Swift uses for its own locals.

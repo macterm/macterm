@@ -1580,42 +1580,42 @@
           "type": "u32",
           "optional": false,
           "default": "1",
-          "since": 1
+          "since": 3
         },
         {
           "name": "epoch_hint",
           "type": "u64",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 3
         },
         {
           "name": "imported_v1",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 3
         },
         {
           "name": "projects",
           "type": "[Project]",
           "optional": false,
           "default": "[]",
-          "since": 1
+          "since": 3
         },
         {
           "name": "workspaces",
           "type": "[Workspace]",
           "optional": false,
           "default": "[]",
-          "since": 1
+          "since": 3
         },
         {
           "name": "selection",
           "type": "Selection",
           "optional": false,
           "default": "{}",
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1629,52 +1629,52 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "name",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "path",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "color",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "sort_order",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 3
         },
         {
           "name": "created_at",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 3
         },
         {
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "kind",
           "type": "ProjectKind",
           "optional": false,
           "default": "project",
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1698,26 +1698,26 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "kind",
           "type": "Kind",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "tabs",
           "type": "[Tab]",
           "optional": false,
           "default": "[]",
-          "since": 1
+          "since": 3
         },
         {
           "name": "active_tab",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1744,25 +1744,25 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "custom_title",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "root",
           "type": "Node",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "focused",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1792,52 +1792,52 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "host",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "slug",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 1
+          "since": 3
         },
         {
           "name": "origin_path",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 1
+          "since": 3
         },
         {
           "name": "cwd",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "host_session_dir",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         },
         {
           "name": "attention",
           "type": "ModelAttention",
           "optional": false,
           "default": "none",
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1862,32 +1862,32 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "dir",
           "type": "Dir",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "ratio",
           "type": "f64",
           "optional": false,
           "default": "0.5",
-          "since": 1
+          "since": 3
         },
         {
           "name": "first",
           "type": "Node",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "second",
           "type": "Node",
           "optional": false,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1911,7 +1911,7 @@
           "name": "active_project",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -1925,13 +1925,13 @@
           "name": "tab",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "pane",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],
@@ -2106,19 +2106,19 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 3
         },
         {
           "name": "host",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 3
         }
       ],
       "cases": [],

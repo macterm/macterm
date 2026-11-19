@@ -856,20 +856,20 @@ pub const ModelOptions = struct {
 
 /// Every request method. A new method goes here.
 pub const methods = .{
-    ControlResume,   ChannelOpen,     ChannelClose,  ChannelPause,  ChannelResume, Ping,        SessionCreate,
-    SessionList,     SessionInfo,     SessionKill,   PaneSeen,      ServerExit,    CommandRun,  LinkOpen,
-    LinkClose,       StateSubscribe,  ProjectCreate, ProjectSet,    ProjectReorder, ProjectRemove, WorkspaceCreate,
-    WorkspaceRemove, TabCreate,       TabClose,      TabSet,        TabSelect,     TabReorder,  TabMove,
-    TabMerge,        PaneSplit,       PaneClose,     PaneMove,      PaneSeparate,  PaneFocus,   PaneZoom,
-    SplitRatio,      SelectSet,       ModelImport,   ModelOptions,
+    ControlResume,   ChannelOpen,    ChannelClose,  ChannelPause, ChannelResume,  Ping,          SessionCreate,
+    SessionList,     SessionInfo,    SessionKill,   PaneSeen,     ServerExit,     CommandRun,    LinkOpen,
+    LinkClose,       StateSubscribe, ProjectCreate, ProjectSet,   ProjectReorder, ProjectRemove, WorkspaceCreate,
+    WorkspaceRemove, TabCreate,      TabClose,      TabSet,       TabSelect,      TabReorder,    TabMove,
+    TabMerge,        PaneSplit,      PaneClose,     PaneMove,     PaneSeparate,   PaneFocus,     PaneZoom,
+    SplitRatio,      SelectSet,      ModelImport,   ModelOptions,
 };
 
 /// The methods that change the model. The server answers one of them sent
 /// again from the ring of request ids, and does it only one time.
 pub const model_writes = .{
-    ProjectCreate, ProjectSet,  ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,
-    TabClose,      TabSet,      TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,
-    PaneClose,     PaneMove,    PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,
+    ProjectCreate, ProjectSet,   ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,
+    TabClose,      TabSet,       TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,
+    PaneClose,     PaneMove,     PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,
     ModelImport,   ModelOptions,
 };
 
@@ -998,7 +998,7 @@ pub const PaneRemoved = struct {
 };
 
 pub const events = .{
-    SessionExit, PaneAttention, ProjectChanged, ProjectRemoved,   ProjectOrder,     TabChanged, TabRemoved,
+    SessionExit, PaneAttention,    ProjectChanged,   ProjectRemoved, ProjectOrder, TabChanged, TabRemoved,
     TabOrder,    WorkspaceRemoved, SelectionChanged, PaneRemoved,
 };
 
@@ -1465,8 +1465,8 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State, Attach, Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End, Refresh,
-    Title, Cwd,    Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
+    State,   Attach,  Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
+    Title,   Cwd,     Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
     Resumed, TtyMode,
 };
 

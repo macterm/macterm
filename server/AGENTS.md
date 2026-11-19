@@ -13,6 +13,17 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 - **The server has no v1 code.** It started as the zmx fork at upstream v1.0.1 (the `DOWNSTREAM.md` of thdxg/zmx names each change by its old patch number: 0003 is the leadership claim, 0004 the disclaim, 0010 the foreground report). Its own verbs are `server`, `connect`, `proxy` and `version`, and the hidden `__session` (the session process) and `__create-session` (tests make a session with it). Every other word goes to the `macterm` CLI (see below). v1's verbs (`attach`, `list`, `kill`, `get`, `set`, `clear`, `history`, `send`, `__daemon`) and their daemon are gone. A v1 session daemon (zmx 0.8.1) keeps running until the first v2 launch ends it by its argv (`V1Sessions`). Remote panes are sessions of the host's v2 server, and v1 sessions there keep running.
 - **The leader's terminal answers the terminal queries.** While no client leads, the session's ghostty-vt terminal answers them (`Watch.answers_all`), except the OSC color reports and the kitty graphics replies. The session answers the OSC 7501 support query at all times. No byte scanner answers a query.
 
+## The model (design/010, `src/model/`, `src/model_ipc.zig`)
+
+The projects, workspaces, tabs and split trees move from the app to the Mac server. Nothing calls the messages yet, so nothing that a user sees changes.
+
+- **Only a server with `MACTERM_STATE_DIR` has a model.** The app sets it to the folder of its v1 files. A host's server never gets it: it answers `state.subscribe` with no model, refuses each model request with `unavailable`, and writes no file.
+- **`model.json` is in that folder.** The server writes it 100 ms after the first change that is not on disk, before it answers `server.exit` (a newer server that starts after the reply reads the last state), and when it stops (SIGTERM, idle exit). A file that does not read, or that a newer build wrote, makes the model read-only: each model request fails with `model_readonly`, and the server never writes over that file.
+- **The events come from a compare** (`Snapshot`, `diff`). The server encodes each project, workspace, tab and pane before and after a request, and sends one batch with an event for each change, before the reply. The requester's copy of the batch has `cause`, the request's id. A request that fails changes nothing and sends no batch.
+- **A pane that leaves the model ends its local session** (`registry.endSession`). The `pane.removed` event and the reply name every pane that left, so that the app ends a remote session. `model.import` ends no session.
+- **The ring of request ids** keeps the last 256 answers to model requests (`model_ipc.request_ring`), by the client's key and the request id. A request id is unique only on its connection, so the key is the connection's: `state.subscribe` gives it as `client`, and a client that resumes on a new connection sends it in `control.resume`.
+- **The schema reads the model through `src/wire.zig`.** `messages.zig` imports the model, and a file can be in one module only. A type that only messages of a level carry has that level (`carriedSince` in the generator).
+
 ## The macterm CLI (design/011)
 
 The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resources/bin/macterm` until the swap (design/011 §3). Until then, nothing that a user sees changes. To run the Zig CLI, use `zig-out/bin/zmx <verb>`.
