@@ -437,6 +437,8 @@ pub const SessionInspect = struct {
 /// What a session knows of its terminal. The cell and surface sizes are the
 /// GUI's, and not here.
 pub const TerminalState = struct {
+    pub const since = 3;
+
     cols: u16,
     rows: u16,
     /// The rows of the screen and the scrollback, the row of the viewport's
@@ -1083,9 +1085,9 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State, Attach, Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End, Refresh,
-    Title, Cwd,    Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode,  Key,   HistoryRead, History, InspectRead, Inspect,
+    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
+    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

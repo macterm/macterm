@@ -148,6 +148,46 @@
       "result": "PaneSeen.Result"
     },
     {
+      "name": "session.send",
+      "type": "SessionSend",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SessionSend.Args",
+      "result": "SessionSend.Result"
+    },
+    {
+      "name": "session.key",
+      "type": "SessionKey",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SessionKey.Args",
+      "result": "SessionKey.Result"
+    },
+    {
+      "name": "session.history",
+      "type": "SessionHistory",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SessionHistory.Args",
+      "result": "SessionHistory.Result"
+    },
+    {
+      "name": "session.inspect",
+      "type": "SessionInspect",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SessionInspect.Args",
+      "result": "SessionInspect.Result"
+    },
+    {
       "name": "server.exit",
       "type": "ServerExit",
       "since": 1,
@@ -398,6 +438,46 @@
     {
       "name": "tty_mode",
       "type": "TtyMode",
+      "since": 3,
+      "senders": [
+        "session"
+      ]
+    },
+    {
+      "name": "key",
+      "type": "Key",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
+    },
+    {
+      "name": "history_read",
+      "type": "HistoryRead",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
+    },
+    {
+      "name": "history",
+      "type": "History",
+      "since": 3,
+      "senders": [
+        "session"
+      ]
+    },
+    {
+      "name": "inspect_read",
+      "type": "InspectRead",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
+    },
+    {
+      "name": "inspect",
+      "type": "Inspect",
       "since": 3,
       "senders": [
         "session"
@@ -1038,6 +1118,206 @@
       "name": "PaneSeen.Result",
       "kind": "struct",
       "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionSend.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "text",
+          "type": "bin",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "submit",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionSend.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionKey.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "chord",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionKey.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionHistory.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "scrollback",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionHistory.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "text",
+          "type": "bin",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "truncated",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionInspect.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionInspect.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "terminal",
+          "type": "TerminalState",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TerminalState",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "cols",
+          "type": "u16",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "rows",
+          "type": "u16",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "scrollback_total",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "scrollback_offset",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "scrollback_len",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "alt_screen",
+          "type": "bool",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "foreground_pid",
+          "type": "i64",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "foreground_argv",
+          "type": "[bin]",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "busy",
+          "type": "bool",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "exited",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        }
+      ],
       "cases": [],
       "variants": []
     },
@@ -1789,6 +2069,77 @@
         {
           "name": "echo",
           "type": "bool",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Key",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "chord",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "HistoryRead",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "scrollback",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "History",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "text",
+          "type": "bin",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "truncated",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "InspectRead",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Inspect",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "terminal",
+          "type": "TerminalState",
           "optional": false,
           "since": 3
         }

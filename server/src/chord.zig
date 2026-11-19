@@ -50,9 +50,9 @@ const tokens = [_]Token{
 /// The US-ANSI shifted forms of the symbol and digit keys, as the app's
 /// `HotkeyRegistry.shiftedSymbols`.
 const shifted = [_][2]u8{
-    .{ '1', '!' }, .{ '2', '@' }, .{ '3', '#' }, .{ '4', '$' },  .{ '5', '%' },
-    .{ '6', '^' }, .{ '7', '&' }, .{ '8', '*' }, .{ '9', '(' },  .{ '0', ')' },
-    .{ '-', '_' }, .{ '=', '+' }, .{ '[', '{' }, .{ ']', '}' },  .{ '\\', '|' },
+    .{ '1', '!' }, .{ '2', '@' },  .{ '3', '#' }, .{ '4', '$' }, .{ '5', '%' },
+    .{ '6', '^' }, .{ '7', '&' },  .{ '8', '*' }, .{ '9', '(' }, .{ '0', ')' },
+    .{ '-', '_' }, .{ '=', '+' },  .{ '[', '{' }, .{ ']', '}' }, .{ '\\', '|' },
     .{ ';', ':' }, .{ '\'', '"' }, .{ ',', '<' }, .{ '.', '>' }, .{ '/', '?' },
     .{ '`', '~' },
 };
@@ -102,8 +102,8 @@ fn eqlAny(word: []const u8, names: []const []const u8) bool {
 fn keyOf(token: []const u8) ?input.Key {
     if (token.len == 1) {
         const c = token[0];
-        if (c >= 'a' and c <= 'z') return @enumFromInt(@intFromEnum(input.Key.key_a) + (c - 'a'));
-        if (c >= '0' and c <= '9') return @enumFromInt(@intFromEnum(input.Key.digit_0) + (c - '0'));
+        if (c >= 'a' and c <= 'z') return @fromBackingInt(@intCast(@backingInt(input.Key.key_a) + (c - 'a')));
+        if (c >= '0' and c <= '9') return @fromBackingInt(@intCast(@backingInt(input.Key.digit_0) + (c - '0')));
     }
     for (tokens) |t| if (std.mem.eql(u8, t.name, token)) return t.key;
     return null;
