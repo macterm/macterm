@@ -196,6 +196,7 @@ struct LocalServerTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var server = bundled
         server.directory = root.appending(path: "run", directoryHint: .isDirectory)
+        server.stateDirectory = root.appending(path: "state", directoryHint: .isDirectory)
         do {
             try await body(server)
         } catch {
@@ -230,10 +231,10 @@ struct LocalServerTests {
     }
 
     private static func firstExit(
-        _ events: inout AsyncStream<[ServerEvent]>.Iterator
+        _ events: inout AsyncStream<ServerEventBatch>.Iterator
     ) async throws -> MactermProtocol.SessionExit {
         while let batch = await events.next() {
-            for case let .sessionExit(exit) in batch {
+            for case let .sessionExit(exit) in batch.events {
                 return exit
             }
         }

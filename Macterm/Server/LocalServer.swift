@@ -18,11 +18,16 @@ struct LocalServer {
     /// The build key of `executable` (`ServerBuilds.bundledKey`). Nil: never replace
     /// a server of the same level.
     var buildTag: String?
+    /// The folder of the server's `model.json` (`MACTERM_STATE_DIR`). Nil:
+    /// the server has no model (design/010 §2).
+    var stateDirectory: URL?
 
     /// The server's socket in `directory` (`socket_name` in `server.zig`).
     static let socketName = ".server"
     /// The variable that names the runtime directory (`runtime.zig`).
     static let directoryVariable = "MACTERM_RUNTIME_DIR"
+    /// The variable that names the model's folder (`model_ipc.zig`).
+    static let stateDirectoryVariable = "MACTERM_STATE_DIR"
     /// How long `macterm server` may take to listen.
     static let startTimeout: DispatchTimeInterval = .seconds(10)
 
@@ -31,7 +36,14 @@ struct LocalServer {
         guard let executable = Bundle.main.url(forResource: "zmx", withExtension: nil, subdirectory: "zmx"),
               let directory = runtimeDirectory(environment: ProcessInfo.processInfo.environment)
         else { return nil }
-        return LocalServer(executable: executable, directory: directory, buildTag: ServerBuilds.bundledKey)
+        return LocalServer(
+            executable: executable,
+            directory: directory,
+            buildTag: ServerBuilds.bundledKey,
+            // The folder of the v1 files (design/010 §2), only while the
+            // shadow stage runs: a release server has no model yet.
+            stateDirectory: ModelShadow.isEnabled ? FileStorage.appSupportDirectory() : nil
+        )
     }
 
     /// The runtime directory as `resolveDir` in `server/src/runtime.zig`
@@ -150,6 +162,7 @@ struct LocalServer {
         process.arguments = ["server"]
         var environment = ProcessInfo.processInfo.environment
         environment[Self.directoryVariable] = directory.path
+        environment[Self.stateDirectoryVariable] = stateDirectory?.path
         process.environment = environment
         let errors = Pipe()
         process.standardInput = FileHandle.nullDevice

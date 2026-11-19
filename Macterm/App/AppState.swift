@@ -841,6 +841,11 @@ final class AppState {
     /// All mutation goes through `AppState+PinnedTabs.swift`.
     var pinnedRecords: [PinnedTabRecord] = []
 
+    /// The shadow stage of design/010 §9 (`ModelShadow`): nil in a build
+    /// that does not run it.
+    @ObservationIgnored
+    var modelShadow: ModelShadow?
+
     /// `pinned.yaml` I/O. Shares the project-file directory, so a test's
     /// injected `ProjectFileStore` tempdir isolates this file too.
     @ObservationIgnored
@@ -1561,12 +1566,14 @@ final class AppState {
         // has a record before the snapshot serializes.
         syncPinnedRecordsWithWorkspace()
         let ordinary = workspaces.filter { $0.value.kind != .pinned }
+        let ordinarySnapshots = WorkspaceSerializer.snapshot(ordinary)
+        let pinnedSnapshots = WorkspaceSerializer.snapshotPinned(
+            records: pinnedRecords,
+            workspace: workspaces[PinnedTabs.workspaceID]
+        )
         workspaceStore.save(
-            WorkspaceSerializer.snapshot(ordinary),
-            pinned: WorkspaceSerializer.snapshotPinned(
-                records: pinnedRecords,
-                workspace: workspaces[PinnedTabs.workspaceID]
-            ),
+            ordinarySnapshots,
+            pinned: pinnedSnapshots,
             // The pinned workspace is excluded from `ordinary`, so it loses
             // the WorkspaceSnapshot.activeTabID every other workspace keeps —
             // carry the selection separately or a relaunch always lands on
@@ -1593,8 +1600,33 @@ final class AppState {
             quickTerminal: quickTerminalSnapshot(),
             desktopWidgets: desktopWidgetSnapshots()
         )
+        shadowModel(ordinary: ordinarySnapshots, pinned: pinnedSnapshots)
         // A closed or unloaded tab takes its bell out of the count with it.
         syncDockBadge()
+    }
+
+    /// Gives `modelShadow` the snapshots that a save wrote, with the pinned
+    /// tabs in the order of their workspace.
+    private func shadowModel(ordinary: [WorkspaceSnapshot], pinned: [PinnedTabSnapshot]) {
+        guard let modelShadow else { return }
+        var inputs = ordinary.map { snapshot in
+            ModelConversion.WorkspaceInput(
+                id: snapshot.projectID,
+                kind: WorkspaceKind(id: snapshot.projectID),
+                tabs: snapshot.tabs,
+                activeTabID: snapshot.activeTabID
+            )
+        }
+        if let pinnedWorkspace = workspaces[PinnedTabs.workspaceID] {
+            let live = Dictionary(pinned.compactMap { record in record.live.map { (record.id, $0) } }, uniquingKeysWith: { first, _ in first })
+            inputs.append(.init(
+                id: pinnedWorkspace.id,
+                kind: .pinned,
+                tabs: pinnedWorkspace.tabs.compactMap { live[$0.id] },
+                activeTabID: pinnedWorkspace.activeTabID
+            ))
+        }
+        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
     }
 
     // MARK: - Project

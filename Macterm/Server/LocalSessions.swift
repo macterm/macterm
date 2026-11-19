@@ -66,6 +66,16 @@ actor LocalSessions {
     private let server: LocalServer?
     private var connection: ServerConnection?
     private var connecting: Task<ServerConnection, Error>?
+    /// Where the model's batches go (`ModelShadow`), nil when nothing reads
+    /// them.
+    private var modelFeed: (@MainActor (ModelFeed) -> Void)?
+
+    /// What `setModelFeed`'s reader gets, in the order of the connection.
+    enum ModelFeed {
+        /// A new connection, maybe to a new server: subscribe again.
+        case connected
+        case batch(ServerEventBatch)
+    }
 
     /// The longest wait for one reply. A kill waits for the session to end:
     /// the server gives it 3 s before SIGKILL.
@@ -96,6 +106,24 @@ actor LocalSessions {
         } catch {
             logger.warning("session kill \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// Sends each batch of model events to `feed`, and `.connected` at each
+    /// new connection, the current one included.
+    func setModelFeed(_ feed: @escaping @MainActor (ModelFeed) -> Void) async {
+        modelFeed = feed
+        if let connection, connection.isOpen { await feed(.connected) }
+    }
+
+    /// The server's state and this connection's place in its batches.
+    func subscribe() async throws -> MactermProtocol.StateSubscribe.Result {
+        try await call(MactermProtocol.StateSubscribe.self, .init())
+    }
+
+    /// Puts `model` in place of the server's model (the shadow stage,
+    /// design/010 §9 step 3).
+    func replaceModel(_ model: MactermProtocol.ModelData) async throws {
+        _ = try await call(MactermProtocol.ModelReplace.self, .init(model: model))
     }
 
     /// Connects now, so that the first pane does not wait for it.
@@ -163,6 +191,11 @@ actor LocalSessions {
         return connection
     }
 
+    private func feedModel(_ item: ModelFeed) async {
+        guard let modelFeed else { return }
+        await modelFeed(item)
+    }
+
     private func drop(_ old: ServerConnection) {
         guard connection === old else { return }
         old.close()
@@ -178,9 +211,13 @@ actor LocalSessions {
             }
         }
         Task { [weak self] in
+            await self?.feedModel(.connected)
             for await batch in connection.events {
-                for case let .sessionExit(exit) in batch {
+                for case let .sessionExit(exit) in batch.events {
                     await self?.kill(exit.id)
+                }
+                if batch.events.contains(where: \.isModel) {
+                    await self?.feedModel(.batch(batch))
                 }
             }
             await self?.drop(connection)

@@ -353,6 +353,14 @@ extension MactermProtocol {
 }
 
 extension MactermProtocol {
+    enum ModelReplace: ProtocolMethod {
+        static let name = "model.replace"
+        static let since: UInt32 = 3
+        static let senders: [MactermProtocol.Trust] = [.local]
+    }
+}
+
+extension MactermProtocol {
     enum ModelOptions: ProtocolMethod {
         static let name = "model.options"
         static let since: UInt32 = 3
@@ -3950,6 +3958,46 @@ extension MactermProtocol.ModelImport {
 }
 
 extension MactermProtocol.ModelImport.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
+    }
+}
+
+extension MactermProtocol.ModelReplace {
+    struct Args: Equatable {
+        var model: MactermProtocol.ModelData
+    }
+}
+
+extension MactermProtocol.ModelReplace.Args: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var model: MactermProtocol.ModelData?
+        try reader.readMap { key, reader in
+            switch key {
+            case "model": model = try MactermProtocol.ModelData(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.model = try MessagePackReader.required(model, "model")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("model")
+        model.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.ModelReplace {
+    struct Result: Equatable {}
+}
+
+extension MactermProtocol.ModelReplace.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         try reader.readMap { _, _ in false }
     }

@@ -458,6 +458,16 @@
       "result": "ModelImport.Result"
     },
     {
+      "name": "model.replace",
+      "type": "ModelReplace",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "ModelReplace.Args",
+      "result": "ModelReplace.Result"
+    },
+    {
       "name": "model.options",
       "type": "ModelOptions",
       "since": 3,
@@ -3055,6 +3065,27 @@
     },
     {
       "name": "ModelImport.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelReplace.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "model",
+          "type": "ModelData",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ModelReplace.Result",
       "kind": "struct",
       "fields": [],
       "cases": [],

@@ -94,6 +94,12 @@ final class ProjectStore {
 
     // MARK: - Tree
 
+    /// Every row, the groups too, in the order of the file. The model of
+    /// design/010 holds both (`ModelShadow`).
+    var allRows: [Project] {
+        rows
+    }
+
     /// The rows whose parent is `parent` (nil: the top level), projects and
     /// groups, in `sortOrder`.
     func children(of parent: UUID?) -> [Project] {

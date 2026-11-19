@@ -67,6 +67,11 @@ struct MactermApp: App {
                         delegate?.openInitialWindow()
                     }
                     appDelegate.projectStore = projectStore
+                    if ModelShadow.isEnabled, appState.modelShadow == nil {
+                        let shadow = ModelShadow(projectStore: projectStore)
+                        appState.modelShadow = shadow
+                        Task { await shadow.start() }
+                    }
                     NotificationHandler.shared.appState = appState
                     Updater.shared.presentToast = { [appState] in appState.presentToast($0) }
                     // Termination persists the snapshot AND refreshes the

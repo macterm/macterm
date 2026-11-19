@@ -938,6 +938,22 @@ pub const ModelImport = struct {
     pub const Result = struct {};
 };
 
+/// Puts the client's copy of its own model in place of this one, as many
+/// times as it likes (design/010 §9, step 3: the shadow stage). The app
+/// sends it after each save while it still owns the model, so that the
+/// server's model, its file and its events follow the app's. It ends no
+/// session and leaves `imported_v1` false. The server refuses it with
+/// `refused` when the model has `imported_v1`, and refuses a model that
+/// does not validate as `model.import` does. Step 7 removes it.
+pub const ModelReplace = struct {
+    pub const name = "model.replace";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { model: model.ModelData };
+    pub const Result = struct {};
+};
+
 /// The client's defaults for a request that does not say. The server keeps
 /// them in memory only.
 pub const ModelOptions = struct {
@@ -957,7 +973,7 @@ pub const methods = .{
     ProjectSet,     ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,      TabClose,
     TabSet,         TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,      PaneClose,
     PaneMove,       PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,      ModelImport,
-    ModelOptions,
+    ModelReplace,   ModelOptions,
 };
 
 /// The methods that change the model. The server answers one of them sent
@@ -966,7 +982,7 @@ pub const model_writes = .{
     ProjectCreate, ProjectSet,   ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,
     TabClose,      TabSet,       TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,
     PaneClose,     PaneMove,     PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,
-    ModelImport,   ModelOptions,
+    ModelImport,   ModelReplace, ModelOptions,
 };
 
 // ── Events ──────────────────────────────────────────────────────────────────

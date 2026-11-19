@@ -235,6 +235,34 @@ assert c.request("model.import", model=good, source="test")["err"]["code"] == "r
 PY
 }
 
+@test "model: model.replace replaces the model each time, and ends no session" {
+  "$ZMX" server
+  "$ZMX" __create-session macterm-x-a -- /bin/sh
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+c.call("state.subscribe")
+bad = {"projects": [{"id": "p1", "name": "One", "path": "/a"}], "workspaces": []}
+assert c.request("model.replace", model=bad)["err"]["code"] == "invalid_args"
+def model(tab):
+    return {
+        "projects": [{"id": "p1", "name": "One", "path": "/a"}],
+        "workspaces": [{"id": "p1", "kind": "project", "tabs": [
+            {"id": tab, "root": {"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}}, "focused": "a"}], "active_tab": tab}],
+    }
+c.call("model.replace", model=model("t1"))
+c.call("model.replace", model=model("t2"))
+st = c.call("state.subscribe")
+assert st["model"]["imported_v1"] is False and st["model"]["workspaces"][0]["tabs"][0]["id"] == "t2", st
+# The pane of t1 left with its tab, and its session stays.
+assert c.call("model.replace", model={}) == {}
+assert any(s["id"] == "macterm-x-a" for s in c.call("session.list")["sessions"])
+# After an import, the model is the server's: a replace is refused.
+c.call("model.import", model=model("t3"), source="test")
+assert c.request("model.replace", model=model("t4"))["err"]["code"] == "refused"
+PY
+}
+
 @test "model: a pane that leaves the model ends its local session" {
   "$ZMX" server
   python3 - <<'PY'

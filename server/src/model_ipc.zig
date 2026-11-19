@@ -238,7 +238,7 @@ fn change(s: *Server, comptime M: type, a: std.mem.Allocator, p: *Peer, re: u64,
     const after = try Snapshot.take(a, now_model);
     var events: std.ArrayList(m.Event) = .empty;
     var removed: std.ArrayList(m.RemovedPane) = .empty;
-    try diff(a, &before, &after, &events, &removed, M != m.ModelImport);
+    try diff(a, &before, &after, &events, &removed, M != m.ModelImport and M != m.ModelReplace);
     if (events.items.len > 0) peers.emitBatch(s, events.items, .{ .peer = p.id, .re = re });
     // A session that a pane of the model still names stays (fail closed).
     for (removed.items) |pane| if (pane.host == null and !after.sessions.contains(pane.session)) registry.endSession(s, pane.session);
@@ -323,7 +323,8 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             }
             if (ws) |w| mo.selectTab(w.id, args.tab.?) catch |err| return modelError(err);
         },
-        m.ModelImport => return importModel(s, a, args),
+        m.ModelImport => return putModel(s, a, args.model, .{ .import = args.source }),
+        m.ModelReplace => return putModel(s, a, args.model, .replace),
         else => @compileError("not a model request: " ++ M.name),
     }
     return done;
@@ -360,14 +361,17 @@ fn splitDir(s: *Server, mo: *const Model, target: model.PaneId, dir: m.SplitDir)
     };
 }
 
-/// `model.import`: the client's model in place of this one, once.
-fn importModel(s: *Server, a: std.mem.Allocator, args: m.ModelImport.Args) !Outcome {
+/// `model.import` (once, and the model gets `imported_v1`) and
+/// `model.replace` (the shadow stage, design/010 §9 step 3): the client's
+/// model in place of this one. Both are refused once the model has
+/// `imported_v1`.
+fn putModel(s: *Server, a: std.mem.Allocator, data: model.ModelData, how: union(enum) { import: []const u8, replace }) !Outcome {
     const st = &s.model;
     if (st.model.?.data.imported_v1) return fail(.refused, "The model has an import.");
     // Through JSON: the file's reader copies, validates and refuses a newer
-    // version, so an import is checked as `model.json` is.
+    // version, so the model is checked as `model.json` is.
     var json: std.Io.Writer.Allocating = .init(a);
-    try std.json.Stringify.value(args.model, .{}, &json.writer);
+    try std.json.Stringify.value(data, .{}, &json.writer);
     var fault: model.Fault = .{};
     var fresh = file.parse(s.gpa, json.written(), &fault) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -375,12 +379,15 @@ fn importModel(s: *Server, a: std.mem.Allocator, args: m.ModelImport.Args) !Outc
         error.NewerVersion => return fail(.invalid_args, "The model version is newer than this server."),
         error.Syntax => return fail(.invalid_args, "The model does not decode."),
     };
-    fresh.data.imported_v1 = true;
+    fresh.data.imported_v1 = how == .import;
     // The panes of the old model stay in the scratch snapshot, which holds
     // copies: the old arena can go.
     st.model.?.deinit();
     st.model = fresh;
-    std.log.info("server: model imported from {s}: {d} projects", .{ args.source, fresh.data.projects.len });
+    switch (how) {
+        .import => |source| std.log.info("server: model imported from {s}: {d} projects", .{ source, fresh.data.projects.len }),
+        .replace => {},
+    }
     return .ok;
 }
 
