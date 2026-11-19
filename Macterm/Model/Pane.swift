@@ -406,9 +406,12 @@ final class Pane: Identifiable {
     ///
     /// Both verdicts are the session's own, with the local shell database
     /// only as a fallback when the report has none. The idle verdict
-    /// (`foreground.isIdle`) is foreground pgid == the shell's, and the shell
-    /// verdict (`foreground.isShell`) is the host's `/etc/shells`. A nested
-    /// shell is a running child, as libghostty reads it. A prompt hook
+    /// (`foreground.isIdle`) is foreground pgid == the process that the
+    /// session started, and the shell verdict (`foreground.isShell`) is the
+    /// host's `/etc/shells`. On a host the session starts the shell, so a
+    /// nested shell is a running child, as libghostty reads it. A local
+    /// session starts login(1), which starts the shell in a group of its own,
+    /// so a local pane uses the shell verdict for both. A prompt hook
     /// (`starship prompt`, `mise hook-env`) runs in the shell's own process
     /// group, so it never names the tab.
     ///
@@ -422,7 +425,10 @@ final class Pane: Identifiable {
         let name = Self.remoteProcessName(comm: foreground.comm, command: foreground.command)
         guard !name.isEmpty else { return }
         let isShell = foreground.isShell ?? ProcessInspector.isShellProcessName(name)
-        let isIdleShell = foreground.isIdle ?? isShell
+        // A local session runs the shell under login(1), so the session's own
+        // process group is login's, and `isIdle` is false at an idle prompt.
+        // A local pane judges by the shell verdict.
+        let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
         if name != foregroundProcessName || isIdleShell != foregroundSample?.isIdleShell {
             foregroundSample = ForegroundSample(name: name, isIdleShell: isIdleShell, sampledAt: Date())
         }
@@ -450,10 +456,11 @@ final class Pane: Identifiable {
 
     /// How the session's pty reads input, from its `tty_mode`. nil until the
     /// first report, and for a pane with no session. A change feeds the
-    /// tracker: a TUI that leaves line mode is still at work.
+    /// tracker once a foreground report came: a TUI that leaves line mode is
+    /// still at work.
     @ObservationIgnored
     var lineMode: TerminalLineMode? {
-        didSet { if lineMode != oldValue, lineMode != nil { refreshTrackerForeground() } }
+        didSet { if lineMode != oldValue, lineMode != nil, foregroundSample != nil { refreshTrackerForeground() } }
     }
 
     /// The latest report's shell verdict on the foreground (see
@@ -539,6 +546,7 @@ final class Pane: Identifiable {
         // session reports again; until then nothing is known, so the close
         // falls back to the surface's reading.
         foregroundSample = nil
+        programTitle = nil
         remoteForegroundCommand = nil
         foregroundReportIsShell = false
         lastAppliedForeground = nil
