@@ -66,6 +66,11 @@ enum MactermTheme {
         GhosttyApp.shared.paletteColor(at: 2).map { Color(nsColor: $0) } ?? .green
     }
 
+    /// The tab's done dot. Always green (Ethan, ui-review 0433): palette
+    /// index 2 is not green in every theme, and the done dot must read as
+    /// green.
+    static var doneDot: Color { .green }
+
     @MainActor
     static var failure: Color {
         GhosttyApp.shared.paletteColor(at: 1).map { Color(nsColor: $0) } ?? .red

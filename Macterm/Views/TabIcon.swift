@@ -151,7 +151,7 @@ struct TabStatusGlyph: View {
                         .frame(width: 7 * size.glyphScale, height: 7 * size.glyphScale)
                         .overlay(
                             Circle()
-                                .fill(failed ? MactermTheme.failure : MactermTheme.success)
+                                .fill(failed ? MactermTheme.failure : MactermTheme.doneDot)
                                 .frame(width: 5 * size.glyphScale, height: 5 * size.glyphScale)
                         )
                         .offset(x: 2.5 * size.glyphScale, y: 2.5 * size.glyphScale)
