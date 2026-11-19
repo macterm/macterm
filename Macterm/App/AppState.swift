@@ -1618,7 +1618,10 @@ final class AppState {
             )
         }
         if let pinnedWorkspace = workspaces[PinnedTabs.workspaceID] {
-            let live = Dictionary(pinned.compactMap { record in record.live.map { (record.id, $0) } }, uniquingKeysWith: { first, _ in first })
+            let live = Dictionary(
+                pinned.compactMap { record in record.live.map { (record.id, $0) } },
+                uniquingKeysWith: { first, _ in first }
+            )
             inputs.append(.init(
                 id: pinnedWorkspace.id,
                 kind: .pinned,

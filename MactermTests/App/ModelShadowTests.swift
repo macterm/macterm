@@ -42,7 +42,7 @@ struct ModelShadowTests {
             let first = try await agreement(shadow)
 
             // Every project, the group and the one with no workspace too.
-            #expect(Set(first.projects.map(\.id)) == Set([group, a, b, remote].map { $0.id.uuidString }))
+            #expect(Set(first.projects.map(\.id)) == Set([group, a, b, remote].map(\.id.uuidString)))
             #expect(first.projects.first { $0.id == b.id.uuidString }?.parent == group.id.uuidString)
             let spaces = Dictionary(uniqueKeysWithValues: first.workspaces.map { ($0.id, $0) })
             #expect(spaces[b.id.uuidString]?.tabs.isEmpty == true)

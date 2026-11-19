@@ -19,6 +19,7 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 - **The server writes `model.json`** 100 ms after a change, before the reply to `server.exit`, and when it stops. A file that does not read, or that a newer build wrote, makes the model read-only (`model_readonly`), and the server never writes over it.
 - **One request, one batch, before the reply.** The server makes the events from a compare of the model before and after the request (`Snapshot`, `diff`). The requester's copy has `cause`. A request that fails sends no batch.
 - **A pane that leaves the model ends its local session**, unless another pane of the model names the session. `pane.removed` and the reply name every pane that left. `model.import` ends no session.
+- **`model.replace` is the shadow stage** (design/010 §9, step 3). The app sends its own model after each save, as often as it likes. It ends no session and leaves `imported_v1` false. Once the model has `imported_v1`, the server refuses it (`refused`). Step 7 removes it.
 - **The ring of request ids** keeps 256 answers by client key, request id and a hash of the arguments. `state.subscribe` gives the key as `client`; `control.resume` takes it. `split.ratio` and failures for lack of memory are not kept.
 - **The model and each batch must fit in one frame** (`server.frame_max`, 1 MiB).
 - **The schema reads the model through `src/wire.zig`**, because a file can be in one module only.

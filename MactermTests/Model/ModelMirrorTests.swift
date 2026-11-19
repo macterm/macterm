@@ -27,7 +27,10 @@ struct ModelMirrorTests {
     @Test
     func a_new_tab_takes_the_order_of_its_workspace_at_the_end_of_the_batch() {
         let mirror = ModelMirror()
-        mirror.install(state(seq: 3, model: .init(projects: [project], workspaces: [.init(id: "p1", kind: .project, tabs: [tab("t1", "a")])])))
+        mirror.install(state(
+            seq: 3,
+            model: .init(projects: [project], workspaces: [.init(id: "p1", kind: .project, tabs: [tab("t1", "a")])])
+        ))
         mirror.apply(batch(4, [
             .tabOrder(.init(workspace: "p1", kind: .project, ids: ["t2", "t1"], activeTab: "t2")),
             .tabChanged(.init(workspace: "p1", tab: tab("t2", "b"), zoomed: "b")),
@@ -43,7 +46,10 @@ struct ModelMirrorTests {
     @Test
     func a_tab_that_moves_leaves_its_old_workspace() {
         let mirror = ModelMirror()
-        mirror.install(state(seq: 1, model: .init(projects: [project], workspaces: [.init(id: "p1", kind: .project, tabs: [tab("t1", "a")], activeTab: "t1")])))
+        mirror.install(state(
+            seq: 1,
+            model: .init(projects: [project], workspaces: [.init(id: "p1", kind: .project, tabs: [tab("t1", "a")], activeTab: "t1")])
+        ))
         mirror.apply(batch(2, [
             .tabOrder(.init(workspace: "pin", kind: .pinned, ids: ["t1"], activeTab: "t1")),
             .tabOrder(.init(workspace: "p1", kind: .project, ids: [])),

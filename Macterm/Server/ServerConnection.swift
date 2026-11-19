@@ -328,8 +328,15 @@ enum ServerEvent: Equatable {
         case let .sessionExit(value)?: self = .sessionExit(value)
         case let kind?:
             switch kind {
-            case .projectChanged, .projectRemoved, .projectOrder, .tabChanged, .tabRemoved, .tabOrder,
-                 .workspaceRemoved, .selectionChanged, .paneRemoved:
+            case .projectChanged,
+                 .projectRemoved,
+                 .projectOrder,
+                 .tabChanged,
+                 .tabRemoved,
+                 .tabOrder,
+                 .workspaceRemoved,
+                 .selectionChanged,
+                 .paneRemoved:
                 self = .model(kind)
             default: return nil
             }

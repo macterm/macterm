@@ -15,6 +15,10 @@ This file loads when you work in `Macterm/Server/`. The root `AGENTS.md` has the
 - `ServerConnection` reads the socket on a thread of its own. A request waits for its response by id. `events` gives one element for each event batch. When the connection ends, each request that waits fails with `ServerClientError.disconnected`. Only the reader thread closes the fd, under the lock that each write holds.
 - `LocalServerTests` runs the bundled server in a runtime directory under `/tmp` (a socket path has at most 103 bytes).
 
+## The model shadow (design/010 §9, step 3)
+
+`AppState` still owns the model. A Debug or tip build (`ModelShadow.isEnabled`) gives the server `MACTERM_STATE_DIR` (the App Support folder), and after each `saveWorkspaces` sends it a copy of the model in `model.replace` (`ModelShadow`, `ModelConversion`). `ModelMirror` follows the server's batches (`LocalSessions.setModelFeed`). A Debug build compares the mirror with the copy that the server took and logs a difference. Nothing reads the mirror, and a user sees nothing. A server that another build started with no state folder has no model: the shadow then sends nothing.
+
 ## Local panes are v2 sessions
 
 Every local pane (workspace, pinned, quick terminal, widget) is a v2 session of the local server. Remote panes are v2 sessions of the host's server (see Remote Projects).

@@ -88,8 +88,8 @@ final class ModelShadow {
             do {
                 try await sessions.replaceModel(model)
                 lastSent = model
-                let elapsed = start.duration(to: clock.now)
-                logger.debug("model shadow: model.replace took \(elapsed.formatted(.units(allowed: [.milliseconds], fractionalPart: .show(length: 2))), privacy: .public)")
+                let micros = start.duration(to: clock.now) / .microseconds(1)
+                logger.debug("model shadow: model.replace took \(Int(micros), privacy: .public) µs")
                 check(model)
             } catch {
                 logger.error("model shadow: model.replace failed: \(String(describing: error), privacy: .public)")
