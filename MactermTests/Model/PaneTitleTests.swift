@@ -187,15 +187,15 @@ struct PaneTitleTests {
         Pane(projectPath: "devbox:~/dev/api", projectID: UUID())
     }
 
-    private let claude = RemoteForeground(comm: "2.1.289", isIdle: false, command: "claude")
-    private let zsh = RemoteForeground(comm: "-zsh", isIdle: true, isShell: true, command: "-zsh")
+    private let claude = SessionForeground(comm: "2.1.289", isIdle: false, command: "claude")
+    private let zsh = SessionForeground(comm: "-zsh", isIdle: true, isShell: true, command: "-zsh")
 
     @Test
     func a_title_in_the_replay_of_an_attach_never_names_the_pane() {
         // After a restart, `top` holds the pty and the replay carries the
         // shell's last title from before `top` started.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "top", isIdle: false, isShell: false, command: "top"))
+        pane.applyForeground(SessionForeground(comm: "top", isIdle: false, isShell: false, command: "top"))
         pane.receiveRemoteSnapshot(started: true)
         pane.receiveReportedTitle("dev@box: ~/work")
         #expect(pane.programTitle == nil)
@@ -211,7 +211,7 @@ struct PaneTitleTests {
     private func runTurn(_ pane: Pane, title: String = "◐ Terminal session icons") {
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle(title)
+        pane.receiveSessionTitle(title)
         pane.markProgressFinished()
     }
 
@@ -219,14 +219,14 @@ struct PaneTitleTests {
     func remote_title_is_adopted_only_while_executing() {
         let pane = makeRemotePane()
         // At the prompt with no report: nothing says a program holds the pty.
-        pane.receiveRemoteReportedTitle("~/dev/api")
+        pane.receiveSessionTitle("~/dev/api")
         #expect(pane.programTitle == nil)
 
         // The tracker gates running on a user interaction (typing the
         // command), same as the real flow.
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle("✳ remote session")
+        pane.receiveSessionTitle("✳ remote session")
         #expect(pane.programTitle == "✳ remote session")
     }
 
@@ -234,11 +234,11 @@ struct PaneTitleTests {
     func remote_title_expires_when_the_run_ends_at_the_shell() {
         // The shell's report lands before the prompt that ends the run.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle("✳ remote session")
-        pane.applyRemoteForeground(zsh)
+        pane.receiveSessionTitle("✳ remote session")
+        pane.applyForeground(zsh)
         pane.markCommandFinished()
         #expect(pane.programTitle == nil)
     }
@@ -247,10 +247,10 @@ struct PaneTitleTests {
     func remote_title_outlives_a_turn_while_the_agent_holds_the_pty() {
         // No flicker to the process name between turns.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         runTurn(pane)
         #expect(pane.programTitle == "◐ Terminal session icons")
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.receiveSessionTitle("✳ Terminal session icons")
         #expect(pane.programTitle == "✳ Terminal session icons")
     }
 
@@ -261,15 +261,15 @@ struct PaneTitleTests {
         let pane = makeRemotePane()
         runTurn(pane)
         #expect(pane.programTitle == nil)
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.receiveSessionTitle("✳ Terminal session icons")
         #expect(pane.programTitle == nil)
     }
 
     @Test
     func remote_prompt_title_is_dropped_while_the_shell_holds_the_pty() {
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(zsh)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(zsh)
+        pane.receiveSessionTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -278,12 +278,12 @@ struct PaneTitleTests {
         // The agent quits between turns, so no run ends: the report alone
         // settles it.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.applyForeground(claude)
+        pane.receiveSessionTitle("✳ Terminal session icons")
         #expect(pane.programTitle == "✳ Terminal session icons")
-        pane.applyRemoteForeground(zsh)
+        pane.applyForeground(zsh)
         #expect(pane.programTitle == nil)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.receiveSessionTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -291,12 +291,12 @@ struct PaneTitleTests {
     func remote_prompt_return_clears_the_title_at_once() {
         // OSC 133;D is the host's shell owning its prompt.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         runTurn(pane)
         pane.notePromptReturned()
         #expect(pane.programTitle == nil)
         // A title after it is the prompt's.
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.receiveSessionTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -305,8 +305,8 @@ struct PaneTitleTests {
         // A title hook that runs before ghostty's precmd titles first, then
         // OSC 133;D lands.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(claude)
+        pane.receiveSessionTitle("~/dev")
         pane.notePromptReturned()
         #expect(pane.programTitle == nil)
     }
@@ -316,8 +316,8 @@ struct PaneTitleTests {
         // The host says the session's shell doesn't own the tty, but what
         // does is another shell: its prompt titles are churn.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "zsh", isIdle: false, command: "zsh"))
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: false, command: "zsh"))
+        pane.receiveSessionTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -326,8 +326,8 @@ struct PaneTitleTests {
         // The host never calls tmux a shell (Debian lists it in /etc/shells),
         // so its titles and its `run:` are a program's.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "tmux", isIdle: false, isShell: false, command: "tmux attach"))
-        pane.receiveRemoteReportedTitle("build: make")
+        pane.applyForeground(SessionForeground(comm: "tmux", isIdle: false, isShell: false, command: "tmux attach"))
+        pane.receiveSessionTitle("build: make")
         #expect(pane.programTitle == "build: make")
         #expect(pane.remoteForegroundCommand == "tmux attach")
     }
@@ -337,8 +337,8 @@ struct PaneTitleTests {
         // `elvish` is in the host's /etc/shells and not the Mac's: the host's
         // verdict decides.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "elvish", isIdle: false, isShell: true, command: "elvish"))
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(SessionForeground(comm: "elvish", isIdle: false, isShell: true, command: "elvish"))
+        pane.receiveSessionTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -352,10 +352,10 @@ struct PaneTitleTests {
     func remote_foreground_name_comes_from_the_report_and_keeps_basename() {
         let pane = makeRemotePane()
         // A macOS remote reports comm as a full path; keep the basename.
-        pane.applyRemoteForegroundName("/usr/local/bin/btop")
+        pane.applyForegroundName("/usr/local/bin/btop")
         #expect(pane.displayTitle == "btop")
         // No name (nil) keeps the last-known name — no title flapping.
-        pane.applyRemoteForegroundName(nil)
+        pane.applyForegroundName(nil)
         #expect(pane.displayTitle == "btop")
     }
 
@@ -369,7 +369,7 @@ struct PaneTitleTests {
         #expect(Pane.normalizeRemoteComm("btop") == "btop")
 
         let pane = makeRemotePane()
-        pane.applyRemoteForegroundName("-/opt/homebrew/bin/nu")
+        pane.applyForegroundName("-/opt/homebrew/bin/nu")
         #expect(pane.displayTitle == "nu")
     }
 
@@ -383,7 +383,7 @@ struct PaneTitleTests {
         #expect(Pane.remoteProcessName(comm: "-zsh", command: "-zsh") == "zsh")
 
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         #expect(pane.displayTitle == "claude")
     }
 

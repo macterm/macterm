@@ -87,9 +87,11 @@ final class PaneSurface: Identifiable {
         self.host = host
     }
 
-    /// Whether this surface's runtime callbacks feed the pane: the first
+    /// Whether this surface's libghostty callbacks feed the pane: the first
     /// surface of the pane. Every surface parses the same output, so only one
-    /// may count titles, runs, bells and notifications.
+    /// may count runs and notifications. Each callback asks when it fires
+    /// (`Pane.connectViewCallbacks`), so the next surface takes over when the
+    /// first one goes.
     var isFeed: Bool { SurfaceRegistry.shared.isFeed(self) }
 
     /// The live terminal NSView. Created lazily the first time it's requested,
@@ -109,7 +111,7 @@ final class PaneSurface: Identifiable {
         view.owningSurface = self
         _nsView = view
         connectUICallbacks(view)
-        pane.connectViewCallbacks(view, isFeed: isFeed)
+        pane.connectViewCallbacks(view)
         MactermPaneEntity.annotate(view, for: pane)
         return view
     }
@@ -260,9 +262,10 @@ final class PaneSurface: Identifiable {
         view.onBackgroundColorChange = nil
         view.onAdaptiveBackgroundChange = nil
         view.onOutputActivity = nil
-        view.onSnapshotMark = nil
-        view.onRemoteForeground = nil
-        view.onRemoteTtyMode = nil
+        view.onSessionState = nil
+        view.onSessionForeground = nil
+        view.onTtyMode = nil
+        view.onSessionMark = nil
         view.onAttention = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil
@@ -465,8 +468,7 @@ final class SurfaceRegistry {
 
     /// Destroy and drop one surface while another remains. A client that goes
     /// ends only its own channel: the session is the pane's, never the
-    /// surface's. When the first surface goes, the next one becomes the feed
-    /// and takes over the runtime callbacks.
+    /// surface's. When the first surface goes, the next one becomes the feed.
     func retire(_ surface: PaneSurface) {
         let pane = surface.pane
         guard var all = entries[pane.id]?.surfaces, all.count > 1,
@@ -475,11 +477,6 @@ final class SurfaceRegistry {
         surface.captureClosingSnapshot()
         all.remove(at: index)
         entries[pane.id]?.surfaces = all
-        if index == 0 {
-            // The old feed may have gone between the two snapshot marks.
-            pane.receiveRemoteSnapshot(started: false)
-            if let view = all[0].nsView { pane.connectViewCallbacks(view, isFeed: true) }
-        }
         // Deferred: a retire can come from inside a SwiftUI update while the
         // view is still in a hierarchy.
         DispatchQueue.main.async { surface.destroy() }

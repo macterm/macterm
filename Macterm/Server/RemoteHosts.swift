@@ -230,7 +230,6 @@ final class RemoteHosts {
         case .lost:
             logger.info("remote pane: session=\(session, privacy: .public) host=\(target.destination, privacy: .public) lost")
             lost.insert(session)
-            pane.remoteLinkDidStop()
             mark(pane, lost: true)
             // The next connect checks the connection again. A roaming link
             // stays: the host may still hold it, and the next attach asks it

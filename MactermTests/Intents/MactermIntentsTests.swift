@@ -366,7 +366,6 @@ struct MactermIntentsTests {
         let busy = ForegroundSample(
             name: "btop",
             isIdleShell: false,
-            origin: .processTable(pid: nil),
             sampledAt: Date()
         )
         #expect(ForegroundPolicy.needsConfirmClose(

@@ -574,7 +574,7 @@ struct PaneTests {
     @Test
     func remote_pane_matches_an_agent_from_the_report() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "/opt/homebrew/bin/codex", command: "codex --yolo"))
+        pane.applyForeground(SessionForeground(comm: "/opt/homebrew/bin/codex", command: "codex --yolo"))
         #expect(pane.agentIcon == .codex)
     }
 
@@ -583,7 +583,7 @@ struct PaneTests {
         // Claude Code's native install: macOS `ps -o comm=` gives the versioned
         // binary's path, and only args names the CLI.
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(
+        pane.applyForeground(SessionForeground(
             comm: "/Users/me/.local/share/claude/versions/2.1.207",
             isIdle: false,
             command: "claude --resume"
@@ -594,7 +594,7 @@ struct PaneTests {
     @Test
     func remote_pane_matches_an_interpreter_run_agent_by_its_script() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(
+        pane.applyForeground(SessionForeground(
             comm: "node",
             isIdle: false,
             command: "node /usr/local/lib/node_modules/@google/gemini-cli/bin/gemini"
@@ -605,9 +605,9 @@ struct PaneTests {
     @Test
     func remote_pane_loses_its_agent_when_the_shell_returns() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "2.1.207", isIdle: false, command: "claude"))
+        pane.applyForeground(SessionForeground(comm: "2.1.207", isIdle: false, command: "claude"))
         #expect(pane.agentIcon == .claude)
-        pane.applyRemoteForeground(RemoteForeground(comm: "-zsh", isIdle: true, command: "-zsh"))
+        pane.applyForeground(SessionForeground(comm: "-zsh", isIdle: true, command: "-zsh"))
         #expect(pane.agentIcon == nil)
     }
 
@@ -616,15 +616,15 @@ struct PaneTests {
         // nil (an empty report) changes nothing, as
         // for the name and the command.
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "2.1.207", isIdle: false, command: "claude"))
-        pane.applyRemoteForeground(nil)
+        pane.applyForeground(SessionForeground(comm: "2.1.207", isIdle: false, command: "claude"))
+        pane.applyForeground(nil)
         #expect(pane.agentIcon == .claude)
     }
 
     @Test
     func remote_pane_shows_no_agent_for_an_ordinary_program() {
         let pane = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        pane.applyRemoteForeground(RemoteForeground(comm: "btop", isIdle: false, command: "btop --utf-force"))
+        pane.applyForeground(SessionForeground(comm: "btop", isIdle: false, command: "btop --utf-force"))
         #expect(pane.agentIcon == nil)
     }
 
@@ -639,7 +639,7 @@ struct PaneTests {
         #expect(!local.needsConfirmClose)
         let remote = Pane(projectPath: "me@host.example:proj", projectID: UUID())
         remote.executionState = .running
-        remote.applyRemoteForegroundName("hx")
+        remote.applyForegroundName("hx")
         #expect(!remote.needsConfirmClose)
     }
 
@@ -658,7 +658,7 @@ struct PaneTests {
         // exact case that must NOT warn (an idle local pane doesn't). `-zsh`
         // is the login form the host actually reports.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForegroundName("-zsh")
+        p.applyForegroundName("-zsh")
         #expect(p.remoteNeedsConfirmClose == false)
         #expect(!p.needsConfirmClose)
     }
@@ -668,7 +668,7 @@ struct PaneTests {
         // A reported program is busy even when the execution tracker has
         // quiet-settled (a silent editor produces no heartbeats).
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForegroundName("hx")
+        p.applyForegroundName("hx")
         #expect(p.executionState != .running)
         #expect(p.remoteNeedsConfirmClose == true)
     }
@@ -678,8 +678,8 @@ struct PaneTests {
         // A remote-only login shell the local /etc/shells doesn't list: the
         // host says its group owns the tty, so an idle prompt must not warn.
         let remote = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "-exotic-shell", isIdle: true, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "-exotic-shell", isIdle: true, command: nil)
         )
         #expect(remote.foregroundProcessName == "exotic-shell")
         #expect(remote.remoteNeedsConfirmClose == false)
@@ -688,15 +688,15 @@ struct PaneTests {
         // as a shell name locally, but the host sees a different foreground
         // group — closing kills it, so it warns (matching libghostty's
         // local surface semantics, where a nested shell is a running child).
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "zsh", isIdle: false, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "zsh", isIdle: false, command: nil)
         )
         #expect(remote.remoteNeedsConfirmClose == true)
 
         // No host verdict (pgid read failure): fall back to
         // the local database heuristic.
-        remote.applyRemoteForeground(
-            RemoteForeground(comm: "zsh", isIdle: nil, command: nil)
+        remote.applyForeground(
+            SessionForeground(comm: "zsh", isIdle: nil, command: nil)
         )
         #expect(remote.remoteNeedsConfirmClose == false)
     }
@@ -715,7 +715,7 @@ struct PaneTests {
     @Test
     func remoteForegroundCommand_records_a_running_programs_full_command_line() {
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
         #expect(p.remoteForegroundCommand == "btop --utf-force")
     }
 
@@ -725,8 +725,8 @@ struct PaneTests {
         // no run" contract local panes get. `-zsh` is the login form the
         // host actually reports; its args carry the same dash.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop"))
-        p.applyRemoteForeground(RemoteForeground(comm: "-zsh", command: "-zsh"))
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop"))
+        p.applyForeground(SessionForeground(comm: "-zsh", command: "-zsh"))
         #expect(p.remoteForegroundCommand == nil)
     }
 
@@ -735,7 +735,7 @@ struct PaneTests {
         // A report with no args field (a ps that reported
         // nothing) still yields a usable `run:` — the short name.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "/usr/local/bin/hx", command: nil))
+        p.applyForeground(SessionForeground(comm: "/usr/local/bin/hx", command: nil))
         #expect(p.remoteForegroundCommand == "hx")
     }
 
@@ -744,8 +744,8 @@ struct PaneTests {
         // nil (an empty report) keeps the last-known
         // command, mirroring the name-freeze contract.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
-        p.applyRemoteForeground(nil)
+        p.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
+        p.applyForeground(nil)
         #expect(p.remoteForegroundCommand == "btop --utf-force")
     }
 }

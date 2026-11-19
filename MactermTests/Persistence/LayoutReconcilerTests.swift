@@ -52,7 +52,7 @@ struct LayoutReconcilerTests {
         let pid = UUID()
         let root = "devbox:~/dev/api"
         let btop = Pane(projectPath: root, projectID: pid)
-        btop.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop"))
+        btop.applyForeground(SessionForeground(comm: "btop", command: "btop"))
         let ws = workspace(projectID: pid, root: .pane(btop))
 
         let file = try layout("""

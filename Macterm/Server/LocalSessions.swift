@@ -7,8 +7,7 @@ private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 /// A local v2 session as the server lists it.
 struct LocalSession: Equatable {
     var name: String
-    /// The session's shell, the leader of its pty. Its controlling tty's
-    /// foreground group is the pane's foreground (`ZmxForegroundResolver`).
+    /// The session's shell, the leader of its pty.
     var shellPID: pid_t?
     /// The session's pty (`/dev/ttysNNN`).
     var ttyPath: String?

@@ -99,7 +99,8 @@ extension GhosttyTerminalNSView {
             let session = PaneSession(
                 name: sessionName,
                 launch: launch,
-                wantsForeground: false,
+                wantsForeground: true,
+                wantsTty: true,
                 host: host,
                 connect: { try await LocalSessions.shared.channelConnection() }
             )
@@ -177,18 +178,42 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         }
     }
 
-    func paneSnapshot(started: Bool) {
-        DispatchQueue.main.async { [weak view] in view?.onSnapshotMark?(started) }
+    func paneState(_ state: MactermProtocol.State) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionState?(state) }
     }
 
     func paneForeground(_ foreground: MactermProtocol.Foreground) {
-        guard let report = RemoteForeground(foreground) else { return }
-        DispatchQueue.main.async { [weak view] in view?.onRemoteForeground?(report) }
+        guard let report = SessionForeground(foreground) else { return }
+        DispatchQueue.main.async { [weak view] in view?.onSessionForeground?(report) }
+    }
+
+    func paneTitle(_ title: Data) {
+        let text = String(decoding: title, as: UTF8.self)
+        DispatchQueue.main.async { [weak view] in view?.onTitleChange?(text) }
+    }
+
+    /// Each surface keeps the folder for itself (`currentPwd`), as
+    /// libghostty's own `pwd` action does for a surface with no session.
+    func paneCwd(_ url: Data) {
+        guard let path = Self.path(ofCwdURL: url) else { return }
+        DispatchQueue.main.async { [weak view] in view?.currentPwd = path }
+    }
+
+    func paneMark(_ mark: MactermProtocol.Mark) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionMark?(mark) }
+    }
+
+    /// The path of an OSC 7 URL (`file://host/path`, `kitty-shell-cwd://`),
+    /// with its percent escapes decoded. nil for an empty or unreadable URL.
+    static func path(ofCwdURL data: Data) -> String? {
+        guard let url = URL(string: String(decoding: data, as: UTF8.self)) else { return nil }
+        let path = url.path(percentEncoded: false)
+        return path.isEmpty ? nil : path
     }
 
     func paneTtyMode(_ mode: MactermProtocol.TtyMode) {
         let lineMode = TerminalLineMode(canonical: mode.canonical, echo: mode.echo)
-        DispatchQueue.main.async { [weak view] in view?.onRemoteTtyMode?(lineMode) }
+        DispatchQueue.main.async { [weak view] in view?.onTtyMode?(lineMode) }
     }
 
     func paneAttention(_ flags: MactermProtocol.Attention) {
