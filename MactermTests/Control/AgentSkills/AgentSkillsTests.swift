@@ -107,7 +107,8 @@ struct AgentSkillsTests {
             let text = try String(contentsOf: directory.appendingPathComponent(skill.path), encoding: .utf8)
             #expect(text == skill.fileText, "server/src/cli/skills/\(skill.path) is not the text of AgentSkills")
         }
-        let folders = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0 != "header.txt" }
+        let folders = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0 != "header.txt" && !$0.hasPrefix(".") }
         #expect(Set(folders) == Set(AgentSkills.all.map(\.name)))
     }
 

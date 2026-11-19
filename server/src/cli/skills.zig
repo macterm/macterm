@@ -108,8 +108,36 @@ test "each skill is frontmatter with its name, then a body that ends with one ne
     try testing.expect(named("macterm") == null);
 }
 
+/// A heading and the first block under it: the text up to the next blank
+/// line, or to the end.
+fn section(text: []const u8, heading: []const u8) ?[]const u8 {
+    const start = std.mem.indexOf(u8, text, heading) orelse return null;
+    const end = std.mem.indexOfPos(u8, text, start + heading.len + 1, "\n\n") orelse text.len;
+    return text[start..end];
+}
+
 test "each skill stands alone and its description is a plain YAML scalar" {
-    for (all) |s| {
+    // Every skill has the same ground rules.
+    const ground_rules = section(all[0].text, "\n## Ground rules\n").?;
+    for (all, 0..) |s, i| {
+        try testing.expect(s.name.len <= 64);
+        var parts = std.mem.splitScalar(u8, s.name, '-');
+        while (parts.next()) |part| {
+            try testing.expect(part.len > 0);
+            for (part) |c| try testing.expect(std.ascii.isLower(c) or std.ascii.isDigit(c));
+        }
+        for (all[i + 1 ..]) |other| try testing.expect(!std.mem.eql(u8, s.name, other.name));
+        try testing.expectEqualStrings(ground_rules, section(s.text, "\n## Ground rules\n").?);
+        var note: [512]u8 = undefined;
+        try testing.expectEqualStrings(try std.fmt.bufPrint(&note,
+            \\
+            \\## Keeping this skill current
+            \\
+            \\This file came from `macterm skills {s}`. If Macterm rejects a command shown here, the CLI changed
+            \\after you installed the skill. Install the skill again from the output of that command.
+            \\
+        , .{s.name}), section(s.text, "\n## Keeping this skill current\n").?);
+
         const d = s.description;
         try testing.expect(d.len > 0 and d.len <= 1024);
         try testing.expect(std.mem.indexOf(u8, d, "Use when") != null);
@@ -118,11 +146,6 @@ test "each skill stands alone and its description is a plain YAML scalar" {
         try testing.expect(std.mem.indexOfScalar(u8, "-?:,[]{}#&*!|>'\"%@`", d[0]) == null);
         // An agent reads all of a skill when it loads it.
         try testing.expect(std.mem.count(u8, s.text, "\n") < 500);
-        // Agents load one skill at a time: each has the ground rules and
-        // its own note on how to stay current.
-        try testing.expect(std.mem.indexOf(u8, s.text, "\n## Ground rules\n") != null);
-        var note: [128]u8 = undefined;
-        try testing.expect(std.mem.indexOf(u8, s.text, try std.fmt.bufPrint(&note, "This file came from `macterm skills {s}`.", .{s.name})) != null);
         // A code span stays on one line, so that the check below sees it.
         var fenced = false;
         var lines = std.mem.splitScalar(u8, s.text, '\n');

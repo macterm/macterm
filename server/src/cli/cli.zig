@@ -862,6 +862,18 @@ test "the help of a ported leaf command is the golden text" {
     }
 }
 
+test "the overview of a group wraps as its golden help" {
+    // The overview of `pane` ends at column 80 on one line; that of
+    // `session` is short.
+    inline for (.{ .{ &pane_command, @embedFile("golden/help/pane.txt") }, .{ &session_command, @embedFile("golden/help/session.txt") } }) |entry| {
+        var out: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        try command.writeHelp(&out.writer, &.{ &root, entry[0] });
+        const golden = entry[1][0 .. std.mem.indexOf(u8, entry[1], "\n\n").? + 2];
+        try testing.expect(std.mem.startsWith(u8, out.written(), golden));
+    }
+}
+
 test "the root help lists the ported commands as the golden text does" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
