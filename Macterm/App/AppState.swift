@@ -841,6 +841,11 @@ final class AppState {
     /// All mutation goes through `AppState+PinnedTabs.swift`.
     var pinnedRecords: [PinnedTabRecord] = []
 
+    /// The shadow stage of design/010 §9 (`ModelShadow`): nil in a build
+    /// that does not run it.
+    @ObservationIgnored
+    var modelShadow: ModelShadow?
+
     /// `pinned.yaml` I/O. Shares the project-file directory, so a test's
     /// injected `ProjectFileStore` tempdir isolates this file too.
     @ObservationIgnored
@@ -1048,6 +1053,15 @@ final class AppState {
     @ObservationIgnored
     var isAppActive: () -> Bool = { NSApp?.isActive ?? false }
 
+    /// Whether the key window draws a view of the pane now. Only the selected
+    /// tab of a window is in the view tree, so a background tab's pane is in
+    /// no window. This is a fact of the views, not of the model: when the
+    /// terminal window is not key, a tab selection changes only the window's
+    /// own choice, and the workspace's `activeTab` can name a tab that is not
+    /// on screen.
+    @ObservationIgnored
+    var paneIsInKeyWindow: (Pane) -> Bool = { SurfaceRegistry.shared.view(of: $0)?.window?.isKeyWindow == true }
+
     /// The two seams of the Dock badge (`AppState+BellBadge.swift`), injectable
     /// so tests can drive the feature set and read the label without the
     /// developer's real ghostty config or the hosting app's Dock tile. The
@@ -1143,9 +1157,8 @@ final class AppState {
     /// Settings → Extensions (`PaletteRegistry`); here so its hourly cache
     /// outlives the Settings window.
     let paletteRegistry = PaletteRegistry()
-    /// Applies the extension updates that need no question, when the user
-    /// turned that on. The app starts it after the launch restore. Tests
-    /// and benchmarks never do.
+    /// Applies the extension updates that need no question. The app starts
+    /// it after the launch restore. Tests and benchmarks never do.
     @ObservationIgnored
     private(set) lazy var extensionAutoUpdater = ExtensionAutoUpdater(
         registry: paletteRegistry,
@@ -1276,9 +1289,8 @@ final class AppState {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     // Coming to the front is both a poll event and the user
-                    // looking at whatever tab is showing — which is what
-                    // acknowledges its bell (`AppState+BellBadge`).
-                    self?.acknowledgeBellsInActiveTab()
+                    // looking at whatever tab is showing (`AppState+BellBadge`).
+                    self?.markActiveTabSeenOnActivation()
                     self?.notePollEvent()
                 }
             }),
@@ -1303,14 +1315,14 @@ final class AppState {
                     self?.notePollEvent()
                 }
             }),
-            // The Dock badge (`BellBadge`) is derived state: re-derived when a
-            // pane's bell flag flips either way, and when a config reload may
+            // The Dock badge (`BellBadge`) is derived state: derived again when
+            // a pane's attention flags change, and when a config reload may
             // have brought the `attention` feature in or taken it out.
             (center, center.addObserver(
-                forName: .terminalBellStateDidChange, object: nil, queue: .main
+                forName: .paneAttentionDidChange, object: nil, queue: .main
             ) { [weak self] note in
                 guard let paneID = note.object as? UUID else { return }
-                MainActor.assumeIsolated { self?.paneBellStateDidChange(paneID: paneID) }
+                MainActor.assumeIsolated { self?.paneAttentionDidChange(paneID: paneID) }
             }),
             (center, center.addObserver(forName: .mactermConfigDidChange, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.syncDockBadge() }
@@ -1424,7 +1436,6 @@ final class AppState {
     /// workspaces. Each pane only republishes (and triggers a tab re-render)
     /// when its name actually changes, so this is cheap when nothing's moving.
     func refreshAllForegroundProcesses() {
-        var didAcknowledgeCompletion = false
         var sawBusyPane = false
         for (projectID, ws) in workspaces {
             for tab in ws.tabs {
@@ -1440,16 +1451,11 @@ final class AppState {
                     // not the pane is on screen — no occlusion special-casing.
                     pane.settleTerminalActivityIfQuiet()
                     if pane.executionState == .running { sawBusyPane = true }
-                    didAcknowledgeCompletion = acknowledgeFinishedCommandIfActive(
-                        paneID: pane.id,
-                        projectID: projectID,
-                        saveImmediately: false
-                    ) || didAcknowledgeCompletion
+                    markSeenIfActive(paneID: pane.id, projectID: projectID)
                 }
             }
         }
         lastPollSawBusyPane = sawBusyPane
-        if didAcknowledgeCompletion { saveWorkspaces() }
         // A pinned pane's foreground changing (a command started or ended) is
         // the cue to re-capture its tab's declaration, so the respawn recipe
         // tracks what the tab is actually doing — not just what it did at pin
@@ -1531,14 +1537,14 @@ final class AppState {
                 // with nothing selected.
                 if hasScratchTabs {
                     activeProjectID = id
-                    acknowledgeActiveTab(projectID: id)
+                    markActiveTabSeen(projectID: id)
                     warmFocusedProject()
                 }
             } else if let project = projects.first(where: { $0.id == id }) {
                 activeProjectID = id
                 recordProjectVisit(id)
                 ensureWorkspace(projectID: id, path: project.path)
-                acknowledgeActiveTab(projectID: id)
+                markActiveTabSeen(projectID: id)
                 warmFocusedProject()
             }
         }
@@ -1562,12 +1568,14 @@ final class AppState {
         // has a record before the snapshot serializes.
         syncPinnedRecordsWithWorkspace()
         let ordinary = workspaces.filter { $0.value.kind != .pinned }
+        let ordinarySnapshots = WorkspaceSerializer.snapshot(ordinary)
+        let pinnedSnapshots = WorkspaceSerializer.snapshotPinned(
+            records: pinnedRecords,
+            workspace: workspaces[PinnedTabs.workspaceID]
+        )
         workspaceStore.save(
-            WorkspaceSerializer.snapshot(ordinary),
-            pinned: WorkspaceSerializer.snapshotPinned(
-                records: pinnedRecords,
-                workspace: workspaces[PinnedTabs.workspaceID]
-            ),
+            ordinarySnapshots,
+            pinned: pinnedSnapshots,
             // The pinned workspace is excluded from `ordinary`, so it loses
             // the WorkspaceSnapshot.activeTabID every other workspace keeps —
             // carry the selection separately or a relaunch always lands on
@@ -1594,8 +1602,40 @@ final class AppState {
             quickTerminal: quickTerminalSnapshot(),
             desktopWidgets: desktopWidgetSnapshots()
         )
+        shadowModel(ordinary: ordinarySnapshots, pinned: pinnedSnapshots)
         // A closed or unloaded tab takes its bell out of the count with it.
         syncDockBadge()
+    }
+
+    /// Gives `modelShadow` the snapshots that a save wrote, with the pinned
+    /// tabs in the order of their workspace.
+    private func shadowModel(ordinary: [WorkspaceSnapshot], pinned: [PinnedTabSnapshot]) {
+        // `save` refuses to write over a file that did not load: the copy
+        // would be as empty as the state.
+        guard let modelShadow, !workspaceStore.loadFailed else { return }
+        var inputs = ordinary.map { snapshot in
+            ModelConversion.WorkspaceInput(
+                id: snapshot.projectID,
+                kind: WorkspaceKind(id: snapshot.projectID),
+                tabs: snapshot.tabs,
+                activeTabID: snapshot.activeTabID
+            )
+        }
+        if let pinnedWorkspace = workspaces[PinnedTabs.workspaceID] {
+            let live = Dictionary(
+                pinned.compactMap { record in record.live.map { (record.id, $0) } },
+                uniquingKeysWith: { first, _ in first }
+            )
+            inputs.append(.init(
+                id: pinnedWorkspace.id,
+                kind: .pinned,
+                tabs: pinnedWorkspace.tabs.compactMap { live[$0.id] },
+                activeTabID: pinnedWorkspace.activeTabID
+            ))
+        }
+        // The pinned and the scratch rows are not projects of the model.
+        let selected = activeProjectID.flatMap { Project.isSynthetic($0) ? nil : $0 }
+        modelShadow.workspacesDidSave(inputs, activeProjectID: selected)
     }
 
     // MARK: - Project
@@ -1625,7 +1665,7 @@ final class AppState {
         activeProjectID = project.id
         recordProjectVisit(project.id)
         ensureWorkspace(projectID: project.id, path: project.path)
-        acknowledgeActiveTab(projectID: project.id)
+        markActiveTabSeen(projectID: project.id)
         reconnectDroppedRemotePanes(trigger: .projectSelected)
         warmFocusedProject()
         // Creating a workspace doesn't change any tab selection (the poll's
@@ -1746,7 +1786,13 @@ final class AppState {
     /// that answers again (`.hostAnswered`) clears the backoff of its panes:
     /// it is one event for each heal, so it adds no load while the host is
     /// down.
-    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
+    ///
+    /// `failedTry`: the session of a pane whose try failed now. Its backoff
+    /// starts at the end of the try (`RemoteReconnectPolicy.tryFailed`).
+    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil, failedTry: String? = nil) {
+        if let failedTry, let pane = remotePane(session: failedTry) {
+            reconnectPolicy.tryFailed(pane.id, now: Date())
+        }
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
@@ -2416,8 +2462,8 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ModelWriter.tabSelect(tabID, in: ws)
-        if ws.activeTabID != before || didAcknowledgeCompletion {
+        ModelWriter.tabSelect(tabID, in: ws)
+        if ws.activeTabID != before {
             saveWorkspaces()
         }
     }
@@ -2657,8 +2703,8 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ModelWriter.tabSelectNext(in: ws)
-        if ws.activeTabID != before || didAcknowledgeCompletion {
+        ModelWriter.tabSelectNext(in: ws)
+        if ws.activeTabID != before {
             saveWorkspaces()
         }
     }
@@ -2670,8 +2716,8 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ModelWriter.tabSelectPrevious(in: ws)
-        if ws.activeTabID != before || didAcknowledgeCompletion {
+        ModelWriter.tabSelectPrevious(in: ws)
+        if ws.activeTabID != before {
             saveWorkspaces()
         }
     }
@@ -2774,10 +2820,9 @@ final class AppState {
 
         activeProjectID = project.id
         ensureWorkspace(projectID: project.id, path: project.path)
-        let didAcknowledgeCompletion = workspaces[project.id].map { ModelWriter.tabSelect(entry.tabID, in: $0) } ?? false
+        if let ws = workspaces[project.id] { ModelWriter.tabSelect(entry.tabID, in: ws) }
         if activeProjectID != beforeProjectID
             || workspaces[project.id]?.activeTabID != beforeTabID
-            || didAcknowledgeCompletion
         {
             saveWorkspaces()
         }
@@ -2802,8 +2847,8 @@ final class AppState {
         }
         guard let ws = workspaces[projectID] else { return }
         let before = ws.activeTabID
-        let didAcknowledgeCompletion = ModelWriter.tabSelect(index: index, in: ws)
-        if ws.activeTabID != before || didAcknowledgeCompletion {
+        ModelWriter.tabSelect(index: index, in: ws)
+        if ws.activeTabID != before {
             saveWorkspaces()
         }
     }
@@ -3310,11 +3355,10 @@ final class AppState {
         if let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.findPane(id: paneID) != nil }) {
             let beforeTabID = workspaces[projectID]?.activeTabID
             let beforeFocusedPaneID = tab.focusedPaneID
-            let didAcknowledgeCompletion = workspaces[projectID].map { ModelWriter.tabSelect(tab.id, in: $0) } ?? false
+            if let ws = workspaces[projectID] { ModelWriter.tabSelect(tab.id, in: ws) }
             ModelWriter.paneFocus(tab, paneID: paneID)
             if workspaces[projectID]?.activeTabID != beforeTabID
                 || tab.focusedPaneID != beforeFocusedPaneID
-                || didAcknowledgeCompletion
             {
                 saveWorkspaces()
             }
@@ -3450,40 +3494,23 @@ final class AppState {
         )
     }
 
-    @discardableResult
-    private func acknowledgeActiveTab(projectID: UUID, saveImmediately: Bool = true) -> Bool {
-        guard projectID == activeProjectID,
-              let tab = workspaces[projectID]?.activeTab
-        else { return false }
-        // The bell rides the same "looking at the active tab" verdict, but is
-        // transient — it never decides the save below.
-        tab.acknowledgeBell()
-        let didAcknowledgeCompletion = tab.acknowledgeCommandCompletion()
-        if didAcknowledgeCompletion, saveImmediately {
-            saveWorkspaces()
-        }
-        return didAcknowledgeCompletion
+    private func markActiveTabSeen(projectID: UUID) {
+        guard projectID == activeProjectID else { return }
+        workspaces[projectID]?.activeTab?.markSeen()
     }
 
-    @discardableResult
-    func acknowledgeFinishedCommandIfActive(
-        paneID: UUID,
-        projectID: UUID,
-        saveImmediately: Bool = true
-    ) -> Bool {
-        // Looking at the active tab acknowledges completion for the whole tab,
-        // not only its focused pane. Otherwise a non-focused split pane that
-        // finished a command stays `.done` under the hood, gets persisted, and
-        // reappears as a status dot after the user switches away or restarts.
-        // Route through the injected `isAppActive` seam (not `NSApp.isActive`
-        // directly): NSApp is nil during construction and unset in tests, and
-        // this path is reachable from init via pollNow().
+    /// Marks the active tab seen when it holds `paneID`, the app is active,
+    /// and the key window draws the pane (`paneIsInKeyWindow`). Reads
+    /// `isAppActive`, not `NSApp.isActive`: NSApp is nil during init
+    /// (`pollNow`) and in tests.
+    func markSeenIfActive(paneID: UUID, projectID: UUID) {
         guard isAppActive(),
               projectID == activeProjectID,
               let tab = workspaces[projectID]?.activeTab,
-              tab.splitRoot.findPane(id: paneID) != nil
-        else { return false }
-        return acknowledgeActiveTab(projectID: projectID, saveImmediately: saveImmediately)
+              let pane = tab.splitRoot.findPane(id: paneID),
+              paneIsInKeyWindow(pane)
+        else { return }
+        tab.markSeen()
     }
 
     // MARK: - Private

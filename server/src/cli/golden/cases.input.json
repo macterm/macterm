@@ -696,7 +696,7 @@
       "pane",
       "inspect"
     ],
-    "method": null,
+    "method": "session.inspect",
     "responses": {
       "pane.inspect": {
         "data": {
@@ -734,7 +734,7 @@
       "inspect",
       "--json"
     ],
-    "method": null,
+    "method": "session.inspect",
     "responses": {
       "pane.inspect": {
         "data": {
@@ -771,7 +771,7 @@
       "pane",
       "dump"
     ],
-    "method": null,
+    "method": "session.history",
     "responses": {
       "pane.dump": {
         "data": {
@@ -795,7 +795,7 @@
       "--session",
       "macterm-api-8f327ce4a3f8"
     ],
-    "method": null,
+    "method": "session.history",
     "responses": {
       "pane.dump": {
         "data": {
@@ -817,7 +817,7 @@
       "dump",
       "--json"
     ],
-    "method": null,
+    "method": "session.history",
     "responses": {
       "pane.dump": {
         "data": {
@@ -1011,7 +1011,7 @@
       "run",
       "ls"
     ],
-    "method": null,
+    "method": "session.send",
     "responses": {
       "pane.run": {
         "ok": true
@@ -1028,7 +1028,7 @@
       "commit",
       "-h"
     ],
-    "method": null,
+    "method": "session.send",
     "responses": {
       "pane.run": {
         "ok": true
@@ -1041,7 +1041,7 @@
       "run",
       "ls"
     ],
-    "method": null,
+    "method": "session.send",
     "responses": {
       "pane.run": {
         "error": {
@@ -1058,7 +1058,7 @@
       "key",
       "ctrl+c"
     ],
-    "method": null,
+    "method": "session.key",
     "responses": {
       "pane.key": {
         "ok": true
@@ -1073,7 +1073,7 @@
       "--session",
       "macterm-api-8f327ce4a3f8"
     ],
-    "method": null,
+    "method": "session.key",
     "responses": {
       "pane.key": {
         "ok": true
@@ -1175,7 +1175,7 @@
       "session",
       "list"
     ],
-    "method": null,
+    "method": "session.list",
     "responses": {
       "session.list": {
         "data": {
@@ -1202,7 +1202,7 @@
       "list",
       "--json"
     ],
-    "method": null,
+    "method": "session.list",
     "responses": {
       "session.list": {
         "data": {
@@ -1229,7 +1229,7 @@
       "info",
       "macterm-api-8f327ce4a3f8"
     ],
-    "method": null,
+    "method": "session.info",
     "responses": {
       "session.info": {
         "data": {
@@ -1256,7 +1256,7 @@
       "kill",
       "macterm-api-8f327ce4a3f8"
     ],
-    "method": null,
+    "method": "session.kill",
     "responses": {
       "session.kill": {
         "ok": true
@@ -2152,7 +2152,7 @@
       "pane",
       "dump"
     ],
-    "method": null,
+    "method": "session.history",
     "responses": {
       "pane.dump": {
         "error": {

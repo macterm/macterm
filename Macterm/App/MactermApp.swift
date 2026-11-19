@@ -67,6 +67,11 @@ struct MactermApp: App {
                         delegate?.openInitialWindow()
                     }
                     appDelegate.projectStore = projectStore
+                    if ModelShadow.isEnabled, appState.modelShadow == nil {
+                        let shadow = ModelShadow(projectStore: projectStore)
+                        appState.modelShadow = shadow
+                        Task { await shadow.start() }
+                    }
                     NotificationHandler.shared.appState = appState
                     Updater.shared.presentToast = { [appState] in appState.presentToast($0) }
                     // Termination persists the snapshot AND refreshes the
@@ -571,9 +576,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: .remoteLinkDidStop,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] note in
+                // The session of a pane whose try failed, else nil.
+                let failedTry = note.object as? String
                 MainActor.assumeIsolated {
-                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped)
+                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped, failedTry: failedTry)
                 }
             },
         ]

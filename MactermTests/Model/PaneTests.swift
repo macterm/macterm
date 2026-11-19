@@ -23,6 +23,9 @@ struct PaneTests {
         p.isRemoteReconnecting = true
         #expect(p.remoteLinkBadge == .reconnecting)
         p.isRemoteLinkLost = false
+        // A slow first connect of a pane that came back after a restart.
+        #expect(p.remoteLinkBadge == .reconnecting)
+        p.isRemoteReconnecting = false
         #expect(p.remoteLinkBadge == nil)
     }
 
@@ -187,136 +190,83 @@ struct PaneTests {
     }
 
     @Test
-    func progressError_endsTheRunAsAFailure() {
-        let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
-    }
-
-    @Test
-    func progressRemove_endsTheRunAsASuccess() {
+    func progressEnd_endsTheRun() {
         let p = progressRunningPane()
         p.markProgressFinished()
         #expect(p.executionState == .done)
-        #expect(!p.completionFailed)
     }
 
-    /// SET → ERROR → REMOVE: a program clears its bar after reporting the
-    /// error, and that REMOVE finds the pane already `.done`.
+    /// An end with no run to end marks nothing.
     @Test
-    func removeAfterError_leavesTheFailureStanding() {
-        let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
-    }
-
-    /// The shell's own completion edge (OSC 133;D) lands after the failed
-    /// program exits, on a pane that is already `.done`.
-    @Test
-    func commandFinishedAfterError_leavesTheFailureStanding() {
-        let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        p.markCommandFinished()
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
-    }
-
-    /// ERROR → SET (a retry) → REMOVE: the retry is a new run, and it passed.
-    @Test
-    func retryAfterError_endsGreen() {
-        let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        p.markCommandRunning()
-        #expect(p.executionState == .running)
-        #expect(!p.completionFailed)
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-        #expect(!p.completionFailed)
-    }
-
-    /// An ERROR with no run to end marks nothing, so the retry after it
-    /// still ends green.
-    @Test
-    func errorBeforeAnyRun_marksNothing() {
+    func progressEndBeforeAnyRun_marksNothing() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.recordUserInteraction()
-        p.markProgressFinished(failed: true)
+        p.markProgressFinished()
         #expect(p.executionState == .idle)
-        #expect(!p.completionFailed)
-        p.markCommandRunning()
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-        #expect(!p.completionFailed)
     }
 
-    /// A program can exit straight after its ERROR, so the foreground refresh
-    /// that runs before the report is applied may already have settled the
-    /// run. The failure still lands on it.
     @Test
-    func errorAfterTheRunAlreadySettled_stillFails() {
+    func attention_comesFromTheSession() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.applyForegroundRefresh(name: "cargo", foregroundPID: 42)
-        p.markCommandRunning()
-        p.applyForegroundRefresh(name: shellName(), foregroundPID: 43, foregroundIsShell: true)
-        #expect(p.executionState == .done)
-        p.markProgressFinished(failed: true)
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
+        #expect(p.attention == MactermProtocol.Attention())
+        let flags = MactermProtocol.Attention(unseen: true, failed: true, bell: false)
+        p.receiveAttention(flags)
+        #expect(p.attention == flags)
+        p.receiveAttention(MactermProtocol.Attention())
+        #expect(p.attention == MactermProtocol.Attention())
     }
 
-    /// Publishing `.done` wakes the poll synchronously, and the poll can save
-    /// the workspace on the spot, so the failure must already be set by then.
     @Test
-    func theFailureIsSetBeforeDoneIsPublished() {
-        let p = progressRunningPane()
-        let seenAtDone = LockedBox<Bool?>(nil)
+    func attention_postsOneNoticeForEachChange() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        let count = LockedBox(0)
+        let id = p.id
+        // Filter by value: each post bridges the id to a new object, and an
+        // `object:` filter compares objects by identity. Other tests post too.
         let token = NotificationCenter.default.addObserver(
-            forName: .terminalPollEvent,
+            forName: .paneAttentionDidChange,
             object: nil,
             queue: nil
-        ) { _ in
-            MainActor.assumeIsolated {
-                guard p.executionState == .done else { return }
-                seenAtDone.mutate { $0 = p.completionFailed }
-            }
+        ) { note in
+            guard note.object as? UUID == id else { return }
+            count.mutate { $0 += 1 }
         }
         defer { NotificationCenter.default.removeObserver(token) }
 
-        p.markProgressFinished(failed: true)
+        let bell = MactermProtocol.Attention(bell: true)
+        p.receiveAttention(bell)
+        p.receiveAttention(bell)
+        p.receiveAttention(MactermProtocol.Attention())
 
-        #expect(seenAtDone.value == true)
+        #expect(count.value == 2)
     }
 
     @Test
-    func acknowledgingAFailure_clearsItLikeASuccess() {
+    func markSeen_clearsTheFlagsAndADoneRun() {
         let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        #expect(p.acknowledgeCommandCompletion())
+        p.markProgressFinished()
+        p.receiveAttention(MactermProtocol.Attention(unseen: true, failed: true, bell: true))
+        p.markSeen()
+        #expect(p.attention == MactermProtocol.Attention())
         #expect(p.executionState == .idle)
-        #expect(!p.completionFailed)
     }
 
     @Test
-    func interactingWithAFailedPane_clearsTheFailure() {
-        let p = progressRunningPane()
-        p.markProgressFinished(failed: true)
-        p.recordUserInteraction()
-        #expect(p.executionState == .idle)
-        #expect(!p.completionFailed)
-    }
-
-    @Test
-    func restoredFailure_staysRedUntilAcknowledged() {
+    func interaction_marksThePaneSeen() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.restoreNeedsAttention(failed: true)
-        #expect(p.executionState == .done)
-        #expect(p.completionFailed)
-        p.acknowledgeCommandCompletion()
-        #expect(!p.completionFailed)
+        p.receiveAttention(MactermProtocol.Attention(unseen: true, bell: true))
+        p.recordUserInteraction()
+        #expect(p.attention == MactermProtocol.Attention())
+    }
+
+    /// A pane with no surface shows nothing: an unloaded pinned tab must not
+    /// keep a dot or the Dock badge.
+    @Test
+    func teardown_dropsTheFlags() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.receiveAttention(MactermProtocol.Attention(unseen: true, bell: true))
+        p.surfacesWillTearDown(hadView: false)
+        #expect(p.attention == MactermProtocol.Attention())
     }
 
     @Test

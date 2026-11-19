@@ -67,3 +67,78 @@ load test_helper
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == zmx* ]]
 }
+
+# Polls `macterm pane dump` until a line of its text is $2.
+wait_dump() {
+  local i out
+  for i in $(seq 100); do
+    out=$("$ZMX" pane dump --session "$1" 2>/dev/null) || true
+    printf '%s\n' "$out" | grep -qxF -- "$2" && return 0
+    sleep 0.1
+  done
+  echo "dump of $1: $out" >&2
+  return 1
+}
+
+@test "pane run, key, dump and inspect reach a session with no GUI" {
+  "$ZMX" __create-session cli1 -- /bin/sh
+  run "$ZMX" pane run --session cli1 -- echo ran-it
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+  wait_dump cli1 ran-it
+
+  # Text left at the prompt runs at the Return of pane key.
+  "$ZMX" pane run --no-submit --session cli1 -- echo keyed
+  "$ZMX" pane key return --session cli1
+  wait_dump cli1 keyed
+
+  run "$ZMX" pane inspect --session cli1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"grid                80×24"* ]]
+  [[ "$output" == *"cell px             -"* ]]
+  [[ "$output" == *"needs confirm quit  false"* ]]
+
+  # A program in front: inspect names it, and ctrl+c ends it.
+  "$ZMX" pane run --session cli1 -- sleep 30
+  for i in $(seq 100); do
+    out=$("$ZMX" pane inspect --session cli1)
+    [[ "$out" == *"(sleep 30)"* ]] && break
+    sleep 0.1
+  done
+  [[ "$out" == *"needs confirm quit  true"* ]]
+  "$ZMX" pane key ctrl+c --session cli1
+  for i in $(seq 100); do
+    out=$("$ZMX" pane inspect --session cli1)
+    [[ "$out" == *"needs confirm quit  false"* ]] && break
+    sleep 0.1
+  done
+  [[ "$out" == *"needs confirm quit  false"* ]]
+
+  run "$ZMX" pane dump --scrollback --json --session cli1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"session" : "cli1"'* ]]
+}
+
+@test "session list, info and kill" {
+  "$ZMX" __create-session cli2 -- /bin/sh
+  run "$ZMX" session list
+  [ "$status" -eq 0 ]
+  [[ "$output" == "cli2  clients:0  pid:"*"  -" ]]
+  run "$ZMX" session info cli2 --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name" : "cli2"'* ]]
+  run "$ZMX" session kill cli2
+  [ "$status" -eq 0 ]
+  run "$ZMX" session info cli2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'no zmx session named "cli2"'* ]]
+}
+
+@test "pane verbs name the session that the server does not have" {
+  "$ZMX" server
+  run "$ZMX" pane dump --session nope
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'no zmx session named "nope"'* ]]
+  run "$ZMX" pane run --session nope -- ls
+  [ "$status" -eq 1 ]
+}

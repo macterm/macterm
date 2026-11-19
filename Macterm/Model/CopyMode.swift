@@ -17,19 +17,6 @@ enum CopyModeKeymap: String, CaseIterable, Identifiable, PreferenceValue {
         }
     }
 
-    /// Every title of the pane's pill under this keymap. An open pill
-    /// reserves the width of the longest (`PanePill.otherTitles`), so a
-    /// change of the mode under the pointer does not narrow the pill and
-    /// move it out from under the pointer.
-    var labels: [String] {
-        switch self {
-        case .helix:
-            [false, true].map { label(for: CopyModeState(selectMode: $0)) }
-        case .vim:
-            [.none, .char, .line, .block].map { label(for: CopyModeState(visual: $0)) }
-        }
-    }
-
     /// The title of the pane's pill for a state under this keymap.
     func label(for state: CopyModeState) -> String {
         switch self {

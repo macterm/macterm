@@ -99,13 +99,11 @@ struct TerminalPane: View {
                     // the shell. The Zoomed pill's chrome, since both are
                     // modes that one click leaves. Per pane, since the mode is.
                     // A change of the mode (Copy Mode to Visual) changes the
-                    // title of the same pill, so the text of an open pill
-                    // changes in place, in the width of the keymap's longest
-                    // title.
+                    // title of the same pill, so an open pill changes its
+                    // text and its width in place.
                     if let label = surface.copyModeLabel {
                         ModePill(
                             title: label,
-                            otherTitles: surface.nsView?.copyMode.keymap.labels ?? [],
                             systemImage: "character.cursor.ibeam",
                             help: String(localized: "Leave copy mode")
                         ) { [weak surface] in
@@ -130,10 +128,11 @@ struct TerminalPane: View {
                         ZoomIndicator(onExit: onZoomRequest)
                             .transition(.opacity)
                     }
-                    // A remote pane whose connection stopped or failed: one
-                    // badge for every reason, and a click does nothing. While
-                    // a try runs it says so; the app tries again by itself,
-                    // and a key connects at once.
+                    // A remote pane whose connection stopped or failed, or
+                    // whose first connect after a restart is slow: one badge
+                    // for every reason, and a click does nothing. While a try
+                    // runs it says so; the app tries again by itself, and a
+                    // key connects at once.
                     if let badge = pane.remoteLinkBadge {
                         RemoteLinkPill(badge: badge)
                             .transition(.opacity)
@@ -204,7 +203,7 @@ struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 
     var body: some View {
-        StatusPill(title: title(of: badge), otherTitles: Pane.RemoteLinkBadge.allCases.map(title(of:))) {
+        StatusPill(title: title(of: badge)) {
             switch badge {
             case .reconnecting:
                 ProgressView().controlSize(.mini)
@@ -387,7 +386,7 @@ private struct TerminalSurface: NSViewRepresentable {
             // in Notification Center for it is stale. Same point Ghostty clears
             // a surface's notifications — and its bell — from (`focusDidChange`).
             NotificationHandler.shared.clearDelivered(paneID: pane.id)
-            pane.acknowledgeBell()
+            pane.markSeen()
             FocusRestoration.restoreFocusWhenAttached(surface)
         } else if !focused, wasFocused {
             view.notifySurfaceUnfocused()
@@ -418,7 +417,7 @@ private struct TerminalSurface: NSViewRepresentable {
         view.isSplit = isSplit
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
-        // A run ended: the window acknowledges it if the user looks at the pane.
+        // A run ended: the window marks it seen if the user looks at the pane.
         view.onRunEnded = onCommandFinished
         view.onOpenLink = { [weak appState, weak projectStore, weak pane] text in
             // The quick terminal's and desktop widgets' hosting views carry

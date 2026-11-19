@@ -15,6 +15,7 @@ const command = @import("command.zig");
 const client = @import("client.zig");
 const output = @import("output.zig");
 const m = @import("../protocol/messages.zig");
+const chord = @import("../chord.zig");
 
 const Command = command.Command;
 const Option = command.Option;
@@ -40,10 +41,109 @@ const status_command: Command = .{
 /// `macterm help <subcommand>`: ArgumentParser's own help command.
 const help_command: Command = .{ .name = "help", .abstract = "Show subcommand help information.", .hidden = true };
 
+// ── The pane and session verbs (design 011 issue 5) ─────────────────────────
+
+const project_option: Option = .{ .names = &.{"--project"}, .value = "project", .abstract = "Project scope (name, UUID, or index). The default is the active project." };
+const tab_option: Option = .{ .names = &.{"--tab"}, .value = "tab", .abstract = "Tab scope (title, UUID, or index)." };
+const pane_option: Option = .{ .names = &.{"--pane"}, .value = "pane", .abstract = "Target pane by UUID, or index within the tab (pane:2)." };
+const session_option: Option = .{ .names = &.{"--session"}, .value = "session", .abstract = "Target pane by zmx session name (restart-stable)." };
+const target_and_connection = [_]Option{ project_option, tab_option, pane_option, session_option, socket_option, json_option };
+
+const pane_inspect_command: Command = .{
+    .name = "inspect",
+    .abstract = "Show the live terminal state of a pane: grid, scrollback and foreground process.",
+    .options = &target_and_connection,
+};
+
+const pane_dump_command: Command = .{
+    .name = "dump",
+    .abstract = "Print the terminal text of a pane: the viewport, or the full scrollback with --scrollback.",
+    .options = &([_]Option{.{ .names = &.{"--scrollback"}, .abstract = "Include the full scrollback, not only the visible viewport." }} ++ target_and_connection),
+};
+
+const pane_run_command: Command = .{
+    .name = "run",
+    .abstract = "Type a command into the shell of a live pane. Add a newline.",
+    .usage = "macterm pane run [<options>] [--] <command> ...",
+    .discussion =
+    \\Pastes a command line into an existing pane's shell and submits it.
+    \\
+    \\Put the command line after `--`: everything after it is typed verbatim, dashes included, so `macterm pane run --session X -- ls -la` types `ls -la` into X. Before `--`, this command's flags are parsed wherever they appear and words with no leading dash are typed, so `macterm pane run ls` needs no `--`. Any other dash-prefixed word before `--` is an error and nothing is typed: `macterm pane run ls -la` refuses rather than guess whose flag `-la` is. `--help` or `-h` before `--` shows this help.
+    \\
+    \\`--no-submit` withholds the trailing newline, so the text lands on the prompt unsubmitted — pre-filling a command for a human to inspect, or feeding a TUI that submits on its own terms. Follow it with `macterm pane key return` to execute; that Return registers as a real command submission, exactly as if the text had been typed.
+    \\
+    \\Both forms ride the terminal's paste path. Reach for `pane key` instead when you need a real key *event* — a control byte (`ctrl+c`) or a named key (`escape`, `up`) — which no text can express.
+    \\
+    \\With no pane/tab/session selector it targets the current pane via $MACTERM_SESSION.
+    ,
+    .options = &([_]Option{.{ .names = &.{"--no-submit"}, .abstract = "Leave the text at the shell prompt. Do not run it. (This leaves out the newline at the end.)" }} ++ target_and_connection),
+    .arguments = &.{.{ .name = "command", .abstract = "The command line to type, after `--`, exactly as you wrote it.", .optional = true, .repeating = true, .unrecognized = true }},
+};
+
+const pane_key_command: Command = .{
+    .name = "key",
+    .abstract = "Send a single key press to a live pane.",
+    .discussion =
+    \\Delivers one key press through the terminal's key-encoding path — the counterpart to `pane run`, which pastes a whole command line. Use it for control keys, named keys, and single printable keys a TUI reads as keystrokes rather than as pasted text.
+    \\
+    \\The chord grammar matches keybinds: modifiers ctrl/cmd/shift/opt joined with '+', then one key token. Examples:
+    \\
+    \\  macterm pane key ctrl+c          # interrupt the foreground process
+    \\  macterm pane key escape          # send Esc to a TUI
+    \\  macterm pane key up              # arrow key (mode-aware encoding)
+    \\  macterm pane key j               # a bare printable key (vim-style nav)
+    \\  macterm pane key shift+1         # the shifted character ('!')
+    \\  macterm pane key space           # space bar
+    \\  macterm pane key 'ctrl+\'        # SIGQUIT char (quote for the shell)
+    \\  macterm pane key enter           # submit (alias of 'return')
+    \\
+    \\Option chords stay on the raw encoding path — their character is a keyboard-layout translation this path can't resolve — so use `pane run` when you need the literal text Option would compose.
+    \\
+    \\With no pane/tab/session selector it targets the current pane via $MACTERM_SESSION.
+    ,
+    .options = &target_and_connection,
+    .arguments = &.{.{ .name = "chord", .abstract = "The key combination, for example a, space, ctrl+c, escape, up or ctrl+\\." }},
+};
+
+const pane_command: Command = .{
+    .name = "pane",
+    .abstract = "List, inspect, split, focus and close panes, and run commands in them.",
+    .subcommands = &.{ &pane_inspect_command, &pane_dump_command, &pane_run_command, &pane_key_command },
+};
+
+const session_name_argument: command.Argument = .{ .name = "name", .abstract = "Session name (macterm-<slug>-<hex>)." };
+
+const session_list_command: Command = .{
+    .name = "list",
+    .abstract = "List live zmx sessions.",
+    .options = &.{ socket_option, json_option },
+};
+
+const session_info_command: Command = .{
+    .name = "info",
+    .abstract = "Show one zmx session.",
+    .options = &.{ socket_option, json_option },
+    .arguments = &.{session_name_argument},
+};
+
+const session_kill_command: Command = .{
+    .name = "kill",
+    .abstract = "Kill a zmx session. Its shell ends, and the shell of a connected pane exits.",
+    .options = &.{ socket_option, json_option },
+    .arguments = &.{session_name_argument},
+};
+
+const session_command: Command = .{
+    .name = "session",
+    .abstract = "Inspect and kill terminal sessions that zmx runs.",
+    .subcommands = &.{ &session_list_command, &session_info_command, &session_kill_command },
+    .default = &session_list_command,
+};
+
 pub const root: Command = .{
     .name = "macterm",
     .abstract = "Control a running Macterm: projects, tabs, panes, zmx sessions.",
-    .subcommands = &.{ &status_command, &help_command },
+    .subcommands = &.{ &status_command, &pane_command, &session_command, &help_command },
 };
 
 /// Runs one argument line (without the program name) and returns the exit
@@ -61,6 +161,13 @@ pub fn run(ctx: Context, words: []const []const u8) error{ OutOfMemory, WriteFai
         .run => |parsed| {
             const c = parsed.command();
             if (c == &status_command) return status(ctx, parsed);
+            if (c == &pane_run_command) return paneRun(ctx, parsed);
+            if (c == &pane_key_command) return paneKey(ctx, parsed);
+            if (c == &pane_dump_command) return paneDump(ctx, parsed);
+            if (c == &pane_inspect_command) return paneInspect(ctx, parsed);
+            if (c == &session_list_command) return sessionList(ctx, parsed);
+            if (c == &session_info_command) return sessionInfo(ctx, parsed);
+            if (c == &session_kill_command) return sessionKill(ctx, parsed);
             unreachable;
         },
     }
@@ -112,6 +219,432 @@ fn writeStatus(ctx: Context, s: Status, json: bool) error{ OutOfMemory, WriteFai
     if (s.pid) |pid| try ctx.out.print(" (pid {d})", .{pid});
     if (s.activeProject) |p| try ctx.out.print(" \u{2014} active project: {s}", .{p});
     try ctx.out.writeByte('\n');
+}
+
+// ── Pane targets ────────────────────────────────────────────────────────────
+
+/// The session that a pane verb acts on, or the text of a failure (exit 1).
+pub const Target = union(enum) { session: []const u8, failed: []const u8 };
+
+/// `--session`, or else `MACTERM_SESSION` when no `--tab` or `--pane` names
+/// another pane (v1's `PaneTarget`). `--project`, `--tab` and `--pane` name a
+/// pane in the model (design 010), which this CLI does not read yet.
+pub fn paneTarget(env: *const std.process.Environ.Map, parsed: command.Parsed) Target {
+    if (nonEmpty(parsed.value("--session"))) |name| return .{ .session = name };
+    const in_tab = parsed.value("--tab") != null or parsed.value("--pane") != null;
+    if (!in_tab) if (nonEmpty(env.get("MACTERM_SESSION"))) |name| return .{ .session = name };
+    if (in_tab or parsed.value("--project") != null)
+        return .{ .failed = "--project, --tab and --pane are not available in this CLI yet: use --session <name>" };
+    return .{ .failed = "no pane to act on: use --session <name>, or run the command in a Macterm pane" };
+}
+
+fn nonEmpty(value: ?[]const u8) ?[]const u8 {
+    const v = value orelse return null;
+    return if (v.len == 0) null else v;
+}
+
+fn targetOrExit(ctx: Context, parsed: command.Parsed) error{WriteFailed}!?[]const u8 {
+    switch (paneTarget(ctx.env, parsed)) {
+        .session => |name| return name,
+        .failed => |message| {
+            try output.writeError(ctx.err, message, "run `macterm session list` to see live sessions");
+            return null;
+        },
+    }
+}
+
+// ── pane run ────────────────────────────────────────────────────────────────
+
+/// What `pane run` types, or the usage error of a stray flag.
+pub const RunLine = union(enum) { text: []const u8, stray: []const u8 };
+
+/// The words of `pane run`: plain words before `--` and every word after it
+/// are typed. A word with a dash before `--` is refused: it is a mistyped
+/// flag or a flag of the typed command, and a guess types into the wrong
+/// place. A lone `-` is a word.
+pub fn runLine(arena: std.mem.Allocator, words: []const []const u8) error{OutOfMemory}!RunLine {
+    var typed: std.ArrayList([]const u8) = .empty;
+    var after = false;
+    for (words) |word| {
+        if (!after and std.mem.eql(u8, word, "--")) {
+            after = true;
+            continue;
+        }
+        if (!after and word.len > 1 and word[0] == '-') return .{ .stray = word };
+        try typed.append(arena, word);
+    }
+    return .{ .text = try std.mem.join(arena, " ", typed.items) };
+}
+
+/// `word` quoted for a POSIX shell, bare when it needs no quotes (v1's
+/// `shellQuoted`).
+fn writeShellWord(w: *std.Io.Writer, word: []const u8) std.Io.Writer.Error!void {
+    var bare = word.len > 0;
+    for (word) |c| {
+        if (!(std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "@%+=:,./_-", c) != null)) bare = false;
+    }
+    if (bare) return w.writeAll(word);
+    try w.writeByte('\'');
+    for (word) |c| if (c == '\'') try w.writeAll("'\\''") else try w.writeByte(c);
+    try w.writeByte('\'');
+}
+
+/// The usage error of a stray flag, with the same line moved after `--`.
+fn writeStray(ctx: Context, parsed: command.Parsed, stray: []const u8) error{ OutOfMemory, WriteFailed }!void {
+    var fix: std.Io.Writer.Allocating = .init(ctx.arena);
+    const w = &fix.writer;
+    try w.writeAll("macterm pane run");
+    if (parsed.flag("--no-submit")) try w.writeAll(" --no-submit");
+    for ([_][]const u8{ "--project", "--tab", "--pane", "--session", "--socket" }) |name| {
+        if (parsed.value(name)) |v| {
+            try w.print(" {s} ", .{name});
+            try writeShellWord(w, v);
+        }
+    }
+    if (parsed.flag("--json")) try w.writeAll(" --json");
+    try w.writeAll(" --");
+    var typed: std.ArrayList([]const u8) = .empty;
+    var after = false;
+    for (parsed.positionals) |word| {
+        if (!after and std.mem.eql(u8, word, "--")) {
+            after = true;
+            continue;
+        }
+        try typed.append(ctx.arena, word);
+    }
+    for (typed.items) |word| {
+        try w.writeByte(' ');
+        try writeShellWord(w, word);
+    }
+    const message = try std.fmt.allocPrint(ctx.arena, "`{s}` is not a `pane run` option, so nothing was typed. To type it, put the command line after `--`:\n  {s}", .{ stray, fix.written() });
+    try command.writeUsageError(ctx.err, parsed.path, message);
+}
+
+fn paneRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const text = switch (try runLine(ctx.arena, parsed.positionals)) {
+        .text => |t| t,
+        .stray => |word| {
+            try writeStray(ctx, parsed, word);
+            return command.usage_exit;
+        },
+    };
+    if (text.len == 0) {
+        try output.writeError(ctx.err, "nothing to run", null);
+        return 1;
+    }
+    const id = (try targetOrExit(ctx, parsed)) orelse return 1;
+    return simple(ctx, parsed, m.SessionSend, .{ .id = id, .text = .{ .bytes = text }, .submit = !parsed.flag("--no-submit") });
+}
+
+// ── pane key ────────────────────────────────────────────────────────────────
+
+fn paneKey(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const raw = parsed.positionals[0];
+    if (chord.parse(raw) == null) {
+        const message = try std.fmt.allocPrint(ctx.arena, "unrecognized key combination '{s}'", .{raw});
+        try output.writeError(ctx.err, message, "use a name such as ctrl+c, escape, up or ctrl+\\ (see `macterm pane key --help`)");
+        return 1;
+    }
+    const id = (try targetOrExit(ctx, parsed)) orelse return 1;
+    return simple(ctx, parsed, m.SessionKey, .{ .id = id, .chord = raw });
+}
+
+/// Sends a request whose result has nothing to print. `--json` prints the
+/// empty payload, as v1 printed a reply with no data.
+fn simple(ctx: Context, parsed: command.Parsed, comptime M: type, args: M.Args) error{ OutOfMemory, WriteFailed }!u8 {
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    switch (conn.request(M, args) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => {},
+        .err => |e| return serverError(ctx, e, sessionArg(M, args)),
+    }
+    if (parsed.flag("--json")) try output.writeJson(ctx.arena, ctx.out, .{ .object = .empty });
+    return 0;
+}
+
+fn sessionArg(comptime M: type, args: M.Args) ?[]const u8 {
+    return if (@hasField(M.Args, "id")) args.id else null;
+}
+
+/// The server's error. `not_found` for a session name gets v1's text.
+fn serverError(ctx: Context, e: m.ErrorInfo, session: ?[]const u8) error{ OutOfMemory, WriteFailed }!u8 {
+    if (std.mem.eql(u8, e.code, "not_found")) if (session) |name| {
+        try writeNoSession(ctx, name);
+        return 1;
+    };
+    try output.writeError(ctx.err, e.message, null);
+    return 1;
+}
+
+fn writeNoSession(ctx: Context, name: []const u8) error{ OutOfMemory, WriteFailed }!void {
+    const message = try std.fmt.allocPrint(ctx.arena, "no zmx session named \"{s}\"", .{name});
+    try output.writeError(ctx.err, message, "run `macterm session list` to see live sessions");
+}
+
+// ── pane dump ───────────────────────────────────────────────────────────────
+
+/// What `pane dump` prints, with the JSON keys of v1. `id` is the pane's,
+/// from the model (design 010): absent until then.
+pub const Dump = struct {
+    id: ?[]const u8 = null,
+    session: []const u8,
+    scrollback: bool,
+    bytes: usize,
+    text: []const u8,
+};
+
+fn paneDump(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const id = (try targetOrExit(ctx, parsed)) orelse return 1;
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    const scrollback = parsed.flag("--scrollback");
+    const result = switch (conn.request(m.SessionHistory, .{ .id = id, .scrollback = scrollback }) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => |r| r,
+        .err => |e| return serverError(ctx, e, id),
+    };
+    const text = result.text.bytes;
+    try writeDump(ctx, .{ .session = id, .scrollback = scrollback, .bytes = text.len, .text = text }, parsed.flag("--json"));
+    if (result.truncated)
+        try ctx.err.print("macterm: the text is longer than one reply holds: this is its last {d} KiB\n", .{text.len / 1024});
+    return 0;
+}
+
+/// The text as it is, with one newline at the end (v1's `renderDump`).
+fn writeDump(ctx: Context, d: Dump, json: bool) error{ OutOfMemory, WriteFailed }!void {
+    if (json) {
+        var data: std.json.ObjectMap = .empty;
+        try data.put(ctx.arena, "dump", try toJson(ctx.arena, d));
+        return output.writeJson(ctx.arena, ctx.out, .{ .object = data });
+    }
+    if (d.text.len == 0) return;
+    try ctx.out.writeAll(d.text);
+    if (d.text[d.text.len - 1] != '\n') try ctx.out.writeByte('\n');
+}
+
+// ── pane inspect ────────────────────────────────────────────────────────────
+
+/// What `pane inspect` prints, with the JSON keys of v1. The cell and
+/// surface sizes, the content scale and read-only are the GUI's, and `id` is
+/// the model's: null until the server asks the GUI (design 011 §1).
+pub const Inspect = struct {
+    id: ?[]const u8 = null,
+    session: []const u8,
+    cols: i64,
+    rows: i64,
+    cellWidthPx: ?i64 = null,
+    cellHeightPx: ?i64 = null,
+    widthPx: ?i64 = null,
+    heightPx: ?i64 = null,
+    scrollbackTotal: ?u64 = null,
+    scrollbackOffset: ?u64 = null,
+    scrollbackLen: ?u64 = null,
+    altScreen: ?bool = null,
+    contentScale: ?f64 = null,
+    foregroundPID: ?i64 = null,
+    foregroundArgv: ?[]const []const u8 = null,
+    processExited: bool,
+    /// Null when the session cannot read the foreground.
+    needsConfirmQuit: ?bool = null,
+    readOnly: ?bool = null,
+};
+
+fn paneInspect(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const id = (try targetOrExit(ctx, parsed)) orelse return 1;
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    const t = switch (conn.request(m.SessionInspect, .{ .id = id }) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => |r| r.terminal,
+        .err => |e| return serverError(ctx, e, id),
+    };
+    try writeInspect(ctx, try inspectOf(ctx.arena, id, t), parsed.flag("--json"));
+    return 0;
+}
+
+pub fn inspectOf(arena: std.mem.Allocator, session: []const u8, t: m.TerminalState) error{OutOfMemory}!Inspect {
+    var argv: ?[]const []const u8 = null;
+    if (t.foreground_argv) |words| {
+        const list = try arena.alloc([]const u8, words.len);
+        for (words, list) |word, *out| out.* = try arena.dupe(u8, word.bytes);
+        argv = list;
+    }
+    return .{
+        .session = try arena.dupe(u8, session),
+        .cols = t.cols,
+        .rows = t.rows,
+        .scrollbackTotal = t.scrollback_total,
+        .scrollbackOffset = t.scrollback_offset,
+        .scrollbackLen = t.scrollback_len,
+        .altScreen = t.alt_screen,
+        .foregroundPID = t.foreground_pid,
+        .foregroundArgv = argv,
+        .processExited = t.exited,
+        .needsConfirmQuit = if (t.exited) false else t.busy,
+    };
+}
+
+fn writeInspect(ctx: Context, i: Inspect, json: bool) error{ OutOfMemory, WriteFailed }!void {
+    if (json) {
+        var data: std.json.ObjectMap = .empty;
+        try data.put(ctx.arena, "inspect", try toJson(ctx.arena, i));
+        return output.writeJson(ctx.arena, ctx.out, .{ .object = data });
+    }
+    const a = ctx.arena;
+    const dash = "-";
+    const pair = struct {
+        fn f(arena: std.mem.Allocator, x: ?i64, y: ?i64) ![]const u8 {
+            if (x == null or y == null) return "-";
+            return std.fmt.allocPrint(arena, "{d}\u{d7}{d}", .{ x.?, y.? });
+        }
+    }.f;
+    const scrollback = if (i.scrollbackTotal) |total|
+        try std.fmt.allocPrint(a, "{d} total, {s} offset, {s} len", .{ total, try optText(a, i.scrollbackOffset), try optText(a, i.scrollbackLen) })
+    else
+        dash;
+    const fg = if (i.foregroundPID) |pid| fg: {
+        const argv = if (i.foregroundArgv) |words| try std.mem.join(a, " ", words) else "";
+        break :fg if (argv.len == 0) try std.fmt.allocPrint(a, "{d}", .{pid}) else try std.fmt.allocPrint(a, "{d} ({s})", .{ pid, argv });
+    } else dash;
+    // Swift prints a whole Double with ".0".
+    const scale = if (i.contentScale) |v|
+        (if (v == @floor(v)) try std.fmt.allocPrint(a, "{d}.0", .{v}) else try std.fmt.allocPrint(a, "{d}", .{v}))
+    else
+        dash;
+    try output.writeColumns(a, ctx.out, &.{
+        &.{ "session", i.session },
+        &.{ "grid", try pair(a, i.cols, i.rows) },
+        &.{ "cell px", try pair(a, i.cellWidthPx, i.cellHeightPx) },
+        &.{ "surface px", try pair(a, i.widthPx, i.heightPx) },
+        &.{ "scrollback", scrollback },
+        &.{ "alt-screen", try optText(a, i.altScreen) },
+        &.{ "content scale", scale },
+        &.{ "foreground", fg },
+        &.{ "process exited", if (i.processExited) "true" else "false" },
+        &.{ "needs confirm quit", try optText(a, i.needsConfirmQuit) },
+        &.{ "read-only", try optText(a, i.readOnly) },
+    });
+}
+
+fn optText(arena: std.mem.Allocator, v: anytype) error{OutOfMemory}![]const u8 {
+    const x = v orelse return "-";
+    return switch (@TypeOf(x)) {
+        bool => if (x) "true" else "false",
+        else => std.fmt.allocPrint(arena, "{d}", .{x}),
+    };
+}
+
+// ── session list, info, kill ────────────────────────────────────────────────
+
+/// One session, with the JSON keys of v1. `paneID` is the pane that shows
+/// it, from the model (design 010).
+pub const SessionRow = struct {
+    name: []const u8,
+    clients: ?i64 = null,
+    leaderPID: ?i64 = null,
+    paneID: ?[]const u8 = null,
+};
+
+/// `panes`: the rows say which pane shows each session. Until the model
+/// (design 010) the CLI cannot say, and the last column is `-`.
+fn writeSessions(ctx: Context, rows: []const SessionRow, panes: bool, json: bool) error{ OutOfMemory, WriteFailed }!void {
+    if (json) {
+        var list: std.json.Array = .init(ctx.arena);
+        for (rows) |row| try list.append(try toJson(ctx.arena, row));
+        var data: std.json.ObjectMap = .empty;
+        try data.put(ctx.arena, "sessions", .{ .array = list });
+        return output.writeJson(ctx.arena, ctx.out, .{ .object = data });
+    }
+    const table = try ctx.arena.alloc([]const []const u8, rows.len);
+    for (rows, table) |row, *cells| {
+        const pane: []const u8 = if (!panes) "-" else if (row.paneID != null) "attached-pane" else "orphan";
+        cells.* = try ctx.arena.dupe([]const u8, &.{
+            row.name,
+            try std.fmt.allocPrint(ctx.arena, "clients:{s}", .{if (row.clients) |n| try std.fmt.allocPrint(ctx.arena, "{d}", .{n}) else "?"}),
+            if (row.leaderPID) |pid| try std.fmt.allocPrint(ctx.arena, "pid:{d}", .{pid}) else "pid:-",
+            pane,
+        });
+    }
+    try output.writeColumns(ctx.arena, ctx.out, table);
+}
+
+fn rowOf(arena: std.mem.Allocator, s: m.Session) error{OutOfMemory}!SessionRow {
+    return .{ .name = try arena.dupe(u8, s.id), .clients = if (s.clients) |n| n else null, .leaderPID = s.shell_pid };
+}
+
+fn sessionList(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    const sessions = switch (conn.request(m.SessionList, .{}) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => |r| r.sessions,
+        .err => |e| return serverError(ctx, e, null),
+    };
+    // Only running sessions, as v1 listed them.
+    var rows: std.ArrayList(SessionRow) = .empty;
+    for (sessions) |s| if (s.state == .running) try rows.append(ctx.arena, try rowOf(ctx.arena, s));
+    try writeSessions(ctx, rows.items, false, parsed.flag("--json"));
+    return 0;
+}
+
+fn sessionInfo(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const name = parsed.positionals[0];
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    const s = switch (conn.request(m.SessionInfo, .{ .id = name }) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => |r| r.session,
+        .err => |e| return serverError(ctx, e, name),
+    };
+    if (s.state != .running) {
+        try writeNoSession(ctx, name);
+        return 1;
+    }
+    try writeSessions(ctx, &.{try rowOf(ctx.arena, s)}, false, parsed.flag("--json"));
+    return 0;
+}
+
+fn sessionKill(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    return simple(ctx, parsed, m.SessionKill, .{ .id = parsed.positionals[0] });
+}
+
+/// A struct as a JSON object: a null field is left out, as `JSONEncoder`
+/// leaves out a nil optional.
+fn toJson(arena: std.mem.Allocator, value: anytype) error{OutOfMemory}!std.json.Value {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            var map: std.json.ObjectMap = .empty;
+            inline for (info.field_names, info.field_types) |name, F| {
+                const v = @field(value, name);
+                if (@typeInfo(F) == .optional) {
+                    if (v) |inner| try map.put(arena, name, try toJson(arena, inner));
+                } else try map.put(arena, name, try toJson(arena, v));
+            }
+            return .{ .object = map };
+        },
+        .bool => return .{ .bool = value },
+        .int, .comptime_int => return .{ .integer = @intCast(value) },
+        .float => return .{ .float = value },
+        .pointer => {
+            if (T == []const u8) return .{ .string = value };
+            var list: std.json.Array = .init(arena);
+            for (value) |item| try list.append(try toJson(arena, item));
+            return .{ .array = list };
+        },
+        else => @compileError("no JSON form for " ++ @typeName(T)),
+    }
 }
 
 // ── The connection ──────────────────────────────────────────────────────────
@@ -171,7 +704,15 @@ const golden_cases_json = @embedFile("golden/cases.json");
 /// group prints only the subcommands that are ported, so its help is checked
 /// by structure alone.
 const golden_help = .{
-    .{ &status_command, @embedFile("golden/help/status.txt") },
+    .{ [_]*const Command{&status_command}, @embedFile("golden/help/status.txt") },
+    .{ [_]*const Command{ &pane_command, &pane_inspect_command }, @embedFile("golden/help/pane-inspect.txt") },
+    .{ [_]*const Command{ &pane_command, &pane_dump_command }, @embedFile("golden/help/pane-dump.txt") },
+    .{ [_]*const Command{ &pane_command, &pane_run_command }, @embedFile("golden/help/pane-run.txt") },
+    .{ [_]*const Command{ &pane_command, &pane_key_command }, @embedFile("golden/help/pane-key.txt") },
+    .{ [_]*const Command{&session_command}, @embedFile("golden/help/session.txt") },
+    .{ [_]*const Command{ &session_command, &session_list_command }, @embedFile("golden/help/session-list.txt") },
+    .{ [_]*const Command{ &session_command, &session_info_command }, @embedFile("golden/help/session-info.txt") },
+    .{ [_]*const Command{ &session_command, &session_kill_command }, @embedFile("golden/help/session-kill.txt") },
 };
 
 fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
@@ -200,7 +741,12 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
     var usage: std.Io.Writer.Allocating = .init(arena);
     try command.writeUsage(&usage.writer, path);
     try testing.expectEqualStrings(golden.usage.?, usage.written());
-    try testing.expect(golden.default == null);
+    // A group's default, when the default is ported.
+    if (c.default) |d| try testing.expectEqualStrings(golden.default.?, d.name);
+    if (golden.default) |name| for (c.subcommands) |sub| {
+        if (std.mem.eql(u8, sub.name, name)) try testing.expect(c.default == sub);
+    };
+    try testing.expectEqualStrings(golden.discussion orelse "", c.discussion orelse "");
 
     // Options: the same names, values and abstracts, in the same order.
     var visible: std.ArrayList(contract.Contract.Option) = .empty;
@@ -224,6 +770,8 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
     for (golden.arguments, c.arguments) |g, a| {
         try testing.expectEqualStrings(g.name, a.name);
         try testing.expectEqual(g.optional, a.optional);
+        try testing.expectEqual(g.repeating, a.repeating);
+        try testing.expectEqual(std.mem.eql(u8, g.takes orelse "", "unrecognized"), a.unrecognized);
         try testing.expectEqualStrings(try collapse(arena, g.abstract), try collapse(arena, a.abstract));
     }
 
@@ -254,7 +802,7 @@ test "the help of a ported leaf command is the golden text" {
     inline for (golden_help) |entry| {
         var out: std.Io.Writer.Allocating = .init(testing.allocator);
         defer out.deinit();
-        try command.writeHelp(&out.writer, &.{ &root, entry[0] });
+        try command.writeHelp(&out.writer, &([_]*const Command{&root} ++ entry[0]));
         try testing.expectEqualStrings(entry[1], out.written());
     }
 }
@@ -274,6 +822,9 @@ test "the root help lists the ported commands as the golden text does" {
         \\SUBCOMMANDS:
         \\  status                  Show whether Macterm is running and which project is
         \\                          active.
+        \\  pane                    List, inspect, split, focus and close panes, and run
+        \\                          commands in them.
+        \\  session                 Inspect and kill terminal sessions that zmx runs.
         \\
         \\  See 'macterm help <subcommand>' for detailed help.
         \\
@@ -305,6 +856,7 @@ test "status and usage errors print the golden output" {
     try testing.expectEqual(inputs.len, goldens.len);
 
     var env: std.process.Environ.Map = .init(arena);
+    try env.put("MACTERM_SESSION", env_session);
     var checked: usize = 0;
     for (inputs, goldens) |input, golden| {
         var out: std.Io.Writer.Allocating = .init(arena);
@@ -313,7 +865,7 @@ test "status and usage errors print the golden output" {
         const exit: u8 = switch (try command.parse(arena, &root, input.arguments)) {
             // A word that is not a command: the other verbs are not ported yet.
             .usage_error => if (spec.find(input.arguments[0..1]) == null) try run(ctx, input.arguments) else continue,
-            .run => |parsed| if (parsed.command() == &status_command) exit: {
+            .run => |parsed| if (try cannedVerb(ctx, parsed, input, golden)) |code| code else if (parsed.command() == &status_command) exit: {
                 try testing.expectEqualStrings("ping", input.method.?);
                 const canned = try std.json.parseFromValueLeaky(CannedStatus, arena, input.responses.?.object.get("status").?, .{});
                 if (canned.ok) {
@@ -333,8 +885,85 @@ test "status and usage errors print the golden output" {
         try testing.expectEqual(golden.exit, exit);
         checked += 1;
     }
-    // Five status lines and the unknown verb.
-    try testing.expectEqual(6, checked);
+    // Five status lines, the unknown verb, the 15 lines of the session verbs
+    // and the stray flag of `pane run`.
+    try testing.expectEqual(22, checked);
+}
+
+/// The session a golden line acts on when it names none.
+const env_session = "macterm-env-session";
+
+/// The v2 method of each ported verb, and the v1 wire command of its line.
+fn methodOf(c: *const Command) ?struct { v2: []const u8, v1: []const u8 } {
+    if (c == &pane_run_command) return .{ .v2 = "session.send", .v1 = "pane.run" };
+    if (c == &pane_key_command) return .{ .v2 = "session.key", .v1 = "pane.key" };
+    if (c == &pane_dump_command) return .{ .v2 = "session.history", .v1 = "pane.dump" };
+    if (c == &pane_inspect_command) return .{ .v2 = "session.inspect", .v1 = "pane.inspect" };
+    if (c == &session_list_command) return .{ .v2 = "session.list", .v1 = "session.list" };
+    if (c == &session_info_command) return .{ .v2 = "session.info", .v1 = "session.info" };
+    if (c == &session_kill_command) return .{ .v2 = "session.kill", .v1 = "session.kill" };
+    return null;
+}
+
+fn jsonString(v: ?std.json.Value) ?[]const u8 {
+    const x = v orelse return null;
+    return if (x == .string) x.string else null;
+}
+
+/// A golden line of a ported session verb: checks that the v2 request
+/// carries what the v1 request carried, and prints the canned v1 response
+/// with this CLI's writers. Null for a line that is not one.
+fn cannedVerb(ctx: Context, parsed: command.Parsed, input: contract.Case, golden: GoldenCase) !?u8 {
+    const c = parsed.command();
+    const names = methodOf(c) orelse return null;
+    if (input.method == null) {
+        // The stray flag of `pane run`: a usage error before any request.
+        if (c != &pane_run_command or input.responses != null) return null;
+        try testing.expect(try runLine(ctx.arena, parsed.positionals) == .stray);
+        return try run(ctx, input.arguments);
+    }
+    try testing.expectEqualStrings(names.v2, input.method.?);
+
+    // The request.
+    try testing.expectEqual(1, golden.requests.len);
+    const req = golden.requests[0].object;
+    try testing.expectEqualStrings(names.v1, req.get("command").?.string);
+    const v1 = if (req.get("args")) |a| a.object else std.json.ObjectMap.empty;
+    if (c == &session_info_command or c == &session_kill_command) {
+        try testing.expectEqualStrings(jsonString(v1.get("session")).?, parsed.positionals[0]);
+    } else if (c != &session_list_command) {
+        const id = switch (paneTarget(ctx.env, parsed)) {
+            .session => |name| name,
+            .failed => return error.NoTarget,
+        };
+        try testing.expectEqualStrings(jsonString(v1.get("session")) orelse env_session, id);
+    }
+    if (c == &pane_run_command) {
+        try testing.expectEqualStrings(jsonString(v1.get("run")).?, (try runLine(ctx.arena, parsed.positionals)).text);
+        const submit = if (v1.get("submit")) |b| b.bool else true;
+        try testing.expectEqual(submit, !parsed.flag("--no-submit"));
+    }
+    if (c == &pane_key_command) try testing.expectEqualStrings(jsonString(v1.get("key")).?, parsed.positionals[0]);
+    if (c == &pane_dump_command) try testing.expectEqual(v1.get("scrollback").?.bool, parsed.flag("--scrollback"));
+
+    // The output.
+    const canned = input.responses.?.object.get(names.v1).?.object;
+    const json = parsed.flag("--json");
+    if (!canned.get("ok").?.bool) {
+        const e = canned.get("error").?.object;
+        try output.writeError(ctx.err, e.get("message").?.string, jsonString(e.get("action")));
+        return 1;
+    }
+    const data = if (canned.get("data")) |d| d.object else std.json.ObjectMap.empty;
+    if (c == &pane_dump_command) {
+        try writeDump(ctx, try std.json.parseFromValueLeaky(Dump, ctx.arena, data.get("dump").?, .{}), json);
+    } else if (c == &pane_inspect_command) {
+        try writeInspect(ctx, try std.json.parseFromValueLeaky(Inspect, ctx.arena, data.get("inspect").?, .{}), json);
+    } else if (c == &session_list_command or c == &session_info_command) {
+        const rows = try std.json.parseFromValueLeaky([]const SessionRow, ctx.arena, data.get("sessions").?, .{});
+        try writeSessions(ctx, rows, true, json);
+    } else if (json) try output.writeJson(ctx.arena, ctx.out, .{ .object = .empty });
+    return 0;
 }
 
 test "status with no server exits 2 and names the socket" {
@@ -364,8 +993,13 @@ const Stub = struct {
     listen_fd: i32,
     build: []const u8,
     reply: enum { ok, err, garbage },
+    /// The encoded result of an `ok` reply. The default is an empty map.
+    result: []const u8 = &.{0x80},
+    err_code: []const u8 = "unavailable",
     arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator),
     method: []const u8 = "",
+    /// The encoded arguments of the request.
+    args: []const u8 = &.{0x80},
 
     fn serve(s: *Stub) void {
         const a = s.arena.allocator();
@@ -386,9 +1020,10 @@ const Stub = struct {
             else => return,
         };
         s.method = req.m;
+        if (req.a) |args| s.args = args.bytes;
         switch (s.reply) {
-            .ok => sendMessage(a, fd, struct { re: u64, ok: m.Ping.Result }{ .re = req.id, .ok = .{} }),
-            .err => sendMessage(a, fd, struct { re: u64, err: m.ErrorInfo }{ .re = req.id, .err = .{ .code = "unavailable", .message = "the stand-in refused" } }),
+            .ok => sendMessage(a, fd, struct { re: u64, ok: msgpack.Raw }{ .re = req.id, .ok = .{ .bytes = s.result } }),
+            .err => sendMessage(a, fd, struct { re: u64, err: m.ErrorInfo }{ .re = req.id, .err = .{ .code = s.err_code, .message = "the stand-in refused" } }),
             .garbage => unreachable,
         }
         drain(fd);
@@ -445,9 +1080,16 @@ const Stub = struct {
     }
 };
 
-const StubRun = struct { exit: u8, out: []const u8, err: []const u8, method: []const u8, path: []const u8 };
+const StubRun = struct { exit: u8, out: []const u8, err: []const u8, method: []const u8, args: []const u8, path: []const u8 };
 
 fn runAgainstStub(arena: std.mem.Allocator, build: []const u8, reply: @FieldType(Stub, "reply"), json: bool) !StubRun {
+    const words: []const []const u8 = if (json) &.{ "status", "--json" } else &.{"status"};
+    return runStub(arena, .{ .listen_fd = -1, .build = build, .reply = reply }, words, &.{});
+}
+
+/// Runs `words` with `--socket <stand-in>` against a stand-in that answers as
+/// `init` says, with `env` as the environment.
+fn runStub(arena: std.mem.Allocator, init: Stub, words: []const []const u8, env_pairs: []const [2][]const u8) !StubRun {
     // Short: a socket path has at most 103 bytes on macOS.
     const path = try std.fmt.allocPrint(arena, "/tmp/macterm-cli-test-{d}.sock", .{std.c.getpid()});
     const path_z = try arena.dupeSentinel(u8, path, 0);
@@ -457,18 +1099,24 @@ fn runAgainstStub(arena: std.mem.Allocator, build: []const u8, reply: @FieldType
         lib_posix.close(listen_fd);
         _ = std.c.unlink(path_z);
     }
-    var stub: Stub = .{ .listen_fd = listen_fd, .build = build, .reply = reply };
+    var stub = init;
+    stub.listen_fd = listen_fd;
+    stub.arena = .init(std.heap.page_allocator);
     defer stub.arena.deinit();
     const thread = try std.Thread.spawn(.{}, Stub.serve, .{&stub});
 
     var env: std.process.Environ.Map = .init(arena);
+    for (env_pairs) |pair| try env.put(pair[0], pair[1]);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
     const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
-    const words: []const []const u8 = if (json) &.{ "status", "--json", "--socket", path } else &.{ "status", "--socket", path };
-    const exit = try run(ctx, words);
+    // Before a `--`, after which every word is typed.
+    const at = for (words, 0..) |w, i| {
+        if (std.mem.eql(u8, w, "--")) break i;
+    } else words.len;
+    const exit = try run(ctx, try std.mem.concat(arena, []const u8, &.{ words[0..at], &.{ "--socket", path }, words[at..] }));
     thread.join();
-    return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = try arena.dupe(u8, stub.method), .path = path };
+    return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = try arena.dupe(u8, stub.method), .args = try arena.dupe(u8, stub.args), .path = path };
 }
 
 test "status sends ping and prints the server's build and the pid of its socket" {
@@ -531,4 +1179,164 @@ test "status exits 2 for a path that is not a socket" {
     const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", path }));
     try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: could not reach the Macterm server:\n  {s}: not a socket\n", .{path}), err.written());
+}
+
+// ── Tests: the session verbs against a stand-in server ─────────────────────
+
+fn okStub(arena: std.mem.Allocator, comptime M: type, result: M.Result) !Stub {
+    return .{ .listen_fd = -1, .build = build_options.version, .reply = .ok, .result = try msgpack.encodeAlloc(arena, result) };
+}
+
+fn decodedArgs(arena: std.mem.Allocator, comptime M: type, r: StubRun) !M.Args {
+    try testing.expectEqualStrings(M.name, r.method);
+    return msgpack.decodeSlice(M.Args, arena, r.args);
+}
+
+test "pane run sends session.send to --session, or to MACTERM_SESSION" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const stub = try okStub(a, m.SessionSend, .{});
+
+    const r = try runStub(a, stub, &.{ "pane", "run", "--session", "macterm-x", "ls" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    try testing.expectEqualStrings("", r.out);
+    const args = try decodedArgs(a, m.SessionSend, r);
+    try testing.expectEqualStrings("macterm-x", args.id);
+    try testing.expectEqualStrings("ls", args.text.bytes);
+    try testing.expect(args.submit);
+
+    // Only the words after `--` are typed as they are, dashes too.
+    const n = try runStub(a, stub, &.{ "pane", "run", "--no-submit", "--", "git", "commit", "-h" }, &.{.{ "MACTERM_SESSION", "macterm-env" }});
+    try testing.expectEqual(0, n.exit);
+    const nargs = try decodedArgs(a, m.SessionSend, n);
+    try testing.expectEqualStrings("macterm-env", nargs.id);
+    try testing.expectEqualStrings("git commit -h", nargs.text.bytes);
+    try testing.expect(!nargs.submit);
+
+    const j = try runStub(a, stub, &.{ "pane", "run", "--json", "--session", "macterm-x", "ls" }, &.{});
+    try testing.expectEqualStrings("{\n\n}\n", j.out);
+}
+
+/// Runs a line that fails before it connects.
+fn runOffline(arena: std.mem.Allocator, words: []const []const u8, env_pairs: []const [2][]const u8) !StubRun {
+    var env: std.process.Environ.Map = .init(arena);
+    for (env_pairs) |pair| try env.put(pair[0], pair[1]);
+    var out: std.Io.Writer.Allocating = .init(arena);
+    var err: std.Io.Writer.Allocating = .init(arena);
+    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const exit = try run(ctx, words);
+    return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = "", .args = "", .path = "" };
+}
+
+test "pane run types nothing for a stray flag, an empty line or no pane" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const stray = try runOffline(a, &.{ "pane", "run", "--session", "it's", "ls", "-la" }, &.{});
+    try testing.expectEqual(64, stray.exit);
+    try testing.expect(std.mem.indexOf(u8, stray.err, "  macterm pane run --session 'it'\\''s' -- ls -la\n") != null);
+    const empty = try runOffline(a, &.{ "pane", "run", "--session", "x", "--" }, &.{});
+    try testing.expectEqual(1, empty.exit);
+    try testing.expectEqualStrings("macterm: nothing to run\n", empty.err);
+    const none = try runOffline(a, &.{ "pane", "run", "ls" }, &.{});
+    try testing.expectEqual(1, none.exit);
+    try testing.expectEqualStrings("macterm: no pane to act on: use --session <name>, or run the command in a Macterm pane\n  hint: run `macterm session list` to see live sessions\n", none.err);
+    // A tab or a pane names another pane than this one: MACTERM_SESSION does not count.
+    const tab = try runOffline(a, &.{ "pane", "run", "--tab", "2", "ls" }, &.{.{ "MACTERM_SESSION", "macterm-env" }});
+    try testing.expectEqual(1, tab.exit);
+    try testing.expect(std.mem.startsWith(u8, tab.err, "macterm: --project, --tab and --pane are not available"));
+}
+
+test "pane key sends the chord, and refuses one that does not parse" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const r = try runStub(a, try okStub(a, m.SessionKey, .{}), &.{ "pane", "key", "ctrl+c", "--session", "macterm-x" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    const args = try decodedArgs(a, m.SessionKey, r);
+    try testing.expectEqualStrings("macterm-x", args.id);
+    try testing.expectEqualStrings("ctrl+c", args.chord);
+
+    const bad = try runOffline(a, &.{ "pane", "key", "hyper+q", "--session", "macterm-x" }, &.{});
+    try testing.expectEqual(1, bad.exit);
+    try testing.expectEqualStrings("macterm: unrecognized key combination 'hyper+q'\n  hint: use a name such as ctrl+c, escape, up or ctrl+\\ (see `macterm pane key --help`)\n", bad.err);
+}
+
+test "pane dump prints the session's text with one newline at the end" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const r = try runStub(a, try okStub(a, m.SessionHistory, .{ .text = .{ .bytes = "$ ls\nREADME.md\n$" } }), &.{ "pane", "dump", "--scrollback", "--session", "macterm-x" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    try testing.expectEqualStrings("$ ls\nREADME.md\n$\n", r.out);
+    const args = try decodedArgs(a, m.SessionHistory, r);
+    try testing.expect(args.scrollback);
+
+    const cut = try runStub(a, try okStub(a, m.SessionHistory, .{ .text = .{ .bytes = "end\n" }, .truncated = true }), &.{ "pane", "dump", "--json", "--session", "macterm-x" }, &.{});
+    try testing.expectEqualStrings("{\n  \"dump\" : {\n    \"bytes\" : 4,\n    \"scrollback\" : false,\n    \"session\" : \"macterm-x\",\n    \"text\" : \"end\\n\"\n  }\n}\n", cut.out);
+    try testing.expectEqualStrings("macterm: the text is longer than one reply holds: this is its last 0 KiB\n", cut.err);
+}
+
+test "pane inspect prints the session's state and - for the GUI's fields" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const argv = [_]msgpack.Bin{ .{ .bytes = "vim" }, .{ .bytes = "a.txt" } };
+    const state: m.TerminalState = .{ .cols = 120, .rows = 40, .scrollback_total = 500, .scrollback_offset = 460, .scrollback_len = 40, .alt_screen = false, .foreground_pid = 901, .foreground_argv = &argv, .busy = true };
+    const r = try runStub(a, try okStub(a, m.SessionInspect, .{ .terminal = state }), &.{ "pane", "inspect", "--session", "macterm-x" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    try testing.expectEqualStrings(
+        \\session             macterm-x
+        \\grid                120×40
+        \\cell px             -
+        \\surface px          -
+        \\scrollback          500 total, 460 offset, 40 len
+        \\alt-screen          false
+        \\content scale       -
+        \\foreground          901 (vim a.txt)
+        \\process exited      false
+        \\needs confirm quit  true
+        \\read-only           -
+        \\
+    , r.out);
+    try testing.expectEqualStrings("macterm-x", (try decodedArgs(a, m.SessionInspect, r)).id);
+}
+
+test "session list prints running sessions, with - where the pane is not known" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const sessions = [_]m.Session{
+        .{ .id = "macterm-api-1", .state = .running, .build = "b", .level = 3, .pid = 10, .shell_pid = 777, .clients = 1 },
+        .{ .id = "macterm-old-2", .state = .exited, .build = "b", .level = 3 },
+        .{ .id = "macterm-new-3", .state = .running, .build = "b", .level = 3 },
+    };
+    const r = try runStub(a, try okStub(a, m.SessionList, .{ .sessions = &sessions }), &.{ "session", "list" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    try testing.expectEqualStrings("macterm-api-1  clients:1  pid:777  -\nmacterm-new-3  clients:?  pid:-    -\n", r.out);
+    // `session` alone runs `list`.
+    const alone = try runStub(a, try okStub(a, m.SessionList, .{ .sessions = &sessions }), &.{ "session", "--json" }, &.{});
+    try testing.expectEqualStrings("session.list", alone.method);
+    try testing.expect(std.mem.startsWith(u8, alone.out, "{\n  \"sessions\" : [\n    {\n      \"clients\" : 1,\n      \"leaderPID\" : 777,\n"));
+}
+
+test "session info and kill name a missing session as v1 did" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const missing: Stub = .{ .listen_fd = -1, .build = build_options.version, .reply = .err, .err_code = "not_found" };
+    const info = try runStub(a, missing, &.{ "session", "info", "macterm-gone" }, &.{});
+    try testing.expectEqual(1, info.exit);
+    try testing.expectEqualStrings("macterm: no zmx session named \"macterm-gone\"\n  hint: run `macterm session list` to see live sessions\n", info.err);
+    try testing.expectEqualStrings("macterm-gone", (try decodedArgs(a, m.SessionInfo, info)).id);
+
+    const kill = try runStub(a, try okStub(a, m.SessionKill, .{}), &.{ "session", "kill", "macterm-x", "--json" }, &.{});
+    try testing.expectEqual(0, kill.exit);
+    try testing.expectEqualStrings("{\n\n}\n", kill.out);
+    try testing.expectEqualStrings("macterm-x", (try decodedArgs(a, m.SessionKill, kill)).id);
+
+    // A session whose shell exited is not live, as v1 listed none.
+    const exited = try runStub(a, try okStub(a, m.SessionInfo, .{ .session = .{ .id = "macterm-x", .state = .exited, .build = "b", .level = 3 } }), &.{ "session", "info", "macterm-x" }, &.{});
+    try testing.expectEqual(1, exited.exit);
 }

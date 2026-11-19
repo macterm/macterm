@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const msgpack = @import("msgpack.zig");
+const model = @import("../model/model.zig");
 
 const Raw = msgpack.Raw;
 
@@ -159,6 +160,12 @@ pub const ErrorCode = enum {
     timeout,
     unavailable,
     unknown_method,
+    /// A request that makes an object names an id that the model has
+    /// (design/010 §3).
+    duplicate_id,
+    /// The server could not read `model.json`, or the file is of a newer
+    /// build: it changes no model and writes no file (design/010 §2).
+    model_readonly,
 };
 
 pub const Event = struct {
@@ -168,9 +175,15 @@ pub const Event = struct {
 
 /// One consistent state: the receiver applies all of its events at once.
 pub const EventBatch = struct {
+    pub const field_since = .{ .cause = 3 };
+
     /// Counts batches within one epoch.
     seq: u64,
     ev: []const Event,
+    /// The id of the request that caused the batch, only on the connection
+    /// that sent the request (design/010 §3). Null on every other
+    /// connection, and in a batch that `control.resume` sends again.
+    cause: ?u64 = null,
 };
 
 // ── Methods ─────────────────────────────────────────────────────────────────
@@ -186,7 +199,18 @@ pub const ControlResume = struct {
     pub const since = 2;
     pub const senders: []const Trust = &.{.local};
 
-    pub const Args = struct { epoch: u64, seq: u64 };
+    pub const Args = struct {
+        pub const field_since = .{ .client = 3 };
+
+        epoch: u64,
+        seq: u64,
+        /// The `client` that `state.subscribe` gave the lost connection.
+        /// With the same epoch, this connection takes it, so that a model
+        /// request sent again gets its first reply. A client that sends
+        /// it keeps the request ids of the lost connection, and counts on
+        /// from them.
+        client: ?u64 = null,
+    };
     pub const Result = struct { replayed: bool, seq: u64 };
 };
 
@@ -367,6 +391,100 @@ pub const PaneSeen = struct {
     pub const Result = struct {};
 };
 
+/// The most bytes that `session.send` types at a time.
+pub const send_max = 64 * 1024;
+
+/// Types text into a session's pty, as it is: no paste brackets, as v1's
+/// `pane run` typed it (`macterm pane run`, design/011 §1). With `submit`,
+/// a newline follows. The reply goes when the server gave the bytes to the
+/// session. A client that may create a session may type into one, so this
+/// gives no new access.
+pub const SessionSend = struct {
+    pub const name = "session.send";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        /// At most `send_max` bytes.
+        text: msgpack.Bin,
+        submit: bool = true,
+    };
+    pub const Result = struct {};
+};
+
+/// Sends one key press to a session (`macterm pane key`). The session
+/// encodes the chord with the key modes of its own terminal (cursor keys,
+/// the kitty flags), so a program gets what a keyboard would send it. The
+/// chord grammar is that of keybinds (`chord.zig`).
+pub const SessionKey = struct {
+    pub const name = "session.key";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        /// `ctrl+c`, `escape`, `up`, `shift+1`.
+        chord: []const u8,
+    };
+    pub const Result = struct {};
+};
+
+/// The text of a session's terminal (`macterm pane dump`): the screen, or
+/// the scrollback and the screen. It needs no client that shows the pane.
+pub const SessionHistory = struct {
+    pub const name = "session.history";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: []const u8,
+        scrollback: bool = false,
+    };
+    pub const Result = struct {
+        text: msgpack.Bin,
+        /// The text was longer than a frame holds: `text` is its end.
+        truncated: bool = false,
+    };
+};
+
+/// The state of a session's terminal (`macterm pane inspect`).
+pub const SessionInspect = struct {
+    pub const name = "session.inspect";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: []const u8 };
+    pub const Result = struct { terminal: TerminalState };
+};
+
+/// What a session knows of its terminal. The cell and surface sizes are the
+/// GUI's, and not here.
+pub const TerminalState = struct {
+    pub const since = 3;
+
+    cols: u16,
+    rows: u16,
+    /// The rows of the screen and the scrollback, the row of the viewport's
+    /// top in them, and the rows of the viewport (ghostty's scrollbar).
+    scrollback_total: u64,
+    scrollback_offset: u64,
+    scrollback_len: u64,
+    /// The alternate screen is active.
+    alt_screen: bool,
+    /// The process group that holds the pty. Null when the session cannot
+    /// read it.
+    foreground_pid: ?i64 = null,
+    /// The arguments of the group's leader, cut at 1 KiB in all. Null when
+    /// they cannot be read.
+    foreground_argv: ?[]const msgpack.Bin = null,
+    /// A program other than the shell holds the pty. Null when the
+    /// session cannot read it.
+    busy: ?bool = null,
+    /// The shell exited.
+    exited: bool = false,
+};
+
 /// The server exits and leaves every session running, so that a newer app
 /// can start its own server (design/002).
 pub const ServerExit = struct {
@@ -446,8 +564,426 @@ pub const LinkClose = struct {
     pub const Result = struct {};
 };
 
+// ── The model (design/010 §3) ───────────────────────────────────────────────
+//
+// Only the Mac server has a model (`model_ipc.zig`). A request that makes an
+// object carries the object's id, which the client made. The server refuses
+// an id that the model has with `duplicate_id`, and an unknown id with
+// `not_found`. A request changes the model completely or not at all. Its
+// events go in one batch before the reply, with the request's id in
+// `EventBatch.cause` on the requester's connection.
+//
+// `rebalance` is on the request: null takes the `auto_tiling` of
+// `model.options`.
+
+pub const ProjectId = model.ProjectId;
+pub const WorkspaceId = model.WorkspaceId;
+pub const TabId = model.TabId;
+pub const PaneId = model.PaneId;
+pub const SplitId = model.SplitId;
+
+/// The zoomed pane of a tab. The server keeps zoom in memory only.
+pub const Zoom = struct {
+    tab: TabId,
+    pane: PaneId,
+};
+
+/// A pane that left the model. The server ends a local pane's session
+/// itself. A client that owns the link to `host` ends a remote one
+/// (design/010 §5).
+pub const RemovedPane = struct {
+    id: PaneId,
+    session: []const u8,
+    /// Null for a pane of this Mac.
+    host: ?[]const u8 = null,
+};
+
+/// The full state: the model and the sessions. A client reads it once, then
+/// follows the event batches from `seq`. Every client gets every batch; this
+/// request only reads.
+pub const StateSubscribe = struct {
+    pub const name = "state.subscribe";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {};
+    pub const Result = struct {
+        epoch: u64,
+        /// The count of batches in `epoch` that this state includes.
+        seq: u64,
+        /// Null on a server with no model: a host's server, or a server
+        /// that the app did not give `MACTERM_STATE_DIR`.
+        model: ?model.ModelData = null,
+        /// The zoomed pane of each tab that has one.
+        zoomed: []const Zoom = &.{},
+        /// The server could not read `model.json`, or the file is of a newer
+        /// build. Every model request fails with `model_readonly`.
+        readonly: bool = false,
+        sessions: []const Session,
+        /// This connection's key for the ring of request ids. A client
+        /// that resumes on a new connection sends it in `control.resume`.
+        client: u64,
+    };
+};
+
+pub const ProjectCreate = struct {
+    pub const name = "project.create";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: ProjectId,
+        name: []const u8,
+        /// A local path, or `user@host:dir`. Empty for a group.
+        path: []const u8 = "",
+        color: ?[]const u8 = null,
+        /// The group that holds it. Null is the top level.
+        parent: ?ProjectId = null,
+        kind: model.ProjectKind = .project,
+        /// Unix time in milliseconds.
+        created_at: i64 = 0,
+    };
+    pub const Result = struct {};
+};
+
+/// Changes the fields that are not null. An empty `color` removes the
+/// color. An empty `parent` moves the project to the top level.
+pub const ProjectSet = struct {
+    pub const name = "project.set";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: ProjectId,
+        name: ?[]const u8 = null,
+        path: ?[]const u8 = null,
+        color: ?[]const u8 = null,
+        parent: ?ProjectId = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Sets the order of the children of `parent` (the top level when null):
+/// `ids` holds each child once.
+pub const ProjectReorder = struct {
+    pub const name = "project.reorder";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        parent: ?ProjectId = null,
+        ids: []const ProjectId,
+    };
+    pub const Result = struct {};
+};
+
+/// Removes a project and its workspace, or an empty group.
+pub const ProjectRemove = struct {
+    pub const name = "project.remove";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: ProjectId };
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
+};
+
+/// Makes a workspace that is not a project's: pinned, scratch, quick or
+/// widget. The client gives the id (a fixed id, or a widget's id).
+pub const WorkspaceCreate = struct {
+    pub const name = "workspace.create";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: WorkspaceId, kind: model.Kind };
+    pub const Result = struct {};
+};
+
+/// Removes a workspace that is not a project's, with its tabs.
+pub const WorkspaceRemove = struct {
+    pub const name = "workspace.remove";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: WorkspaceId };
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
+};
+
+/// Makes a tab. `root` is one pane, or a tree (a layout, a grid), with the
+/// ids that the client made. The tab's focus is its first pane.
+pub const TabCreate = struct {
+    pub const name = "tab.create";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        workspace: WorkspaceId,
+        id: TabId,
+        /// At the end when null.
+        index: ?u32 = null,
+        root: model.Node,
+        title: ?[]const u8 = null,
+        /// The tab becomes the workspace's active tab.
+        focus: bool = true,
+    };
+    pub const Result = struct {};
+};
+
+pub const TabClose = struct {
+    pub const name = "tab.close";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: TabId };
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
+};
+
+/// Sets the tab's title. Null removes it.
+pub const TabSet = struct {
+    pub const name = "tab.set";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: TabId, title: ?[]const u8 = null };
+    pub const Result = struct {};
+};
+
+/// The active tab of a workspace.
+pub const TabSelect = struct {
+    pub const name = "tab.select";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { workspace: WorkspaceId, id: TabId };
+    pub const Result = struct {};
+};
+
+pub const TabReorder = struct {
+    pub const name = "tab.reorder";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { workspace: WorkspaceId, id: TabId, index: u32 };
+    pub const Result = struct {};
+};
+
+/// Moves a tab to another workspace (pinned and scratch included) and makes
+/// it the active tab there. No session moves.
+pub const TabMove = struct {
+    pub const name = "tab.move";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: TabId,
+        to_workspace: WorkspaceId,
+        index: ?u32 = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Puts the tree of tab `src` into tab `dst`, next to `target_pane` on
+/// `zone`, or at the edge of the tab when `target_pane` is null. `src`
+/// closes; no pane leaves the model.
+pub const TabMerge = struct {
+    pub const name = "tab.merge";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        src: TabId,
+        dst: TabId,
+        target_pane: ?PaneId = null,
+        zone: model.tree.Zone,
+        split_id: SplitId,
+        rebalance: ?bool = null,
+    };
+    pub const Result = struct {};
+};
+
+/// The direction of a new split. `auto` splits along the longer side of
+/// the target's session (its `cols` and `rows`, a cell twice as high as it
+/// is wide), and side by side when the server does not know the size.
+pub const SplitDir = enum {
+    horizontal,
+    vertical,
+    auto,
+    unknown,
+};
+
+pub const PaneSplit = struct {
+    pub const name = "pane.split";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        tab: TabId,
+        target: PaneId,
+        new: model.Pane,
+        split_id: SplitId,
+        dir: SplitDir,
+        position: model.tree.Position = .second,
+        /// 0.5 when null.
+        ratio: ?f64 = null,
+        /// The new pane gets the focus, and a zoom ends.
+        focus: bool = true,
+        rebalance: ?bool = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Closes a pane. The last pane of a tab closes the tab. The next focus
+/// comes from the tab's history.
+pub const PaneClose = struct {
+    pub const name = "pane.close";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: PaneId, rebalance: ?bool = null };
+    /// The panes that left the model.
+    pub const Result = struct { panes: []const RemovedPane = &.{} };
+};
+
+/// Moves a pane next to pane `dest` on `zone`, in its tab or in another.
+pub const PaneMove = struct {
+    pub const name = "pane.move";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: PaneId,
+        dest: PaneId,
+        zone: model.tree.Zone,
+        split_id: SplitId,
+        rebalance: ?bool = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Moves a pane out of its tab into a new tab `tab_id`, in `workspace` (the
+/// pane's own when null).
+pub const PaneSeparate = struct {
+    pub const name = "pane.separate";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        id: PaneId,
+        tab_id: TabId,
+        workspace: ?WorkspaceId = null,
+    };
+    pub const Result = struct {};
+};
+
+pub const PaneFocus = struct {
+    pub const name = "pane.focus";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: PaneId };
+    pub const Result = struct {};
+};
+
+/// Zooms a pane of the tab, or with a null `pane` ends the zoom.
+pub const PaneZoom = struct {
+    pub const name = "pane.zoom";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { tab: TabId, pane: ?PaneId = null };
+    pub const Result = struct {};
+};
+
+/// The ratio of a split, kept inside 0.15 to 0.85.
+pub const SplitRatio = struct {
+    pub const name = "split.ratio";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { id: SplitId, ratio: f64 };
+    pub const Result = struct {};
+};
+
+/// The key window's selection. `tab` becomes the active tab of the
+/// project's workspace.
+pub const SelectSet = struct {
+    pub const name = "select.set";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        project: ?ProjectId = null,
+        tab: ?TabId = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Puts the client's conversion of the v1 files in place of the model, one
+/// time (design/010 §8). The server refuses it when the model has
+/// `imported_v1`, and refuses a model that does not validate with
+/// `invalid_args` and the path of the first fault. The stored model has
+/// `imported_v1`.
+pub const ModelImport = struct {
+    pub const name = "model.import";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        model: model.ModelData,
+        /// What the client read, for the log (`workspaces_v3.json`).
+        source: []const u8 = "",
+    };
+    pub const Result = struct {};
+};
+
+/// Puts the client's copy of its own model in place of this one, any number
+/// of times (design/010 §9, step 3: the shadow stage). The app
+/// sends it after each save while it still owns the model, so that the
+/// server's model, its file and its events follow the app's. It ends no
+/// session and leaves `imported_v1` false. The server refuses it with
+/// `refused` when the model has `imported_v1`, and refuses a model that
+/// does not validate as `model.import` does. Step 7 removes it.
+pub const ModelReplace = struct {
+    pub const name = "model.replace";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { model: model.ModelData };
+    pub const Result = struct {};
+};
+
+/// The client's defaults for a request that does not say. The server keeps
+/// them in memory only.
+pub const ModelOptions = struct {
+    pub const name = "model.options";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct { auto_tiling: bool };
+    pub const Result = struct {};
+};
+
 /// Every request method. A new method goes here.
-pub const methods = .{ ControlResume, ChannelOpen, ChannelClose, ChannelPause, ChannelResume, Ping, SessionCreate, SessionList, SessionInfo, SessionKill, PaneSeen, ServerExit, CommandRun, LinkOpen, LinkClose };
+pub const methods = .{
+    ControlResume,  ChannelOpen,    ChannelClose,  ChannelPause,    ChannelResume,   Ping,           SessionCreate,
+    SessionList,    SessionInfo,    SessionKill,   PaneSeen,        SessionSend,     SessionKey,     SessionHistory,
+    SessionInspect, ServerExit,     CommandRun,    LinkOpen,        LinkClose,       StateSubscribe, ProjectCreate,
+    ProjectSet,     ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,      TabClose,
+    TabSet,         TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,      PaneClose,
+    PaneMove,       PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,      ModelImport,
+    ModelReplace,   ModelOptions,
+};
+
+/// The methods that change the model. The server answers one of them sent
+/// again from the ring of request ids, and does it only one time.
+pub const model_writes = .{
+    ProjectCreate, ProjectSet,   ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,
+    TabClose,      TabSet,       TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,
+    PaneClose,     PaneMove,     PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,
+    ModelImport,   ModelReplace, ModelOptions,
+};
 
 // ── Events ──────────────────────────────────────────────────────────────────
 
@@ -481,7 +1017,102 @@ pub const PaneAttention = struct {
 /// `since` and `senders`, as a method does, and its fields are the event's
 /// `a`. No event may hold a `Secret` (design/006 §1); `schema.check` refuses
 /// one.
-pub const events = .{ SessionExit, PaneAttention };
+// The model's events (design/010 §3). Each one carries whole objects, so
+// the newest value for a key wins when events merge. One request makes one
+// batch.
+
+/// A project was made or changed.
+pub const ProjectChanged = struct {
+    pub const name = "project.set";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    project: model.Project,
+};
+
+pub const ProjectRemoved = struct {
+    pub const name = "project.remove";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    id: ProjectId,
+};
+
+/// The order of the children of `parent` (the top level when null).
+pub const ProjectOrder = struct {
+    pub const name = "project.order";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    parent: ?ProjectId = null,
+    ids: []const ProjectId,
+};
+
+/// A tab was made or changed: the whole tab with its tree.
+pub const TabChanged = struct {
+    pub const name = "tab.set";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    workspace: WorkspaceId,
+    tab: model.Tab,
+    zoomed: ?PaneId = null,
+};
+
+pub const TabRemoved = struct {
+    pub const name = "tab.remove";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    workspace: WorkspaceId,
+    id: TabId,
+};
+
+/// A workspace was made, or its tabs, their order or its active tab
+/// changed.
+pub const TabOrder = struct {
+    pub const name = "tab.order";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    workspace: WorkspaceId,
+    kind: model.Kind,
+    ids: []const TabId,
+    active_tab: ?TabId = null,
+};
+
+/// A workspace that is not a project's was removed.
+pub const WorkspaceRemoved = struct {
+    pub const name = "workspace.remove";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    id: WorkspaceId,
+};
+
+pub const SelectionChanged = struct {
+    pub const name = "selection";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    active_project: ?ProjectId = null,
+};
+
+/// A pane left the model (`RemovedPane`).
+pub const PaneRemoved = struct {
+    pub const name = "pane.removed";
+    pub const since = 3;
+    pub const senders = everyone;
+
+    id: PaneId,
+    session: []const u8,
+    host: ?[]const u8 = null,
+};
+
+pub const events = .{
+    SessionExit, PaneAttention,    ProjectChanged,   ProjectRemoved, ProjectOrder, TabChanged, TabRemoved,
+    TabOrder,    WorkspaceRemoved, SelectionChanged, PaneRemoved,
+};
 
 /// True if a connection with this trust may send message `M`. A message from
 /// a sender outside the list gets an error reply and a log line; the link
@@ -750,6 +1381,51 @@ pub const Foreground = struct {
     args: msgpack.Bin,
 };
 
+/// The server asks the session for one key press (`session.key`). The
+/// session ignores a chord that does not parse.
+pub const Key = struct {
+    pub const name = "key";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    chord: []const u8,
+};
+
+/// The server asks for the terminal's text (`session.history`). The session
+/// answers with `History`, in the order of the requests.
+pub const HistoryRead = struct {
+    pub const name = "history_read";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    scrollback: bool = false,
+};
+
+pub const History = struct {
+    pub const name = "history";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    text: msgpack.Bin,
+    truncated: bool = false,
+};
+
+/// The server asks for the terminal's state (`session.inspect`). The session
+/// answers with `Inspect`, in the order of the requests.
+pub const InspectRead = struct {
+    pub const name = "inspect_read";
+    pub const since = 3;
+    pub const senders = from_client;
+};
+
+pub const Inspect = struct {
+    pub const name = "inspect";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    terminal: TerminalState,
+};
+
 /// How the pty reads input (`termios` `ICANON` and `ECHO`). A password read
 /// is canonical with echo off. Sent when a mode changes, and to a client
 /// that connects or catches up, if its `attach` asked for it.
@@ -946,9 +1622,9 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State, Attach, Resize,     Claim, Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End, Refresh,
-    Title, Cwd,    Foreground, Mark,  Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode,
+    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
+    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

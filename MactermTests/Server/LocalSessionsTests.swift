@@ -56,7 +56,7 @@ struct LocalSessionsTests {
             defer { other.close() }
             var events = other.events.makeAsyncIterator()
             _ = try await other.call(MactermProtocol.SessionCreate.self, Self.args(id: id, command: ["/bin/sh", "-c", "exit 0"]))
-            while let batch = await events.next(), !batch.contains(where: {
+            while let batch = await events.next(), !batch.events.contains(where: {
                 if case let .sessionExit(exit) = $0 { exit.id == id } else { false }
             }) {}
 

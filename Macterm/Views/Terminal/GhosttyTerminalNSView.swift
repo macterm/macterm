@@ -186,8 +186,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     func surfaceDidReportProgress(_ report: TerminalProgressReport) {
         switch report {
         case .running: onProgressStarted?()
-        case .ended: onProgressFinished?(false)
-        case .failed: onProgressFinished?(true)
+        case .ended,
+             .failed: onProgressFinished?()
         }
     }
 
@@ -425,21 +425,16 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSearchTotal: ((Int?) -> Void)?
     var onSearchSelected: ((Int?) -> Void)?
     var onDesktopNotification: ((String, String) -> Void)?
-    /// The surface rang BEL (`GHOSTTY_ACTION_RING_BELL`). The app-level
-    /// features (beep, sound, dock bounce) are handled in `GhosttyCallbacks`
-    /// for every surface; this is the per-pane half — the pane marks itself
-    /// as ringing so the Dock badge can count its tab (`Pane.ringBell`).
-    var onBell: (() -> Void)?
     /// Exit code (-1 unknown), duration in ns, and the command as typed
     /// at the prompt when libghostty has it (fork patch 0019), else nil.
     var onCommandFinished: ((Int16, UInt64, String?) -> Void)?
     var onProgressStarted: (() -> Void)?
-    /// A progress report ended the run (`TerminalProgressReport`). The Bool is
-    /// whether it failed: true for ERROR, false for REMOVE and PAUSE.
-    var onProgressFinished: ((Bool) -> Void)?
+    /// A progress report ended the run (`TerminalProgressReport`): REMOVE,
+    /// PAUSE or ERROR. The session says whether it failed (`Pane.attention`).
+    var onProgressFinished: (() -> Void)?
     /// A run ended (`onCommandFinished` or `onProgressFinished`), after the
-    /// pane recorded it. The window that draws the pane sets it, to
-    /// acknowledge the run when the user looks at the pane.
+    /// pane recorded it. The window that draws the pane sets it, to mark the
+    /// pane seen when the user looks at it.
     var onRunEnded: (() -> Void)?
     var onTerminalRender: (() -> Void)?
     var onBackgroundColorChange: ((NSColor) -> Void)?
@@ -459,6 +454,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onRemoteForeground: ((RemoteForeground) -> Void)?
     /// The host's session reports how the pane's pty reads input.
     var onRemoteTtyMode: ((TerminalLineMode) -> Void)?
+    /// The session's attention flags (`PaneSessionHost.paneAttention`).
+    var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
     /// when the pointer leaves it. Drives the pane's hover-URL banner.
     var onLinkHover: ((String?) -> Void)?
@@ -638,9 +635,37 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// from a stray updateNSView during SwiftUI teardown).
     private var isDestroyed = false
 
+    /// True while a split animation slides this pane in (`AnimatedSplitView`):
+    /// the surface, and with it the shell, waits for the final size. Each
+    /// frame of the slide is a resize. zsh draws its prompt again after each
+    /// one, from where the old width put it, and garbled the first lines of
+    /// the pane (issue 0426).
+    private(set) var holdsSurfaceCreation = false
+
+    /// Holds the surface creation until `releaseSurfaceCreation()`. No effect
+    /// on a view that has a surface.
+    func holdSurfaceCreation() {
+        guard surface == nil, !isDestroyed else { return }
+        holdsSurfaceCreation = true
+        logger.debug("hold surface creation for \(self.sessionName, privacy: .public)")
+    }
+
+    /// Ends the hold and creates the surface, if a creation waited for it.
+    func releaseSurfaceCreation() {
+        guard holdsSurfaceCreation else { return }
+        holdsSurfaceCreation = false
+        let size = "\(Int(bounds.width))x\(Int(bounds.height))"
+        logger.debug("release surface creation at \(size, privacy: .public)pt for \(self.sessionName, privacy: .public)")
+        if pendingSurfaceCreation { createSurface() }
+    }
+
     func createSurface() {
         guard !isDestroyed else { return }
         guard surface == nil, let app = GhosttyApp.shared.app else { return }
+        guard !holdsSurfaceCreation else {
+            pendingSurfaceCreation = true
+            return
+        }
         let backingSize = convertToBacking(bounds).size
         guard backingSize.width > 0, backingSize.height > 0 else {
             pendingSurfaceCreation = true
@@ -2260,6 +2285,11 @@ extension GhosttyTerminalNSView {
 // MARK: - Read-only introspection (control CLI `pane inspect`/`dump`)
 
 extension GhosttyTerminalNSView {
+    /// Tells the session that the user saw the pane (`PaneSession.seen`).
+    func sendSeen() {
+        channelRuntime?.route.seen()
+    }
+
     /// The live terminal grid + cell/surface pixel dimensions
     /// (`ghostty_surface_size`), or nil when the surface isn't created yet.
     /// Ask the session to make this surface's client its leader (#345), so

@@ -42,7 +42,7 @@ pub fn parse(gpa: Allocator, bytes: []const u8, fault: *model.Fault) LoadError!M
     }
     var m = Model.init(gpa);
     errdefer m.deinit();
-    m.data = std.json.parseFromSliceLeaky(model.Data, m.arena.allocator(), bytes, .{ .allocate = .alloc_always }) catch |err| switch (err) {
+    m.data = std.json.parseFromSliceLeaky(model.ModelData, m.arena.allocator(), bytes, .{ .allocate = .alloc_always }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.Syntax,
     };

@@ -132,20 +132,20 @@ final class TerminalTab: Identifiable {
         return nil
     }
 
+    /// The tab's status dot. Running comes from the panes' run state. Done
+    /// comes from the session's flag `Pane.attention.unseen`.
     var executionState: TerminalExecutionState {
         let panes = splitRoot.allPanes()
         if panes.contains(where: { $0.executionState == .running }) { return .running }
-        if panes.contains(where: { $0.executionState == .done }) { return .done }
+        if panes.contains(where: \.attention.unseen) { return .done }
         return .idle
     }
 
-    /// Whether the tab's `.done` is a failure — some pane's run reported one
-    /// (`Pane.completionFailed`) — which turns its status dot red. A running
-    /// pane outranks it exactly as it outranks done, and it outranks a sibling
-    /// pane's success: a split where one pane failed and another passed shows
-    /// the failure.
+    /// The tab's done dot is red: the ended run of a pane failed
+    /// (`Pane.attention.failed`). Running wins over failed, and failed wins
+    /// over the success of another pane.
     var completionFailed: Bool {
-        executionState == .done && splitRoot.allPanes().contains(where: \.completionFailed)
+        executionState == .done && splitRoot.allPanes().contains { $0.attention.unseen && $0.attention.failed }
     }
 
     var focusedPane: Pane? {
@@ -153,32 +153,19 @@ final class TerminalTab: Identifiable {
         return splitRoot.findPane(id: focusedPaneID)
     }
 
-    @discardableResult
-    func acknowledgeCommandCompletion() -> Bool {
-        var didAcknowledge = false
-        for pane in splitRoot.allPanes() {
-            didAcknowledge = pane.acknowledgeCommandCompletion() || didAcknowledge
-        }
-        return didAcknowledge
+    /// A pane of the tab rang the bell, and nobody showed it since
+    /// (`Pane.attention.bell`). The Dock badge counts tabs
+    /// (`BellBadge.tabCount`).
+    var hasUnseenBell: Bool {
+        splitRoot.allPanes().contains(where: \.attention.bell)
     }
 
-    /// Whether any pane of this tab rang BEL and hasn't been looked at since.
-    /// The tab is the unit the Dock badge counts (`BellBadge.tabCount`).
-    var hasUnacknowledgedBell: Bool {
-        splitRoot.allPanes().contains(where: \.hasUnacknowledgedBell)
-    }
-
-    /// Looking at the tab acknowledges every pane's bell, not just the
-    /// focused pane's — the same whole-tab rule `acknowledgeCommandCompletion`
-    /// follows, for the same reason: a split pane that rang would otherwise
-    /// keep the badge up while the user sits right next to it.
-    @discardableResult
-    func acknowledgeBell() -> Bool {
-        var didAcknowledge = false
+    /// Looking at the tab marks every pane seen, not only the focused pane.
+    /// Otherwise a split pane next to the focused one keeps its dot.
+    func markSeen() {
         for pane in splitRoot.allPanes() {
-            didAcknowledge = pane.acknowledgeBell() || didAcknowledge
+            pane.markSeen()
         }
-        return didAcknowledge
     }
 
     init(
@@ -646,31 +633,26 @@ final class Workspace: Identifiable {
         }
     }
 
-    @discardableResult
-    fileprivate func selectTab(_ tabID: UUID) -> Bool {
-        guard let tab = tabs.first(where: { $0.id == tabID }) else { return false }
+    fileprivate func selectTab(_ tabID: UUID) {
+        guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
         if let current = activeTabID, current != tabID { tabHistory.push(current) }
         activeTabID = tabID
-        // Selecting a tab is looking at it: its bell is seen (transient, so
-        // it never feeds the save decision the return value drives).
-        tab.acknowledgeBell()
-        return tab.acknowledgeCommandCompletion()
+        // Selecting a tab is looking at it.
+        tab.markSeen()
     }
 
-    @discardableResult
-    fileprivate func selectNextTab() -> Bool {
+    fileprivate func selectNextTab() {
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
-        else { return false }
-        return selectTab(tabs[(i + 1) % tabs.count].id)
+        else { return }
+        selectTab(tabs[(i + 1) % tabs.count].id)
     }
 
-    @discardableResult
-    fileprivate func selectPreviousTab() -> Bool {
+    fileprivate func selectPreviousTab() {
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
-        else { return false }
-        return selectTab(tabs[(i - 1 + tabs.count) % tabs.count].id)
+        else { return }
+        selectTab(tabs[(i - 1 + tabs.count) % tabs.count].id)
     }
 
     /// Builds a recency-ordered list of tab IDs: current tab first, then most-recent-first from history.
@@ -699,9 +681,9 @@ final class Workspace: Identifiable {
     }
 
     @discardableResult
-    fileprivate func selectTabByIndex(_ index: Int) -> Bool {
-        guard index >= 0, index < tabs.count else { return false }
-        return selectTab(tabs[index].id)
+    fileprivate func selectTabByIndex(_ index: Int) {
+        guard index >= 0, index < tabs.count else { return }
+        selectTab(tabs[index].id)
     }
 
     fileprivate func reorderTabs(fromOffsets source: IndexSet, toOffset destination: Int) {
@@ -795,25 +777,20 @@ enum ModelWriter {
         tab.focusedPaneID = focusedPaneID
     }
 
-    /// `tab.select`. Returns whether looking at the tab acknowledged a
-    /// finished run (the caller saves then).
-    @discardableResult
-    static func tabSelect(_ tabID: UUID, in workspace: Workspace) -> Bool {
+    /// `tab.select`. Looking at the tab marks its panes seen.
+    static func tabSelect(_ tabID: UUID, in workspace: Workspace) {
         workspace.selectTab(tabID)
     }
 
-    @discardableResult
-    static func tabSelectNext(in workspace: Workspace) -> Bool {
+    static func tabSelectNext(in workspace: Workspace) {
         workspace.selectNextTab()
     }
 
-    @discardableResult
-    static func tabSelectPrevious(in workspace: Workspace) -> Bool {
+    static func tabSelectPrevious(in workspace: Workspace) {
         workspace.selectPreviousTab()
     }
 
-    @discardableResult
-    static func tabSelect(index: Int, in workspace: Workspace) -> Bool {
+    static func tabSelect(index: Int, in workspace: Workspace) {
         workspace.selectTabByIndex(index)
     }
 

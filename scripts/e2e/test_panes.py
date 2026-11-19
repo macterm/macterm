@@ -27,6 +27,27 @@ def test_split_creates_a_second_live_pane(app, fresh_tab, live_pane):
     )
 
 
+def test_a_split_pane_shell_gets_no_resize_from_the_split(app, fresh_tab, live_pane):
+    """A new split pane starts its shell after the split animation, so the
+    slide sends it no resize (issue 0426). The trap is set only when the
+    shell reads the command, so a slow shell start can miss the slide."""
+    nonce = uuid.uuid4().hex[:8]
+    command = (
+        f'/bin/sh -c "w() {{ printf resized-%s {nonce}; echo; }}; trap w WINCH; '
+        f'sleep 2; printf settled-%s {nonce}; echo"'
+    )
+    app.cli("pane", "split", "--direction", "right", "--run", command, "--session", live_pane["session"])
+    panes = app.panes(tab=fresh_tab["id"])
+    new = next(pane for pane in panes if pane["id"] != live_pane["id"])
+
+    def finished():
+        text = app.pane_text(pane=new["id"])
+        return text if text and f"settled-{nonce}" in text else None
+
+    text = wait_for(finished, timeout=60, message="the split pane's command to finish")
+    assert f"resized-{nonce}" not in text
+
+
 def test_grid_makes_two_by_two(app, fresh_tab, live_pane):
     app.cli("grid", "2x2", "--session", live_pane["session"])
     panes = app.panes(tab=fresh_tab["id"])

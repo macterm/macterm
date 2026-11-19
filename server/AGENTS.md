@@ -13,6 +13,17 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 - **The server has no v1 code.** It started as the zmx fork at upstream v1.0.1 (the `DOWNSTREAM.md` of thdxg/zmx names each change by its old patch number: 0003 is the leadership claim, 0004 the disclaim, 0010 the foreground report). Its own verbs are `server`, `connect`, `proxy` and `version`, and the hidden `__session` (the session process) and `__create-session` (tests make a session with it). Every other word goes to the `macterm` CLI (see below). v1's verbs (`attach`, `list`, `kill`, `get`, `set`, `clear`, `history`, `send`, `__daemon`) and their daemon are gone. A v1 session daemon (zmx 0.8.1) keeps running until the first v2 launch ends it by its argv (`V1Sessions`). Remote panes are sessions of the host's v2 server, and v1 sessions there keep running.
 - **The leader's terminal answers the terminal queries.** While no client leads, the session's ghostty-vt terminal answers them (`Watch.answers_all`), except the OSC color reports and the kitty graphics replies. The session answers the OSC 7501 support query at all times. No byte scanner answers a query.
 
+## The model (design/010, `src/model/`, `src/model_ipc.zig`)
+
+- **Only a server with `MACTERM_STATE_DIR` has a model.** A host's server answers `state.subscribe` with no model, refuses each model request with `unavailable`, and writes no file.
+- **The server writes `model.json`** 100 ms after a change, before the reply to `server.exit`, and when it stops. A file that does not read, or that a newer build wrote, makes the model read-only (`model_readonly`), and the server never writes over it.
+- **One request, one batch, before the reply.** The server makes the events from a compare of the model before and after the request (`Snapshot`, `diff`). The requester's copy has `cause`. A request that fails sends no batch.
+- **A pane that leaves the model ends its local session**, unless another pane of the model names the session. `pane.removed` and the reply name every pane that left. `model.import` ends no session.
+- **`model.replace` is the shadow stage** (design/010 §9, step 3). The app sends its own model after each save, any number of times. It ends no session and leaves `imported_v1` false. Once the model has `imported_v1`, the server refuses it (`refused`). Step 7 removes it.
+- **The ring of request ids** keeps 256 answers by client key, request id and a hash of the arguments. `state.subscribe` gives the key as `client`; `control.resume` takes it. `split.ratio` and failures for lack of memory are not kept.
+- **The model and each batch must fit in one frame** (`server.frame_max`, 1 MiB).
+- **The schema reads the model through `src/wire.zig`**, because a file can be in one module only.
+
 ## The macterm CLI (design/011)
 
 The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resources/bin/macterm` until the swap (design/011 §3). Until then, nothing that a user sees changes. To run the Zig CLI, use `zig-out/bin/zmx <verb>`.
@@ -33,6 +44,12 @@ The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resource
 
   The CLI does not read `MACTERM_SOCKET`, because that variable names the app's `control.sock`.
 - The CLI sends `hello` with the role `cli`. A server of another build refuses it. The CLI then exits with 1 and shows the two builds. The server's pid comes from the socket (`runtime.peerPid`), not from the server.
+- **The pane verbs act on one session.** `--session` names it. With no `--session`, `MACTERM_SESSION` names it, but not when `--tab` or `--pane` is given (v1's rule). `--project`, `--tab` and `--pane` name a pane in the model (design/010): until the model moves to the server, they fail with exit 1.
+- **The session methods need no GUI.** `pane run` sends `session.send`, `pane key` sends `session.key`, `pane dump` sends `session.history` and `pane inspect` sends `session.inspect`. The server gives each one to the session process, which answers from its own terminal.
+  - `session.send` types the text as it is, with no paste brackets, as v1 typed it. Before `--`, `pane run` refuses a word that starts with a dash (exit 64).
+  - The session encodes the chord of `session.key` with the key modes of its terminal (`chord.zig`, ghostty-vt's key encoder). The grammar is the keybind grammar of the app (`HotkeyRegistry.parseShortcut`).
+  - `session.history` holds at most 960 KiB, because a session's frame to the server is at most 1 MiB. Longer text keeps its end, and the CLI says so on stderr.
+  - The cell size, the surface size, the content scale and read-only are the GUI's: `pane inspect` prints `-` for them, and `pane run` refuses no read-only pane yet. `session.key` treats Option as Alt, Macterm's default. The pane column of `session list` is `-` until the model.
 - **Use a streaming writer for output** (`writerStreaming`). A positional writer writes at the start of a file, also when the shell opened the file to append.
 
 ## The roaming link (design/009, issue 0201)

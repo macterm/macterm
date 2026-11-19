@@ -93,14 +93,6 @@ struct VimKeymapTests {
 
     // MARK: - Visual modes
 
-    /// The pill reserves the width of these titles, so the list has every
-    /// title that `label(for:)` gives.
-    @Test
-    func each_keymap_lists_every_title_of_its_pill() {
-        #expect(CopyModeKeymap.vim.labels == ["Copy Mode", "Visual", "Visual Line", "Visual Block"])
-        #expect(CopyModeKeymap.helix.labels == ["Copy Mode", "Select Mode"])
-    }
-
     @Test
     func v_starts_visual_mode_where_motions_extend() {
         var state = CopyModeState()

@@ -1844,6 +1844,22 @@
         }
       }
     },
+    "Cannot create the project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트를 생성할 수 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建项目"
+          }
+        }
+      }
+    },
     "Cannot install %@: %@" : {
       "localizations" : {
         "en" : {
@@ -11650,22 +11666,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新频道"
-          }
-        }
-      }
-    },
-    "Update extensions automatically" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "확장 프로그램 자동 업데이트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动更新扩展"
           }
         }
       }

@@ -657,7 +657,7 @@ struct PaletteRegistryTests {
     }
 
     @Test
-    func auto_update_reads_nothing_while_off_and_announces_what_it_updated() async throws {
+    func auto_update_applies_only_unchanged_copies_and_announces_what_it_updated() async throws {
         let store = try makeStore()
         try await PaletteRegistry(ref: "main", fetch: Server().fetch).install(Self.entry("kubernetes"), into: store)
         try await PaletteRegistry(ref: "main", fetch: Server().fetch).install(Self.entry("docker"), into: store)
@@ -668,14 +668,9 @@ struct PaletteRegistryTests {
         let newer = { (id: String) in Self.entry(id, palettes: ["pods.yaml": Self.pods, "contexts.yaml": Self.contexts]) }
         let server = Self.serving([newer("kubernetes"), newer("docker")])
         let registry = PaletteRegistry(ref: "main", fetch: server.fetch)
-        var enabled = false
         var announced: [[String]] = []
-        let updater = ExtensionAutoUpdater(registry: registry, store: store, isEnabled: { enabled }, announce: { announced.append($0) })
+        let updater = ExtensionAutoUpdater(registry: registry, store: store, announce: { announced.append($0) })
 
-        #expect(await updater.runOnce().isEmpty)
-        #expect(server.treeReads == 0, "off: no read of the repository at all")
-
-        enabled = true
         #expect(await updater.runOnce() == ["Kubernetes"])
         #expect(announced == [["Kubernetes"]])
         #expect(store.installedExtension(id: "kubernetes")?.paletteIDs == ["kubernetes/contexts", "kubernetes/pods"])

@@ -20,10 +20,10 @@ final class ServerConnection: @unchecked Sendable {
     let serverPID: pid_t?
     /// One element for each event batch, in order. A batch is one consistent
     /// state: apply all of it at once (design/003 §5).
-    let events: AsyncStream<[ServerEvent]>
+    let events: AsyncStream<ServerEventBatch>
 
     private let fd: Int32
-    private let eventSink: AsyncStream<[ServerEvent]>.Continuation
+    private let eventSink: AsyncStream<ServerEventBatch>.Continuation
     private let lock = NSLock()
     /// Held for each write and for the close, so that no write goes to an
     /// fd number that the close gave back to the system.
@@ -111,7 +111,7 @@ final class ServerConnection: @unchecked Sendable {
         self.fd = fd
         serverHello = hello
         serverPID = pid
-        (events, eventSink) = AsyncStream.makeStream(of: [ServerEvent].self)
+        (events, eventSink) = AsyncStream.makeStream(of: ServerEventBatch.self)
     }
 
     /// Sends one request and waits for its response. A response with `err`
@@ -252,7 +252,7 @@ final class ServerConnection: @unchecked Sendable {
             waiting?.resume(returning: response)
         case let .events(batch):
             let events = batch.ev.compactMap(ServerEvent.init)
-            if !events.isEmpty { eventSink.yield(events) }
+            if !events.isEmpty { eventSink.yield(ServerEventBatch(seq: batch.seq, events: events)) }
         case .hello,
              .request,
              .refuse:
@@ -304,18 +304,47 @@ final class ServerConnection: @unchecked Sendable {
     }
 }
 
+/// The events of one batch that this build reads, with the batch's place
+/// in the server's order. A batch with none of them is not given.
+struct ServerEventBatch: Equatable {
+    /// The batch's number in the server's `epoch` (`StateSubscribe.Result.seq`).
+    var seq: UInt64
+    var events: [ServerEvent]
+}
+
 /// An event of the server that this build reads. Events that a later build
 /// added are skipped.
 enum ServerEvent: Equatable {
     /// A session's shell exited. The session keeps the status until a client
     /// sends `session.kill`.
     case sessionExit(MactermProtocol.SessionExit)
+    /// A change of the model (design/010 §3), for `ModelMirror`.
+    case model(MactermProtocol.EventKind)
 
     init?(_ event: MactermProtocol.Event) {
         switch try? event.decoded() {
         case let .sessionExit(value)?: self = .sessionExit(value)
-        default: return nil
+        case let kind?:
+            switch kind {
+            case .projectChanged,
+                 .projectRemoved,
+                 .projectOrder,
+                 .tabChanged,
+                 .tabRemoved,
+                 .tabOrder,
+                 .workspaceRemoved,
+                 .selectionChanged,
+                 .paneRemoved:
+                self = .model(kind)
+            default: return nil
+            }
+        case nil: return nil
         }
+    }
+
+    var isModel: Bool {
+        if case .model = self { return true }
+        return false
     }
 }
 

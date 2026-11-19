@@ -128,13 +128,8 @@ pub fn build(b: *std.Build) void {
     // A program of its own, so that the shipped binary has no generator. It
     // reads the protocol and the model as modules, with no ghostty.
     {
-        const protocol_mod = b.createModule(.{
-            .root_source_file = b.path("src/protocol/protocol.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        const model_mod = b.createModule(.{
-            .root_source_file = b.path("src/model/model.zig"),
+        const wire_mod = b.createModule(.{
+            .root_source_file = b.path("src/wire.zig"),
             .target = target,
             .optimize = optimize,
         });
@@ -142,10 +137,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tools/schema.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "protocol", .module = protocol_mod },
-                .{ .name = "model", .module = model_mod },
-            },
+            .imports = &.{.{ .name = "wire", .module = wire_mod }},
         });
         const schema_exe = b.addExecutable(.{ .name = "macterm-schema", .root_module = schema_mod });
         // Out of bin/, so that nothing that bundles the server finds it.

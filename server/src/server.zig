@@ -35,6 +35,7 @@ const m = protocol.messages;
 const registry = @import("registry.zig");
 const runs = @import("runs.zig");
 const peers = @import("peers.zig");
+const model_ipc = @import("model_ipc.zig");
 
 const Peer = peers.Peer;
 const Entry = registry.Entry;
@@ -243,6 +244,8 @@ pub const Server = struct {
     /// loop pass, because a request cannot add to `peers` while the loop
     /// walks it.
     pending_peers: std.ArrayList(i32) = .empty,
+    /// The model, when the app gave a state folder (`model_ipc.zig`).
+    model: model_ipc.State = .{},
 
     pub fn init(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, fds: Bound) !Server {
         var epoch: u64 = undefined;
@@ -277,6 +280,7 @@ pub const Server = struct {
         signal.installWakeHandler(@backingInt(lib_posix.SIG.CHLD));
         std.log.info("server started pid={d} epoch={x}", .{ std.c.getpid(), s.epoch });
         registry.discover(s);
+        model_ipc.load(s);
 
         var reactor: Reactor = .{};
         defer reactor.deinit(s.gpa);
@@ -368,8 +372,8 @@ pub const Server = struct {
     /// The time until the next deadline, or -1 for none.
     pub fn pollTimeout(s: *const Server) i32 {
         const t = s.now();
-        var next: ?i64 = null;
-        if (s.idle_since) |since| next = since + idle_exit_ms;
+        var next: ?i64 = s.model.deadline();
+        if (s.idle_since) |since| next = @min(next orelse since + idle_exit_ms, since + idle_exit_ms);
         for (s.spawns.items) |sp| {
             const d = sp.started_at + spawn_ms;
             next = @min(next orelse d, d);
@@ -438,8 +442,11 @@ pub const Server = struct {
         s.lock_fd = -1;
     }
 
-    /// Closes everything. Sessions see a client leave and keep running.
+    /// Closes everything. Sessions see a client leave and keep running. The
+    /// model goes to disk first: at `server.exit`, at SIGTERM, and when the
+    /// server is idle (design/010 §2).
     pub fn shutdown(s: *Server) void {
+        model_ipc.flush(s);
         s.links.deinit();
         s.closeListen();
         for (s.peers.items) |p| {
@@ -469,7 +476,7 @@ pub const Server = struct {
                 defer s.gpa.free(waiters);
                 for (waiters) |w| switch (w.kind) {
                     .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session does not answer."),
-                    .info, .list, .seen => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
+                    .info, .list, .seen, .history, .inspect, .subscribe => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
                     .kill => registry.wait(s, &e.waiters, w),
                 };
             }
@@ -500,6 +507,7 @@ pub const Server = struct {
         };
         runs.finishRuns(s);
         registry.answerLists(s);
+        model_ipc.timers(s);
     }
 
     pub fn sweep(s: *Server) void {

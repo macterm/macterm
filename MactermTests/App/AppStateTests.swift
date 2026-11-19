@@ -1028,105 +1028,95 @@ struct AppStateTests {
         #expect(ran)
     }
 
-    @Test
-    func selectTab_persists_cleared_completion_indicator() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = makeAppState(store: store)
-        let project = seedProject(state)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
-        let pane = try #require(tab.splitRoot.allPanes().first)
-        pane.executionState = .done
-        state.saveWorkspaces()
+    // MARK: - Attention (the session's flags)
 
-        state.selectTab(tab.id, projectID: project.id)
-
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
-        #expect(restored.first?.tabs.first?.executionState == .idle)
-    }
+    private let unseenFailure = MactermProtocol.Attention(unseen: true, failed: true)
 
     @Test
-    func selectProject_persists_cleared_active_tab_indicator() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = makeAppState(store: store)
-        let p1 = seedProject(state, name: "p1", path: "/tmp1")
-        _ = seedProject(state, name: "p2", path: "/tmp2")
-        let tab = try #require(state.workspaces[p1.id]?.activeTab)
-        let pane = try #require(tab.splitRoot.allPanes().first)
-        pane.executionState = .done
-        state.saveWorkspaces()
-
-        state.selectProject(p1)
-
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [p1.id])
-        #expect(restored.first?.tabs.first?.executionState == .idle)
-    }
-
-    // MARK: - Failed completion (OSC 9;4 ERROR)
-
-    /// End `pane`'s progress run on an ERROR.
-    private func fail(_ pane: Pane) {
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
-        pane.markProgressFinished(failed: true)
-    }
-
-    @Test
-    func a_failure_in_the_active_tab_is_acknowledged_like_a_success() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = makeAppState(store: store)
-        // Inactive while the run fails, so the poll it wakes can't acknowledge
-        // it first; the acknowledgement under test is the one below.
-        state.isAppActive = { false }
-        let project = seedProject(state)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
-        fail(pane)
-        #expect(pane.completionFailed)
-
-        state.isAppActive = { true }
-        #expect(state.acknowledgeFinishedCommandIfActive(paneID: pane.id, projectID: project.id))
-
-        #expect(pane.executionState == .idle)
-        #expect(!pane.completionFailed)
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
-        #expect(restored.first?.tabs.first?.executionState == .idle)
-        #expect(restored.first?.tabs.first?.completionFailed == false)
-    }
-
-    @Test
-    func a_failure_in_a_background_tab_stays_red_until_that_tab_is_selected() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = makeAppState(store: store)
+    func selecting_a_background_tab_marks_its_panes_seen() throws {
+        let state = makeAppState()
         state.isAppActive = { true }
         let project = seedProject(state)
         let background = try #require(state.workspaces[project.id]?.activeTab)
         state.createTab(projectID: project.id, projects: [project])
         let pane = try #require(background.focusedPane)
-        fail(pane)
+        pane.receiveAttention(unseenFailure)
 
-        #expect(!state.acknowledgeFinishedCommandIfActive(paneID: pane.id, projectID: project.id))
+        state.markSeenIfActive(paneID: pane.id, projectID: project.id)
         #expect(background.completionFailed)
-        state.saveWorkspaces()
-        let saved = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
-        #expect(saved.first?.tabs.first { $0.id == background.id }?.completionFailed == true)
 
         state.selectTab(background.id, projectID: project.id)
 
+        #expect(pane.attention == MactermProtocol.Attention())
         #expect(background.executionState == .idle)
-        #expect(!background.completionFailed)
+    }
+
+    @Test
+    func selecting_a_project_marks_its_active_tab_seen() throws {
+        let state = makeAppState()
+        let p1 = seedProject(state, name: "p1", path: "/tmp1")
+        _ = seedProject(state, name: "p2", path: "/tmp2")
+        let pane = try #require(state.workspaces[p1.id]?.activeTab?.focusedPane)
+        pane.receiveAttention(unseenFailure)
+
+        state.selectProject(p1)
+
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
+    @Test
+    func the_active_tab_is_seen_only_while_the_app_is_active() throws {
+        let state = makeAppState()
+        state.paneIsInKeyWindow = { _ in true }
+        state.isAppActive = { false }
+        let project = seedProject(state)
+        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        pane.receiveAttention(unseenFailure)
+
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == unseenFailure)
+
+        state.isAppActive = { true }
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
+    /// The workspace's active tab can name a tab that the window does not
+    /// draw (a selection made while the window was not key). A pane that is
+    /// in no key window keeps its flags.
+    @Test
+    func a_pane_that_the_key_window_does_not_draw_is_not_seen() throws {
+        let state = makeAppState()
+        state.isAppActive = { true }
+        state.paneIsInKeyWindow = { _ in false }
+        let project = seedProject(state)
+        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        pane.receiveAttention(unseenFailure)
+
+        state.paneAttentionDidChange(paneID: pane.id)
+        state.markActiveTabSeenOnActivation()
+
+        #expect(pane.attention == unseenFailure)
+    }
+
+    /// The session keeps the flags across a quit: the saved file has none.
+    @Test
+    func saved_workspaces_hold_no_attention() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = WorkspaceStore(fileURL: tmp)
+        let state = makeAppState(store: store)
+        state.isAppActive = { false }
+        let project = seedProject(state)
+        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        pane.receiveAttention(unseenFailure)
+        pane.executionState = .done
+        state.saveWorkspaces()
+
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
-        #expect(restored.first?.tabs.first { $0.id == background.id }?.completionFailed == false)
+        #expect(restored.first?.tabs.first?.executionState == .idle)
+        #expect(restored.first?.tabs.first?.splitRoot.allPanes().first?.executionState == .idle)
     }
 
     // MARK: - Rename state

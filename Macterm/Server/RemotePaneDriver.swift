@@ -45,16 +45,49 @@ final class RemotePaneDriver: PaneInputRoute {
     private var undelivered = Data()
     /// A key found the link down: connect at once after the `lost` answer.
     private var retryAfterLost = false
+    /// The session attached at least once in this run.
+    private var attached = false
+    /// After this time with no attach, the first connect is slow
+    /// (`RemoteHosts.firstConnectIsSlow`).
+    private let slowConnectAfter: Duration
 
-    init(name: String, surface: any PaneSessionHost, hosts: RemoteHosts = .shared) {
+    /// A connect to a host whose server does not answer runs until the
+    /// handshake gives up (15 s, `RemoteServers.Configuration.handshakeTimeout`).
+    /// A login that is slower than this time shows the badge too.
+    static let slowConnectAfter: Duration = .seconds(3)
+
+    init(
+        name: String,
+        surface: any PaneSessionHost,
+        hosts: RemoteHosts = .shared,
+        slowConnectAfter: Duration = RemotePaneDriver.slowConnectAfter
+    ) {
         self.name = name
         self.surface = surface
         self.hosts = hosts
+        self.slowConnectAfter = slowConnectAfter
     }
 
     func start() {
         registerWake()
         step(.ask)
+        watchFirstConnect()
+    }
+
+    /// A pane that came back after a restart shows nothing while its first
+    /// connect runs. When that connect is slow, the badge says so.
+    private func watchFirstConnect() {
+        Task { @MainActor [weak self, slowConnectAfter] in
+            try? await Task.sleep(for: slowConnectAfter)
+            guard let self, !attached else { return }
+            switch state {
+            case .idle,
+                 .waiting: hosts.firstConnectIsSlow(hosts.pane?(name))
+            case .running,
+                 .plain,
+                 .closed: break
+            }
+        }
     }
 
     func stop() {
@@ -168,6 +201,7 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     fileprivate func sessionAttached() {
+        attached = true
         hosts.sessionAttached(name, pane: hosts.pane?(name))
     }
 
@@ -218,6 +252,10 @@ final class RemotePaneDriver: PaneInputRoute {
 
     nonisolated func sendSize(_ grid: PaneGrid?) {
         DispatchQueue.main.async { MainActor.assumeIsolated { self.currentRoute()?.sendSize(grid) } }
+    }
+
+    nonisolated func seen() {
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.currentRoute()?.seen() } }
     }
 
     private func currentRoute() -> (any PaneInputRoute)? {
@@ -319,6 +357,10 @@ final class RemotePaneDriver: PaneInputRoute {
 
         func paneTtyMode(_ mode: MactermProtocol.TtyMode) {
             surface.paneTtyMode(mode)
+        }
+
+        func paneAttention(_ flags: MactermProtocol.Attention) {
+            surface.paneAttention(flags)
         }
 
         func paneExited(code: UInt8?, signal: UInt8?) {

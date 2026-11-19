@@ -101,6 +101,11 @@ struct PaneChannelTests {
         let lead = ProtocolFrame(channel: 3, kind: .msg, body: writer.data)
         #expect(PaneChannelEvent(lead) == .lead(true))
 
+        var flags = MessagePackWriter()
+        let attention = MactermProtocol.Attention(unseen: true, failed: true, bell: false)
+        MactermProtocol.PaneMessage(attention).encode(to: &flags)
+        #expect(PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: flags.data)) == .attention(attention))
+
         var unknown = MessagePackWriter()
         MactermProtocol.PaneMessage(t: "from.a.later.build", a: nil).encode(to: &unknown)
         #expect(PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: unknown.data)) == .other("from.a.later.build"))

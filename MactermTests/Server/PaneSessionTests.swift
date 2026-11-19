@@ -152,6 +152,64 @@ struct PaneSessionTests {
         }
     }
 
+    /// The session's flags reach every client, and a `seen` from one client
+    /// clears them for both.
+    @Test
+    func the_attention_flags_reach_each_client_and_seen_clears_them() async throws {
+        try await withServer { server in
+            let name = "ps-seen-\(UInt32.random(in: 0 ... .max))"
+            let first = RecordingPaneHost()
+            let a = PaneSession(
+                name: name,
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "read l; printf '\\a'; sleep 60"], env: []),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.leads == [true] }
+            let second = RecordingPaneHost()
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            b.start()
+            try await second.waitFor { $0.leads == [false] }
+
+            a.sendInput(Data("\n".utf8))
+            let bell = MactermProtocol.Attention(bell: true)
+            try await first.waitFor { $0.attention.last == bell }
+            try await second.waitFor { $0.attention.last == bell }
+
+            b.seen()
+            try await first.waitFor { $0.attention.last == MactermProtocol.Attention() }
+            try await second.waitFor { $0.attention.last == MactermProtocol.Attention() }
+            a.stop()
+            b.stop()
+        }
+    }
+
+    /// The session sends its flags at an attach only when one is set, so a
+    /// channel that ends clears the host's copy.
+    @Test
+    func a_lost_link_clears_the_attention_flags() async throws {
+        try await withServer { server in
+            let host = RecordingPaneHost()
+            let connections = ConnectionBox()
+            let session = PaneSession(
+                name: "ps-flags-\(UInt32.random(in: 0 ... .max))",
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf '\\a'; sleep 60"], env: []),
+                wantsForeground: false,
+                reconnects: false,
+                host: host,
+                connect: { try await connections.next(server) }
+            )
+            session.start()
+            try await host.waitFor { $0.attention.last == MactermProtocol.Attention(bell: true) }
+            connections.current?.close()
+            try await host.waitFor { $0.linkLost > 0 }
+            #expect(host.snapshot().attention.last == MactermProtocol.Attention())
+            session.stop()
+        }
+    }
+
     @Test
     func a_session_that_was_killed_ends_the_pane_and_is_not_made_again() async throws {
         try await withServer { server in
@@ -173,6 +231,49 @@ struct PaneSessionTests {
             let sessions = try await other.call(MactermProtocol.SessionList.self, .init()).sessions
             #expect(sessions.isEmpty)
             session.stop()
+        }
+    }
+
+    @Test
+    func a_grid_that_changes_before_the_snapshot_gets_a_snapshot_for_the_new_grid() async throws {
+        // A restored pane attaches in the incubator, then moves into its
+        // tile before the snapshot comes. A snapshot laid out for the
+        // incubator puts the cursor on the wrong row of the tile.
+        try await withServer { server in
+            let name = "ps-regrid-\(UInt32.random(in: 0 ... .max))"
+            let wide = PaneGrid(cols: 100, rows: 10)
+            let first = RecordingPaneHost(grid: wide)
+            let a = PaneSession(
+                name: name,
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf '%060d\\n' 0; printf END; sleep 60"],
+                    env: []
+                ),
+                wantsForeground: false,
+                host: first,
+                connect: { try await server.connect() }
+            )
+            a.start()
+            try await first.waitFor { $0.screen.contains("END") }
+            a.stop()
+
+            let narrow = PaneGrid(cols: 30, rows: 10)
+            let box = SessionBox()
+            let second = RecordingPaneHost(grid: wide) { [box] in
+                box.host?.setGrid(narrow)
+                box.session?.sendSize(narrow)
+            }
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            box.set(session: b, host: second)
+            b.start()
+            try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
+            // At 30 columns the line of 60 takes rows 1 and 2, and END is on
+            // row 3. At 100 columns it would be on row 2.
+            let drawn = second.snapshot().snapshots
+            #expect(drawn.count == 1)
+            #expect(drawn.last?.contains("\u{1B}[3;4H") == true, "\(drawn.last.debugDescription)")
+            b.stop()
         }
     }
 
@@ -349,6 +450,29 @@ struct PaneSessionTests {
     }
 
     // MARK: - Support
+
+    /// The session and host of a test, for a host's hook.
+    final class SessionBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: (PaneSession, RecordingPaneHost)?
+        var session: PaneSession? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored?.0
+        }
+
+        var host: RecordingPaneHost? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored?.1
+        }
+
+        func set(session: PaneSession, host: RecordingPaneHost) {
+            lock.lock()
+            stored = (session, host)
+            lock.unlock()
+        }
+    }
 
     /// Holds the connection that a session got, so that a test can end it.
     final class ConnectionBox: @unchecked Sendable {

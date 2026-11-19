@@ -7,7 +7,7 @@ This file loads when you work in `Macterm/Protocol/`. The root `AGENTS.md` has t
 The frames and messages between the app, the server and the session processes (design/003). The app speaks it on `ServerConnection` (channel 0) and on every pane's channel (`PaneChannel`, `PaneSession`).
 
 - **The Zig messages are the one source** (`server/src/protocol/messages.zig`). The generator is a program of its own (`server/tools/schema.zig`, `zig build schema`, into `server/zig-out/tools`), so the shipped server has none. It writes the Swift types (`Macterm/Protocol/MactermProtocol.generated.swift`), the metadata (`server/schema/protocol.json`) and frames that Zig encoded (`server/schema/frames.json`). `mise run protocol` writes all three. Never edit them by hand.
-- **The schema reads types from `messages.zig` and the model** (`server/src/model/`, `name_spaces` in the generator). A type's schema name is its name in its file, so a name must be unique across both. Besides structs, enums, integers and strings, it carries `f64` (always a float 64 on the wire) and tagged unions: `{t: tag, a: payload}`, the shape of a pane message, with no `a` for a case with no payload. A union is an `indirect enum` in Swift, so a split can hold two nodes; `*T` on the wire is the `T`. A new union case needs an `unknown` case, as a new enum case does.
+- **The schema reads types from `messages.zig` and the model** (`server/src/model/`, `name_spaces` in the generator, through the module `server/src/wire.zig`). A type's schema name is its name in its file, so a name must be unique across both. Besides structs, enums, integers and strings, it carries `f64` (always a float 64 on the wire) and tagged unions: `{t: tag, a: payload}`, the shape of a pane message, with no `a` for a case with no payload. A union is an `indirect enum` in Swift, so a split can hold two nodes; `*T` on the wire is the `T`. A new union case needs an `unknown` case, as a new enum case does.
 - `MessagePack.swift` and `ProtocolFrame.swift` follow the Zig codec byte for byte. The cap on array memory differs: Swift counts its stride. `ProtocolFixtureTests` decodes each Zig frame and encodes it again to the same bytes.
 - **CI checks the schema** (`scripts/protocol.sh --check` in the Server workflow; `mise run protocol --check` locally):
   - The generated files are current.
@@ -17,6 +17,7 @@ The frames and messages between the app, the server and the session processes (d
   - No method result and no event holds a `secret`.
   - No error code is removed. The codes are `ErrorCode` in `messages.zig`; the app compares `ErrorInfo.errorCode`, never the string.
 - A new field in an older type names its level in `field_since`.
+- Each method declares its own `Args` and `Result` structs. A shared type gives Swift no nested `Result`, and the method does not conform to `ProtocolMethod`.
 - Field names and enum tags are snake_case ASCII (`checkName`), so the Swift String compare is the Zig byte compare.
 - `scripts/protocol.sh` needs Zig 0.17 on PATH or in `$ZIG`.
 - The generator also writes `PaneMessage.decoded()` and `Event.decoded()` (`PaneMessageKind`, `EventKind`, with `unknown` for a message of a later build). Read a pane message or an event through them, not with a list of names of your own.

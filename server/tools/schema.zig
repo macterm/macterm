@@ -14,8 +14,9 @@
 //! message, and no saved secret in a reply or an event (design/006 §1).
 
 const std = @import("std");
-const protocol = @import("protocol");
-const model = @import("model");
+const server_src = @import("wire");
+const protocol = server_src.protocol;
+const model = server_src.model;
 const msgpack = protocol.msgpack;
 const messages = protocol.messages;
 const frame = protocol.frame;
@@ -97,7 +98,7 @@ pub const Metadata = struct {
 pub const metadata: Metadata = build();
 
 fn build() Metadata {
-    @setEvalBranchQuota(100_000);
+    @setEvalBranchQuota(1_000_000);
     comptime {
         const handshake = .{ messages.Hello, messages.Refuse };
         const envelopes = .{ messages.Request, messages.Response, messages.EventBatch, messages.PaneMessage };
@@ -178,7 +179,7 @@ fn build() Metadata {
 /// Swift side would declare one of them twice.
 fn typeDefs(comptime types: []const type) [types.len]TypeDef {
     comptime {
-        @setEvalBranchQuota(100_000);
+        @setEvalBranchQuota(1_000_000);
         var out: [types.len]TypeDef = undefined;
         for (types, 0..) |T, i| {
             out[i] = typeDef(T);
@@ -339,7 +340,28 @@ fn fieldSince(comptime T: type, comptime name: []const u8) u32 {
     for (messages.methods) |M| {
         if (T == M.Args or T == M.Result) return M.since;
     }
-    return 1;
+    return carriedSince(T);
+}
+
+/// The lowest `since` of the methods and events that carry `T` (the model's
+/// types come with the messages of level 3). 1 for a type that a message of
+/// level 1 carries, or that no message carries.
+fn carriedSince(comptime T: type) u32 {
+    comptime {
+        @setEvalBranchQuota(2_000_000);
+        var lowest: ?u32 = null;
+        for (messages.methods) |M| {
+            for (collect(M.Result, collect(M.Args, &.{}))) |C| if (C == T) {
+                lowest = @min(lowest orelse M.since, M.since);
+            };
+        }
+        for (messages.events) |E| {
+            for (collect(E, &.{})) |C| if (C == T) {
+                lowest = @min(lowest orelse E.since, E.since);
+            };
+        }
+        return lowest orelse 1;
+    }
 }
 
 /// Names that the generated Swift uses for its own locals.
@@ -376,6 +398,8 @@ fn defaultText(comptime F: type, comptime value: F) []const u8 {
             @compileError("a default float must be finite"),
         .@"enum" => @tagName(value),
         .pointer => if (value.len == 0) "[]" else @compileError("a default array must be empty"),
+        // A struct whose own fields all have their defaults: `{}`.
+        .@"struct" => if (std.meta.eql(value, F{})) "{}" else @compileError("a default struct must be .{}"),
         else => @compileError("no default of type " ++ @typeName(F)),
     };
 }
@@ -1118,6 +1142,7 @@ fn formatDefault(pair: [2][]const u8, w: *std.Io.Writer) std.Io.Writer.Error!voi
         if (std.mem.eql(u8, p, wire)) return w.writeAll(text);
     }
     if (std.mem.eql(u8, text, "[]")) return w.writeAll("[]");
+    if (std.mem.eql(u8, text, "{}")) return w.writeAll(".init()");
     // An enum tag.
     try w.writeByte('.');
     try formatName(text, w);
@@ -1287,6 +1312,84 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         fixture.replace = c[3];
         try list.append(arena, fixture);
     }
+
+    // The model (design/010): a split tree with an f64 ratio and both cases
+    // of the Node union, in a reply, a request, a batch and an import.
+    const project_id = model.ProjectId.of("p-1");
+    const workspace_id = model.WorkspaceId.ofProject(project_id);
+    const tab_id = model.TabId.of("t-1");
+    const left: model.Pane = .{
+        .id = model.PaneId.of("pane-1"),
+        .session = "macterm-1",
+        .slug = "api",
+        .origin_path = "/src/api",
+        .cwd = "/src/api/cmd",
+        .attention = .done,
+    };
+    const right: model.Pane = .{
+        .id = model.PaneId.of("pane-2"),
+        .session = "macterm-2",
+        .host = "me@box",
+        .host_session_dir = "/run/macterm",
+    };
+    var split: model.tree.Split = .{
+        .id = model.SplitId.of("s-1"),
+        .dir = .horizontal,
+        .ratio = 0.3,
+        .first = .{ .pane = left },
+        .second = .{ .pane = right },
+    };
+    const tab: model.Tab = .{
+        .id = tab_id,
+        .custom_title = "build",
+        .root = .{ .split = &split },
+        .focused = right.id,
+    };
+    var tabs = [_]model.Tab{tab};
+    var projects = [_]model.Project{.{
+        .id = project_id,
+        .name = "api",
+        .path = "/src/api",
+        .color = "blue",
+        .sort_order = 2,
+        .created_at = 1_700_000_000_000,
+    }};
+    var workspaces = [_]model.Workspace{.{
+        .id = workspace_id,
+        .kind = .project,
+        .tabs = &tabs,
+        .active_tab = tab_id,
+    }};
+    const model_data: model.ModelData = .{
+        .epoch_hint = 5,
+        .imported_v1 = true,
+        .projects = &projects,
+        .workspaces = &workspaces,
+        .selection = .{ .active_project = project_id },
+    };
+
+    try m.encodeResult(&buf.writer, 10, m.StateSubscribe, .{
+        .epoch = 5,
+        .seq = 12,
+        .model = model_data,
+        .zoomed = &.{.{ .tab = tab_id, .pane = right.id }},
+        .sessions = &.{.{ .id = "macterm-1", .state = .running, .build = "2.0.0", .level = 3, .pid = 501 }},
+        .client = 77,
+    });
+    try list.append(arena, try control(arena, "state.subscribe result", Raw{ .bytes = try buf.toOwnedSlice() }, true));
+    try m.encodeRequest(&buf.writer, 11, m.TabCreate, .{
+        .workspace = workspace_id,
+        .id = tab_id,
+        .root = .{ .split = &split },
+        .title = "build",
+    });
+    try list.append(arena, try control(arena, "tab.create request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
+    try list.append(arena, try control(arena, "model events", m.EventBatch{ .seq = 13, .cause = 11, .ev = &.{
+        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .workspace = workspace_id, .tab = tab, .zoomed = right.id }) } },
+        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .workspace = workspace_id, .kind = .project, .ids = &.{tab_id}, .active_tab = tab_id }) } },
+    } }, true));
+    try m.encodeRequest(&buf.writer, 12, m.ModelImport, .{ .model = model_data, .source = "workspaces_v3.json" });
+    try list.append(arena, try control(arena, "model.import request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
 
     try m.encodePane(&buf.writer, m.Attach, .{ .cols = 120, .rows = 40 });
     try list.append(arena, try pane(arena, "attach", try buf.toOwnedSlice()));
@@ -1544,7 +1647,7 @@ test "every fixture decodes as the message it names" {
             .request
         else if (std.mem.endsWith(u8, f.name, "result") or std.mem.eql(u8, f.name, "error"))
             .response
-        else if (std.mem.eql(u8, f.name, "events"))
+        else if (std.mem.endsWith(u8, f.name, "events"))
             .events
         else if (std.mem.eql(u8, f.name, "refuse"))
             .refuse

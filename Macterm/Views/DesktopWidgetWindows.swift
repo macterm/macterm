@@ -700,7 +700,7 @@ private struct DesktopWidgetTerminalView: View {
                 guard let pane = tab.splitRoot.findPane(id: paneID),
                       SurfaceRegistry.shared.existingSurface(for: pane, in: .widget(widget.id))?.nsView?.window?.isKeyWindow == true
                 else { return }
-                pane.acknowledgeCommandCompletion()
+                pane.markSeen()
             },
             onAdaptiveBackgroundChange: { paneID, color in
                 guard let pane = tab.splitRoot.findPane(id: paneID) else { return }

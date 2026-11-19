@@ -50,7 +50,8 @@ enum RemotePaneAnswer {
 /// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
 ///   (`Pane.isRemoteLinkLost`): its cursor says disabled, and its badge
 ///   says `Reconnecting` while a try runs (`Pane.isRemoteReconnecting`),
-///   else `Connection Lost`.
+///   else `Connection Lost`. A pane that came back after a restart says
+///   `Reconnecting` while a slow first connect runs (`firstConnectIsSlow`).
 ///   It connects again by itself (`AppState.reconnectDroppedRemotePanes`
 ///   with `RemoteReconnectPolicy`): such a try never asks the user anything
 ///   (`reconnect`, a quiet login). A key in the pane connects at once, and
@@ -87,10 +88,12 @@ final class RemoteHosts {
             NotificationCenter.default.post(name: .remoteHostDidAnswer, object: $0)
         }
 
-        /// A pane became lost (its link stopped, or a try failed): the
-        /// reconnect sweep runs now, so a try starts at once or is planned.
-        var paneLost: @MainActor (String) -> Void = { _ in
-            NotificationCenter.default.post(name: .remoteLinkDidStop, object: nil)
+        /// A pane became lost: its link stopped, or a try failed
+        /// (`failedTry`). The reconnect sweep runs now, so a try starts at
+        /// once or is planned. After a failed try the backoff starts now
+        /// (`RemoteReconnectPolicy.tryFailed`).
+        var paneLost: @MainActor (_ session: String, _ failedTry: Bool) -> Void = { session, failedTry in
+            NotificationCenter.default.post(name: .remoteLinkDidStop, object: failedTry ? session : nil)
         }
 
         var declines: DeclineStore
@@ -238,7 +241,7 @@ final class RemoteHosts {
             if !isRoamingLink(target.destination) {
                 drop(target.destination)
             }
-            configuration.paneLost(session)
+            configuration.paneLost(session, false)
             return .wait(message: nil)
         case .retry:
             lost.remove(session)
@@ -252,6 +255,9 @@ final class RemoteHosts {
     /// on a missing session is gone and closes the pane.
     func sessionAttached(_ session: String, pane: Pane?) {
         let directory = creating.removeValue(forKey: session)
+        // No try runs now. A slow first connect can mark the pane after the
+        // answer to attach (`firstConnectIsSlow`).
+        if let pane, !pane.isRemoteLinkLost, pane.isRemoteReconnecting { pane.isRemoteReconnecting = false }
         guard let pane, pane.hostSessionDirectory == nil,
               let folder = directory ?? Target(pane)?.directory
         else { return }
@@ -407,7 +413,8 @@ final class RemoteHosts {
     }
 
     /// `checkFolder` for the scp-style path of a new remote project in the
-    /// GUI (the sheet, the palette): nil when the folder is there, else the
+    /// GUI (the sheet, the palette, Create Project of a layout file in
+    /// Settings): nil when the folder is there, else the
     /// line that says why nothing is added.
     func refusal(forNewProjectPath path: String) async -> String? {
         guard case let .remote(user, host, directory) = ProjectPath.parse(path) else { return nil }
@@ -517,7 +524,7 @@ final class RemoteHosts {
             if link.isRoaming, link.connection.isOpen, case let .ready(current) = hosts[destination], current === link {
                 lost.insert(session)
                 mark(pane, lost: true)
-                configuration.paneLost(session)
+                configuration.paneLost(session, true)
                 return .wait(message: nil)
             }
             // The link broke. Only a failure on the host's current link
@@ -533,7 +540,7 @@ final class RemoteHosts {
                 listFailures[destination] = nil
                 lost.insert(session)
                 mark(pane, lost: true)
-                configuration.paneLost(session)
+                configuration.paneLost(session, true)
                 return .wait(message: nil)
             }
             return await resolve(session, pane: pane, target: target, prompts: prompts)
@@ -672,7 +679,7 @@ final class RemoteHosts {
             for session in sessions {
                 lost.insert(session)
                 mark(pane?(session), lost: true)
-                configuration.paneLost(session)
+                configuration.paneLost(session, true)
             }
         }
         for session in sessions {
@@ -824,6 +831,21 @@ final class RemoteHosts {
         }
         if pane.isRemoteReconnecting { pane.isRemoteReconnecting = false }
         if !lost { quiet.remove(pane.sessionName) }
+    }
+
+    /// The first connect of a pane whose session ran on the host (a pane
+    /// that came back after a restart) runs long: the badge says
+    /// `Reconnecting` until the session attaches or the connect fails. A new
+    /// pane shows nothing, because its first connect can wait for a login
+    /// question. A host whose link is ready connects no more: another view
+    /// of the pane (a second window) can show it live.
+    func firstConnectIsSlow(_ pane: Pane?) {
+        guard let pane, pane.hostSessionDirectory != nil, !pane.isRemoteLinkLost, !pane.isRemoteReconnecting,
+              let target = Target(pane)
+        else { return }
+        if case .ready = hosts[target.destination] { return }
+        logger.info("remote pane: session=\(pane.sessionName, privacy: .public) first connect is slow")
+        pane.isRemoteReconnecting = true
     }
 
     /// A try starts for this lost pane: the badge says `Reconnecting`.

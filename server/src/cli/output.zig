@@ -10,6 +10,29 @@ pub fn writeError(w: *std.Io.Writer, message: []const u8, action: ?[]const u8) s
     if (action) |a| try w.print("  hint: {s}\n", .{a});
 }
 
+/// Rows of cells, each column as wide as its widest cell, two spaces apart.
+/// The last cell of a row has no padding (v1's `printColumns`).
+pub fn writeColumns(gpa: std.mem.Allocator, w: *std.Io.Writer, rows: []const []const []const u8) (std.Io.Writer.Error || error{OutOfMemory})!void {
+    var widths: std.ArrayList(usize) = .empty;
+    defer widths.deinit(gpa);
+    for (rows) |row| for (row, 0..) |cell, i| {
+        if (i == widths.items.len) try widths.append(gpa, 0);
+        widths.items[i] = @max(widths.items[i], cellWidth(cell));
+    };
+    for (rows) |row| {
+        for (row, 0..) |cell, i| {
+            if (i > 0) try w.writeAll("  ");
+            try w.writeAll(cell);
+            if (i + 1 < row.len) try w.splatByteAll(' ', widths.items[i] - cellWidth(cell));
+        }
+        try w.writeByte('\n');
+    }
+}
+
+fn cellWidth(cell: []const u8) usize {
+    return std.unicode.utf8CountCodepoints(cell) catch cell.len;
+}
+
 /// `--json` output: the value as Foundation's `JSONEncoder` writes it with
 /// `.prettyPrinted` and `.sortedKeys` (two spaces, `"key" : value`, `\/`),
 /// and a newline.

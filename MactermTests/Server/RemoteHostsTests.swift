@@ -293,6 +293,101 @@ struct RemoteHostsTests {
         }
     }
 
+    /// After a restart of the app, a pane whose session ran on the host
+    /// connects for the first time. A slow connect shows `Reconnecting`, and
+    /// the attach clears it. A new pane in the same connect shows nothing.
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_slow_first_connect_of_a_restored_pane_shows_reconnecting() async throws {
+        try await withSSHDHost { host in
+            let before = Fixture(host, wakes: true)
+            let restored = before.pane()
+            before.hosts.pane = { _ in restored }
+            let first = RemotePaneDriver(name: restored.sessionName, surface: RecordingPaneHost(), hosts: before.hosts)
+            first.start()
+            let deadline = Date().addingTimeInterval(30)
+            while restored.hostSessionDirectory == nil, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(restored.hostSessionDirectory == before.directory)
+            // The app quits: the channel and the login end, the session stays.
+            first.stop()
+            host.sshd.dropConnections()
+
+            // The next login takes 4 s to reach the host.
+            try host.sshd.addToConfig("ProxyCommand /bin/sh -c 'sleep 4; exec /usr/bin/nc %h %p'")
+            let after = Fixture(host, wakes: true)
+            let fresh = after.pane()
+            after.hosts.pane = { $0 == restored.sessionName ? restored : fresh }
+            let views = [RecordingPaneHost(), RecordingPaneHost()]
+            let drivers = zip([restored, fresh], views).map { pane, view in
+                RemotePaneDriver(name: pane.sessionName, surface: view, hosts: after.hosts, slowConnectAfter: .seconds(1))
+            }
+            defer { drivers.forEach { $0.stop() } }
+            drivers.forEach { $0.start() }
+            try await Task.sleep(for: .seconds(2))
+            #expect(restored.remoteLinkBadge == .reconnecting)
+            #expect(!restored.isRemoteLinkLost)
+            #expect(fresh.remoteLinkBadge == nil)
+
+            try await views[0].waitFor { $0.resets > 0 }
+            try await views[1].waitFor { $0.resets > 0 }
+            let attached = Date().addingTimeInterval(10)
+            while restored.remoteLinkBadge != nil, Date() < attached {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(restored.remoteLinkBadge == nil)
+            #expect(fresh.remoteLinkBadge == nil)
+        }
+    }
+
+    /// The app's sweep learns which pane's try failed: the default
+    /// `paneLost` posts the session only for a failed try, never for a link
+    /// that stopped (`AppState.reconnectDroppedRemotePanes(failedTry:)`).
+    @Test
+    func a_failed_try_names_its_session_and_a_stopped_link_names_none() {
+        let configuration = RemoteHosts.Configuration(key: nil, declines: .memory())
+        let objects = LockedBox<[String?]>([])
+        let observer = NotificationCenter.default.addObserver(forName: .remoteLinkDidStop, object: nil, queue: nil) { note in
+            let object = note.object as? String
+            objects.mutate { $0.append(object) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let session = "macterm-test-\(UUID().uuidString)"
+        configuration.paneLost(session, true)
+        configuration.paneLost(session, false)
+        #expect(objects.value.filter { $0 == session || $0 == nil }.suffix(2) == [session, nil])
+    }
+
+    /// The first connect of a pane that came back after a restart fails
+    /// after a slow start: the badge changes from `Reconnecting` to
+    /// `Connection Lost`, and the failure is a failed try, so the sweep
+    /// waits its backoff before the next try.
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_failed_slow_first_connect_of_a_restored_pane_shows_connection_lost() async throws {
+        try await withSSHDHost { host in
+            let fixture = Fixture(host, wakes: true)
+            let pane = fixture.pane()
+            // The session ran on the host before the restart.
+            pane.hostSessionDirectory = fixture.directory
+            fixture.hosts.pane = { _ in pane }
+            // The login fails after 4 s.
+            try host.sshd.addToConfig("ProxyCommand /bin/sh -c 'sleep 4; exit 1'")
+            let driver = RemotePaneDriver(
+                name: pane.sessionName, surface: RecordingPaneHost(), hosts: fixture.hosts, slowConnectAfter: .seconds(1)
+            )
+            defer { driver.stop() }
+            driver.start()
+            try await Task.sleep(for: .seconds(2))
+            #expect(pane.remoteLinkBadge == .reconnecting)
+            let deadline = Date().addingTimeInterval(30)
+            while pane.remoteLinkBadge != .lost, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(pane.remoteLinkBadge == .lost)
+            #expect(fixture.failedTries == [pane.sessionName])
+        }
+    }
+
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func an_automatic_try_asks_nothing_and_a_key_logs_in() async throws {
         try await withSSHDHost(passphrase: "open sesame") { host in
@@ -599,12 +694,15 @@ struct RemoteHostsTests {
         var connected: [String] { connections.value }
         private let readyHosts = LockedBox<[String]>([])
         private let stopped = LockedBox<[String]>([])
+        private let failures = LockedBox<[String]>([])
         private let answers = LockedBox<[String]>([])
         /// The hosts whose quiet roaming link heard them again
         /// (`hostAnswered`), in order.
         var answered: [String] { answers.value }
         /// The sessions that became lost (`paneLost`), in order.
         var panesLost: [String] { stopped.value }
+        /// The sessions whose try failed (`paneLost` with `failedTry`), in order.
+        var failedTries: [String] { failures.value }
 
         /// The hosts whose link became ready, in order.
         var ready: [String] {
@@ -638,7 +736,10 @@ struct RemoteHostsTests {
             }
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
             configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
-            configuration.paneLost = { [stopped] session in stopped.mutate { $0.append(session) } }
+            configuration.paneLost = { [stopped, failures] session, failedTry in
+                stopped.mutate { $0.append(session) }
+                if failedTry { failures.mutate { $0.append(session) } }
+            }
             configuration.hostAnswered = { [answers] destination in answers.mutate { $0.append(destination) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)
         }

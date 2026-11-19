@@ -217,26 +217,26 @@ struct TerminalTabTests {
     // MARK: - executionState
 
     @Test
-    func executionState_prefers_running_then_done_then_idle() throws {
+    func executionState_prefers_running_then_unseen_then_idle() throws {
         let (tab, ids) = makeTab(H(pane("a"), H(pane("b"), pane("c"))), focused: "a")
-        let bID = try #require(ids["b"])
-        let cID = try #require(ids["c"])
-        let b = try #require(tab.splitRoot.findPane(id: bID))
-        let c = try #require(tab.splitRoot.findPane(id: cID))
-        b.executionState = .done
+        let b = try paneNamed("b", in: tab, ids)
+        let c = try paneNamed("c", in: tab, ids)
+        b.receiveAttention(MactermProtocol.Attention(unseen: true))
         c.executionState = .running
         #expect(tab.executionState == .running)
         c.executionState = .idle
         #expect(tab.executionState == .done)
-        b.executionState = .idle
+        b.receiveAttention(MactermProtocol.Attention())
         #expect(tab.executionState == .idle)
     }
 
-    /// A pane whose progress run ended on an OSC 9;4 ERROR.
-    private func fail(_ pane: Pane) {
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
-        pane.markProgressFinished(failed: true)
+    /// The run state's own `.done` no longer draws a dot: only the session's
+    /// `unseen` flag does.
+    @Test
+    func executionState_ignores_a_done_run_state() throws {
+        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
+        try paneNamed("a", in: tab, ids).executionState = .done
+        #expect(tab.executionState == .idle)
     }
 
     private func paneNamed(_ name: String, in tab: TerminalTab, _ ids: [String: UUID]) throws -> Pane {
@@ -250,8 +250,8 @@ struct TerminalTabTests {
         let a = try paneNamed("a", in: tab, ids)
         let b = try paneNamed("b", in: tab, ids)
         let c = try paneNamed("c", in: tab, ids)
-        b.executionState = .done
-        fail(c)
+        b.receiveAttention(MactermProtocol.Attention(unseen: true))
+        c.receiveAttention(MactermProtocol.Attention(unseen: true, failed: true))
         // One pane passed and one failed: the failure shows.
         #expect(tab.executionState == .done)
         #expect(tab.completionFailed)
@@ -261,23 +261,24 @@ struct TerminalTabTests {
         #expect(!tab.completionFailed)
         a.executionState = .idle
         #expect(tab.completionFailed)
-        // Acknowledging the failed pane leaves the passing one's green dot.
-        c.acknowledgeCommandCompletion()
+        // Seeing the failed pane leaves the passing one's green dot.
+        c.markSeen()
         #expect(tab.executionState == .done)
         #expect(!tab.completionFailed)
     }
 
     @Test
-    func acknowledgeCommandCompletion_clears_a_failure_like_a_success() throws {
+    func markSeen_clears_every_pane_of_the_tab() throws {
         let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
         let a = try paneNamed("a", in: tab, ids)
         let b = try paneNamed("b", in: tab, ids)
-        fail(a)
-        b.executionState = .done
-        #expect(tab.acknowledgeCommandCompletion())
+        a.receiveAttention(MactermProtocol.Attention(unseen: true, failed: true))
+        b.receiveAttention(MactermProtocol.Attention(bell: true))
+        #expect(tab.hasUnseenBell)
+        tab.markSeen()
         #expect(tab.executionState == .idle)
         #expect(!tab.completionFailed)
-        #expect(!a.completionFailed)
+        #expect(!tab.hasUnseenBell)
     }
 
     // MARK: - toggleZoom
