@@ -261,7 +261,7 @@ pub const RunLine = union(enum) { text: []const u8, stray: []const u8 };
 /// The words of `pane run`: plain words before `--` and every word after it
 /// are typed. A word with a dash before `--` is refused: it is a mistyped
 /// flag or a flag of the typed command, and a guess types into the wrong
-/// place. A lone `-` is a word (stdin, by custom).
+/// place. A lone `-` is a word.
 pub fn runLine(arena: std.mem.Allocator, words: []const []const u8) error{OutOfMemory}!RunLine {
     var typed: std.ArrayList([]const u8) = .empty;
     var after = false;
@@ -449,7 +449,8 @@ pub const Inspect = struct {
     foregroundPID: ?i64 = null,
     foregroundArgv: ?[]const []const u8 = null,
     processExited: bool,
-    needsConfirmQuit: bool,
+    /// Null when the session cannot read the foreground.
+    needsConfirmQuit: ?bool = null,
     readOnly: ?bool = null,
 };
 
@@ -486,7 +487,7 @@ pub fn inspectOf(arena: std.mem.Allocator, session: []const u8, t: m.TerminalSta
         .foregroundPID = t.foreground_pid,
         .foregroundArgv = argv,
         .processExited = t.exited,
-        .needsConfirmQuit = t.busy orelse false,
+        .needsConfirmQuit = if (t.exited) false else t.busy,
     };
 }
 
@@ -527,7 +528,7 @@ fn writeInspect(ctx: Context, i: Inspect, json: bool) error{ OutOfMemory, WriteF
         &.{ "content scale", scale },
         &.{ "foreground", fg },
         &.{ "process exited", if (i.processExited) "true" else "false" },
-        &.{ "needs confirm quit", if (i.needsConfirmQuit) "true" else "false" },
+        &.{ "needs confirm quit", try optText(a, i.needsConfirmQuit) },
         &.{ "read-only", try optText(a, i.readOnly) },
     });
 }

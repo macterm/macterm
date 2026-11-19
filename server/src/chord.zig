@@ -139,7 +139,10 @@ fn text(chord: Chord, buf: *[1]u8) ?[]const u8 {
 /// modes encode them. A release writes nothing unless the kitty flags ask
 /// for it.
 pub fn encode(w: *std.Io.Writer, chord: Chord, term: *const vt.Terminal) std.Io.Writer.Error!void {
-    const opts: input.KeyEncodeOptions = .fromTerminal(term);
+    var opts: input.KeyEncodeOptions = .fromTerminal(term);
+    // The app's default (`MactermConfig.defaultsBody`): Option is Alt, so
+    // `opt+x` sends ESC x, as v1's `pane key` did.
+    opts.macos_option_as_alt = .true;
     var buf: [1]u8 = undefined;
     const typed = text(chord, &buf);
     const event: input.KeyEvent = .{
@@ -194,6 +197,7 @@ test "chord: the keys of the pane key help" {
     try expectEncoded("\r", "enter", "");
     try expectEncoded("\r", "return", "");
     try expectEncoded("A", "Shift + A", "");
+    try expectEncoded("\x1bx", "opt+x", "");
 }
 
 test "chord: the terminal's modes decide the bytes" {

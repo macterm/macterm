@@ -202,10 +202,6 @@ pub fn serializeTerminalState(alloc: std.mem.Allocator, term: *ghostty_vt.Termin
     return serializeState(alloc, term, true);
 }
 
-/// The visible screen and the terminal's modes, with no scrollback. A client
-/// that fell behind already has the scrollback up to the point where its
-/// output was dropped; the rows that it missed are read by range. The screen
-/// is cleared first, because the client's screen still shows the old rows.
 pub const PlainText = struct { text: []const u8, truncated: bool };
 
 /// The text of the active screen (`session.history`): the viewport, or the
@@ -226,12 +222,18 @@ pub fn plainText(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal, scrollbac
     const text = out.written();
     if (text.len <= max) return .{ .text = text, .truncated = false };
     var start = text.len - max;
-    if (std.mem.indexOfScalarPos(u8, text, start, '\n')) |nl| start = nl + 1;
+    if (text[start - 1] != '\n') if (std.mem.indexOfScalarPos(u8, text, start, '\n')) |nl| {
+        start = nl + 1;
+    };
     // A UTF-8 continuation byte is never a start.
     while (start < text.len and text[start] & 0xC0 == 0x80) start += 1;
     return .{ .text = text[start..], .truncated = true };
 }
 
+/// The visible screen and the terminal's modes, with no scrollback. A client
+/// that fell behind already has the scrollback up to the point where its
+/// output was dropped; the rows that it missed are read by range. The screen
+/// is cleared first, because the client's screen still shows the old rows.
 pub fn serializeScreenState(alloc: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]const u8 {
     return serializeState(alloc, term, false);
 }
@@ -1222,4 +1224,7 @@ test "plainText: text over the limit keeps its end from a line start" {
     const cut = try plainText(arena.allocator(), &term, true, 13);
     try testing.expect(cut.truncated);
     try testing.expectEqualStrings("line3\nline4", cut.text);
+    // A cut at a line start keeps that line.
+    const exact = try plainText(arena.allocator(), &term, true, 11);
+    try testing.expectEqualStrings("line3\nline4", exact.text);
 }

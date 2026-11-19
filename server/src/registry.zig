@@ -571,25 +571,36 @@ pub fn send(s: *Server, p: *Peer, re: u64, args: m.SessionSend.Args) void {
     if (args.text.bytes.len > m.send_max)
         return peers.replyError(s, p.id, re, .invalid_args, "The text is over 64 KiB.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    if (args.text.bytes.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, args.text.bytes) catch return entryGone(s, e);
-    if (args.submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return entryGone(s, e);
+    if (args.text.bytes.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, args.text.bytes) catch return lostEntry(s, p, re, e);
+    if (args.submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return lostEntry(s, p, re, e);
     peers.reply(s, p.id, re, m.SessionSend, .{});
 }
 
+/// The session's connection failed during a request that waits for no
+/// answer of the session: the request gets its reply here.
+fn lostEntry(s: *Server, p: *Peer, re: u64, e: *Entry) void {
+    entryGone(s, e);
+    peers.replyError(s, p.id, re, .not_found, "No session has this id.");
+}
+
+/// `session.key`: the session parses and encodes the chord itself. The
+/// server parses it too, so that a chord that does not parse gets an error.
 pub fn sendKey(s: *Server, p: *Peer, re: u64, args: m.SessionKey.Args) void {
     if (chord.parse(args.chord) == null)
         return peers.replyError(s, p.id, re, .invalid_args, "The key combination does not parse.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    sendEntryPane(s, e, m.Key, .{ .chord = args.chord });
-    if (!e.conn.dead) peers.reply(s, p.id, re, m.SessionKey, .{});
+    e.conn.sendPane(s.gpa, m.Key, .{ .chord = args.chord }) catch return lostEntry(s, p, re, e);
+    peers.reply(s, p.id, re, m.SessionKey, .{});
 }
 
+/// `session.history`: the reply goes when the session's `history` comes.
 pub fn readHistory(s: *Server, p: *Peer, re: u64, args: m.SessionHistory.Args) void {
     const e = terminalEntry(s, p, re, args.id, false) orelse return;
     wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history });
     sendEntryPane(s, e, m.HistoryRead, .{ .scrollback = args.scrollback });
 }
 
+/// `session.inspect`: the reply goes when the session's `inspect` comes.
 pub fn readInspect(s: *Server, p: *Peer, re: u64, id: []const u8) void {
     const e = terminalEntry(s, p, re, id, false) orelse return;
     wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .inspect });
