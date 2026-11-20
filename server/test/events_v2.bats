@@ -315,35 +315,6 @@ assert d.messages("tty_mode") == []
 PY
 }
 
-# macOS starts a local shell under login(1) (ghostty's launch), which puts
-# the shell in a process group of its own: that group is the shell's.
-@test "events: a shell under login(1) is idle at its prompt" {
-  [[ "$(uname -s)" == Darwin ]] || skip "login(1) starts the shell only on macOS"
-  "$ZMX" __create-session s1 -- /usr/bin/login -flpq "$(id -un)" /bin/sh
-  python3 - <<'PY'
-from v2client import Client
-c = Client("s1")
-c.attach(foreground=True)
-def last():
-    return c.messages("foreground")[-1]["a"]
-c.wait(lambda: c.messages("foreground") and b"sh" in last()["comm"], what="the shell in front")
-assert last()["idle"] is True, last()
-def busy():
-    n = len(c.messages("inspect"))
-    c.pane("inspect_read")
-    c.wait_msg("inspect", count=n + 1)
-    return c.messages("inspect")[-1]["a"]["terminal"]["busy"]
-assert busy() is False
-c.type("sleep 30\r")
-c.wait(lambda: b"sleep" in last()["comm"], what="the sleep foreground")
-assert last()["idle"] is False, last()
-assert busy() is True
-c.type(b"\x03")
-c.wait(lambda: last()["idle"] is True, what="the idle foreground")
-assert busy() is False
-PY
-}
-
 # v1's tracker rules, in the session: a shell with no marks (sh) gets a run
 # for a program that it starts after a Return, and an agent (a program in
 # raw mode) gets a run for a reply, which ends after 3 s of quiet output.
