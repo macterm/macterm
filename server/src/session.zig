@@ -280,6 +280,9 @@ const Session = struct {
     /// The command is login(1), which starts the shell in a process group
     /// of its own. ghostty starts every local shell this way on macOS.
     under_login: bool,
+    /// The last group in front that `isShellGroup` found is not the shell's,
+    /// so that a program in front costs no read of its parent at each output.
+    other_pgid: lib_posix.pid_t = 0,
     pty_name: []const u8,
     pty_name_buf: [128]u8,
     epoch: u64,
@@ -761,8 +764,11 @@ const Session = struct {
     /// child.
     fn isShellGroup(s: *Session, pgrp: lib_posix.pid_t) bool {
         if (pgrp == s.shell_pid or pgrp == s.shell_pgid) return true;
-        if (!s.under_login or s.shell_pgid != s.shell_pid) return false;
-        if (foreground.parentPid(pgrp) != s.shell_pid) return false;
+        if (!s.under_login or s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
+        if (foreground.parentPid(pgrp) != s.shell_pid) {
+            s.other_pgid = pgrp;
+            return false;
+        }
         s.shell_pgid = pgrp;
         std.log.info("session {s}: the shell's group is {d}, under login pid={d}", .{ s.name, pgrp, s.shell_pid });
         return true;

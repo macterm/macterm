@@ -328,11 +328,19 @@ def last():
     return c.messages("foreground")[-1]["a"]
 c.wait(lambda: c.messages("foreground") and b"sh" in last()["comm"], what="the shell in front")
 assert last()["idle"] is True, last()
+def busy():
+    n = len(c.messages("inspect"))
+    c.pane("inspect_read")
+    c.wait_msg("inspect", count=n + 1)
+    return c.messages("inspect")[-1]["a"]["terminal"]["busy"]
+assert busy() is False
 c.type("sleep 30\r")
 c.wait(lambda: b"sleep" in last()["comm"], what="the sleep foreground")
 assert last()["idle"] is False, last()
+assert busy() is True
 c.type(b"\x03")
 c.wait(lambda: last()["idle"] is True, what="the idle foreground")
+assert busy() is False
 PY
 }
 

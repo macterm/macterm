@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const terminal = @import("terminal.zig");
+const util = @import("util.zig");
 const protocol = @import("protocol/protocol.zig");
 const ghostty_vt = terminal.ghostty_vt;
 const m = protocol.messages;
@@ -53,19 +54,20 @@ const RunSource = enum {
     agent,
 };
 
-/// Input that submits a line: a Return as CR or LF, or as a key of the
-/// kitty keyboard protocol (`CSI 13 u`, `CSI 13 ; <mods> u`).
+/// Input that submits a line: a plain Return, as CR or as a key press of
+/// the kitty keyboard protocol (`CSI 13 u`, `CSI 13 ; 1 u`). A Return with a
+/// modifier (Shift+Enter adds a line in an agent), a key release, an LF and a
+/// paste are not a submission.
 pub fn isSubmission(data: []const u8) bool {
-    if (std.mem.indexOfAny(u8, data, "\r\n") != null) return true;
+    if (std.mem.startsWith(u8, data, "\x1b[200~")) return false;
+    if (std.mem.indexOfScalar(u8, data, '\r') != null) return true;
     var at: usize = 0;
-    while (std.mem.indexOfPos(u8, data, at, "\x1b[13")) |i| {
-        at = i + 4;
-        var j = at;
-        if (j < data.len and data[j] == ';') {
-            j += 1;
-            while (j < data.len and (std.ascii.isDigit(data[j]) or data[j] == ':')) j += 1;
-        }
-        if (j < data.len and data[j] == 'u') return true;
+    while (std.mem.indexOfPos(u8, data, at, "\x1b[")) |i| {
+        at = i + 2;
+        if (std.mem.startsWith(u8, data[at..], "13u")) return true;
+        const key = util.parseKittyCsiU(data[at..]) orelse continue;
+        // Caps Lock and Num Lock (bits 64 and 128) are no modifier of the key.
+        if (key.key_code == 13 and key.modifiers & ~@as(u32, 0xc0) == 0 and key.event_type != 3) return true;
     }
     return false;
 }
@@ -79,14 +81,13 @@ pub const Foreground = struct {
     raw: bool = false,
 };
 
-/// A program that takes the foreground this long after a submission is the
-/// user's command, and two heartbeats in this time after a submission to a
-/// raw program start a run (v1's `TerminalExecutionTracker`).
+/// A program that takes the foreground within this time after a submission
+/// is the user's command. Two heartbeats within this time after a
+/// submission to a raw program start a run.
 pub const submit_window_ms = 2000;
 
-/// A run with a raw program in front ends after this long with no output
-/// (v1's `TerminalActivityTiming.quietInterval`): an agent finished its
-/// reply.
+/// A run with a raw program in front ends after this time with no output:
+/// an agent finished its reply.
 pub const quiet_ms = 3000;
 
 /// A program status record, and when it last changed.
@@ -260,7 +261,7 @@ pub const Watch = struct {
             if (!h.held or now - h.sent_at.? < m.coalesce_ms) continue;
             h.held = false;
             h.sent_at = now;
-            w.emit(@fromBackingInt(@intCast(i)));
+            w.emit(@enumFromInt(i));
         }
         if (w.quietDeadline()) |due| if (now >= due) w.setStatus(.done, false);
     }
@@ -314,7 +315,7 @@ pub const Watch = struct {
     /// The first value in a quiet period goes at once; later ones wait for
     /// the end of the window, where the newest goes.
     fn coalesce(w: *Watch, key: Key) void {
-        const h = &w.holds[@backingInt(key)];
+        const h = &w.holds[@intFromEnum(key)];
         if (h.sent_at) |at| if (w.now_ms - at < m.coalesce_ms) {
             h.held = true;
             return;
@@ -545,7 +546,7 @@ pub const Watch = struct {
     pub fn shellExited(w: *Watch, now: i64) void {
         w.now_ms = now;
         if (!w.removeRecords("", .ended)) return;
-        w.holds[@backingInt(Key.program)] = .{ .sent_at = now };
+        w.holds[@intFromEnum(Key.program)] = .{ .sent_at = now };
         w.emit(.program);
     }
 
@@ -1380,10 +1381,14 @@ test "events: a new client gets the flags only when one is set" {
 
 test "events: isSubmission finds a Return in input" {
     try testing.expect(isSubmission("ls\r"));
-    try testing.expect(isSubmission("\n"));
     try testing.expect(isSubmission("\x1b[13u"));
     try testing.expect(isSubmission("\x1b[13;1:1u"));
     try testing.expect(!isSubmission("ls"));
+    // Shift+Enter, a key release, an LF and a paste add a line.
+    try testing.expect(!isSubmission("\x1b[13;2u"));
+    try testing.expect(!isSubmission("\x1b[13;1:3u"));
+    try testing.expect(!isSubmission("\n"));
+    try testing.expect(!isSubmission("\x1b[200~a\rb\x1b[201~"));
     // A cursor position report is a reply, not a key.
     try testing.expect(!isSubmission("\x1b[13;5R"));
     try testing.expect(!isSubmission("\x1b[133u"));
