@@ -54,13 +54,13 @@ const RunSource = enum {
     agent,
 };
 
-/// Input that submits a line: a plain Return, as CR or as a key press of
-/// the kitty keyboard protocol (`CSI 13 u`, `CSI 13 ; 1 u`). A Return with a
-/// modifier (Shift+Enter adds a line in an agent), a key release, an LF and a
-/// paste are not a submission.
+/// Input that submits a line: a plain Return, as CR, as LF (`pane run`
+/// submits with LF) or as a key press of the kitty keyboard protocol
+/// (`CSI 13 u`, `CSI 13 ; 1 u`). A Return with a modifier (Shift+Enter adds
+/// a line in an agent), a key release and a paste are not a submission.
 pub fn isSubmission(data: []const u8) bool {
     if (std.mem.startsWith(u8, data, "\x1b[200~")) return false;
-    if (std.mem.indexOfScalar(u8, data, '\r') != null) return true;
+    if (std.mem.indexOfAny(u8, data, "\r\n") != null) return true;
     var at: usize = 0;
     while (std.mem.indexOfPos(u8, data, at, "\x1b[")) |i| {
         at = i + 2;
@@ -1384,10 +1384,10 @@ test "events: isSubmission finds a Return in input" {
     try testing.expect(isSubmission("\x1b[13u"));
     try testing.expect(isSubmission("\x1b[13;1:1u"));
     try testing.expect(!isSubmission("ls"));
-    // Shift+Enter, a key release, an LF and a paste add a line.
+    try testing.expect(isSubmission("\n"));
+    // Shift+Enter, a key release and a paste add a line.
     try testing.expect(!isSubmission("\x1b[13;2u"));
     try testing.expect(!isSubmission("\x1b[13;1:3u"));
-    try testing.expect(!isSubmission("\n"));
     try testing.expect(!isSubmission("\x1b[200~a\rb\x1b[201~"));
     // A cursor position report is a reply, not a key.
     try testing.expect(!isSubmission("\x1b[13;5R"));
