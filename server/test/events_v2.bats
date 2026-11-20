@@ -156,7 +156,9 @@ PY
 }
 
 # An idle session with only clients that did not ask for the foreground
-# does not wake. With a client that asked, it wakes each 500 ms. macOS counts
+# does not wake, once `submit_window_ms` after the last Return is over (the
+# session reads the foreground in that time, for a program that prints
+# nothing). With a client that asked, it wakes each 500 ms. macOS counts
 # each wakeup of the session's poll as an interrupt wakeup
 # (`proc_pid_rusage`, as scripts/_harness.py reads it), Linux as a voluntary
 # context switch.
@@ -184,6 +186,7 @@ a = Client("s1")
 a.attach()
 a.type("printf 'idle-%s\\n' 1\r")
 a.wait_output("idle-1")
+time.sleep(2)
 quiet = wakeups()
 assert quiet <= 1, quiet
 b = Client("s1")
@@ -309,5 +312,69 @@ d.wait_msg("state")
 d.type("printf 'quiet-%s\\n' 1\r")
 d.wait_output("quiet-1")
 assert d.messages("tty_mode") == []
+PY
+}
+
+# macOS starts a local shell under login(1) (ghostty's launch), which puts
+# the shell in a process group of its own: that group is the shell's.
+@test "events: a shell under login(1) is idle at its prompt" {
+  [[ "$(uname -s)" == Darwin ]] || skip "login(1) starts the shell only on macOS"
+  "$ZMX" __create-session s1 -- /usr/bin/login -flpq "$(id -un)" /bin/sh
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach(foreground=True)
+def last():
+    return c.messages("foreground")[-1]["a"]
+c.wait(lambda: c.messages("foreground") and b"sh" in last()["comm"], what="the shell in front")
+assert last()["idle"] is True, last()
+c.type("sleep 30\r")
+c.wait(lambda: b"sleep" in last()["comm"], what="the sleep foreground")
+assert last()["idle"] is False, last()
+c.type(b"\x03")
+c.wait(lambda: last()["idle"] is True, what="the idle foreground")
+PY
+}
+
+# v1's tracker rules, in the session: a shell with no marks (sh) gets a run
+# for a program that it starts after a Return, and an agent (a program in
+# raw mode) gets a run for a reply, which ends after 3 s of quiet output.
+@test "events: a program that a shell with no marks starts is a run until the shell is back" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+c.type("sleep 1\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")), what="the run")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", what="the end of the run")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+PY
+}
+
+@test "events: a reply of a raw program is a run that ends when its output is quiet" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+import os, time
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+path = os.path.join(os.environ["RT"], "agent.py")
+# The agent: raw mode, and a reply of 1.2 s of output for each Return.
+agent = ("import sys,time,tty;tty.setraw(0);print('ready',end='\\r\\n',flush=True)\n"
+         "while sys.stdin.read(1)!='q':\n"
+         " [print('.',end='',flush=True) or time.sleep(0.1) for _ in range(12)]\n")
+open(path, "w").write(agent)
+c.type("python3 %s\r" % path)
+c.wait_output("ready")
+time.sleep(4)
+start = len(c.messages("status"))
+c.type("\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")[start:]), what="the run of the reply")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", timeout=8, what="the end of the reply")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+c.type("q")
 PY
 }
