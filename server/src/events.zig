@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const terminal = @import("terminal.zig");
+const util = @import("util.zig");
 const protocol = @import("protocol/protocol.zig");
 const ghostty_vt = terminal.ghostty_vt;
 const m = protocol.messages;
@@ -40,6 +41,55 @@ pub const Event = union(enum) {
 /// The values that coalesce.
 const Key = enum { title, cwd, progress, program, bell };
 
+/// What started the run that runs now.
+const RunSource = enum {
+    /// OSC 133;C. 133;D or the next prompt ends it.
+    mark,
+    /// An OSC 9;4 report. Its end ends it.
+    progress,
+    /// A program that took the foreground after a submission, in a shell
+    /// with no marks. The shell's return ends it.
+    foreground,
+    /// A submission to a program in raw mode, with output after it.
+    agent,
+};
+
+/// Input that submits a line: a plain Return, as CR, as LF (`pane run`
+/// submits with LF) or as a key press of the kitty keyboard protocol
+/// (`CSI 13 u`, `CSI 13 ; 1 u`). A Return with a modifier (Shift+Enter adds
+/// a line in an agent), a key release and a paste are not a submission.
+pub fn isSubmission(data: []const u8) bool {
+    if (std.mem.startsWith(u8, data, "\x1b[200~")) return false;
+    if (std.mem.indexOfAny(u8, data, "\r\n") != null) return true;
+    var at: usize = 0;
+    while (std.mem.indexOfPos(u8, data, at, "\x1b[")) |i| {
+        at = i + 2;
+        if (std.mem.startsWith(u8, data[at..], "13u")) return true;
+        const key = util.parseKittyCsiU(data[at..]) orelse continue;
+        // Caps Lock and Num Lock (bits 64 and 128) are no modifier of the key.
+        if (key.key_code == 13 and key.modifiers & ~@as(u32, 0xc0) == 0 and key.event_type != 3) return true;
+    }
+    return false;
+}
+
+/// The pty's foreground, as the session reads it.
+pub const Foreground = struct {
+    /// The shell's own group is in front.
+    idle: bool = true,
+    /// The tty is not in canonical mode: a full-screen program or an agent
+    /// reads each key.
+    raw: bool = false,
+};
+
+/// A program that takes the foreground within this time after a submission
+/// is the user's command. Two heartbeats within this time after a
+/// submission to a raw program start a run.
+pub const submit_window_ms = 2000;
+
+/// A run with a raw program in front ends after this time with no output:
+/// an agent finished its reply.
+pub const quiet_ms = 3000;
+
 /// A program status record, and when it last changed.
 const Record = struct {
     rec: m.ProgramRecord,
@@ -67,8 +117,18 @@ pub const Watch = struct {
     /// What the user did not see yet. A run that ends and the bell set it,
     /// a new run clears `unseen` and `failed`, and `seen` clears it all.
     attention: m.Attention = .{},
-    /// A progress report started the run, not a mark.
-    run_by_progress: bool = false,
+    run_by: RunSource = .mark,
+    /// A primary prompt mark came: the marks own the runs of the shell's
+    /// commands, and the foreground does not start a run.
+    has_marks: bool = false,
+    fg: Foreground = .{},
+    /// A submission while the shell was in front, in a shell with no marks.
+    fg_armed_at: ?i64 = null,
+    /// A submission to a raw program, and the heartbeats since.
+    agent_armed_at: ?i64 = null,
+    agent_beats: u8 = 0,
+    /// The last output, or the start of the run or of raw mode when later.
+    quiet_from: i64 = 0,
     /// The command that runs now, for its `end` mark.
     command: ?[]u8 = null,
     /// An input mark came, and no output or end mark since: the input
@@ -121,9 +181,77 @@ pub const Watch = struct {
         w.now_ms = now;
         stream.nextSlice(data);
         if (data.len == 0) return;
+        w.quiet_from = @max(w.quiet_from, now);
         if (w.activity_at) |at| if (now - at < m.activity_ms) return;
         w.activity_at = now;
         w.push(.activity);
+        w.heartbeat(now);
+    }
+
+    /// The user submitted input (`isSubmission`) at `now`. The session
+    /// reads the foreground first.
+    pub fn submitted(w: *Watch, now: i64) void {
+        w.now_ms = now;
+        if (w.fg.idle) {
+            if (!w.has_marks) w.fg_armed_at = now;
+        } else if (w.fg.raw) {
+            w.agent_armed_at = now;
+            w.agent_beats = 0;
+        }
+    }
+
+    /// The session read the foreground at `now`.
+    ///
+    /// - The shell's return ends a run that the foreground or an agent
+    ///   started.
+    /// - A program that takes the foreground within `submit_window_ms` of a
+    ///   submission starts a run. Only a shell with no marks arms it: a
+    ///   shell with marks sends 133;C for the command, and its prompt hooks
+    ///   take the foreground with no submission.
+    pub fn foreground(w: *Watch, next: Foreground, now: i64) void {
+        w.now_ms = now;
+        const was = w.fg;
+        w.fg = next;
+        if (next.idle) {
+            w.agent_armed_at = null;
+            if (!was.idle and w.status.state == .running and (w.run_by == .foreground or w.run_by == .agent))
+                w.setStatus(.done, false);
+            return;
+        }
+        if (was.idle) if (w.fg_armed_at) |at| {
+            w.fg_armed_at = null;
+            if (now - at < submit_window_ms) w.startRun(.foreground);
+        };
+        if (next.raw and !(was.raw and !was.idle)) w.quiet_from = @max(w.quiet_from, now);
+    }
+
+    /// The session must read the foreground on a timer: a program that
+    /// prints nothing can take the foreground after a submission.
+    pub fn watchesForeground(w: *const Watch, now: i64) bool {
+        const at = w.fg_armed_at orelse return false;
+        return now - at < submit_window_ms;
+    }
+
+    /// The second heartbeat within `submit_window_ms` of a submission to a
+    /// raw program starts a run. One heartbeat can be the echo of the key.
+    fn heartbeat(w: *Watch, now: i64) void {
+        const at = w.agent_armed_at orelse return;
+        if (now - at >= submit_window_ms or w.fg.idle or !w.fg.raw) {
+            w.agent_armed_at = null;
+            return;
+        }
+        w.agent_beats += 1;
+        if (w.agent_beats < 2) return;
+        w.agent_armed_at = null;
+        w.startRun(.agent);
+    }
+
+    /// When a run with a raw program in front ends for quiet output, or
+    /// null. A run that progress started ends at its report.
+    fn quietDeadline(w: *const Watch) ?i64 {
+        if (w.status.state != .running or w.run_by == .progress) return null;
+        if (w.fg.idle or !w.fg.raw) return null;
+        return w.quiet_from + quiet_ms;
     }
 
     /// Sends the held values whose window ended by `now`.
@@ -135,11 +263,12 @@ pub const Watch = struct {
             h.sent_at = now;
             w.emit(@enumFromInt(i));
         }
+        if (w.quietDeadline()) |due| if (now >= due) w.setStatus(.done, false);
     }
 
     /// When the next held value is due, or null when none waits.
     pub fn deadline(w: *const Watch) ?i64 {
-        var next: ?i64 = null;
+        var next: ?i64 = w.quietDeadline();
         for (w.holds) |h| {
             if (!h.held) continue;
             const due = h.sent_at.? + m.coalesce_ms;
@@ -235,9 +364,10 @@ pub const Watch = struct {
         w.push(.{ .attention = w.attention });
     }
 
-    fn startRun(w: *Watch, by_progress: bool) void {
+    fn startRun(w: *Watch, source: RunSource) void {
         if (w.status.state == .running) return;
-        w.run_by_progress = by_progress;
+        w.run_by = source;
+        w.quiet_from = w.now_ms;
         w.setStatus(.running, false);
     }
 
@@ -246,11 +376,13 @@ pub const Watch = struct {
             .prompt_start => {
                 // A continuation or right prompt is part of the same prompt.
                 if (e.prompt_kind != .primary) return;
+                w.has_marks = true;
+                w.fg_armed_at = null;
                 w.at_input = false;
                 w.endPromptRecords();
                 // A new prompt ends the command, also when the shell sent no
                 // 133;D (after a full reset, for one).
-                if (w.status.state == .running and !w.run_by_progress) {
+                if (w.status.state == .running and w.run_by != .progress) {
                     w.setCommand(null);
                     w.setStatus(.done, false);
                 }
@@ -272,10 +404,10 @@ pub const Watch = struct {
                 w.at_input = false;
                 w.setCommand(command);
                 w.push(.{ .mark = .{ .kind = .output, .command = w.dupeCommand() } });
-                w.startRun(false);
+                w.startRun(.mark);
                 // The command owns the run now: a progress report that
                 // started it does not end it.
-                w.run_by_progress = false;
+                w.run_by = .mark;
             },
             .command_end => {
                 w.at_input = false;
@@ -308,12 +440,12 @@ pub const Watch = struct {
         w.progress = if (state == .remove) null else .{ .state = state, .percent = r.progress };
         w.coalesce(.progress);
         switch (state) {
-            .set, .indeterminate => w.startRun(true),
+            .set, .indeterminate => w.startRun(.progress),
             // v1's rule: error ends the run as a failure, whatever started it.
             .@"error" => if (w.status.state == .running) w.setStatus(.done, true),
             // Remove and pause end only a run that a report started: a
             // command that 133;C started ends at 133;D.
-            .remove, .pause => if (w.status.state == .running and w.run_by_progress) w.setStatus(.done, false),
+            .remove, .pause => if (w.status.state == .running and w.run_by == .progress) w.setStatus(.done, false),
             .unknown => {},
         }
     }
@@ -1245,4 +1377,127 @@ test "events: a new client gets the flags only when one is set" {
         try testing.expectEqual(m.Attention{ .unseen = true }, e.attention);
     };
     try testing.expect(found);
+}
+
+test "events: isSubmission finds a Return in input" {
+    try testing.expect(isSubmission("ls\r"));
+    try testing.expect(isSubmission("\x1b[13u"));
+    try testing.expect(isSubmission("\x1b[13;1:1u"));
+    try testing.expect(!isSubmission("ls"));
+    try testing.expect(isSubmission("\n"));
+    // Shift+Enter, a key release and a paste add a line.
+    try testing.expect(!isSubmission("\x1b[13;2u"));
+    try testing.expect(!isSubmission("\x1b[13;1:3u"));
+    try testing.expect(!isSubmission("\x1b[200~a\rb\x1b[201~"));
+    // A cursor position report is a reply, not a key.
+    try testing.expect(!isSubmission("\x1b[13;5R"));
+    try testing.expect(!isSubmission("\x1b[133u"));
+}
+
+const raw_program: Foreground = .{ .idle = false, .raw = true };
+
+test "events: a submission to a raw program with output after it is a run, and quiet output ends it" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.w.foreground(raw_program, 0);
+    f.w.submitted(1000);
+    f.feed("a", 1000);
+    try testing.expectEqual(.idle, f.w.status.state);
+    f.feed("b", 1500);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.feed("c", 4000);
+    try testing.expectEqual(4000 + quiet_ms, f.w.deadline().?);
+    f.w.flush(4000 + quiet_ms - 1);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.flush(4000 + quiet_ms);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    try testing.expectEqual(m.Attention{ .unseen = true }, f.w.attention);
+    // The next submission is the next reply.
+    f.w.submitted(9000);
+    f.feed("d", 9000);
+    f.feed("e", 9500);
+    try testing.expectEqual(.running, f.w.status.state);
+    try testing.expectEqual(m.Attention{}, f.w.attention);
+}
+
+test "events: the echo of a submission alone, or output too late, starts no run" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.w.foreground(raw_program, 0);
+    f.w.submitted(1000);
+    f.feed("a", 1000);
+    f.w.flush(5000);
+    try testing.expectEqual(.idle, f.w.status.state);
+    f.feed("b", 1000 + submit_window_ms);
+    try testing.expectEqual(.idle, f.w.status.state);
+    // A program in canonical mode gets no agent rule.
+    f.w.foreground(.{ .idle = false, .raw = false }, 6000);
+    f.w.submitted(6000);
+    f.feed("c", 6000);
+    f.feed("d", 6500);
+    try testing.expectEqual(.idle, f.w.status.state);
+}
+
+test "events: with no marks, a program that takes the foreground after a submission runs until the shell is back" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.w.submitted(0);
+    try testing.expect(f.w.watchesForeground(100));
+    f.w.foreground(.{ .idle = false }, 300);
+    try testing.expectEqual(.running, f.w.status.state);
+    try testing.expect(!f.w.watchesForeground(400));
+    // A program in canonical mode does not end for quiet output.
+    f.w.flush(300 + quiet_ms * 10);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.foreground(.{}, 60_000);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    try testing.expectEqual(m.Attention{ .unseen = true }, f.w.attention);
+    // A program in front with no submission (a prompt hook) is no run.
+    f.w.foreground(.{ .idle = false }, 61_000);
+    try testing.expectEqual(.done, f.w.status.state);
+    f.w.foreground(.{}, 61_100);
+    // A submission arms the rule for `submit_window_ms` only.
+    f.w.submitted(70_000);
+    try testing.expect(!f.w.watchesForeground(70_000 + submit_window_ms));
+    f.w.foreground(.{ .idle = false }, 70_000 + submit_window_ms);
+    try testing.expectEqual(.done, f.w.status.state);
+}
+
+test "events: with marks, a submission at the shell arms no foreground run" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ ", 0);
+    f.w.submitted(100);
+    try testing.expect(!f.w.watchesForeground(100));
+    f.w.foreground(.{ .idle = false }, 200);
+    try testing.expectEqual(.idle, f.w.status.state);
+}
+
+test "events: a command that becomes a raw program ends for quiet output, and progress does not" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ \x1b]133;C\x07", 0);
+    try testing.expectEqual(.running, f.w.status.state);
+    // The program switches to raw mode some time after its start.
+    f.w.foreground(.{ .idle = false }, 10);
+    f.w.foreground(raw_program, 5000);
+    try testing.expectEqual(5000 + quiet_ms, f.w.deadline().?);
+    f.w.flush(5000 + quiet_ms);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    // Its end mark changes nothing more.
+    f.w.foreground(.{}, 9000);
+    f.feed("\x1b]133;D;0\x07", 9000);
+    try testing.expectEqual(.done, f.w.status.state);
+
+    f.feed("\x1b]9;4;3\x07", 10_000);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.foreground(raw_program, 10_000);
+    try testing.expectEqual(null, f.w.deadline());
+    f.w.flush(10_000 + quiet_ms * 10);
+    try testing.expectEqual(.running, f.w.status.state);
 }
