@@ -1,81 +1,60 @@
 import Foundation
 
-/// Attempt gating for reconnecting dropped remote panes (#281). Pure state
-/// machine — no clocks, no I/O — so `AppState` owns the triggers and the
-/// retry sweep, and this type only answers "may this pane be redialed
-/// NOW?". Two properties matter:
+/// The backoff of one host's automatic tries (#281, 0264). `RemoteHost`
+/// keeps one for each host: N lost panes of one host make one streak, not N.
+/// It is a pure state machine with no clock and no I/O. The host owns the
+/// triggers, and this type only says if the host may be tried now.
 ///
-/// - **It never polls hard.** The sweep runs on triggers, and again every
-///   few seconds while a pane is lost and the app is active. The backoff
-///   below bounds how often one pane whose host is still unreachable is
-///   tried: at most once a minute after the first few tries. Only a sign
-///   that the host answers again (`hostAnswered`) clears it early.
-/// - **Recovery is judged by survival, not by the attempt.** A respawned ssh
-///   against a silently dead host can sit in TCP connect for ~75s looking
-///   "alive" (`processExited == false`) before it fails, so a pane only
-///   clears its failure streak after staying alive for `recoveryGrace` —
-///   otherwise every dial-in-progress would reset the backoff.
+/// - The sweep runs on triggers, and again every few seconds while a pane
+///   is lost and the app is active. The backoff tries a host that stays
+///   unreachable at most once a minute after the first few tries.
+/// - A connect that works (`connected`) or a host that answers again
+///   (`hostAnswered`) clears the streak. The other lost panes of the host
+///   then try at once.
 struct RemoteReconnectPolicy {
-    /// Minimum quiet time before a pane may be attempted again, indexed by its
-    /// consecutive-attempt streak (0 attempts → immediate, then escalating;
-    /// the last entry repeats).
+    /// The time to wait before the next try, by the number of tries in a row
+    /// (0 tries: no wait). The last step repeats.
     static let backoff: [TimeInterval] = [0, 5, 20, 60]
 
-    /// How long a previously-attempted pane must stay alive before the
-    /// attempt is judged successful and its streak resets. Longer than the
-    /// worst-case TCP connect hang, so a dial still in flight never counts.
-    static let recoveryGrace: TimeInterval = 120
+    private var lastAttempt: Date?
+    private var streak = 0
 
-    private struct PaneState {
-        var lastAttempt: Date
-        var streak: Int
+    /// Whether the backoff window has passed. It records nothing: call
+    /// `recordAttempt` when the try starts.
+    func shouldAttempt(now: Date) -> Bool {
+        guard let next = nextAttempt else { return true }
+        return now >= next
     }
 
-    private var states: [UUID: PaneState] = [:]
-
-    /// Whether the pane's backoff window has elapsed. Does not record — call
-    /// `recordAttempt` when the reconnect is actually issued.
-    func shouldAttempt(_ paneID: UUID, now: Date) -> Bool {
-        guard let state = states[paneID] else { return true }
-        let delay = Self.backoff[min(state.streak, Self.backoff.count - 1)]
-        return now.timeIntervalSince(state.lastAttempt) >= delay
+    /// The first time when `shouldAttempt` is true, or nil when it is true now
+    /// whatever the time.
+    var nextAttempt: Date? {
+        guard let lastAttempt else { return nil }
+        return lastAttempt + Self.backoff[min(streak, Self.backoff.count - 1)]
     }
 
-    mutating func recordAttempt(_ paneID: UUID, now: Date) {
-        let streak = (states[paneID]?.streak ?? 0) + 1
-        states[paneID] = PaneState(lastAttempt: now, streak: streak)
+    mutating func recordAttempt(now: Date) {
+        streak += 1
+        lastAttempt = now
     }
 
-    /// A try of the pane failed now. The backoff counts from the end of the
+    /// A try of the host failed now. The backoff counts from the end of the
     /// try, not from its start. A host whose server does not answer holds a
     /// try until the handshake gives up (15 s after the login), longer than
     /// the first backoff step: the next try would start at once, and the
     /// badge would never say `Connection Lost`. A failed connect that the
-    /// sweep did not start (the pane's first connect, a key) counts as one
+    /// sweep did not start (a pane's first connect, a key) counts as one
     /// try.
-    mutating func tryFailed(_ paneID: UUID, now: Date) {
-        let streak = max(states[paneID]?.streak ?? 0, 1)
-        states[paneID] = PaneState(lastAttempt: now, streak: streak)
+    mutating func tryFailed(now: Date) {
+        streak = max(streak, 1)
+        lastAttempt = now
     }
 
-    /// A sweep found the pane alive. Clears the streak only once the pane has
-    /// outlived `recoveryGrace` since its last attempt (see the type comment).
-    mutating func observeAlive(_ paneID: UUID, now: Date) {
-        guard let state = states[paneID] else { return }
-        if now.timeIntervalSince(state.lastAttempt) >= Self.recoveryGrace {
-            states[paneID] = nil
-        }
-    }
-
-    /// The pane's host answers again (its roaming link heard it after a gap): the
-    /// next sweep may try the pane at once. The streak starts again, so a
-    /// try that still fails backs off from the start.
-    mutating func hostAnswered(_ paneID: UUID) {
-        states[paneID] = nil
-    }
-
-    /// The pane is gone for good — drop its state.
-    mutating func forget(_ paneID: UUID) {
-        states[paneID] = nil
+    /// The host is reachable again: a connect to it worked (a key, a sweep, a
+    /// new pane), or its roaming link heard it after a gap. Its other lost
+    /// panes may try at once. A try that then fails backs off from the start.
+    mutating func clear() {
+        lastAttempt = nil
+        streak = 0
     }
 }

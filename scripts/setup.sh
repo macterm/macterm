@@ -92,7 +92,7 @@ XCFRAMEWORK_DIR="GhosttyKit.xcframework"
 # build-2026-11-12-f55ac55: + downstream patch 0023 (macterm/ghostty#50):
 # `ghostty_launch_resolve` and `ghostty_launch_free` return the argv, env and
 # folder that a surface would run, for a manual surface. New C API only.
-GHOSTTYKIT_TAG="${GHOSTTYKIT_TAG:-build-2026-11-22-cc72827}"
+GHOSTTYKIT_TAG="${GHOSTTYKIT_TAG:-build-2026-11-23-7c5e29c}"
 # Which tag the on-disk fork artifacts actually came from. Without this the
 # presence checks below would keep a stale copy forever after a pin bump — the
 # same silent-staleness trap that makes symlinking these artifacts a bad idea.

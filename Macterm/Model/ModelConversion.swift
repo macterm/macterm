@@ -19,11 +19,12 @@ enum ModelConversion {
 
     /// The model. A project with no workspace (the app makes it when a
     /// window selects the project) gets an empty one, because the model
-    /// gives every project a workspace.
+    /// gives every project a workspace. A group of the app is a project of
+    /// the model (design/013, "Ethan chose B" §1), so it gets one too.
     static func model(projects: [Project], workspaces: [WorkspaceInput], activeProjectID: UUID?) -> MactermProtocol.ModelData {
         var spaces = workspaces.map(workspace)
         let present = Set(workspaces.map(\.id))
-        for project in projects where !project.isGroup && !present.contains(project.id) {
+        for project in projects where !present.contains(project.id) {
             spaces.append(.init(id: id(project.id), kind: .project))
         }
         return .init(
@@ -37,12 +38,11 @@ enum ModelConversion {
         .init(
             id: id(p.id),
             name: p.name,
-            path: p.isGroup ? "" : p.path,
+            path: p.path,
             color: p.colorName,
             sortOrder: Int64(p.sortOrder),
             createdAt: Int64((p.createdAt.timeIntervalSince1970 * 1000).rounded()),
-            parent: p.parent.map(id),
-            kind: p.isGroup ? .group : .project
+            parent: p.parent.map(id)
         )
     }
 

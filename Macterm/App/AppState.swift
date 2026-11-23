@@ -1046,10 +1046,6 @@ final class AppState {
     /// seed must not mistake an unread snapshot for a fresh install).
     var snapshotLoadFailed: Bool { workspaceStore.loadFailed }
 
-    /// Per-pane attempt gating for the reconnect sweep (#281). Not observed —
-    /// pure bookkeeping, no UI reads it.
-    @ObservationIgnored
-    private var reconnectPolicy = RemoteReconnectPolicy()
     /// A `.retry` sweep is planned (`scheduleReconnectRetry`).
     @ObservationIgnored
     private var reconnectRetryPlanned = false
@@ -1751,7 +1747,7 @@ final class AppState {
 
     // MARK: - Remote reconnect (#281)
 
-    /// What woke the reconnect sweep. The backoff gates each pane for every
+    /// What woke the reconnect sweep. The host's backoff gates every
     /// trigger, except `.hostAnswered`, which clears it.
     enum ReconnectTrigger: String {
         case wake
@@ -1762,7 +1758,7 @@ final class AppState {
         case hostConnected
         /// A roaming link heard its host after a gap
         /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
-        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        /// backoff (`RemoteReconnectPolicy.clear`).
         case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).
@@ -1772,34 +1768,28 @@ final class AppState {
     }
 
     /// How often the sweep runs again while the active project has a lost
-    /// pane and the app is active. `RemoteReconnectPolicy` gates each pane.
+    /// pane and the app is active. Each host's backoff gates its tries.
     static let reconnectRetryInterval: TimeInterval = 5
 
     /// Let the active project's lost remote panes connect again: panes whose
-    /// connection stopped while their session lives on the host.
-    /// `RemoteHosts` wakes each pane's driver, and the attach replays the
-    /// session's screen. These tries never ask the user anything
-    /// (`RemoteHosts.reconnect`): a login that needs an answer waits for a
-    /// key in the pane.
+    /// connection stopped while their session lives on the host. Each host
+    /// (`RemoteHost.reconnect`) wakes its lost panes after its backoff, and
+    /// the attach replays the session's screen. These tries never ask the
+    /// user anything: a login that needs an answer waits for a key in the
+    /// pane.
     ///
     /// The triggers (system wake, a network change, app activation, project
     /// selection, a pane that became lost) run a sweep, and while a lost pane
     /// remains, the sweep runs again every `reconnectRetryInterval` while the
-    /// app is active. `RemoteReconnectPolicy` gates each pane, so an
-    /// unreachable host is tried at most once a minute. Active project only;
-    /// other projects reconnect via `.projectSelected` when opened. A key in
-    /// a lost pane connects at once, with no backoff. `destination`: only
-    /// the panes of this host (`.hostConnected`, `.hostAnswered`). A host
-    /// that answers again (`.hostAnswered`) clears the backoff of its panes:
-    /// it is one event for each heal, so it adds no load while the host is
-    /// down.
-    ///
-    /// `failedTry`: the session of a pane whose try failed now. Its backoff
-    /// starts at the end of the try (`RemoteReconnectPolicy.tryFailed`).
-    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil, failedTry: String? = nil) {
-        if let failedTry, let pane = remotePane(session: failedTry) {
-            reconnectPolicy.tryFailed(pane.id, now: Date())
-        }
+    /// app is active. The host's backoff (`RemoteReconnectPolicy`, one for
+    /// each host) tries an unreachable host at most once a minute. Active
+    /// project only; other projects reconnect via `.projectSelected` when
+    /// opened. A key in a lost pane connects at once, with no backoff.
+    /// `destination`: only the panes of this host (`.hostConnected`,
+    /// `.hostAnswered`). A host that answers again (`.hostAnswered`) clears
+    /// its backoff: it is one event for each heal, so it adds no load while
+    /// the host is down.
+    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
@@ -1810,46 +1800,22 @@ final class AppState {
         let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
         guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
-        let (sessions, anyLost) = Self.reconnectSessions(
-            ws.tabs.flatMap { $0.splitRoot.allPanes() },
-            trigger: trigger,
-            destination: destination,
-            policy: &reconnectPolicy,
-            now: Date()
-        )
-        if anyLost { scheduleReconnectRetry() }
-        guard !sessions.isEmpty else { return }
-        let count = sessions.count
-        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(count, privacy: .public) lost remote pane(s)")
-        RemoteHosts.shared.reconnect(sessions)
+        let lost = Self.lostDestinations(ws.tabs.flatMap { $0.splitRoot.allPanes() }, destination: destination)
+        guard !lost.isEmpty else { return }
+        scheduleReconnectRetry()
+        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(lost.count, privacy: .public) host(s) with lost panes")
+        RemoteHosts.shared.reconnect(lost, answered: trigger == .hostAnswered)
     }
 
-    /// The sessions of the lost panes that the sweep tries now, and whether
-    /// any pane is lost. `destination`: only the panes of this host. Pure,
-    /// except for the policy.
-    static func reconnectSessions(
-        _ panes: [Pane],
-        trigger: ReconnectTrigger,
-        destination: String?,
-        policy: inout RemoteReconnectPolicy,
-        now: Date
-    ) -> (sessions: Set<String>, anyLost: Bool) {
-        var sessions: Set<String> = []
-        var anyLost = false
-        for pane in panes where pane.isRemote {
-            if let destination, pane.remoteDestination != destination { continue }
-            guard pane.isDisconnected else {
-                policy.observeAlive(pane.id, now: now)
-                continue
-            }
-            anyLost = true
-            if trigger == .hostAnswered { policy.hostAnswered(pane.id) }
-            // A try runs now: the next sweep judges it.
-            guard !pane.isRemoteReconnecting, policy.shouldAttempt(pane.id, now: now) else { continue }
-            policy.recordAttempt(pane.id, now: now)
-            sessions.insert(pane.sessionName)
+    /// The hosts of the lost panes. `destination`: only this host. Pure.
+    static func lostDestinations(_ panes: [Pane], destination: String?) -> Set<String> {
+        var destinations: Set<String> = []
+        for pane in panes where pane.isDisconnected {
+            guard let host = pane.remoteDestination else { continue }
+            if let destination, host != destination { continue }
+            destinations.insert(host)
         }
-        return (sessions, anyLost)
+        return destinations
     }
 
     /// One sweep later, unless one is already planned.
@@ -3082,7 +3048,6 @@ final class AppState {
         if let closing = tab.splitRoot.findPane(id: paneID) {
             releaseSessions([closing])
         }
-        reconnectPolicy.forget(paneID)
         switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:
             closeTab(tab.id, projectID: projectID)

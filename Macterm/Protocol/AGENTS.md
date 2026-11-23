@@ -11,7 +11,7 @@ The frames and messages between the app, the server and the session processes (d
 - `MessagePack.swift` and `ProtocolFrame.swift` follow the Zig codec byte for byte. The cap on array memory differs: Swift counts its stride. `ProtocolFixtureTests` decodes each Zig frame and encodes it again to the same bytes.
 - **CI checks the schema** (`scripts/protocol.sh --check` in the Server workflow; `mise run protocol --check` locally):
   - The generated files are current.
-  - Against the metadata on main: no message, method, type, field, enum case or union case is removed; no type, default, payload or `since` changes; each addition has the current level; a new enum or union case needs an `unknown` case.
+  - Against the metadata on main: no message, method, type, field, enum case or union case is removed; no type, default, payload or `since` changes; each addition has the current level; a new enum or union case needs an `unknown` case. A removal of an item that no release has can pass only when `removals_before_release` in `server/tools/schema.zig` names it.
   - No message, method, event or pane message gets or loses a sender (`senders`, the trust that may send it, design/006 §2).
   - Against the latest release that has the metadata (`--base-release`, a `v<x.y.z>` or `v<x.y.z>-beta.<n>` tag): the same rules, and an addition needs a level above the release's. Before a release has metadata, this check passes with a line that says so.
   - No method result and no event holds a `secret`.
