@@ -26,6 +26,7 @@ final class LayoutFileService {
     /// the project's path, when the file does not parse, and when it declares
     /// no tabs: an empty declaration must never plan "close every tab".
     func layout(for project: Project) throws -> LayoutFile {
+        guard project.hasFolder else { throw LayoutFileError.noFolder }
         guard let file = try projectFiles.loadFull(
             forProjectPath: project.path,
             preferredSlug: ProjectSlug.slug(from: project.name)
@@ -58,6 +59,7 @@ final class LayoutFileService {
     /// the files of other projects in the same folder alone and to find the
     /// conflicts.
     func save(_ layout: LayoutFile, for project: Project, siblingProjects: [Project]) throws -> SaveResult {
+        guard project.hasFolder else { throw LayoutFileError.noFolder }
         // Reserve the *other* same-directory projects' files so the save leaves
         // them alone. Drop our own slug: a same-*name* sibling shares our slug
         // and thus our file (last save wins — flagged below), so it must not

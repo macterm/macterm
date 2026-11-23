@@ -49,7 +49,7 @@ final class ModelShadow {
     /// that the save wrote.
     func workspacesDidSave(_ workspaces: [ModelConversion.WorkspaceInput], activeProjectID: UUID?) {
         guard let projectStore else { return }
-        waiting = ModelConversion.model(projects: projectStore.allRows, workspaces: workspaces, activeProjectID: activeProjectID)
+        waiting = ModelConversion.model(projects: projectStore.projects, workspaces: workspaces, activeProjectID: activeProjectID)
         send()
     }
 
