@@ -88,10 +88,4 @@ struct MemoryRedactionTests {
         #expect(MemoryRedaction.redact(command) == command)
         #expect(MemoryRedaction.redactCommand(command) == command)
     }
-
-    @Test
-    func a_leading_space_marks_a_command_private() {
-        #expect(MemoryRedaction.isPrivate(" export TOKEN=x"))
-        #expect(!MemoryRedaction.isPrivate("export TOKEN=x"))
-    }
 }

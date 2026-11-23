@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyKit
 
 extension Pane {
     /// Connect the view's callbacks that feed the pane's own state: execution
@@ -31,12 +32,8 @@ extension Pane {
         // Order matters: `onInteraction` clears the tracker's in-place start
         // arming that `onCommandSubmitted` sets, and the view calls them in
         // that order. See `GhosttyTerminalNSView.onCommandSubmitted`.
-        view.onCommandSubmitted = { [weak self, weak view] hasContent in
-            guard let self else { return }
-            // Before the tracker leaves the prompt: memory captures the line
-            // only while the shell is at its prompt.
-            ProjectMemory.shared.commandSubmitted(pane: self, view: view)
-            recordCommandSubmission(hasContent: hasContent)
+        view.onCommandSubmitted = { [weak self] hasContent in
+            self?.recordCommandSubmission(hasContent: hasContent)
         }
         view.canCarryCommandInput = { [weak self] in self?.allowsInPlaceOutputStart ?? false }
         // The surface half of the passthrough gate. The key responders decline
@@ -62,14 +59,29 @@ extension Pane {
         view.onSessionState = { [weak self] state in self?.receiveSessionState(state) }
         view.onSessionForeground = { [weak self] foreground in self?.applyForeground(foreground) }
         view.onTtyMode = { [weak self] mode in self?.lineMode = mode }
-        view.onSessionMark = { [weak self] mark in
+        // libghostty's callbacks, and the marks for project memory: only the
+        // feed surface counts them.
+        let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
+        view.onSessionMark = { [weak self, weak view] mark in
+            guard let self else { return }
             // OSC 133;D: the shell owns its prompt again. It feeds the title
             // gate and the tracker's prompt hold.
-            if mark.kind == .end { self?.notePromptReturned() }
+            if mark.kind == .end { notePromptReturned() }
+            guard isFeed() else { return }
+            switch mark.kind {
+            case .output:
+                commandStartedAt = Date()
+            case .end:
+                let command = mark.command.map { String(decoding: $0.bytes, as: UTF8.self) }
+                recordCommandEnd(command: command, exitCode: mark.exitCode.map(Int.init), startedAt: commandStartedAt, view: view)
+                commandStartedAt = nil
+            case .prompt,
+                 .input,
+                 .unknown:
+                break
+            }
         }
         view.onSessionStatus = { [weak self] status in self?.receiveSessionStatus(status) }
-        // libghostty's callbacks: only the feed surface counts what it parses.
-        let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
             guard let self, isFeed() else { return }
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
@@ -105,11 +117,16 @@ extension Pane {
             guard let self, isFeed() else { return }
             // A surface on a channel gets the shell's 133;D from the session
             // (`onSessionMark`); a surface with no session has only this one.
-            if view?.channelRuntime == nil { notePromptReturned() }
-            // Project memory: off unless the user turned it on, macOS 26+.
-            ProjectMemory.shared.commandFinished(
-                pane: self, view: view, exitCode: exitCode, durationNs: durationNs, reportedCommand: command
-            )
+            if view?.channelRuntime == nil {
+                notePromptReturned()
+                let duration = Double(durationNs) / 1_000_000_000
+                recordCommandEnd(
+                    command: command,
+                    exitCode: exitCode < 0 ? nil : Int(exitCode),
+                    startedAt: Date().addingTimeInterval(-duration),
+                    view: view
+                )
+            }
             markCommandFinished()
             view?.onRunEnded?()
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
@@ -121,6 +138,26 @@ extension Pane {
                 String(localized: "Exited with code \(Int(exitCode)) (\(duration))")
             }
             NotificationHandler.shared.post(pane: self, title: String(localized: "Command Finished"), body: body)
+        }
+    }
+
+    /// Hands a finished command to project memory (off unless the user
+    /// turned it on, macOS 26+). The screen is read only for a failure's
+    /// output tail, and not while a password prompt owns its last line.
+    private func recordCommandEnd(command: String?, exitCode: Int?, startedAt: Date?, view: GhosttyTerminalNSView?) {
+        let end = CommandEnd(
+            paneID: id,
+            projectID: projectID,
+            command: command,
+            exitCode: exitCode,
+            directory: view?.currentPwd,
+            startedAt: startedAt,
+            finishedAt: Date()
+        )
+        ProjectMemory.shared.commandEnded(end) { [weak view] in
+            guard let view else { return nil }
+            let phase = PasswordPromptMonitor.shared.state(for: view).phase
+            return ["sighted", "prompting"].contains(phase) ? nil : view.readText(area: GHOSTTY_POINT_ACTIVE)
         }
     }
 
