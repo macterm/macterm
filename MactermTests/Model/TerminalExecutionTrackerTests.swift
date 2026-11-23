@@ -122,6 +122,42 @@ struct TerminalExecutionTrackerTests {
         #expect(progressState == .running)
     }
 
+    /// bash's readline holds the tty raw at its prompt. The session sends
+    /// the foreground before the tty mode, so the command that a Return
+    /// started comes first with the prompt's raw mode, then canonical.
+    @Test
+    func submittedCommandFirstSeenWithThePromptsRawModeStartsWhenCanonical() {
+        var tracker = TerminalExecutionTracker()
+        tracker.recordUserInteraction()
+        tracker.recordCommandSubmission(at: Date(), allowInPlaceOutputStart: false, hasContent: true)
+        var state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true, currentState: .idle
+        )
+        #expect(state == .idle)
+        state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false, currentState: state
+        )
+        #expect(state == .running)
+        state = tracker.refreshForeground(
+            name: "bash", pid: nil, foregroundIsShell: true, terminalInputIsRaw: true, currentState: state
+        )
+        #expect(state == .done)
+    }
+
+    /// With no submission, the same reports start nothing.
+    @Test
+    func rawThenCanonicalForegroundWithNoSubmissionStaysIdle() {
+        var tracker = TerminalExecutionTracker()
+        tracker.recordUserInteraction()
+        var state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true, currentState: .idle
+        )
+        state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false, currentState: state
+        )
+        #expect(state == .idle)
+    }
+
     @Test
     func rawForegroundCannotStartButCanonicalRunDemotesAndSettles() {
         var tracker = TerminalExecutionTracker()

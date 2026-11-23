@@ -80,6 +80,15 @@ struct TerminalExecutionTracker {
     /// Last observed tty input mode for `lastForeground`. Mode transitions are
     /// meaningful even when the pid/name key is unchanged.
     private var lastTerminalInputWasRaw: Bool?
+    /// A new foreground after a submission that came while the tty was raw,
+    /// with no run. The session sends the foreground before the tty mode at
+    /// each check, so a command that a shell starts from its raw prompt
+    /// (bash's readline) comes first with the prompt's raw mode. When the
+    /// next report is the same foreground in canonical mode, the command
+    /// starts its run. Any other report clears it.
+    private var rawStartCandidate: ForegroundProcessKey?
+    /// A nonempty submission that no foreground change followed yet.
+    private var submissionAwaitsForeground = false
     /// Why the pane is currently considered running. Foreground and explicit
     /// progress run until a completion/foreground transition; activity is an
     /// output heartbeat and quiet-settles.
@@ -187,6 +196,7 @@ struct TerminalExecutionTracker {
         progressQuiesced = nil
         pendingProgressQuiesce = false
         blankSubmissionAt = nil
+        submissionAwaitsForeground = true
         // The shell has been handed work, so a foreground process from here on
         // is that work rather than prompt-hook noise. A BLANK submission
         // deliberately does not clear this (it launches nothing), which is why
@@ -366,7 +376,10 @@ struct TerminalExecutionTracker {
         // claimed as new activity after the transition — notably by the first
         // heartbeat after a command's process returned the foreground to the
         // shell.
+        let followsSubmission = changed && submissionAwaitsForeground
         if changed {
+            rawStartCandidate = nil
+            submissionAwaitsForeground = false
             pendingOutputStart = nil
             blankSubmissionAt = nil
             lastOutputRows = nil
@@ -406,6 +419,7 @@ struct TerminalExecutionTracker {
         guard hasUserInteraction else { return currentState }
 
         if terminalInputIsRaw {
+            rawStartCandidate = followsSubmission && currentState != .running ? newKey : nil
             // A TUI switching canonical→raw is still working. Demote its
             // foreground-owned run so IO heartbeats keep it alive and quiet
             // output can settle it, rather than marking it done immediately.
@@ -414,6 +428,8 @@ struct TerminalExecutionTracker {
             }
             return currentState
         }
+        let startsFromRaw = returnedToCanonical && rawStartCandidate == newKey
+        rawStartCandidate = nil
 
         // A same-pid TUI can return from raw to canonical mode while it keeps
         // working. Restore foreground authority only while it is still
@@ -428,7 +444,7 @@ struct TerminalExecutionTracker {
 
         // A canonical non-shell command is foreground-owned until its process
         // changes. Re-polls of the same pid must not restart settled state.
-        guard changed else { return currentState }
+        guard changed || startsFromRaw else { return currentState }
         // A process appearing while the shell sits at a prompt is a prompt hook,
         // not the user's command (see `shellIsAtPrompt`). Suppress the START
         // only — a run already owned by anything keeps its own rules.
