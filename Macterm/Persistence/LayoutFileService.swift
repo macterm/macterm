@@ -25,7 +25,6 @@ final class LayoutFileService {
     /// The layout that `project`'s file declares. Throws when no file matches
     /// the project's path, when the file does not parse, and when it declares
     /// no tabs: an empty declaration must never plan "close every tab".
-    /// Throws for a project with no folder.
     func layout(for project: Project) throws -> LayoutFile {
         guard project.hasFolder else { throw LayoutFileError.noFolder }
         guard let file = try projectFiles.loadFull(
@@ -59,7 +58,6 @@ final class LayoutFileService {
     /// drifted. `siblingProjects` is the full project list, used only to leave
     /// the files of other projects in the same folder alone and to find the
     /// conflicts.
-    /// Throws for a project with no folder: no file can match it.
     func save(_ layout: LayoutFile, for project: Project, siblingProjects: [Project]) throws -> SaveResult {
         guard project.hasFolder else { throw LayoutFileError.noFolder }
         // Reserve the *other* same-directory projects' files so the save leaves

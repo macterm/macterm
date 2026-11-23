@@ -1870,6 +1870,19 @@ struct AppStateTests {
     }
 
     @Test
+    func next_project_skips_a_project_with_no_folder() {
+        let state = makeAppState()
+        let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
+        let group = Project(name: "g", path: "", sortOrder: 1)
+        let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
+        state.selectProject(a)
+        state.selectNextProject(projects: [a, group, b])
+        #expect(state.activeProjectID == b.id)
+        state.selectPreviousProject(projects: [a, group, b])
+        #expect(state.activeProjectID == a.id)
+    }
+
+    @Test
     func a_project_with_no_folder_has_no_layout_file() {
         let files = makeProjectFileStore()
         let state = makeAppState(projectFiles: files)

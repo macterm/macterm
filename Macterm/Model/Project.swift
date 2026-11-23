@@ -72,7 +72,7 @@ struct Project: Identifiable, Codable, Hashable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         colorName = try container.decodeIfPresent(String.self, forKey: .colorName)
         parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
-        if try container.decodeIfPresent(String.self, forKey: .kind) == "group" {
+        if (try? container.decodeIfPresent(String.self, forKey: .kind)) == "group" {
             path = ""
         }
     }
@@ -95,9 +95,7 @@ extension Project {
 
     /// Whether the project has a folder. Only a row of a dev build that
     /// was a group has none (design 013): no command makes one. The places
-    /// that read `path` skip a project with no folder: Project Insights,
-    /// Finder file routing, layout files, the Worktrees menu. Its shells
-    /// start in `ScratchTabs.fallbackRoot` (`Pane.init`).
+    /// that read `path` skip a project with no folder.
     var hasFolder: Bool { !path.isEmpty }
 
     /// Parsed location: `.local` for a directory path, `.remote` for an

@@ -3,8 +3,6 @@ import Foundation
 /// One row of the sidebar's project tree (design 013): a group, which holds
 /// other rows, or a project, which holds its tabs. A group is a project with
 /// no folder (`Project.hasFolder`), the row of a dev build that was a group.
-/// Issue 0482 replaces the group row with one project row that holds its
-/// tabs and its child projects.
 enum SidebarNode: Identifiable, Equatable {
     case group(Project, children: [SidebarNode])
     case project(Project)

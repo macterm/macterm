@@ -195,7 +195,7 @@ enum LayoutFileError: Error, LocalizedError, EnglishDescribedError {
     /// declaration with nothing to apply.
     case noTabs
     /// The project has no folder (`Project.hasFolder`). A layout file
-    /// matches a project by its folder, so this project has none.
+    /// matches a project by its folder.
     case noFolder
     /// A delete was asked for a file outside the projects directory — a guard
     /// against a stale URL ever reaching `removeItem`.

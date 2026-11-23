@@ -340,12 +340,15 @@ struct ProjectStoreTests {
         let fileURL = tempURL("kind")
         defer { try? FileManager.default.removeItem(at: fileURL) }
         try Data("""
-        [{"createdAt": 0, "id": "11111111-1111-1111-1111-111111111111", "kind": "board", "name": "b", "path": "/tmp/b", "sortOrder": 0}]
+        [
+          {"createdAt": 0, "id": "11111111-1111-1111-1111-111111111111", "kind": "board", "name": "b", "path": "/tmp/b", "sortOrder": 0},
+          {"createdAt": 0, "id": "22222222-2222-2222-2222-222222222222", "kind": 7, "name": "c", "path": "/tmp/c", "sortOrder": 1}
+        ]
         """.utf8).write(to: fileURL)
 
         let store = makeStore(fileURL: fileURL)
         #expect(!store.loadFailed)
-        #expect(store.projects.map(\.path) == ["/tmp/b"])
+        #expect(store.projects.map(\.path) == ["/tmp/b", "/tmp/c"])
     }
 
     @Test

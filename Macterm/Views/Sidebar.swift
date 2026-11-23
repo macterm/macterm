@@ -1003,9 +1003,11 @@ struct SidebarContent: View {
             appState.reorderPinnedTab(record.id, toIndex: index + 2)
         }
         .disabled(index >= appState.pinnedRecords.count - 1)
-        if isLoaded, !projectStore.projects.isEmpty {
+        // A project with no folder is a group row, with no tabs.
+        let unpinTargets = projectStore.projects.filter(\.hasFolder)
+        if isLoaded, !unpinTargets.isEmpty {
             Menu("Unpin to Project") {
-                ForEach(projectStore.projects) { destination in
+                ForEach(unpinTargets) { destination in
                     Button(destination.name) {
                         appState.moveTab(
                             record.id,
@@ -1057,7 +1059,8 @@ struct SidebarContent: View {
             appState.reorderTab(tab.id, inProject: project.id, toIndex: tabIndex + 2)
         }
         .disabled(tabIndex >= tabs.count - 1)
-        let moveTargets = projectStore.projects.filter { $0.id != project.id }
+        // A project with no folder is a group row, with no tabs.
+        let moveTargets = projectStore.projects.filter { $0.id != project.id && $0.hasFolder }
         if !moveTargets.isEmpty {
             Menu("Move to Project") {
                 ForEach(moveTargets) { destination in
