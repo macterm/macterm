@@ -66,6 +66,40 @@ struct PaneTests {
         #expect(p.sidebarSegmentTitle == p.processTitle)
     }
 
+    /// After an app restart, a restored pane attaches to a session whose
+    /// `sleep 300` still runs. The session sends its run status at `hello`,
+    /// before the foreground that the attach asks for. The pane has had no
+    /// input in this app, but the run is real: the name and the state agree.
+    @Test
+    func a_restored_pane_whose_session_runs_a_program_is_running() {
+        let p = Pane(projectPath: "/", projectID: UUID(), sessionName: "macterm-proj-aaaaaaaabbbb")
+        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        report(p, "sleep")
+        #expect(p.foregroundProcessName == "sleep")
+        #expect(p.executionState == .running)
+        report(p, "zsh", shell: true)
+        #expect(p.executionState == .done)
+    }
+
+    /// The same, when the foreground report comes first.
+    @Test
+    func a_running_status_after_the_report_starts_the_run() {
+        let p = Pane(projectPath: "/", projectID: UUID(), sessionName: "macterm-proj-aaaaaaaabbbb")
+        report(p, "sleep")
+        #expect(p.executionState == .idle)
+        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        #expect(p.executionState == .running)
+    }
+
+    /// A session at its prompt trusts nothing: start-up foregrounds stay idle.
+    @Test
+    func an_idle_status_keeps_startup_foregrounds_idle() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.receiveSessionStatus(MactermProtocol.Status(state: .idle))
+        report(p, "login")
+        #expect(p.executionState == .idle)
+    }
+
     @Test
     func executionState_defaults_to_idle() {
         let p = Pane(projectPath: "/", projectID: UUID())

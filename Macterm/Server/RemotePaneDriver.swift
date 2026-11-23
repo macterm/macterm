@@ -346,6 +346,10 @@ final class RemotePaneDriver: PaneInputRoute {
             surface.paneMark(mark)
         }
 
+        func paneStatus(_ status: MactermProtocol.Status) {
+            surface.paneStatus(status)
+        }
+
         func paneLead(_ leader: Bool?) {
             surface.paneLead(leader)
             // The session tells each client that attached whether it leads:

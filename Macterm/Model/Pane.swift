@@ -357,6 +357,15 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private var trackerForeground: (name: String, isShell: Bool)?
 
+    /// The session's run status. A pane restored after an app restart has had
+    /// no input in this app, so the tracker ignores its foreground. A session
+    /// that says `running` (at `hello`, before the foreground) vouches for
+    /// it: its program still runs (`TerminalExecutionTracker.trustSessionRun`).
+    func receiveSessionStatus(_ status: MactermProtocol.Status) {
+        guard status.state == .running, executionTracker.trustSessionRun() else { return }
+        if trackerForeground != nil { refreshTrackerForeground() }
+    }
+
     /// Feeds the tracker the session's latest foreground and line mode. The
     /// report has no pid, so the tracker keys a foreground by its name.
     private func refreshTrackerForeground() {

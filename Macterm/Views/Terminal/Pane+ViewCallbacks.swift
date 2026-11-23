@@ -67,6 +67,7 @@ extension Pane {
             // gate and the tracker's prompt hold.
             if mark.kind == .end { self?.notePromptReturned() }
         }
+        view.onSessionStatus = { [weak self] status in self?.receiveSessionStatus(status) }
         // libghostty's callbacks: only the feed surface counts what it parses.
         let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in

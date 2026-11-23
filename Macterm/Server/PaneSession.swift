@@ -32,6 +32,9 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneCwd(_ url: Data)
     /// An OSC 133 mark that the session parsed.
     func paneMark(_ mark: MactermProtocol.Mark)
+    /// The session's run status: at each change, and at `hello` while it is
+    /// not idle.
+    func paneStatus(_ status: MactermProtocol.Status)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
     /// The session's attention flags: at an attach when one is set, and at
@@ -73,6 +76,7 @@ extension PaneSessionHost {
     func paneTitle(_: Data) {}
     func paneCwd(_: Data) {}
     func paneMark(_: MactermProtocol.Mark) {}
+    func paneStatus(_: MactermProtocol.Status) {}
     func paneAttention(_: MactermProtocol.Attention) {}
     func paneLead(_: Bool?) {}
     func paneLinkLost() {}
@@ -432,9 +436,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 // and the pty would echo the input before the prompt.
                 if mark.kind != .prompt { releaseHeldInput() }
                 host.paneMark(mark)
-            case .status:
+            case let .status(status):
                 // A program runs and reads its input.
                 releaseHeldInput()
+                host.paneStatus(status)
             case let .state(state):
                 host.paneState(state)
             case let .title(title):

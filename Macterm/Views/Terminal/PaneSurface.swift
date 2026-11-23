@@ -266,6 +266,7 @@ final class PaneSurface: Identifiable {
         view.onSessionForeground = nil
         view.onTtyMode = nil
         view.onSessionMark = nil
+        view.onSessionStatus = nil
         view.onAttention = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil

@@ -458,6 +458,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onTtyMode: ((TerminalLineMode) -> Void)?
     /// An OSC 133 mark that the session parsed.
     var onSessionMark: ((MactermProtocol.Mark) -> Void)?
+    /// The session's run status.
+    var onSessionStatus: ((MactermProtocol.Status) -> Void)?
     /// The session's attention flags (`PaneSessionHost.paneAttention`).
     var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil

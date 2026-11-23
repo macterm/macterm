@@ -203,6 +203,10 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         DispatchQueue.main.async { [weak view] in view?.onSessionMark?(mark) }
     }
 
+    func paneStatus(_ status: MactermProtocol.Status) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionStatus?(status) }
+    }
+
     /// The path of an OSC 7 URL: what follows the host. A `file://` URL has
     /// percent escapes, which are decoded. A `kitty-shell-cwd://` URL (the
     /// shell integration of Ghostty) has the raw path, which can hold `#`,
