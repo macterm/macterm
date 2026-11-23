@@ -36,8 +36,8 @@ extension Notification.Name {
     /// this must force one poll even when coalescing and window occlusion would
     /// otherwise leave the timer paused.
     static let terminalQuietSettleDeadline = Notification.Name("MactermTerminalQuietSettleDeadline")
-    /// A zmx session was created, killed, or reattached — the
-    /// `ZmxForegroundResolver` name→leader-pid cache is stale. Observed by
-    /// `AppState`, which invalidates its `ZmxRefreshGate` and wakes the poll.
+    /// A zmx session was created, killed, or reattached: the session listing
+    /// is stale. Observed by `AppState`, which invalidates its
+    /// `ZmxRefreshGate` and wakes the poll.
     static let zmxSessionsChanged = Notification.Name("MactermZmxSessionsChanged")
 }

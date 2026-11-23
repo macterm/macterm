@@ -11,11 +11,8 @@ struct LocalSession: Equatable {
     /// program in the session (server/AGENTS.md, "Session daemons and
     /// macOS attribution").
     var pid: pid_t?
-    /// The session's shell, the leader of its pty. Its controlling tty's
-    /// foreground group is the pane's foreground (`ZmxForegroundResolver`).
+    /// The session's shell, the leader of its pty.
     var shellPID: pid_t?
-    /// The session's pty (`/dev/ttysNNN`).
-    var ttyPath: String?
     /// False after the shell exited: the session keeps the status until a
     /// client sends `session.kill`.
     var isRunning: Bool
@@ -29,7 +26,6 @@ struct LocalSession: Equatable {
         name: String,
         pid: pid_t? = nil,
         shellPID: pid_t? = nil,
-        ttyPath: String? = nil,
         isRunning: Bool = true,
         clients: Int? = 0,
         buildKey: String? = nil
@@ -37,7 +33,6 @@ struct LocalSession: Equatable {
         self.name = name
         self.pid = pid
         self.shellPID = shellPID
-        self.ttyPath = ttyPath
         self.isRunning = isRunning
         self.clients = clients
         self.buildKey = buildKey
@@ -48,7 +43,6 @@ struct LocalSession: Equatable {
             name: session.id,
             pid: session.pid.flatMap { pid_t(exactly: $0) },
             shellPID: session.shellPid.flatMap { pid_t(exactly: $0) },
-            ttyPath: session.pty.map { String(decoding: $0.bytes, as: UTF8.self) },
             isRunning: session.state == .running,
             clients: session.clients.map(Int.init),
             buildKey: session.buildKey

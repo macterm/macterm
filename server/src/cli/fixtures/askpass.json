@@ -1,0 +1,79 @@
+[
+  {
+    "name": "password",
+    "prompt": "alice@prod's password: ",
+    "request": {
+      "v": 1,
+      "command": "ssh.askpass",
+      "args": {
+        "prompt": "alice@prod's password: "
+      }
+    },
+    "response": "{\"v\":2,\"id\":\"$ID\",\"ok\":true,\"data\":{\"askpass\":{\"answer\":\"s3cret\"}}}\n",
+    "stdout": "s3cret\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "name": "confirm",
+    "prompt": "Allow use of key?",
+    "mode": "confirm",
+    "request": {
+      "v": 1,
+      "command": "ssh.askpass",
+      "args": {
+        "prompt": "Allow use of key?",
+        "confirm": true
+      }
+    },
+    "response": "{\"v\":2,\"id\":\"$ID\",\"ok\":true,\"data\":{\"askpass\":{\"answer\":\"\"}}}\n",
+    "stdout": "",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "name": "cancelled",
+    "prompt": "Password: ",
+    "request": {
+      "v": 1,
+      "command": "ssh.askpass",
+      "args": {
+        "prompt": "Password: "
+      }
+    },
+    "response": "{\"v\":2,\"id\":\"$ID\",\"ok\":false,\"error\":{\"code\":\"cancelled\",\"message\":\"the login was cancelled\"}}\n",
+    "stdout": "",
+    "stderr": "macterm: the login was cancelled\n",
+    "exit": 1
+  },
+  {
+    "name": "refused",
+    "prompt": "Password: ",
+    "request": {
+      "v": 1,
+      "command": "ssh.askpass",
+      "args": {
+        "prompt": "Password: "
+      }
+    },
+    "response": "{\"v\":2,\"id\":\"$ID\",\"ok\":false,\"error\":{\"code\":\"denied\",\"message\":\"this askpass was not started by an ssh of Macterm\"}}\n",
+    "stdout": "",
+    "stderr": "macterm: this askpass was not started by an ssh of Macterm\n",
+    "exit": 1
+  },
+  {
+    "name": "touch the key",
+    "prompt": "Confirm user presence for key",
+    "mode": "none",
+    "stdout": "",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "name": "no socket",
+    "prompt": "Password: ",
+    "stdout": "",
+    "stderr": "macterm: macterm askpass runs only for an ssh that Macterm started\n",
+    "exit": 1
+  }
+]

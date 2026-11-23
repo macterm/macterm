@@ -64,11 +64,11 @@ final class PasswordPromptMonitor {
     /// The monitor's reads of and writes to the world, injectable for tests.
     struct Probes {
         var isReadingPassword: @MainActor (Pane) -> Bool = {
-            $0.isRemote ? $0.remoteLineMode == .password : ProcessInspector.terminalIsReadingPassword(forPane: $0)
+            $0.isRemote ? $0.lineMode == .password : ProcessInspector.terminalIsReadingPassword(forPane: $0)
         }
 
         var isNonCanonical: @MainActor (Pane) -> Bool = {
-            $0.isRemote ? $0.remoteLineMode == .raw : ProcessInspector.terminalIsNonCanonical(forPane: $0)
+            $0.isRemote ? $0.lineMode == .raw : ProcessInspector.terminalIsNonCanonical(forPane: $0)
         }
 
         var screenText: @MainActor (GhosttyTerminalNSView) -> String? = { $0.readText(scrollback: false) }
@@ -77,7 +77,7 @@ final class PasswordPromptMonitor {
         var transcript: @MainActor (GhosttyTerminalNSView) -> String? = { $0.readText(scrollback: true) }
         var asker: @MainActor (Pane) -> PasswordAsker = PasswordPromptMonitor.asker(for:)
         var foregroundIsLocalShell: @MainActor (Pane) -> Bool = {
-            $0.isRemote ? $0.remoteForegroundIsShell : ProcessInspector.foregroundProcessIsShell(forPane: $0)
+            $0.isRemote ? $0.foregroundReportIsShell : ProcessInspector.foregroundProcessIsShell(forPane: $0)
         }
 
         var anchor: @MainActor (GhosttyTerminalNSView) -> NSRect? = { view in
@@ -791,9 +791,9 @@ final class PasswordPromptMonitor {
             // no foreground report, nobody can say who asks.
             guard let destination = pane.remoteDestination,
                   let scope = RemotePasswordScope.scope(for: destination),
-                  let report = pane.remoteForegroundReport
+                  let report = pane.foregroundReport
             else { return .unknown }
-            let isShell = report.isIdle ?? pane.remoteForegroundIsShell
+            let isShell = report.isIdle ?? pane.foregroundReportIsShell
             return .remote(scope: scope, command: isShell ? nil : (report.command ?? report.comm))
         }
         return ProcessInspector.passwordAsker(forPane: pane)

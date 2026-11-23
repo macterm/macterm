@@ -3,65 +3,70 @@ import Foundation
 import Testing
 
 /// Tests for the pane's title model: the OSC-title provenance gate
-/// (`receiveReportedTitle`) and its expiry (`applyForegroundRefresh`).
-/// Both are exercised through their testable cores, with the foreground
-/// pid / program-pid lookups passed in instead of read from live surfaces.
+/// (`receiveReportedTitle`) and its expiry, both judged against the session's
+/// foreground reports (`applyForeground`), the same for local and remote
+/// panes.
 @MainActor
 struct PaneTitleTests {
     private func makePane() -> Pane {
         Pane(projectPath: "/", projectID: UUID())
     }
 
+    private let hx = SessionForeground(comm: "/opt/homebrew/bin/hx", isIdle: false, isShell: false, command: "hx")
+    private let nu = SessionForeground(comm: "/opt/homebrew/bin/nu", isIdle: true, isShell: true, command: "nu")
+
     // MARK: - receiveReportedTitle (provenance gate)
 
     @Test
     func title_from_program_is_adopted() {
         let pane = makePane()
-        pane.receiveReportedTitle("✳ Fix tab switcher", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("✳ Fix tab switcher")
         #expect(pane.programTitle == "✳ Fix tab switcher")
-        #expect(pane.displayTitle == "✳ Fix tab switcher")
     }
 
     @Test
     func title_from_shell_prompt_is_ignored() {
         let pane = makePane()
-        // programPID nil = the foreground process is the shell (prompt churn).
-        pane.receiveReportedTitle("~/dev/macterm", programPID: nil)
+        pane.applyForeground(nu)
+        pane.receiveReportedTitle("~/dev/macterm")
         #expect(pane.programTitle == nil)
     }
 
     @Test
     func blank_title_is_ignored() {
         let pane = makePane()
-        pane.receiveReportedTitle("   ", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("   ")
         #expect(pane.programTitle == nil)
     }
 
     @Test
     func title_is_trimmed() {
         let pane = makePane()
-        pane.receiveReportedTitle("  hello \n", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("  hello \n")
         #expect(pane.programTitle == "hello")
     }
 
     @Test
     func same_program_can_update_its_title() {
         let pane = makePane()
-        pane.receiveReportedTitle("first", programPID: 42)
-        pane.receiveReportedTitle("second", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("first")
+        pane.receiveReportedTitle("second")
         #expect(pane.programTitle == "second")
     }
 
     @Test
     func bare_version_title_is_ignored() {
-        // Claude Code emits its version (`2.1.202`) as an OSC 2 title at its
-        // prompt — useless as a tab name. Discard it so displayTitle falls back
-        // to the process name; a real (non-version) title still adopts.
+        // Claude Code sets its version as the title at its prompt; it must not
+        // pin the tab to `2.1.202`.
         let pane = makePane()
-        pane.receiveReportedTitle("2.1.202", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("2.1.202")
         #expect(pane.programTitle == nil)
-
-        pane.receiveReportedTitle("✳ Claude Code", programPID: 42)
+        pane.receiveReportedTitle("✳ Claude Code")
         #expect(pane.programTitle == "✳ Claude Code")
     }
 
@@ -80,34 +85,35 @@ struct PaneTitleTests {
         #expect(!ProcessInspector.looksLikeVersionString(""))
     }
 
-    // MARK: - applyForegroundRefresh (expiry)
+    // MARK: - Expiry
 
     @Test
-    func title_survives_while_its_pid_holds_the_foreground() {
+    func title_survives_while_its_program_holds_the_foreground() {
         let pane = makePane()
-        pane.receiveReportedTitle("session", programPID: 42)
-        pane.applyForegroundRefresh(name: "claude", foregroundPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("session")
+        pane.applyForeground(hx)
         #expect(pane.programTitle == "session")
     }
 
     @Test
     func title_expires_when_foreground_returns_to_shell() {
         let pane = makePane()
-        pane.receiveReportedTitle("session", programPID: 42)
-        pane.applyForegroundRefresh(name: "nu", foregroundPID: 7, foregroundIsShell: true)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("session")
+        pane.applyForeground(nu)
         #expect(pane.programTitle == nil)
-        // Display falls back to the process name.
         #expect(pane.displayTitle == "nu")
     }
 
     @Test
     func title_expires_when_a_different_program_takes_over() {
+        // claude exits and btop takes the pty: claude's title must not be
+        // put on btop.
         let pane = makePane()
-        pane.receiveReportedTitle("session", programPID: 42)
-        // claude exits and btop starts between two polls: the pid changed,
-        // so claude's title must not be attributed to btop. Expiry is
-        // immediate — it is keyed on the pid, NOT on the debounced name.
-        pane.applyForegroundRefresh(name: "btop", foregroundPID: 43)
+        pane.applyForeground(SessionForeground(comm: "2.1.289", isIdle: false, isShell: false, command: "claude"))
+        pane.receiveReportedTitle("session")
+        pane.applyForeground(SessionForeground(comm: "btop", isIdle: false, isShell: false, command: "btop"))
         #expect(pane.programTitle == nil)
         #expect(pane.displayTitle == "btop")
     }
@@ -115,70 +121,115 @@ struct PaneTitleTests {
     @Test
     func title_expires_when_surface_is_gone() {
         let pane = makePane()
-        pane.receiveReportedTitle("session", programPID: 42)
-        pane.applyForegroundRefresh(name: nil, foregroundPID: nil)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("session")
+        pane.surfacesWillTearDown(hadView: true)
+        #expect(pane.foregroundSample == nil)
+        #expect(pane.programTitle == nil)
+        // No report: a title outside a run names nothing.
+        pane.receiveReportedTitle("later")
         #expect(pane.programTitle == nil)
     }
 
-    // MARK: - Prompt-hook debounce (transient foreground processes)
-
-    private func loginShellName() throws -> String {
-        try (String(cString: #require(getpwuid(getuid())?.pointee.pw_shell)) as NSString).lastPathComponent
+    @Test
+    func prompt_mark_clears_a_local_title() {
+        let pane = makePane()
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("session")
+        pane.notePromptReturned()
+        #expect(pane.programTitle == nil)
     }
 
-    /// A hook-heavy shell forks `starship`/`mise`/`zoxide` on every prompt.
-    /// Publishing one renamed the tab to `starship`, and because the poll stops
-    /// while the window is occluded and the app is inactive, that wrong name
-    /// stuck until a click or keystroke re-sampled.
+    // MARK: - Prompt hooks
+
+    private func shell(_ name: String) -> SessionForeground {
+        SessionForeground(comm: name, isIdle: true, isShell: true, command: name)
+    }
+
+    private func program(_ name: String) -> SessionForeground {
+        SessionForeground(comm: name, isIdle: false, isShell: false, command: name)
+    }
+
+    /// A hook-heavy shell starts `starship`, `mise` or `zoxide` at each
+    /// prompt. nushell gives each one a process group of its own, so the
+    /// session reports it in front for a moment. It must never name the tab.
     @Test
-    func promptHookNeverBecomesTheTabName() throws {
+    func promptHookNeverBecomesTheTabName() {
         let pane = makePane()
-        let shell = try loginShellName()
-
-        pane.applyForegroundRefresh(name: shell, foregroundPID: 10)
-        #expect(pane.foregroundProcessName == shell)
-
+        pane.applyForeground(shell("nu"))
         // The shell reports its command finished, so it is now at a prompt.
         pane.notePromptReturned()
 
-        // A poll lands inside a prompt hook's ~64ms lifetime.
-        pane.applyForegroundRefresh(name: "starship", foregroundPID: 11)
-        #expect(pane.foregroundProcessName == shell)
-        #expect(pane.displayTitle == shell)
+        pane.applyForeground(program("starship"))
+        #expect(pane.foregroundProcessName == "nu")
+        #expect(pane.displayTitle == "nu")
+        #expect(pane.agentIcon == nil)
 
-        // Another hook, next prompt — still never adopted.
-        pane.applyForegroundRefresh(name: "mise", foregroundPID: 12)
-        #expect(pane.foregroundProcessName == shell)
+        pane.applyForeground(program("mise"))
+        #expect(pane.foregroundProcessName == "nu")
 
-        // The shell itself is always allowed through, so no lag returning.
-        pane.applyForegroundRefresh(name: shell, foregroundPID: 10)
-        #expect(pane.foregroundProcessName == shell)
+        // The shell itself is always let through.
+        pane.applyForeground(shell("nu"))
+        #expect(pane.foregroundProcessName == "nu")
     }
 
-    /// The gate must not swallow the user's actual command: submitting one
-    /// means the shell is no longer at a prompt, so the name lands on the very
-    /// first poll — no added latency.
+    /// A submitted command means the shell is no longer at a prompt, so its
+    /// name lands on the first report.
     @Test
-    func submittedCommandIsNamedImmediately() throws {
+    func submittedCommandIsNamedImmediately() {
         let pane = makePane()
-        let shell = try loginShellName()
-        pane.applyForegroundRefresh(name: shell, foregroundPID: 10)
+        pane.applyForeground(shell("nu"))
         pane.notePromptReturned()
 
         pane.recordCommandSubmission(hasContent: true)
-        pane.applyForegroundRefresh(name: "hx", foregroundPID: 20)
+        pane.applyForeground(program("hx"))
         #expect(pane.foregroundProcessName == "hx")
     }
 
-    /// A shell with no OSC 133 integration never reports a prompt, so the gate
-    /// never arms and naming is exactly as it was before it existed.
+    /// A shell with no OSC 133 marks never reports a prompt, so the gate
+    /// never arms.
     @Test
     func withoutShellIntegration_namingIsUnchanged() {
         let pane = makePane()
-        pane.applyForegroundRefresh(name: "npm", foregroundPID: 30)
+        pane.applyForeground(program("npm"))
         #expect(pane.foregroundProcessName == "npm")
-        pane.applyForegroundRefresh(name: "node", foregroundPID: 31)
+        pane.applyForeground(program("node"))
         #expect(pane.foregroundProcessName == "node")
+    }
+
+    // MARK: - Session messages
+
+    @Test
+    func the_state_message_seeds_the_shell_of_a_local_pane() {
+        let pane = makePane()
+        pane.receiveSessionState(MactermProtocol.State(
+            pid: 10, shellPid: 11, pty: ProtocolBin(Data("/dev/ttys004".utf8)), cols: 80, rows: 24
+        ))
+        #expect(pane.sessionShell == SessionShell(pid: 11, ttyPath: "/dev/ttys004"))
+        pane.surfacesWillTearDown(hadView: true)
+        #expect(pane.sessionShell == nil)
+    }
+
+    @Test
+    func the_state_message_of_a_remote_session_is_not_kept() {
+        let pane = makeRemotePane()
+        pane.receiveSessionState(MactermProtocol.State(
+            pid: 10, shellPid: 11, pty: ProtocolBin(Data("/dev/pts/3".utf8)), cols: 80, rows: 24
+        ))
+        #expect(pane.sessionShell == nil)
+    }
+
+    @Test
+    func an_osc7_url_gives_its_path() {
+        func path(_ url: String) -> String? {
+            SurfaceChannelHost.path(ofCwdURL: Data(url.utf8))
+        }
+        #expect(path("file://mac.local/Users/me/dev%20x") == "/Users/me/dev x")
+        // Ghostty's shell integration sends the raw path.
+        #expect(path("kitty-shell-cwd://mac.local/tmp/issue#42?a%b") == "/tmp/issue#42?a%b")
+        #expect(path("file:///tmp") == "/tmp")
+        #expect(path("file://host") == nil)
+        #expect(path("/tmp") == nil)
     }
 
     // MARK: - Remote panes (#104): execution-gated titles, names from the host's reports
@@ -187,22 +238,20 @@ struct PaneTitleTests {
         Pane(projectPath: "devbox:~/dev/api", projectID: UUID())
     }
 
-    private let claude = RemoteForeground(comm: "2.1.289", isIdle: false, command: "claude")
-    private let zsh = RemoteForeground(comm: "-zsh", isIdle: true, isShell: true, command: "-zsh")
+    private let claude = SessionForeground(comm: "2.1.289", isIdle: false, command: "claude")
+    private let zsh = SessionForeground(comm: "-zsh", isIdle: true, isShell: true, command: "-zsh")
 
     @Test
-    func a_title_in_the_replay_of_an_attach_never_names_the_pane() {
-        // After a restart, `top` holds the pty and the replay carries the
-        // shell's last title from before `top` started.
+    func the_current_title_before_the_first_report_is_dropped() {
+        // A new channel gets the session's current title at `hello`, before
+        // the attach that asks for the foreground. It may be a prompt's title
+        // from before the program in front started, so it names nothing.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "top", isIdle: false, isShell: false, command: "top"))
-        pane.receiveRemoteSnapshot(started: true)
         pane.receiveReportedTitle("dev@box: ~/work")
         #expect(pane.programTitle == nil)
-        pane.receiveRemoteSnapshot(started: false)
-        #expect(pane.programTitle == nil)
-        #expect(pane.foregroundProcessName == "top")
-        // A title after the replay is new output, and counts.
+        pane.applyForeground(SessionForeground(comm: "top", isIdle: false, isShell: false, command: "top"))
+        #expect(pane.displayTitle == "top")
+        // A title after the report is new output, and counts.
         pane.receiveReportedTitle("top - load")
         #expect(pane.programTitle == "top - load")
     }
@@ -211,7 +260,7 @@ struct PaneTitleTests {
     private func runTurn(_ pane: Pane, title: String = "◐ Terminal session icons") {
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle(title)
+        pane.receiveReportedTitle(title)
         pane.markProgressFinished()
     }
 
@@ -219,14 +268,14 @@ struct PaneTitleTests {
     func remote_title_is_adopted_only_while_executing() {
         let pane = makeRemotePane()
         // At the prompt with no report: nothing says a program holds the pty.
-        pane.receiveRemoteReportedTitle("~/dev/api")
+        pane.receiveReportedTitle("~/dev/api")
         #expect(pane.programTitle == nil)
 
         // The tracker gates running on a user interaction (typing the
         // command), same as the real flow.
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle("✳ remote session")
+        pane.receiveReportedTitle("✳ remote session")
         #expect(pane.programTitle == "✳ remote session")
     }
 
@@ -234,11 +283,11 @@ struct PaneTitleTests {
     func remote_title_expires_when_the_run_ends_at_the_shell() {
         // The shell's report lands before the prompt that ends the run.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         pane.recordUserInteraction()
         pane.markCommandRunning()
-        pane.receiveRemoteReportedTitle("✳ remote session")
-        pane.applyRemoteForeground(zsh)
+        pane.receiveReportedTitle("✳ remote session")
+        pane.applyForeground(zsh)
         pane.markCommandFinished()
         #expect(pane.programTitle == nil)
     }
@@ -247,10 +296,10 @@ struct PaneTitleTests {
     func remote_title_outlives_a_turn_while_the_agent_holds_the_pty() {
         // No flicker to the process name between turns.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         runTurn(pane)
         #expect(pane.programTitle == "◐ Terminal session icons")
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.receiveReportedTitle("✳ Terminal session icons")
         #expect(pane.programTitle == "✳ Terminal session icons")
     }
 
@@ -261,15 +310,15 @@ struct PaneTitleTests {
         let pane = makeRemotePane()
         runTurn(pane)
         #expect(pane.programTitle == nil)
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.receiveReportedTitle("✳ Terminal session icons")
         #expect(pane.programTitle == nil)
     }
 
     @Test
     func remote_prompt_title_is_dropped_while_the_shell_holds_the_pty() {
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(zsh)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(zsh)
+        pane.receiveReportedTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -278,12 +327,12 @@ struct PaneTitleTests {
         // The agent quits between turns, so no run ends: the report alone
         // settles it.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
-        pane.receiveRemoteReportedTitle("✳ Terminal session icons")
+        pane.applyForeground(claude)
+        pane.receiveReportedTitle("✳ Terminal session icons")
         #expect(pane.programTitle == "✳ Terminal session icons")
-        pane.applyRemoteForeground(zsh)
+        pane.applyForeground(zsh)
         #expect(pane.programTitle == nil)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.receiveReportedTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -291,12 +340,12 @@ struct PaneTitleTests {
     func remote_prompt_return_clears_the_title_at_once() {
         // OSC 133;D is the host's shell owning its prompt.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         runTurn(pane)
         pane.notePromptReturned()
         #expect(pane.programTitle == nil)
         // A title after it is the prompt's.
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.receiveReportedTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -305,8 +354,8 @@ struct PaneTitleTests {
         // A title hook that runs before ghostty's precmd titles first, then
         // OSC 133;D lands.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(claude)
+        pane.receiveReportedTitle("~/dev")
         pane.notePromptReturned()
         #expect(pane.programTitle == nil)
     }
@@ -316,8 +365,8 @@ struct PaneTitleTests {
         // The host says the session's shell doesn't own the tty, but what
         // does is another shell: its prompt titles are churn.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "zsh", isIdle: false, command: "zsh"))
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: false, command: "zsh"))
+        pane.receiveReportedTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -326,8 +375,8 @@ struct PaneTitleTests {
         // The host never calls tmux a shell (Debian lists it in /etc/shells),
         // so its titles and its `run:` are a program's.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "tmux", isIdle: false, isShell: false, command: "tmux attach"))
-        pane.receiveRemoteReportedTitle("build: make")
+        pane.applyForeground(SessionForeground(comm: "tmux", isIdle: false, isShell: false, command: "tmux attach"))
+        pane.receiveReportedTitle("build: make")
         #expect(pane.programTitle == "build: make")
         #expect(pane.remoteForegroundCommand == "tmux attach")
     }
@@ -337,8 +386,8 @@ struct PaneTitleTests {
         // `elvish` is in the host's /etc/shells and not the Mac's: the host's
         // verdict decides.
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(RemoteForeground(comm: "elvish", isIdle: false, isShell: true, command: "elvish"))
-        pane.receiveRemoteReportedTitle("~/dev")
+        pane.applyForeground(SessionForeground(comm: "elvish", isIdle: false, isShell: true, command: "elvish"))
+        pane.receiveReportedTitle("~/dev")
         #expect(pane.programTitle == nil)
     }
 
@@ -352,10 +401,10 @@ struct PaneTitleTests {
     func remote_foreground_name_comes_from_the_report_and_keeps_basename() {
         let pane = makeRemotePane()
         // A macOS remote reports comm as a full path; keep the basename.
-        pane.applyRemoteForegroundName("/usr/local/bin/btop")
+        pane.applyForegroundName("/usr/local/bin/btop")
         #expect(pane.displayTitle == "btop")
         // No name (nil) keeps the last-known name — no title flapping.
-        pane.applyRemoteForegroundName(nil)
+        pane.applyForegroundName(nil)
         #expect(pane.displayTitle == "btop")
     }
 
@@ -369,7 +418,7 @@ struct PaneTitleTests {
         #expect(Pane.normalizeRemoteComm("btop") == "btop")
 
         let pane = makeRemotePane()
-        pane.applyRemoteForegroundName("-/opt/homebrew/bin/nu")
+        pane.applyForegroundName("-/opt/homebrew/bin/nu")
         #expect(pane.displayTitle == "nu")
     }
 
@@ -383,7 +432,7 @@ struct PaneTitleTests {
         #expect(Pane.remoteProcessName(comm: "-zsh", command: "-zsh") == "zsh")
 
         let pane = makeRemotePane()
-        pane.applyRemoteForeground(claude)
+        pane.applyForeground(claude)
         #expect(pane.displayTitle == "claude")
     }
 
@@ -399,7 +448,7 @@ struct PaneTitleTests {
     @Test
     func displayTitle_falls_back_to_process_name_without_a_program_title() {
         let pane = makePane()
-        pane.applyForegroundRefresh(name: "hx", foregroundPID: 9)
+        pane.applyForeground(hx)
         #expect(pane.displayTitle == "hx")
     }
 
@@ -407,41 +456,8 @@ struct PaneTitleTests {
     func tab_autoTitle_uses_program_title_for_its_segment() {
         let pane = makePane()
         let tab = TerminalTab(id: UUID(), splitRoot: .pane(pane), focusedPaneID: pane.id)
-        pane.receiveReportedTitle("✳ session", programPID: 42)
+        pane.applyForeground(hx)
+        pane.receiveReportedTitle("✳ session")
         #expect(tab.autoTitle == "✳ session")
-    }
-
-    // MARK: - Throttle wiring
-
-    /// A flood of reported titles reaches the expensive path twice: once on
-    /// the first title, once at the window's end for the newest held one —
-    /// counted by the `.terminalPollEvent` that path posts, since without a
-    /// surface every title is prompt churn and adopts nothing. The pure
-    /// throttle is `TitleReportThrottleTests`; this pins the pane's flush
-    /// timer to it.
-    @Test
-    func a_flood_of_titles_is_evaluated_once_per_window() async {
-        let pane = Pane(projectPath: "/", projectID: UUID(), titleReportInterval: 0.05)
-        let posts = LockedBox(0)
-        let token = NotificationCenter.default.addObserver(
-            forName: .terminalPollEvent,
-            object: nil,
-            queue: nil
-        ) { _ in posts.mutate { $0 += 1 } }
-        defer { NotificationCenter.default.removeObserver(token) }
-
-        for i in 0 ..< 500 {
-            pane.receiveReportedTitle("t\(i)")
-        }
-        // The leading edge's post is deferred one run-loop turn, the trailing
-        // flush lands after the window: poll rather than sleep a fixed multiple
-        // (see PaneTests.quietPollWake…).
-        for _ in 0 ..< 200 where posts.value < 2 {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        #expect(posts.value == 2)
-        // And nothing else is pending once the flush ran.
-        try? await Task.sleep(for: .milliseconds(100))
-        #expect(posts.value == 2)
     }
 }

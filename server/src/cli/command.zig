@@ -13,6 +13,9 @@ pub const Option = struct {
     /// The name of the value, for an option that takes one. Null for a flag.
     value: ?[]const u8 = null,
     abstract: []const u8,
+    /// The value when the option is not given, for the help only: the
+    /// command reads it itself.
+    default: ?[]const u8 = null,
 
     fn long(o: Option) []const u8 {
         return o.names[o.names.len - 1];
@@ -29,6 +32,10 @@ pub const Argument = struct {
     /// first `--` (ArgumentParser's `.allUnrecognized`): the command reads
     /// them itself (`pane run`).
     unrecognized: bool = false,
+    /// Takes the first word that is not an option of the command and every
+    /// word after it, `--` and options too (ArgumentParser's
+    /// `.captureForPassthrough`): `ssh` hands them on as they are.
+    passthrough: bool = false,
 };
 
 pub const Command = struct {
@@ -119,6 +126,7 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
     }
     const command = path.items[path.items.len - 1];
     const unrecognized = command.arguments.len > 0 and command.arguments[command.arguments.len - 1].unrecognized;
+    const passthrough = command.arguments.len > 0 and command.arguments[command.arguments.len - 1].passthrough;
 
     const values = try arena.alloc(?[]const u8, command.options.len);
     @memset(values, null);
@@ -126,15 +134,21 @@ pub fn parse(arena: std.mem.Allocator, root: *const Command, words: []const []co
     var only_positionals = false;
     while (i < words.len) : (i += 1) {
         const word = words[i];
+        if (passthrough and positionals.items.len == 0 and !isHelpOption(word) and
+            (!isOption(word) or std.mem.eql(u8, word, "--") or optionIndex(command, optionName(word)) == null))
+        {
+            try positionals.appendSlice(arena, words[i..]);
+            break;
+        }
         if (!only_positionals and std.mem.eql(u8, word, "--")) {
             only_positionals = true;
             if (unrecognized) try positionals.append(arena, word);
             continue;
         }
         if (!only_positionals and isOption(word)) {
-            if (std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help")) return .{ .help = path.items };
+            if (isHelpOption(word)) return .{ .help = path.items };
             const eq = std.mem.indexOfScalar(u8, word, '=');
-            const name = if (eq) |e| word[0..e] else word;
+            const name = optionName(word);
             const index = optionIndex(command, name) orelse {
                 if (unrecognized) {
                     try positionals.append(arena, word);
@@ -187,6 +201,15 @@ fn helpCommand(arena: std.mem.Allocator, root: *const Command, words: []const []
     return .{ .help = path.items };
 }
 
+fn isHelpOption(word: []const u8) bool {
+    return std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help");
+}
+
+/// The name of an option word: `--cache` of `--cache=false`.
+fn optionName(word: []const u8) []const u8 {
+    return if (std.mem.indexOfScalar(u8, word, '=')) |e| word[0..e] else word;
+}
+
 fn isHelpFlag(word: []const u8) bool {
     return std.mem.eql(u8, word, "-h") or std.mem.eql(u8, word, "--help") or std.mem.eql(u8, word, "-help");
 }
@@ -235,12 +258,19 @@ pub fn writeUsage(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer
     if (c.usage) |u| return w.writeAll(u);
     try writeCommandLine(w, path);
     if (c.subcommands.len > 0) return w.writeAll(" <subcommand>");
+    // ArgumentParser writes a passthrough argument after the options.
+    const passthrough = c.arguments.len > 0 and c.arguments[c.arguments.len - 1].passthrough;
+    if (!passthrough) try writeArguments(w, c);
+    for (c.options) |o| {
+        if (o.value) |v| try w.print(" [{s} <{s}>]", .{ o.long(), v }) else try w.print(" [{s}]", .{o.long()});
+    }
+    if (passthrough) try writeArguments(w, c);
+}
+
+fn writeArguments(w: *std.Io.Writer, c: *const Command) std.Io.Writer.Error!void {
     for (c.arguments) |a| {
         const dots: []const u8 = if (a.repeating) " ..." else "";
         if (a.optional) try w.print(" [<{s}>{s}]", .{ a.name, dots }) else try w.print(" <{s}>{s}", .{ a.name, dots });
-    }
-    for (c.options) |o| {
-        if (o.value) |v| try w.print(" [{s} <{s}>]", .{ o.long(), v }) else try w.print(" [{s}]", .{o.long()});
     }
 }
 
@@ -278,7 +308,7 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
         try w.writeAll("ARGUMENTS:\n");
         for (c.arguments) |a| {
             var label: [64]u8 = undefined;
-            try writeRow(w, std.fmt.bufPrint(&label, "<{s}>", .{a.name}) catch a.name, a.abstract, width);
+            try writeRow(w, std.fmt.bufPrint(&label, "<{s}>", .{a.name}) catch a.name, a.abstract, short_width, width);
         }
         try w.writeByte('\n');
     }
@@ -294,7 +324,7 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
             if (sub.hidden) continue;
             var label: [64]u8 = undefined;
             const name = if (c.default == sub) std.fmt.bufPrint(&label, "{s} (default)", .{sub.name}) catch sub.name else sub.name;
-            try writeRow(w, name, sub.abstract, short_width);
+            try writeRow(w, name, sub.abstract, short_width, short_width);
         }
         try w.writeAll("\n  See '");
         try w.writeAll(path[0].name);
@@ -312,12 +342,16 @@ fn writeOption(w: *std.Io.Writer, o: Option) std.Io.Writer.Error!void {
         label.writeAll(n) catch {};
     }
     if (o.value) |v| label.print(" <{s}>", .{v}) catch {};
-    try writeRow(w, label.buffered(), o.abstract, width);
+    var abstract_buf: [256]u8 = undefined;
+    const abstract = if (o.default) |d| std.fmt.bufPrint(&abstract_buf, "{s} (default: {s})", .{ o.abstract, d }) catch o.abstract else o.abstract;
+    try writeRow(w, label.buffered(), abstract, short_width, width);
 }
 
 /// One row of a section: the label at column 2 and the abstract at column
-/// 26, on the next line when the label does not leave room.
-fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8, max: usize) std.Io.Writer.Error!void {
+/// 26, on the next line when the label does not leave room. A word ends at
+/// column `max` at most, and the last word at column `last_max`: in the
+/// golden help of an option, only the last word reaches column 80.
+fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8, max: usize, last_max: usize) std.Io.Writer.Error!void {
     try w.writeAll("  ");
     try w.writeAll(label);
     if (2 + label.len + 2 > abstract_column) {
@@ -326,7 +360,7 @@ fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8, max: usi
     } else {
         try w.splatByteAll(' ', abstract_column - 2 - label.len);
     }
-    try writeWrapped(w, "", abstract, abstract_column, max, max);
+    try writeWrapped(w, "", abstract, abstract_column, max, last_max);
 }
 
 /// Writes `prefix` and `text`, wrapped on spaces so that a line holds at
@@ -405,6 +439,31 @@ test "usage errors name the word" {
     try testing.expectEqualStrings("Missing expected argument '<id>'", (try parse(a, &test_root, &.{"needs"})).usage_error.message);
 }
 
+test "a passthrough argument takes every word from the first that is not an option" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const pass: Command = .{
+        .name = "pass",
+        .abstract = "Pass.",
+        .options = &.{ .{ .names = &.{"--cache"}, .value = "cache", .abstract = "Cache." }, .{ .names = &.{"--verbose"}, .abstract = "Verbose." } },
+        .arguments = &.{.{ .name = "args", .abstract = "Args.", .optional = true, .repeating = true, .passthrough = true }},
+    };
+    const root: Command = .{ .name = "macterm", .abstract = "Root.", .subcommands = &.{&pass} };
+    const r = try parse(a, &root, &.{ "pass", "--cache=false", "--verbose", "-p", "22", "host", "--verbose" });
+    try testing.expectEqualStrings("false", r.run.value("--cache").?);
+    try testing.expectEqual(4, r.run.positionals.len);
+    try testing.expectEqualStrings("-p", r.run.positionals[0]);
+    try testing.expectEqualStrings("--verbose", r.run.positionals[3]);
+    // `--` and what follows it, help flags too, go as they are.
+    const sep = try parse(a, &root, &.{ "pass", "--", "-h" });
+    try testing.expectEqualStrings("--", sep.run.positionals[0]);
+    try testing.expectEqualStrings("-h", sep.run.positionals[1]);
+    try testing.expectEqual(2, (try parse(a, &root, &.{ "pass", "--verbose", "-h" })).help.len);
+    // After the first captured word, `-h` is ssh's.
+    try testing.expectEqualStrings("-h", (try parse(a, &root, &.{ "pass", "host", "-h" })).run.positionals[1]);
+}
+
 test "help comes from -h, --help, the help command and a group alone" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -434,8 +493,8 @@ test "a usage error prints the usage line and where to find help" {
 test "a long abstract wraps at column 80 under column 26" {
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
-    try writeRow(&w, "status", "Show whether Macterm is running and which project is active.", short_width);
-    try writeRow(&w, "--a-very-long-option <value>", "Text.", width);
+    try writeRow(&w, "status", "Show whether Macterm is running and which project is active.", short_width, short_width);
+    try writeRow(&w, "--a-very-long-option <value>", "Text.", short_width, width);
     try testing.expectEqualStrings(
         \\  status                  Show whether Macterm is running and which project is
         \\                          active.

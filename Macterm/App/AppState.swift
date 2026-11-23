@@ -1195,7 +1195,7 @@ final class AppState {
     @ObservationIgnored
     var pendingDesktopWidgetMaterialize: Set<UUID> = []
 
-    /// Refresh policy for `ZmxForegroundResolver`'s name→leader cache:
+    /// Refresh policy for the session listing behind `outdatedSessions`:
     /// refresh on session lifecycle events plus a 30s reconcile TTL — never
     /// per tick.
     @ObservationIgnored
@@ -1210,14 +1210,6 @@ final class AppState {
     /// (`SessionBuild`), from the last listing. A tab with one shows a
     /// badge, and Restart Session ends them (`AppState+SessionRestart`).
     var outdatedSessions: Set<String> = []
-
-    /// Bounded retries while a *wrapped* pane is missing from the server's
-    /// list: a freshly-spawned session registers asynchronously, so the
-    /// refresh fired by its creation event usually runs too early. Reset on
-    /// every lifecycle event; without the cap, a dead session would turn
-    /// every poll tick back into a listing.
-    @ObservationIgnored
-    private var zmxRetryBudget = 8
 
     /// Central project-file store (`~/.config/macterm/projects`). Injectable
     /// so tests never read or write the user's real directory.
@@ -1311,7 +1303,6 @@ final class AppState {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.zmxRefreshGate.noteSessionLifecycle()
-                    self?.zmxRetryBudget = 8
                     self?.notePollEvent()
                 }
             }),
@@ -1361,46 +1352,25 @@ final class AppState {
         // that fire `notePollEvent`, and the fresh poll timestamp turns those
         // into coalesced no-ops instead of recursive polls.
         pollCadence.notePolled(at: Date())
-        refreshZmxCacheIfDue()
-        refreshAllForegroundProcesses()
+        refreshOutdatedSessionsIfDue()
+        settleAllPanes()
         reschedulePoll()
     }
 
-    /// Refresh `ZmxForegroundResolver`'s name→leader cache when the gate
-    /// says so (session lifecycle event, or the 30s reconcile TTL), from the
-    /// server's `session.list`. Per-tick foreground resolution reads the
-    /// cache with cheap syscalls only. A failed listing keeps the cache.
-    private func refreshZmxCacheIfDue() {
+    /// List the sessions when the gate says so (session lifecycle event, or
+    /// the 30s reconcile TTL), and keep the ones of an older build. A failed
+    /// listing keeps the last answer: nothing is known.
+    private func refreshOutdatedSessionsIfDue() {
         guard !zmxRefreshInFlight, sessionClient.isBundled() else { return }
         guard zmxRefreshGate.shouldRefresh(now: Date()) else { return }
         zmxRefreshInFlight = true
         Task { [weak self, sessionClient] in
             let sessions = await sessionClient.listSessions()
-            if let sessions { ZmxForegroundResolver.updateCache(sessions) }
-            let names = Set((sessions ?? []).filter(\.isRunning).map(\.name))
-            // A failed listing keeps the last answer: nothing is known.
             let outdated = sessions.map { SessionBuild.outdatedNames(in: $0, appKey: ServerBuilds.bundledKey) }
             await MainActor.run {
+                self?.zmxRefreshInFlight = false
                 if let outdated, self?.outdatedSessions != outdated { self?.outdatedSessions = outdated }
-                self?.finishZmxRefresh(running: names)
             }
-        }
-    }
-
-    private func finishZmxRefresh(running map: Set<String>) {
-        zmxRefreshInFlight = false
-        // A wrapped pane absent from the listing means the refresh raced the
-        // session's async registration — retry on the next tick (bounded).
-        // Without this, the tab title reads `zmx` (the attach client) until
-        // the 30s reconcile catches up.
-        let missingWrapped = workspaces.values
-            .flatMap(\.tabs)
-            .flatMap { $0.splitRoot.allPanes() }
-            .contains { SurfaceRegistry.shared.view(of: $0)?.runsInLocalSession == true && !map.contains($0.sessionName) }
-        if missingWrapped, zmxRetryBudget > 0 {
-            zmxRetryBudget -= 1
-            zmxRefreshGate.noteSessionLifecycle()
-            notePollEvent()
         }
     }
 
@@ -1432,19 +1402,14 @@ final class AppState {
         pollTimerDelay = delay
     }
 
-    /// Re-read the foreground process name of every live pane across all
-    /// workspaces. Each pane only republishes (and triggers a tab re-render)
-    /// when its name actually changes, so this is cheap when nothing's moving.
-    func refreshAllForegroundProcesses() {
+    /// Settle the quiet runs of every pane, and mark seen what the key window
+    /// shows. The foreground needs no poll: each pane's session reports it
+    /// (`Pane.applyForeground`).
+    func settleAllPanes() {
         var sawBusyPane = false
         for (projectID, ws) in workspaces {
             for tab in ws.tabs {
                 for pane in tab.splitRoot.allPanes() {
-                    // The local process table only knows `ssh` for a remote
-                    // pane: its host pushes its foreground through the pane's
-                    // own connection (`Pane.receiveUnknownAPC`). Execution
-                    // state still settles from output heartbeats below.
-                    if !pane.isRemote { pane.refreshForegroundProcess() }
                     // An activity-sourced run whose output has been quiet past
                     // the window settles to `.done`. The output heartbeat is
                     // occlusion-independent, so silence is meaningful whether or
