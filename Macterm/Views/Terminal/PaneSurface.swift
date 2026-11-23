@@ -255,8 +255,6 @@ final class PaneSurface: Identifiable {
         view.onOpenLink = nil
         view.onDesktopNotification = nil
         view.onCommandFinished = nil
-        view.onProgressStarted = nil
-        view.onProgressFinished = nil
         view.onRunEnded = nil
         view.onTerminalRender = nil
         view.onBackgroundColorChange = nil

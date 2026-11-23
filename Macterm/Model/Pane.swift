@@ -151,42 +151,53 @@ final class Pane: Identifiable {
 
     /// The user looked at the pane. The flags clear here at once, and the
     /// session clears its own (`sendSeenToSession`). A `.done` run state
-    /// goes back to `.idle`.
+    /// goes back to `.idle`, because it is the `unseen` flag.
     func markSeen() {
-        acknowledgeCommandCompletion()
         guard attention != MactermProtocol.Attention() else { return }
         logger.info("pane \(self.id, privacy: .public) seen")
         attention = MactermProtocol.Attention()
         sendSeenToSession()
     }
 
-    var executionState: TerminalExecutionState = .idle {
+    /// The pane's run state, from its session only (design/004 §2): the
+    /// session's status says `running`; else a run ended that no client
+    /// showed (`attention.unseen`) is `.done`; else `.idle`. A pane with no
+    /// channel (a plain surface, a remote shell with no server) has no
+    /// status, so it stays idle.
+    var executionState: TerminalExecutionState {
+        if isSessionRunning { return .running }
+        return attention.unseen ? .done : .idle
+    }
+
+    /// The session's `status` message says a run goes on. The session ends
+    /// a run at OSC 133;D, at a new prompt and at the end of a progress
+    /// report, and also for a program with no marks (`events.zig`). The
+    /// channel's end sets it false (`PaneSession.channelEnded`): at an
+    /// attach, the session sends its status only when it is not idle.
+    private(set) var isSessionRunning = false {
         didSet {
-            guard executionState != oldValue else { return }
+            guard isSessionRunning != oldValue else { return }
             // A program's OSC title expires when its command ends (see
             // `receiveReportedTitle`). An agent that finishes a turn ends its
             // run and keeps the foreground, so the title stays while the
             // latest report says a program holds the pty: the shell's own
             // report comes before the prompt that ended the run. A pane with
             // no report keeps no title.
-            if oldValue == .running, programTitle != nil, !programHoldsForeground {
+            if oldValue, programTitle != nil, !programHoldsForeground {
                 programTitle = nil
             }
-            // Transitions (idle→running, running→done) are exactly when the
-            // adaptive poll should speed up; steady-state assignments and
-            // per-frame heartbeats don't reach here (value unchanged).
             NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
         }
     }
 
-    @ObservationIgnored
-    private var executionTracker = TerminalExecutionTracker()
-    /// The poll pauses when the app has no visible window. Keep one
-    /// lightweight wake scheduled from the final IO heartbeat so an occluded
-    /// activity-owned run can still quiet-settle.
-    @ObservationIgnored
-    private var activityQuietPollWork: DispatchWorkItem?
-    private let activityQuietPollDelay: TimeInterval
+    /// The session's run status. True when it ended a run of this pane.
+    @discardableResult
+    func receiveSessionStatus(_ status: MactermProtocol.Status) -> Bool {
+        let running = status.state == .running
+        guard running != isSessionRunning else { return false }
+        isSessionRunning = running
+        return !running
+    }
 
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
@@ -203,139 +214,36 @@ final class Pane: Identifiable {
         sessionShell = SessionShell(pid: pid_t(state.shellPid), ttyPath: tty.isEmpty ? nil : tty)
     }
 
-    func markCommandRunning() {
-        executionState = executionTracker.markProgressStarted(currentState: executionState)
-        cancelActivityQuietPollIfNeeded()
-    }
+    /// Whether the shell sits at its prompt: the session's last OSC 133 mark
+    /// was the end of a command (133;D), with no new command (133;C) since.
+    /// A foreground seen then is a prompt hook, not a command. The naming
+    /// path, the title gate, project memory and the widget recipe capture
+    /// read it. A shell with no marks never sets it.
+    @ObservationIgnored
+    private(set) var isShellAtPrompt = false
 
-    func markCommandFinished() {
-        executionState = executionTracker.markCommandFinished(currentState: executionState)
-        cancelActivityQuietPollIfNeeded()
-    }
-
-    /// Whether the shell sits at its prompt (OSC 133;D since the last real
-    /// submission). A foreground seen then is a prompt hook, not a command —
-    /// the rule the tracker's own start gate and the naming path apply; the
-    /// widget recipe capture reads it for the same reason.
-    var isShellAtPrompt: Bool { executionTracker.isShellAtPrompt }
-
-    /// The shell returned to a prompt (OSC 133;D). The naming path uses it to
-    /// reject prompt-hook processes.
-    func notePromptReturned() {
-        executionTracker.notePromptReturned()
-        // OSC 133;D is the shell that owns the prompt again, so the
-        // program's title goes now. Agents don't emit OSC 133; the shell
-        // around them does.
-        programTitle = nil
-    }
-
-    /// A progress report ended the pane's run: REMOVE, PAUSE or ERROR. Whether
-    /// the run failed is the session's to say (`attention.failed`).
-    func markProgressFinished() {
-        executionState = executionTracker.markProgressFinished(currentState: executionState)
-        cancelActivityQuietPollIfNeeded()
-    }
-
-    /// The row-growth activity primitive that `markOutputActivity` delegates
-    /// to on a growing heartbeat. Exposed directly so tests can seed an
-    /// activity-sourced run at a chosen instant without a growth baseline.
-    func markTerminalActivity(at date: Date = Date()) {
-        executionState = executionTracker.markTerminalActivity(
-            at: date,
-            currentState: executionState
-        )
-    }
-
-    func settleTerminalActivityIfQuiet(
-        now: Date = Date(),
-        quietInterval: TimeInterval = TerminalActivityTiming.quietInterval
-    ) {
-        executionState = executionTracker.settleIfQuiet(
-            now: now,
-            quietInterval: quietInterval,
-            currentState: executionState
-        )
-        cancelActivityQuietPollIfNeeded()
-    }
-
-    /// Handle a throttled `OUTPUT_ACTIVITY` heartbeat — the pane's sole source
-    /// of terminal activity. It fires from the pty IO path (not the renderer),
-    /// so unlike the scrollbar it also reaches occluded/background panes and
-    /// its silence is always meaningful. `setup.sh` requires the GhosttyKit
-    /// ABI that emits it, so the quiet-settle needs no occluded-pane exemption.
-    /// Growth-vs-keepalive is decided in `TerminalExecutionTracker`.
-    func markOutputActivity(totalRows: UInt64, now: Date = Date()) {
-        executionState = executionTracker.markOutputActivity(totalRows: totalRows, at: now, currentState: executionState)
-        scheduleActivityQuietPollIfNeeded()
-    }
-
-    private func scheduleActivityQuietPollIfNeeded() {
-        guard executionTracker.isActivitySourced else {
-            cancelActivityQuietPollIfNeeded()
-            return
+    /// An OSC 133 mark that the session parsed.
+    func receiveSessionMark(_ mark: MactermProtocol.Mark) {
+        switch mark.kind {
+        case .end:
+            isShellAtPrompt = true
+            // The shell owns the prompt again, so the program's title goes
+            // now. Agents don't emit OSC 133; the shell around them does.
+            programTitle = nil
+        case .output:
+            isShellAtPrompt = false
+        default:
+            break
         }
-        // Rescheduled on every heartbeat (~2 Hz per live pane), so this uses a
-        // plain work item rather than spawning and cancelling a `Task` each
-        // time — the same idiom the view's `commandSubmissionEvidenceReset`
-        // uses.
-        activityQuietPollWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            activityQuietPollWork = nil
-            // This dedicated deadline bypasses ordinary event coalescing: if
-            // every window is occluded there may be no timer left to retry.
-            // AppState still performs the settle, so that the poll's other
-            // work stays in one place.
-            NotificationCenter.default.post(name: .terminalQuietSettleDeadline, object: self)
-        }
-        activityQuietPollWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + activityQuietPollDelay, execute: work)
-    }
-
-    private func cancelActivityQuietPollIfNeeded() {
-        guard !executionTracker.isActivitySourced else { return }
-        activityQuietPollWork?.cancel()
-        activityQuietPollWork = nil
-    }
-
-    @discardableResult
-    func acknowledgeCommandCompletion() -> Bool {
-        guard executionState == .done else { return false }
-        executionState = .idle
-        return true
     }
 
     func recordUserInteraction() {
-        executionTracker.recordUserInteraction()
         // Typing into or clicking the pane is the user looking at it — the
         // same event ghostty clears its bell on (`keyDown`).
         markSeen()
         // Keystrokes are the strongest "about to launch something" signal —
         // and the only one available while the non-activating quick terminal
         // has keyboard focus without app focus.
-        NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
-    }
-
-    /// True when a recognized AI agent holds the foreground. Two things key off
-    /// it: the two-heartbeat in-place start heuristic (below), and the view's
-    /// decision to carry a programmatic payload's content evidence forward —
-    /// both are only meaningful in a raw-mode agent TUI, where a bracketed
-    /// paste can leave the payload sitting unsubmitted in the editor buffer.
-    var allowsInPlaceOutputStart: Bool {
-        agentIcon != nil || AgentIcon.match(processName: foregroundProcessName) != nil
-    }
-
-    func recordCommandSubmission(hasContent: Bool, at date: Date = Date()) {
-        // Plain Return is ambiguous in editors and menus. Only a nonempty
-        // submission in a recognized AI agent gets the two-heartbeat in-place
-        // start heuristic; ordinary programs still use process/row evidence.
-        let allowInPlaceOutputStart = allowsInPlaceOutputStart
-        executionTracker.recordCommandSubmission(
-            at: date,
-            allowInPlaceOutputStart: allowInPlaceOutputStart,
-            hasContent: hasContent
-        )
-        acknowledgeCommandCompletion()
         NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
     }
 
@@ -349,40 +257,13 @@ final class Pane: Identifiable {
     /// so the return to the prompt names the pane at once. A shell with no
     /// OSC 133 marks never arms this.
     private func isPromptHook(isShell: Bool) -> Bool {
-        executionTracker.isShellAtPrompt && !isShell
-    }
-
-    /// The latest report, as the tracker reads it: its name, and whether a
-    /// shell holds the pty (the shell verdict, so a nested shell is no run).
-    @ObservationIgnored
-    private var trackerForeground: (name: String, isShell: Bool)?
-
-    /// The session's run status. A pane restored after an app restart has had
-    /// no input in this app, so the tracker ignores its foreground. A session
-    /// that says `running` (at `hello`, before the foreground) vouches for
-    /// it: its program still runs (`TerminalExecutionTracker.trustSessionRun`).
-    func receiveSessionStatus(_ status: MactermProtocol.Status) {
-        guard status.state == .running, executionTracker.trustSessionRun() else { return }
-        if trackerForeground != nil { refreshTrackerForeground() }
-    }
-
-    /// Feeds the tracker the session's latest foreground and line mode. The
-    /// report has no pid, so the tracker keys a foreground by its name.
-    private func refreshTrackerForeground() {
-        executionState = executionTracker.refreshForeground(
-            name: trackerForeground?.name,
-            pid: nil,
-            foregroundIsShell: trackerForeground?.isShell ?? true,
-            terminalInputIsRaw: lineMode.map { $0 != .echoing } ?? false,
-            currentState: executionState
-        )
-        cancelActivityQuietPollIfNeeded()
+        isShellAtPrompt && !isShell
     }
 
     /// An OSC 0/2 title from the session's `title` message. The session sends
     /// the foreground before the output that follows it, so the title is
     /// judged against the report that holds the pane now.
-    /// - A title while a command runs (OSC 133, activity, progress) shows at
+    /// - A title while the session says a run goes on shows at
     ///   once: the program names itself.
     /// - A title at a prompt that OSC 133;D announced is the shell's: dropped.
     /// - Any other title shows when a program holds the pty (an agent idle
@@ -391,8 +272,8 @@ final class Pane: Identifiable {
     ///   channel gets at `hello` comes before its first report, so it is
     ///   dropped.
     ///
-    /// It expires at the end of a run (`executionState.didSet`), at OSC
-    /// 133;D (`notePromptReturned`), and at a report of the shell or of
+    /// It expires at the end of a run (`isSessionRunning`), at OSC
+    /// 133;D (`receiveSessionMark`), and at a report of the shell or of
     /// another program (`applyForeground`).
     func receiveReportedTitle(_ title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -457,10 +338,6 @@ final class Pane: Identifiable {
         // process group is login's, and `isIdle` is false at an idle prompt.
         // A local pane judges by the shell verdict.
         let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
-        // The tracker gets every report: it has its own gate for a prompt
-        // hook (`TerminalExecutionTracker.shellIsAtPrompt`).
-        trackerForeground = (name, isShell)
-        refreshTrackerForeground()
         // A prompt hook must not name the tab: see `isPromptHook`.
         guard !isPromptHook(isShell: isShell) else { return }
         foregroundReportIsShell = isShell
@@ -491,13 +368,9 @@ final class Pane: Identifiable {
     }
 
     /// How the session's pty reads input, from its `tty_mode`. nil until the
-    /// first report, and for a pane with no session. A change feeds the
-    /// tracker once a foreground report came: a TUI that leaves line mode is
-    /// still at work.
+    /// first report, and for a pane with no session.
     @ObservationIgnored
-    var lineMode: TerminalLineMode? {
-        didSet { if lineMode != oldValue, lineMode != nil, trackerForeground != nil { refreshTrackerForeground() } }
-    }
+    var lineMode: TerminalLineMode?
 
     /// The latest report's shell verdict on the foreground (see
     /// `applyForeground`).
@@ -586,8 +459,9 @@ final class Pane: Identifiable {
         remoteForegroundCommand = nil
         foregroundReportIsShell = false
         lastAppliedForeground = nil
-        trackerForeground = nil
         sessionShell = nil
+        isSessionRunning = false
+        isShellAtPrompt = false
         // A notification whose pane no longer exists routes nowhere on tap, so
         // drop any still sitting in Notification Center. Ghostty does the same
         // when a surface is removed.
@@ -640,8 +514,7 @@ final class Pane: Identifiable {
         sessionName persistedSessionName: String? = nil,
         start: PaneStartCommand? = nil,
         shell: String? = nil,
-        env: [String: String]? = nil,
-        activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay
+        env: [String: String]? = nil
     ) {
         self.projectPath = projectPath
         self.projectID = projectID
@@ -672,8 +545,6 @@ final class Pane: Identifiable {
         self.start = start
         self.shell = shell
         self.env = env
-        self.activityQuietPollDelay = activityQuietPollDelay
-        executionTracker = TerminalExecutionTracker(hasUserInteraction: start != nil)
     }
 
     /// Re-point this pane at a new workspace after its tab is moved between

@@ -185,14 +185,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         onTitleChange?(title)
     }
 
-    func surfaceDidReportProgress(_ report: TerminalProgressReport) {
-        switch report {
-        case .running: onProgressStarted?()
-        case .ended,
-             .failed: onProgressFinished?()
-        }
-    }
-
     func surfaceDidUpdateScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
         // Renderer-driven, so it's suppressed while occluded — it feeds only the
         // overlay scrollbar UI, never activity detection. Activity comes solely
@@ -294,9 +286,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// (`GHOSTTY_ACTION_OUTPUT_ACTIVITY`, wired separately in
     /// `GhosttyCallbacks`). Unlike `surfaceDidUpdateScrollbar`, this fires
     /// regardless of occlusion — the renderer doesn't need to be running —
-    /// so it also reaches background/occluded panes. Growth-vs-keepalive
-    /// decisions belong to `TerminalExecutionTracker.markOutputActivity`, not
-    /// here; this method forwards only the total row count that decision needs.
+    /// so it also reaches background/occluded panes. It feeds the adaptive
+    /// chrome and the password monitor, not the run state.
     func surfaceDidOutputActivity(total: UInt64, offset _: UInt64, len _: UInt64) {
         onOutputActivity?(total)
     }
@@ -380,11 +371,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSurfaceSized: (() -> Void)?
     private var hasReportedSurfaceSize = false
     /// Bool is best-effort evidence that the submitted prompt contained text.
-    ///
-    /// CALL ORDER: every path that reports a submission fires `onInteraction`
-    /// FIRST. `Pane.recordUserInteraction` clears the tracker's in-place start
-    /// arming that `recordCommandSubmission` then sets, so the reverse order
-    /// silently disarms the agent path. Keep the two calls in this order.
+    /// Project memory reads the submission; the run state is the session's.
     var onCommandSubmitted: ((Bool) -> Void)?
     /// The text that `sendText` submitted, for the length of its
     /// `onCommandSubmitted` call; nil for a Return that the user typed. Its
@@ -430,13 +417,9 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// Exit code (-1 unknown), duration in ns, and the command as typed
     /// at the prompt when libghostty has it (fork patch 0019), else nil.
     var onCommandFinished: ((Int16, UInt64, String?) -> Void)?
-    var onProgressStarted: (() -> Void)?
-    /// A progress report ended the run (`TerminalProgressReport`): REMOVE,
-    /// PAUSE or ERROR. The session says whether it failed (`Pane.attention`).
-    var onProgressFinished: (() -> Void)?
-    /// A run ended (`onCommandFinished` or `onProgressFinished`), after the
-    /// pane recorded it. The window that draws the pane sets it, to mark the
-    /// pane seen when the user looks at it.
+    /// The session ended a run of the pane (`Pane.receiveSessionStatus`).
+    /// The window that draws the pane sets it, to mark the pane seen when
+    /// the user looks at it.
     var onRunEnded: (() -> Void)?
     var onTerminalRender: (() -> Void)?
     var onBackgroundColorChange: ((NSColor) -> Void)?
@@ -2315,10 +2298,9 @@ extension GhosttyTerminalNSView {
     /// Write raw bytes straight to the pty, recording NONE of the
     /// command-submission evidence `sendText` does.
     ///
-    /// That evidence drives `TerminalExecutionTracker` — execution state, the
-    /// tab status glyph, and tab naming via `shellIsAtPrompt` — so a control
-    /// sequence the user never typed must leave it untouched, or a following
-    /// Return would read as submitting content that does not exist.
+    /// A control sequence the user never typed must leave that evidence
+    /// untouched, or a following Return would read as submitting content
+    /// that does not exist.
     ///
     /// Rides the key path with only `.text` set: libghostty writes such an
     /// event's bytes verbatim under both its legacy and kitty encoders (no

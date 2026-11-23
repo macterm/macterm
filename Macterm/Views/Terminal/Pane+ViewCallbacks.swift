@@ -1,8 +1,8 @@
 import AppKit
 
 extension Pane {
-    /// Connect the view's callbacks that feed the pane's own state: execution
-    /// tracking, attention flags, titles, notifications and project memory.
+    /// Connect the view's callbacks that feed the pane's own state: the run
+    /// state, attention flags, titles, notifications and project memory.
     /// `PaneSurface.ensureNSView` calls this when it makes the view, so the callbacks work
     /// before any window draws the pane. A pane in a `tab new --no-focus` tab,
     /// or in a background tab that a launch warmed, otherwise recorded no
@@ -12,10 +12,10 @@ extension Pane {
     /// `onRunEnded`) stay in `TerminalSurface.configure`.
     ///
     /// The session's own messages (foreground, title, tty mode, marks,
-    /// state, attention) come on every surface's channel and say the same
-    /// thing, so every surface applies them. Every surface of a pane also
+    /// state, status, attention) come on every surface's channel and say the
+    /// same thing, so every surface applies them. Every surface of a pane also
     /// parses the same output with libghostty, so the callbacks that count
-    /// what it reads (runs, notifications, project memory) act only for the
+    /// what it reads (notifications, project memory) act only for the
     /// feed surface (`PaneSurface.isFeed`), which each one asks when it
     /// fires: when the first surface goes, the next one takes over with no
     /// handoff. `PaneSurface` sets the search, copy mode, link and read-only
@@ -28,17 +28,12 @@ extension Pane {
             guard let surface = view?.owningSurface else { return }
             NotificationCenter.default.post(name: .terminalSurfaceSized, object: surface.id)
         }
-        // Order matters: `onInteraction` clears the tracker's in-place start
-        // arming that `onCommandSubmitted` sets, and the view calls them in
-        // that order. See `GhosttyTerminalNSView.onCommandSubmitted`.
-        view.onCommandSubmitted = { [weak self, weak view] hasContent in
+        view.onCommandSubmitted = { [weak self, weak view] _ in
             guard let self else { return }
-            // Before the tracker leaves the prompt: memory captures the line
-            // only while the shell is at its prompt.
+            // Memory captures the line only while the shell is at its prompt,
+            // which the session's 133;C ends after this Return.
             ProjectMemory.shared.commandSubmitted(pane: self, view: view)
-            recordCommandSubmission(hasContent: hasContent)
         }
-        view.canCarryCommandInput = { [weak self] in self?.allowsInPlaceOutputStart ?? false }
         // The surface half of the passthrough gate. The key responders decline
         // the event first; without this, `isAppShortcut` would still swallow it
         // here. Both consult `KeybindPassthrough` so they can't disagree.
@@ -62,12 +57,15 @@ extension Pane {
         view.onSessionState = { [weak self] state in self?.receiveSessionState(state) }
         view.onSessionForeground = { [weak self] foreground in self?.applyForeground(foreground) }
         view.onTtyMode = { [weak self] mode in self?.lineMode = mode }
-        view.onSessionMark = { [weak self] mark in
-            // OSC 133;D: the shell owns its prompt again. It feeds the title
-            // gate and the tracker's prompt hold.
-            if mark.kind == .end { self?.notePromptReturned() }
+        view.onSessionMark = { [weak self] mark in self?.receiveSessionMark(mark) }
+        view.onSessionStatus = { [weak self] status in
+            // Each window that draws the pane may mark it seen. The first
+            // surface's message ends the run, so tell every surface.
+            guard let self, receiveSessionStatus(status) else { return }
+            for surface in SurfaceRegistry.shared.surfaces(of: self) {
+                surface.nsView?.onRunEnded?()
+            }
         }
-        view.onSessionStatus = { [weak self] status in self?.receiveSessionStatus(status) }
         // libghostty's callbacks: only the feed surface counts what it parses.
         let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
@@ -75,43 +73,19 @@ extension Pane {
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
-        view.onProgressStarted = { [weak self] in
-            guard isFeed() else { return }
-            self?.markCommandRunning()
-        }
-        view.onProgressFinished = { [weak self, weak view] in
-            // Only a live run can end. Whether it failed is the session's
-            // flag (`Pane.attention`).
-            guard let self, isFeed(), executionState == .running else { return }
-            markProgressFinished()
-            view?.onRunEnded?()
-        }
-        view.onOutputActivity = { [weak self, weak view] total in
-            if let view {
-                AdaptiveTerminalChrome.shared.terminalDidOutput(view)
-                // A prompt is output: re-read the tty now rather than at the
-                // next idle poll, so the bubble is up before the user types.
-                PasswordPromptMonitor.shared.viewDidOutput(view)
-            }
-            guard let self, isFeed() else { return }
-            // The single activity source. Output heartbeats fire from the pty
-            // IO path regardless of occlusion, so they also reach background
-            // tabs, and they carry the row total so the tracker can tell
-            // growth from an in-place redraw. The session's foreground and
-            // tty mode reach the tracker on their own (`applyForeground`).
-            markOutputActivity(totalRows: total)
+        view.onOutputActivity = { [weak view] _ in
+            guard let view else { return }
+            AdaptiveTerminalChrome.shared.terminalDidOutput(view)
+            // A prompt is output: re-read the tty now rather than at the
+            // next idle poll, so the bubble is up before the user types.
+            PasswordPromptMonitor.shared.viewDidOutput(view)
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
             guard let self, isFeed() else { return }
-            // A surface on a channel gets the shell's 133;D from the session
-            // (`onSessionMark`); a surface with no session has only this one.
-            if view?.channelRuntime == nil { notePromptReturned() }
             // Project memory: off unless the user turned it on, macOS 26+.
             ProjectMemory.shared.commandFinished(
                 pane: self, view: view, exitCode: exitCode, durationNs: durationNs, reportedCommand: command
             )
-            markCommandFinished()
-            view?.onRunEnded?()
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             let durationSec = Double(durationNs) / 1_000_000_000
             let duration = Self.formatDuration(durationSec)

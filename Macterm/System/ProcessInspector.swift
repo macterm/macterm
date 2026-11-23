@@ -302,11 +302,7 @@ enum ProcessInspector {
     /// nushell pane: ghostty's command-wrapper injects
     /// `nu --execute 'use ghostty *'` to load shell integration, and without
     /// this entry the scan reads `use ghostty *` as a command word and reports
-    /// the pane's idle prompt as foreground work. `TerminalExecutionTracker`
-    /// then never sees the shell (`newKey == nil`), so it loses its
-    /// authoritative return-to-prompt completion edge and instead demotes the
-    /// run to activity ownership on the prompt's raw-mode switch — leaving a
-    /// spinner up for the full quiet-settle window after a fast command.
+    /// the pane's idle prompt as foreground work.
     private static func shellOptionConsumesNextArgument(_ option: String) -> Bool {
         option == "--rcfile" || option == "--init-file" || option == "--execute"
     }
