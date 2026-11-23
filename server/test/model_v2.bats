@@ -95,6 +95,15 @@ tab = next(e["a"] for e in batch_of(c, rid)["ev"] if e["e"] == "tab.set")
 assert tab["zoomed"] == "a" and tab["tab"]["focused"] == "a", tab
 assert c.call("state.subscribe")["zoomed"] == [{"tab": "t1", "pane": "a"}]
 
+# A project with tabs holds a project too. A project that holds one is not removed.
+rid = c.next_id
+assert c.call("project.create", id="p2", name="Two", path="/tmp/two", parent="p1") == {}
+orders = [e["a"] for e in batch_of(c, rid)["ev"] if e["e"] == "project.order"]
+assert orders == [{"parent": "p1", "ids": ["p2"]}], orders
+assert c.request("project.remove", id="p1")["err"]["code"] == "invalid_args"
+assert c.call("project.reorder", parent="p1", ids=["p2"]) == {}
+assert c.call("project.remove", id="p2").get("panes", []) == []
+
 # Errors: an id in use, an unknown id, a request that the model refuses.
 assert c.request("tab.create", workspace="p1", id="t2", root=pane("a"))["err"]["code"] == "duplicate_id"
 assert c.request("pane.focus", id="nope")["err"]["code"] == "not_found"
