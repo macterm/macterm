@@ -11291,7 +11291,7 @@
         }
       }
     },
-    "This session is from an older Macterm version and can lose access to folders. Click to restart it." : {
+    "This session is from an older Macterm and can lose access to folders. Click to restart it." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
