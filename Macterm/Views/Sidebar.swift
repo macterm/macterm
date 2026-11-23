@@ -390,7 +390,7 @@ struct SidebarContent: View {
                 return
             case let .project(projectID):
                 guard let project = projectStore.projects.first(where: { $0.id == projectID }) else { return }
-                appState.selectProject(project, in: windowState)
+                appState.showProjectScreen(project, in: windowState)
             case let .tab(PinnedTabs.workspaceID, tabID):
                 // Loaded → select; unloaded → restore from declaration.
                 appState.selectPinnedTab(tabID)

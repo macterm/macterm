@@ -90,6 +90,7 @@ fn cliCommand(init: std.process.Init, words: []const []const u8) !void {
     var in = std.Io.File.stdin().readerStreaming(init.io, &in_buf);
     var code = cli.run(.{
         .arena = arena_state.allocator(),
+        .io = init.io,
         .env = init.environ_map,
         .out = &out.interface,
         .err = &err.interface,

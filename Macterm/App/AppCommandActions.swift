@@ -9,6 +9,51 @@ struct AppCommandContext {
 }
 
 extension AppCommand {
+    /// Whether the command acts on the tab or pane that the key window shows.
+    /// On the project screen no tab shows, so it does nothing there, as in a
+    /// project with no tabs (`AppState.keyWindowShowsProjectScreen`).
+    var actsOnShownTab: Bool {
+        switch self {
+        case .closePane,
+             .closeTab,
+             .renameTab,
+             .moveTabUp,
+             .moveTabDown,
+             .separateAllPanes,
+             .pinTab,
+             .separateCurrentPane,
+             .splitRight,
+             .splitDown,
+             .splitAuto,
+             .zoomPane,
+             .focusLeft,
+             .focusRight,
+             .focusUp,
+             .focusDown,
+             .nextPane,
+             .previousPane,
+             .resizeLeft,
+             .resizeRight,
+             .resizeUp,
+             .resizeDown,
+             .movePaneLeft,
+             .movePaneRight,
+             .movePaneUp,
+             .movePaneDown,
+             .copySessionID,
+             .capturePane,
+             .copyMode,
+             .readOnlyMode,
+             .restartSession,
+             .explainOutput,
+             .autofillPassword,
+             .replaceProjectPathWithCurrentDir:
+            true
+        default:
+            false
+        }
+    }
+
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
     /// project is active, "Replace path" when the pane's pwd matches the
@@ -16,6 +61,7 @@ extension AppCommand {
     /// command palette and the menu bar so the two stay in sync.
     @MainActor
     func action(in ctx: AppCommandContext) -> (@MainActor () -> Void)? {
+        if actsOnShownTab, ctx.appState.keyWindowShowsProjectScreen { return nil }
         let projectID = ctx.appState.activeProjectID
         let current = projectID.flatMap { id in ctx.projectStore.projects.first(where: { $0.id == id }) }
 

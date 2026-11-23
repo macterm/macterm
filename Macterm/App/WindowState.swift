@@ -32,9 +32,16 @@ final class WindowState: Identifiable {
     var activeProjectID: UUID? {
         didSet {
             guard activeProjectID != oldValue else { return }
+            showsProjectScreen = false
             expandActiveProject()
         }
     }
+
+    /// Whether this window shows the project screen (`EmptyProjectView`) of
+    /// `activeProjectID` in place of a tab, also when the project has tabs.
+    /// `AppState.showProjectScreen` sets it. A change of project clears it.
+    /// Saved as `WindowSnapshot.showsProjectScreen`.
+    var showsProjectScreen = false
 
     /// The rows whose sidebar sections are open in this window: projects and
     /// groups (design 013). The saved key keeps its old name.

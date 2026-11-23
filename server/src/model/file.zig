@@ -46,11 +46,43 @@ pub fn parse(gpa: Allocator, bytes: []const u8, fault: *model.Fault) LoadError!M
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.Syntax,
     };
+    try addFormerGroupWorkspaces(gpa, &m, bytes);
     if (try model.validate(gpa, &m.data)) |f| {
         fault.* = f;
         return error.Invalid;
     }
     return m;
+}
+
+/// Gives an empty workspace to each project that an older build wrote as
+/// `kind: group` (design/013, "Ethan chose B" §1). Any other project with
+/// no workspace stays a fault.
+fn addFormerGroupWorkspaces(gpa: Allocator, m: *Model, bytes: []const u8) LoadError!void {
+    const Old = struct {
+        projects: []const struct {
+            id: []const u8,
+            kind: ?enum { project, group } = null,
+        } = &.{},
+    };
+    const parsed = std.json.parseFromSlice(Old, gpa, bytes, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.Syntax,
+    };
+    defer parsed.deinit();
+    const a = m.arena.allocator();
+    var added: std.ArrayList(model.Workspace) = .empty;
+    for (parsed.value.projects) |p| {
+        if (p.kind != .group) continue;
+        const id: model.WorkspaceId = .of(p.id);
+        if (m.findWorkspace(id) != null) continue;
+        try added.append(gpa, .{ .id = try id.dupe(a), .kind = .project });
+    }
+    defer added.deinit(gpa);
+    if (added.items.len == 0) return;
+    const all = try a.alloc(model.Workspace, m.data.workspaces.len + added.items.len);
+    @memcpy(all[0..m.data.workspaces.len], m.data.workspaces);
+    @memcpy(all[m.data.workspaces.len..], added.items);
+    m.data.workspaces = all;
 }
 
 /// Writes the model as JSON.

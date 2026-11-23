@@ -55,6 +55,11 @@ The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resource
   - `api list` shows only the methods that a `local` client may send. Each of these methods must have a `doc`, or the build fails.
   - `api describe` prints the arguments and the result as JSON Schema. A named type is in the top-level `$defs`.
   - `api call` reads the arguments as JSON with the keys of the wire. It refuses an unknown key or a bad value before it connects (exit 1), and prints the result as JSON. A `bin` is a JSON string: bytes that are not UTF-8 print as U+FFFD.
+- **`ssh` and `askpass` need no server** (`src/cli/ssh.zig`, `src/cli/askpass.zig`). Until the swap, the Swift `SSHWrapper` and `AskpassCommand` hold the same rules. `src/cli/fixtures/` holds the cases, and the Zig tests, `SSHWrapperTests` and `ControlProtocolTests` read them: change the two sides together.
+  - `ssh` embeds the `xterm-ghostty` entry as text (`src/cli/terminfo/xterm-ghostty.terminfo`: the output of `infocmp -x xterm-ghostty` without its first line, which is a comment with a path). `SSHWrapperTests` compares it with the entry of the pinned GhosttyKit. After a pin that changes the entry, write the file again.
+  - The cache key of `ssh` is the hash of that text. The Swift CLI hashes the output of `infocmp` with its comment, so after the swap each host gets the entry one more time.
+  - `ssh` becomes the real ssh with `execvp`. The install's `ControlPath` has the pid in its name.
+  - `askpass` sends the v1 request `ssh.askpass` to `MACTERM_ASKPASS_SOCKET`, which is the app's `control.sock`.
 - **Use a streaming writer for output** (`writerStreaming`). A positional writer writes at the start of a file, also when the shell opened the file to append.
 
 ## The roaming link (design/009, issue 0201)
@@ -86,4 +91,8 @@ macOS attributes work that needs privacy permission (Local Network, TCC) to the 
 - You cannot change responsibility afterwards (`responsibility_set_*` needs a private entitlement). The disclaim exists only as a spawn attribute. This is why the server spawns `__session` itself, with no process between, and why there is no flag for it. The responsible root must *stay* a zmx process. A trampoline that ran the shell with exec would keep the pid, but the identity that macOS evaluates would become the identity of the shell.
 - **One spawn starts a session.** The spawn has `POSIX_SPAWN_SETSID`, and on macOS `POSIX_SPAWN_CLOEXEC_DEFAULT`, so the session gets only the fds of the file actions: /dev/null on 0 to 2, and its end of a socket pair on `session.spec_fd`. On Linux every fd of the server is close-on-exec. The spec is one msgpack `SessionCreate.Args` on that socket pair. The session binds its socket, starts the shell, then answers `session.ready_answer` or its error text on the same fd (`session.run`). The session stays a child of the server until the server exits (`Server.children`). The `__create-session` verb asks the server, as `connect --` does.
 - A session that an older build created keeps its old attribution until you create it again. The fix takes effect for each session.
+- **An update removes the protected folders from each session that was open before it.** The update deletes the old bundle, so the session process has no file. tccd then cannot read its path (`proc_pidpath` fails with `ENOENT`). It denies Documents, Desktop and Downloads to the session and its programs.
+  - A copy of the old bundle does not help: tccd uses the path that LaunchServices registered. An exec in place does not help: a running shell keeps its identity.
+  - The app shows the Outdated pill on such a pane (`SessionBuild`). Its restart starts a new session from the new bundle.
+  - Not marked: an old bundle that is moved and not deleted (for example to the Trash). The kernel still gives its path. Not measured: what tccd does then.
 - To measure, use `responsibility_get_pid_responsible_for_pid` (a probe in C of ten lines). A Local Network prompt that nobody *answered* denies everything under that responsible process, also platform binaries. A subnet that looks dead can be a dialog that waits.

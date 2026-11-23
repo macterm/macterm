@@ -7,6 +7,10 @@ private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 /// A local v2 session as the server lists it.
 struct LocalSession: Equatable {
     var name: String
+    /// The session process (`__session`), the responsible process of every
+    /// program in the session (server/AGENTS.md, "Session daemons and
+    /// macOS attribution").
+    var pid: pid_t?
     /// The session's shell, the leader of its pty.
     var shellPID: pid_t?
     /// False after the shell exited: the session keeps the status until a
@@ -20,12 +24,14 @@ struct LocalSession: Equatable {
 
     init(
         name: String,
+        pid: pid_t? = nil,
         shellPID: pid_t? = nil,
         isRunning: Bool = true,
         clients: Int? = 0,
         buildKey: String? = nil
     ) {
         self.name = name
+        self.pid = pid
         self.shellPID = shellPID
         self.isRunning = isRunning
         self.clients = clients
@@ -35,6 +41,7 @@ struct LocalSession: Equatable {
     init(_ session: MactermProtocol.Session) {
         self.init(
             name: session.id,
+            pid: session.pid.flatMap { pid_t(exactly: $0) },
             shellPID: session.shellPid.flatMap { pid_t(exactly: $0) },
             isRunning: session.state == .running,
             clients: session.clients.map(Int.init),

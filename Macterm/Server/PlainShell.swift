@@ -5,7 +5,7 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "PlainShell")
 
 /// A plain ssh shell on a pty, for a remote pane on a host with no server
-/// (`RemotePaneAnswer.plain`). The surface is a manual surface, so the app
+/// (`RemoteHost.Attachment.plain`). The surface is a manual surface, so the app
 /// runs the ssh itself: its output feeds the surface, and the surface's
 /// input goes to its pty. There is no session: the shell stops when the
 /// connection stops.

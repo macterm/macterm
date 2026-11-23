@@ -44,7 +44,7 @@ final class Pane: Identifiable {
     @ObservationIgnored
     let remoteSpec: ProjectPath?
     /// For a remote pane, the host folder of its session, once its session
-    /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
+    /// attached on the host's server (0057, `RemoteHost.sessionAttached`):
     /// the folder of its creation, then the shell's own (OSC 7) at each
     /// save. nil: the pane never had a v2 session there (a new pane, or one
     /// from before v2), so a missing session is made. When it is set and
@@ -52,20 +52,27 @@ final class Pane: Identifiable {
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
-    /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
-    /// app tries again by itself, and a key connects at once. Its frozen
-    /// screen is not dimmed: its cursor is faint and does not blink
-    /// (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row says
-    /// `Connection Lost` (`TerminalPane`), so that it does not look live.
-    /// Never persisted.
-    var isRemoteLinkLost = false {
-        didSet { if isRemoteLinkLost { lineMode = nil } }
+    /// The host of a remote pane (`RemoteHosts.host(of:)`), set when its
+    /// first view asks. The pane reads its link state from it. A host lives
+    /// for the run of the app.
+    var linkHost: RemoteHost?
+
+    /// A remote pane whose connection stopped or failed (its host's session
+    /// table, 0264): the app tries again by itself, and a key connects at
+    /// once. Its frozen screen is not dimmed: its cursor is faint and does
+    /// not blink (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row
+    /// says `Connection Lost` (`TerminalPane`), so that it does not look
+    /// live. Never persisted.
+    var isRemoteLinkLost: Bool {
+        linkHost?.isLost(sessionName) ?? false
     }
 
     /// A try runs now for a lost pane, or a slow first connect runs for a
-    /// pane that came back after a restart (`RemoteHosts.firstConnectIsSlow`):
+    /// pane that came back after a restart (`RemoteHost.firstConnectIsSlow`):
     /// its badge says `Reconnecting`. Never persisted.
-    var isRemoteReconnecting = false
+    var isRemoteReconnecting: Bool {
+        linkHost?.isReconnecting(sessionName) ?? false
+    }
 
     /// The badge of a remote pane whose connection is lost or slow, or nil.
     enum RemoteLinkBadge: Equatable {
@@ -386,6 +393,8 @@ final class Pane: Identifiable {
 
     /// The latest report, as the tracker reads it: its name, and whether a
     /// shell holds the pty (the shell verdict, so a nested shell is no run).
+    /// A shell that runs `-c` or a script is not a shell here: it is a run
+    /// (`ProcessInspector.shellCommandLineRunsCommand`).
     @ObservationIgnored
     private var trackerForeground: (name: String, isShell: Bool)?
 
@@ -473,7 +482,9 @@ final class Pane: Identifiable {
     /// nested shell is a running child, as libghostty reads it. A local
     /// session starts login(1), which starts the shell in a group of its own,
     /// so a local pane uses the shell verdict for both (issue 0448). A
-    /// prompt hook never names the pane (`isPromptHook`).
+    /// prompt hook never names the pane (`isPromptHook`). For the run
+    /// tracker only, a shell that runs `-c` or a script is a program
+    /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
     ///
     /// `remoteForegroundCommand` follows the local `runningCommand` contract:
     /// a shell foreground records no command, anything else records the
@@ -490,8 +501,10 @@ final class Pane: Identifiable {
         // A local pane judges by the shell verdict.
         let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
         // The tracker gets every report: it has its own gate for a prompt
-        // hook (`TerminalExecutionTracker.shellIsAtPrompt`).
-        trackerForeground = (name, isShell)
+        // hook (`TerminalExecutionTracker.shellIsAtPrompt`). A shell that
+        // runs `-c` or a script is a run for the tracker, not a prompt.
+        let runsCommand = isShell && foreground.command.map(ProcessInspector.shellCommandLineRunsCommand) == true
+        trackerForeground = (name, isShell && !runsCommand)
         refreshTrackerForeground()
         // A prompt hook must not name the tab: see `isPromptHook`.
         guard !isPromptHook(isShell: isShell) else { return }
@@ -573,9 +586,9 @@ final class Pane: Identifiable {
         return (stripped as NSString).lastPathComponent
     }
 
-    /// Whether this remote pane's connection stopped (#281, 0057): its client
-    /// (`macterm remote-pane`) waits on the pane's tty while the session
-    /// lives on the host. Read at trigger time by the reconnect sweep. Local
+    /// Whether this remote pane's connection stopped (#281, 0057): its driver
+    /// waits for its host's next try while the session lives on the host.
+    /// Read at trigger time by the reconnect sweep. Local
     /// panes are never "disconnected": they have no network to lose.
     var isDisconnected: Bool {
         isRemote && isRemoteLinkLost

@@ -50,6 +50,26 @@ pub const Base = enum {
     release,
 };
 
+/// The removals that the check against `main` lets pass, as `check` names
+/// them. No release has these items, so no peer in the field reads them.
+/// The check against a release never lets a removal pass. An entry does
+/// nothing once `main` has no such item: remove it then.
+///
+/// Issue 0480 (design/013, "Ethan chose B" §1): a project has no `kind`.
+const removals_before_release = [_][]const u8{
+    "type ProjectKind",
+    "Project.kind",
+    "ProjectCreate.Args.kind",
+};
+
+fn removalPasses(against: Base, comptime fmt: []const u8, args: anytype) bool {
+    if (against != .main) return false;
+    var buf: [256]u8 = undefined;
+    const item = std.fmt.bufPrint(&buf, fmt, args) catch return false;
+    for (removals_before_release) |r| if (std.mem.eql(u8, r, item)) return true;
+    return false;
+}
+
 /// Writes one line for each change from `old` to `new` that an older peer
 /// could not read, for each change to who may send a message, and for each
 /// reply or event that holds a `secret`. Returns the count of lines. `old` is
@@ -151,6 +171,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
 
     for (o.types) |ot| {
         const nt = findName(TypeDef, new.types, ot.name) orelse {
+            if (removalPasses(against, "type {s}", .{ot.name})) continue;
             try w.print("type {s} was removed\n", .{ot.name});
             n += 1;
             continue;
@@ -203,6 +224,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
         };
         for (ot.fields) |of| {
             const nf = findName(Field, nt.fields, of.name) orelse {
+                if (removalPasses(against, "{s}.{s}", .{ ot.name, of.name })) continue;
                 try w.print("{s}.{s} was removed\n", .{ ot.name, of.name });
                 n += 1;
                 continue;
@@ -1162,6 +1184,36 @@ test "the check refuses a removed field, message, method, type or case" {
 
     const no_type = try edit(arena, "\"name\": \"Role\"", "\"name\": \"Rule\"");
     try testing.expectEqualStrings("type Role was removed\n", try problems(arena, base, no_type));
+}
+
+test "a listed removal passes against main, never against a release" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const opts: std.json.ParseOptions = .{ .ignore_unknown_fields = true };
+    // A type and a field from `removals_before_release`.
+    const listed = try edit(arena, "{\"name\": \"Role\", \"kind\": \"enum\", \"cases\": [\"gui\", \"unknown\"]}",
+        \\{"name": "ProjectKind", "kind": "enum", "cases": ["project", "group"]},
+        \\   {"name": "Project", "kind": "struct", "fields": [
+        \\     {"name": "id", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "ProjectKind", "since": 1}]}
+    );
+    const removed = try std.mem.replaceOwned(u8, arena, listed,
+        \\{"name": "ProjectKind", "kind": "enum", "cases": ["project", "group"]},
+        \\   {"name": "Project", "kind": "struct", "fields": [
+        \\     {"name": "id", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "ProjectKind", "since": 1}]}
+    ,
+        \\{"name": "Project", "kind": "struct", "fields": [
+        \\     {"name": "id", "type": "str", "since": 1}]}
+    );
+    try testing.expectEqualStrings("", try problems(arena, listed, removed));
+
+    const old = try std.json.parseFromSliceLeaky(Metadata, arena, listed, opts);
+    const new = try std.json.parseFromSliceLeaky(Metadata, arena, removed, opts);
+    var out: std.Io.Writer.Allocating = .init(arena);
+    try testing.expectEqual(2, try check(&out.writer, old, new, .release));
+    try testing.expectEqualStrings("type ProjectKind was removed\nProject.kind was removed\n", out.written());
 }
 
 test "a new enum case needs an unknown case in the enum" {

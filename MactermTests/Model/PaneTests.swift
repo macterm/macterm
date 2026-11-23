@@ -25,14 +25,14 @@ struct PaneTests {
     func a_lost_remote_pane_shows_reconnecting_while_a_try_runs_and_connection_lost_otherwise() {
         let p = Pane(projectPath: "box:/srv", projectID: UUID())
         #expect(p.remoteLinkBadge == nil)
-        p.isRemoteLinkLost = true
+        p.setRemoteLink(lost: true)
         #expect(p.remoteLinkBadge == .lost)
-        p.isRemoteReconnecting = true
+        p.setRemoteLink(reconnecting: true)
         #expect(p.remoteLinkBadge == .reconnecting)
-        p.isRemoteLinkLost = false
+        p.setRemoteLink(lost: false)
         // A slow first connect of a pane that came back after a restart.
         #expect(p.remoteLinkBadge == .reconnecting)
-        p.isRemoteReconnecting = false
+        p.setRemoteLink(reconnecting: false)
         #expect(p.remoteLinkBadge == nil)
     }
 
@@ -98,6 +98,39 @@ struct PaneTests {
         p.receiveSessionStatus(MactermProtocol.Status(state: .idle))
         report(p, "login")
         #expect(p.executionState == .idle)
+    }
+
+    /// `pane run '/bin/sh -c "…"'`: the session reports `sh`, a shell by
+    /// `/etc/shells`, with the `-c` command line. That is a run, and the
+    /// login shell's return ends it (End-to-End, issue 0484).
+    @Test
+    func a_shell_that_runs_minus_c_is_a_run() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.lineMode = .echoing
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        p.recordUserInteraction()
+        p.recordCommandSubmission(hasContent: true)
+        p.applyForeground(SessionForeground(
+            comm: "/bin/sh", isIdle: false, isShell: true, command: "/bin/sh -c sleep 1; printf started; sleep 6"
+        ))
+        #expect(p.executionState == .running)
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        #expect(p.executionState == .done)
+    }
+
+    /// A login shell and nushell under ghostty's wrapper own their prompt:
+    /// a Return there starts no run.
+    @Test
+    func a_shell_at_its_prompt_is_no_run() {
+        for command in ["-zsh", "/opt/homebrew/bin/nu --execute use ghostty *"] {
+            let p = Pane(projectPath: "/", projectID: UUID())
+            p.lineMode = .echoing
+            p.recordUserInteraction()
+            p.recordCommandSubmission(hasContent: true)
+            let comm = String(command.split(separator: " ")[0])
+            p.applyForeground(SessionForeground(comm: comm, isIdle: false, isShell: true, command: command))
+            #expect(p.executionState == .idle)
+        }
     }
 
     @Test
