@@ -218,4 +218,38 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "/usr/bin/no-such-program"))
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "usr/bin/sudo"), "relative paths never are")
     }
+
+    @Test
+    func a_process_whose_file_was_deleted_is_detected() throws {
+        // The case of a session process after an update deleted the old
+        // bundle. A copy of a platform binary is killed at launch, so the
+        // copy gets an ad-hoc signature first.
+        let folder = FileManager.default.temporaryDirectory.appending(path: "ProcessInspectorTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let copy = folder.appending(path: "sleep")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: copy)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["-f", "-s", "-", copy.path]
+        sign.standardError = FileHandle.nullDevice
+        try sign.run()
+        sign.waitUntilExit()
+        try #require(sign.terminationStatus == 0)
+
+        let process = Process()
+        process.executableURL = copy
+        process.arguments = ["30"]
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+        #expect(!ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+        try FileManager.default.removeItem(at: copy)
+        #expect(ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+
+        process.terminate()
+        process.waitUntilExit()
+        // A process that is gone is not marked.
+        #expect(!ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+        #expect(!ProcessInspector.executableIsDeleted(pid: getpid()))
+    }
 }
