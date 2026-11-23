@@ -298,12 +298,16 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             do {
                 link = try await endpoint.connection()
             } catch {
-                if !(error is CancellationError) {
+                if !(error is CancellationError), !Task.isCancelled {
                     logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
                     host.paneGone()
                 }
                 return
             }
+            // After a failed try, wait before the next one. The endpoint
+            // answers first: one with no next connection ends the pane now.
+            if tries > 0 { try? await Task.sleep(for: Self.channelWait) }
+            if Task.isCancelled { return }
             do {
                 // Only the first attach makes the session. A session that is
                 // gone later ended: the app ends a session whose shell exited,
@@ -329,8 +333,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 uninstall()
                 channelEnded()
                 host.paneLinkLost()
-                // A link that ended goes back to the endpoint at once.
-                if !link.isOpen { continue }
             } catch is CancellationError {
                 return
             } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
@@ -340,13 +342,11 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
                 if uninstall() { channelEnded() }
                 tries += 1
-                if !link.isOpen { continue }
             }
             if tries > Self.channelTries {
                 host.paneGone()
                 return
             }
-            if tries > 0 { try? await Task.sleep(for: Self.channelWait) }
         }
     }
 

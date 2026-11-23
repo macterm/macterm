@@ -127,7 +127,9 @@ final class SSHConnections {
     /// New logins for each host in this run.
     private(set) var logins: [String: Int] = [:]
     /// The GUI's side of a login: its notices, and the end of its
-    /// questions when the ssh of a login exits.
+    /// questions when the ssh of a login exits. With none (before launch
+    /// sets it, and in tests), a login shows no notice and an install
+    /// question is declined.
     weak var loginUI: (any LoginUI)?
     /// Questions that are open for each master.
     private var asking: [pid_t: Int] = [:]

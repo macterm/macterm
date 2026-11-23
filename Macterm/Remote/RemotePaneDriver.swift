@@ -202,7 +202,7 @@ final class RemotePaneDriver: PaneInputRoute {
         let session = PaneSession(
             name: name, launch: launch, wantsForeground: true, wantsTty: true,
             host: forward,
-            endpoint: link
+            endpoint: OneAttach(link)
         )
         forward.session = session
         state = .running(session)
@@ -338,6 +338,28 @@ final class RemotePaneDriver: PaneInputRoute {
     /// because the screen can be in any mode.
     nonisolated static func paneText(_ message: String) -> String {
         "\r\n" + message.replacingOccurrences(of: "\n", with: "\r\n") + "\r\n"
+    }
+
+    /// The host's link for one attach. The host owns the next connection:
+    /// after the channel ends, or an attach fails, the session has no next
+    /// connection and ends, and the driver waits for the host's try.
+    private final class OneAttach: ServerEndpoint, @unchecked Sendable {
+        private let link: RemoteServers.Link
+        private let lock = NSLock()
+        private var given = false
+
+        init(_ link: RemoteServers.Link) {
+            self.link = link
+        }
+
+        func connection() async throws -> any ServerLink {
+            let first = lock.withLock {
+                defer { given = true }
+                return !given
+            }
+            guard first else { throw ServerClientError.disconnected }
+            return try await link.connection()
+        }
     }
 
     // MARK: - The session's host

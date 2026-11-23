@@ -15,11 +15,14 @@ This file loads when you work in `Macterm/Server/`. The root `AGENTS.md` has the
 - `ServerConnection` reads the socket on a thread of its own. A request waits for its response by id. `events` gives one element for each event batch. When the connection ends, each request that waits fails with `ServerClientError.disconnected`. Only the reader thread closes the fd, under the lock that each write holds.
 - `LocalServerTests` runs the bundled server in a runtime directory under `/tmp` (a socket path has at most 103 bytes).
 
-## One endpoint for local and remote sessions (F11, issue 0265)
+## One endpoint for local and remote sessions
 
-- **`ServerEndpoint` is where a pane's session lives**: `connection()`, `list`, `kill` and `run`. `LocalSessions` is the local endpoint: it starts the server and tries for a few seconds (`LocalSessions.connection`). A host's link (`RemoteServers.Link`) is the endpoint of the panes that attach over it: it gives only its own connection, and the pane's `RemoteHost` connects again with its backoff.
-- **`PaneSession` takes an endpoint and has one rule for a lost link**: a channel that ends with no exit reports `paneLinkLost`, forgets the lead and the flags, and asks the endpoint again. An endpoint with no connection to give ends the session with `paneGone`. A channel that fails or ends within 2 s counts as a failed try; after more than 12 in a row the pane is gone.
-- **`PaneRoute.make` picks the pane's route** (a `PaneSession` on the local endpoint, or a `RemotePaneDriver`), so the view only hosts the surface.
+- **`ServerEndpoint` is where a pane's session lives**: `connection()`, `list`, `kill` and `run`. Each endpoint decides if a pane gets a next connection.
+  - `LocalSessions` is the local endpoint. It starts the server. A pane's connect tries for a few seconds (`LocalSessions.connection`).
+  - A host's link (`RemoteServers.Link`) is an endpoint for `list`, `kill` and `run`. A remote pane's session gets the link for one attach only (`RemotePaneDriver.OneAttach`). After that attach the session ends, and `RemoteHost` connects again with its backoff.
+- **`PaneSession` takes an endpoint and has one rule for a lost link.** A channel that ends with no exit reports `paneLinkLost` and forgets the lead and the flags. Then the session asks the endpoint again. An endpoint with no connection to give ends the session with `paneGone`.
+  - A channel that fails, or ends within 2 s, is a failed try. The next try waits 500 ms. After more than 12 failed tries in a row, the pane is gone.
+- **`PaneRoute.make` (`Macterm/Model/`) picks the pane's route**: a `PaneSession` on the local endpoint, or a `RemotePaneDriver`. The view only hosts the surface.
 - **`ServerLink` is a connection as a pane and a list use it.** `ServerConnection` is the one that the app runs. `FakeServerLink` (`MactermTests/Support/`) is an in-memory link that speaks frames, for tests with no server (`PaneSessionEndpointTests`).
 - `SessionInfo` is a session as any server lists it. `ServerLink.call(_:_:timeout:)` bounds a request (`serverRequestTimeout`, 10 s).
 - Not built: a state stream of the endpoint (nothing reads one yet), and resume by offset on the app's channels.

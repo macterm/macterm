@@ -127,7 +127,7 @@ struct PaneSessionTests {
     }
 
     @Test
-    func a_lost_link_with_no_reconnect_forgets_the_lead() async throws {
+    func a_lost_link_with_no_next_connection_forgets_the_lead() async throws {
         // A host's link gives no next connection. When it stops, the
         // surface must not keep the lead of a client that is gone.
         try await withServer { server in
@@ -557,6 +557,39 @@ struct PaneSessionEndpointTests {
         // A key after the end comes back to the host.
         session.sendInput(Data("k".utf8))
         try await host.waitFor { $0.undelivered == Data("k".utf8) }
+        session.stop()
+    }
+
+    @Test
+    func channels_that_fail_at_once_end_the_pane_after_the_tries() async throws {
+        // A server that drops each connection: every link is closed.
+        let links = (0 ..< 20).map { _ in FakeServerLink() }
+        for link in links {
+            link.close()
+        }
+        let endpoint = FakeEndpoint(links)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: endpoint)
+        session.start()
+        try await host.waitFor { $0.gone == 1 }
+        // 13 failed tries, 500 ms apart: no tight loop.
+        #expect(endpoint.connected.count == 13)
+        session.stop()
+    }
+
+    @Test
+    func a_failed_attach_on_an_endpoint_with_no_next_connection_ends_the_pane_at_once() async throws {
+        let link = FakeServerLink { method, args in
+            if method == MactermProtocol.SessionCreate.name { throw ServerClientError.noAnswer }
+            return try FakeServerLink.standard(method, args)
+        }
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: Self.launch, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        let started = Date()
+        session.start()
+        try await host.waitFor { $0.gone == 1 }
+        #expect(Date().timeIntervalSince(started) < 0.4, "no wait before an endpoint with no next connection")
+        #expect(host.snapshot().linkLost == 0)
         session.stop()
     }
 

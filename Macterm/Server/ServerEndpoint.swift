@@ -113,11 +113,11 @@ struct SessionInfo: Equatable {
 /// Where a pane's session lives: the local server (`LocalSessions`), or the
 /// server of one host, through one link to it (`RemoteServers.Link`).
 ///
-/// The endpoint owns the rule to connect again. `PaneSession` asks it for a
-/// connection at each attach. The local endpoint starts the server and tries
-/// for a few seconds. A host's link gives only its own connection: a link
-/// that ended has no next connection, and the pane's `RemoteHost` connects
-/// again with its backoff.
+/// `PaneSession` asks the endpoint for a connection at each attach, so the
+/// endpoint decides if a pane gets a next connection. The local endpoint
+/// starts the server and tries for a few seconds. A remote pane gets its
+/// host's link for one attach (`RemotePaneDriver.OneAttach`): after it, the
+/// pane's `RemoteHost` connects again with its backoff.
 protocol ServerEndpoint: AnyObject, Sendable {
     /// A connection that is up. Throws when the endpoint has none to give:
     /// the pane is then gone from this endpoint.
