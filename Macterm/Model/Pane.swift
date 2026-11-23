@@ -44,7 +44,7 @@ final class Pane: Identifiable {
     @ObservationIgnored
     let remoteSpec: ProjectPath?
     /// For a remote pane, the host folder of its session, once its session
-    /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
+    /// attached on the host's server (0057, `RemoteHost.sessionAttached`):
     /// the folder of its creation, then the shell's own (OSC 7) at each
     /// save. nil: the pane never had a v2 session there (a new pane, or one
     /// from before v2), so a missing session is made. When it is set and
@@ -52,20 +52,27 @@ final class Pane: Identifiable {
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
-    /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
-    /// app tries again by itself, and a key connects at once. Its frozen
-    /// screen is not dimmed: its cursor is faint and does not blink
-    /// (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row says
-    /// `Connection Lost` (`TerminalPane`), so that it does not look live.
-    /// Never persisted.
-    var isRemoteLinkLost = false {
-        didSet { if isRemoteLinkLost { lineMode = nil } }
+    /// The host of a remote pane (`RemoteHosts.host(of:)`), set when its
+    /// first view asks. The pane reads its link state from it. A host lives
+    /// for the run of the app.
+    var linkHost: RemoteHost?
+
+    /// A remote pane whose connection stopped or failed (its host's session
+    /// table, 0264): the app tries again by itself, and a key connects at
+    /// once. Its frozen screen is not dimmed: its cursor is faint and does
+    /// not blink (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row
+    /// says `Connection Lost` (`TerminalPane`), so that it does not look
+    /// live. Never persisted.
+    var isRemoteLinkLost: Bool {
+        linkHost?.isLost(sessionName) ?? false
     }
 
     /// A try runs now for a lost pane, or a slow first connect runs for a
-    /// pane that came back after a restart (`RemoteHosts.firstConnectIsSlow`):
+    /// pane that came back after a restart (`RemoteHost.firstConnectIsSlow`):
     /// its badge says `Reconnecting`. Never persisted.
-    var isRemoteReconnecting = false
+    var isRemoteReconnecting: Bool {
+        linkHost?.isReconnecting(sessionName) ?? false
+    }
 
     /// The badge of a remote pane whose connection is lost or slow, or nil.
     enum RemoteLinkBadge: Equatable {
@@ -547,9 +554,9 @@ final class Pane: Identifiable {
         return (stripped as NSString).lastPathComponent
     }
 
-    /// Whether this remote pane's connection stopped (#281, 0057): its client
-    /// (`macterm remote-pane`) waits on the pane's tty while the session
-    /// lives on the host. Read at trigger time by the reconnect sweep. Local
+    /// Whether this remote pane's connection stopped (#281, 0057): its driver
+    /// waits for its host's next try while the session lives on the host.
+    /// Read at trigger time by the reconnect sweep. Local
     /// panes are never "disconnected": they have no network to lose.
     var isDisconnected: Bool {
         isRemote && isRemoteLinkLost
