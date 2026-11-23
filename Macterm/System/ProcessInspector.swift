@@ -278,6 +278,17 @@ enum ProcessInspector {
         return !shellInvocationRunsCommand(argv)
     }
 
+    /// Whether a shell's command line from a session report runs a command
+    /// (`-c`, a script) and does not own a prompt: `sh -c "sleep 1"` is a
+    /// run. The report joins the arguments with spaces, so the value of an
+    /// option can contain spaces (`nu --execute use ghostty *`). The scan
+    /// therefore stops at an option that takes a value.
+    static func shellCommandLineRunsCommand(_ commandLine: String) -> Bool {
+        let words = commandLine.split(separator: " ").map(String.init)
+        let end = words.indices.dropFirst().first { shellOptionConsumesNextArgument(words[$0]) } ?? words.endIndex
+        return shellInvocationRunsCommand(Array(words[..<end]))
+    }
+
     private static func shellInvocationRunsCommand(_ argv: [String]) -> Bool {
         guard argv.count > 1 else { return false }
         var index = 1

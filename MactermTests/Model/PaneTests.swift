@@ -100,6 +100,24 @@ struct PaneTests {
         #expect(p.executionState == .idle)
     }
 
+    /// `pane run '/bin/sh -c "…"'`: the session reports `sh`, a shell by
+    /// `/etc/shells`, with the `-c` command line. That is a run, and the
+    /// login shell's return ends it (End-to-End, issue 0484).
+    @Test
+    func a_shell_that_runs_minus_c_is_a_run() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.lineMode = .echoing
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        p.recordUserInteraction()
+        p.recordCommandSubmission(hasContent: true)
+        p.applyForeground(SessionForeground(
+            comm: "/bin/sh", isIdle: false, isShell: true, command: "/bin/sh -c sleep 1; printf started; sleep 6"
+        ))
+        #expect(p.executionState == .running)
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        #expect(p.executionState == .done)
+    }
+
     @Test
     func executionState_defaults_to_idle() {
         let p = Pane(projectPath: "/", projectID: UUID())

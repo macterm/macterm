@@ -458,8 +458,10 @@ final class Pane: Identifiable {
         // A local pane judges by the shell verdict.
         let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
         // The tracker gets every report: it has its own gate for a prompt
-        // hook (`TerminalExecutionTracker.shellIsAtPrompt`).
-        trackerForeground = (name, isShell)
+        // hook (`TerminalExecutionTracker.shellIsAtPrompt`). A shell that
+        // runs `-c` or a script is a run for the tracker, not a prompt.
+        let runsCommand = isShell && foreground.command.map(ProcessInspector.shellCommandLineRunsCommand) == true
+        trackerForeground = (name, isShell && !runsCommand)
         refreshTrackerForeground()
         // A prompt hook must not name the tab: see `isPromptHook`.
         guard !isPromptHook(isShell: isShell) else { return }

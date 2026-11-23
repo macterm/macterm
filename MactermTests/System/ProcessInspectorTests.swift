@@ -89,6 +89,20 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isIdleShellInvocation(["/bin/bash", "-lc", "sleep 10"]))
     }
 
+    /// A session report joins the arguments with spaces.
+    @Test
+    func reportedShellCommandLine_runsCommandOnlyForMinusCOrScript() {
+        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/sh -c sleep 1; printf started; echo"))
+        #expect(ProcessInspector.shellCommandLineRunsCommand("bash -lc make"))
+        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/bash /path/to/script.sh"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("-zsh"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash --posix"))
+        // The value of `--execute` lost its quotes: the words after it are
+        // not a script.
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("/opt/homebrew/bin/nu --execute use ghostty *"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand(""))
+    }
+
     /// Every nushell pane runs the exact argv below — ghostty's command-wrapper
     /// injects `--execute 'use ghostty *'` to load shell integration. Unlike
     /// `-c`, nushell's `--execute` runs its code and THEN enters the
