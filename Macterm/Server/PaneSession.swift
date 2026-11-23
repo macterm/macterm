@@ -111,8 +111,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     static let resetScreen = Data("\u{1B}[0m\u{1B}[3J\u{1B}[2J\u{1B}[H".utf8)
 
     /// A channel that fails or ends at once counts as a failed try. After
-    /// this many in a row the pane is gone, so a server that drops each
-    /// channel does not make a tight loop.
+    /// more than this many in a row the pane is gone, so a server that drops
+    /// each channel does not make a tight loop.
     private static let channelTries = 12
     private static let channelWait: Duration = .milliseconds(500)
     /// The limit of new attaches on one channel for a grid that changes
