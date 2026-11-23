@@ -139,7 +139,7 @@ pub const Watch = struct {
             if (!h.held or now - h.sent_at.? < m.coalesce_ms) continue;
             h.held = false;
             h.sent_at = now;
-            w.emit(@fromBackingInt(@intCast(i)));
+            w.emit(@enumFromInt(i));
         }
     }
 
@@ -192,7 +192,7 @@ pub const Watch = struct {
     /// The first value in a quiet period goes at once; later ones wait for
     /// the end of the window, where the newest goes.
     fn coalesce(w: *Watch, key: Key) void {
-        const h = &w.holds[@backingInt(key)];
+        const h = &w.holds[@intFromEnum(key)];
         if (h.sent_at) |at| if (w.now_ms - at < m.coalesce_ms) {
             h.held = true;
             return;
@@ -258,6 +258,7 @@ pub const Watch = struct {
                 // 133;D (after a full reset, for one).
                 if (w.status.state == .running and !w.run_by_progress) {
                     w.setCommand(null);
+                    w.setOutputStart(false);
                     w.setStatus(.done, false);
                 }
                 w.push(.{ .mark = .{ .kind = .prompt } });
@@ -318,10 +319,10 @@ pub const Watch = struct {
     /// printed, a line for each row that does not wrap. Read at the
     /// command's end mark, before the shell prints its next prompt, so what
     /// comes after the end (a `clear`, the next command) does not change it.
-    /// An erase inside the command does not move the start: output that it
-    /// printed above the start after the erase is not in the text. Null when
-    /// the command did not start on the primary screen, the primary screen
-    /// is not active now, or the command printed nothing.
+    /// Null when the command did not start on the primary screen, the
+    /// primary screen is not active now, the cursor is above the start (the
+    /// command moved it there, as a `clear` inside it does), or the command
+    /// printed nothing.
     fn outputTail(w: *Watch) ?[]u8 {
         const start_pin = w.output_start orelse return null;
         if (w.term.screens.active_key != .primary) return null;
@@ -330,7 +331,15 @@ pub const Watch = struct {
             .offset => |p| p,
             .overflow => |o| o.end,
         }.left(cursor.x);
-        const start = if (start_pin.isBetween(top, cursor)) start_pin.* else top;
+        // A start above `top` is long output. A start after the cursor is a
+        // command that moved the cursor up past its start: the rows above
+        // are not known to be its output.
+        const start = if (start_pin.isBetween(top, cursor))
+            start_pin.*
+        else if (cursor.before(start_pin.*))
+            return null
+        else
+            top;
         return cellText(w.gpa, start, cursor, .output);
     }
 
@@ -461,7 +470,7 @@ pub const Watch = struct {
     pub fn shellExited(w: *Watch, now: i64) void {
         w.now_ms = now;
         if (!w.removeRecords("", .ended)) return;
-        w.holds[@backingInt(Key.program)] = .{ .sent_at = now };
+        w.holds[@intFromEnum(Key.program)] = .{ .sent_at = now };
         w.emit(.program);
     }
 
@@ -840,12 +849,15 @@ test "events: a success, and output longer than the tail, keep only what they mu
     const marks = try f.only(.mark);
     defer testing.allocator.free(marks);
     try testing.expectEqual(null, marks[3].output_tail);
-    const tail = marks[7].output_tail.?;
-    // The prompt scrolled out of the rows read: the tail starts at a row
-    // of output and ends at the last one.
-    try testing.expect(std.mem.endsWith(u8, tail, "\n24"));
-    try testing.expect(std.mem.indexOf(u8, tail, "seq") == null);
-    try testing.expect(std.mem.count(u8, tail, "\n") < output_tail_rows);
+    // The cursor's row and the 19 above it: the prompt scrolled out.
+    var want: std.ArrayList(u8) = .empty;
+    defer want.deinit(testing.allocator);
+    var n: usize = output_tail_rows + 5 - (output_tail_rows - 1);
+    while (n < output_tail_rows + 5) : (n += 1) {
+        if (want.items.len > 0) try want.append(testing.allocator, '\n');
+        try want.print(testing.allocator, "{d}", .{n});
+    }
+    try testing.expectEqualStrings(want.items, marks[7].output_tail.?);
 }
 
 test "events: with no prompt marks, the tail starts at the output mark" {
@@ -857,6 +869,26 @@ test "events: with no prompt marks, the tail starts at the output mark" {
     const marks = try f.only(.mark);
     defer testing.allocator.free(marks);
     try testing.expectEqualStrings("rejected", marks[1].output_tail.?);
+}
+
+test "events: a command that moves the cursor above its start has no tail" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("older\r\n\x1b]133;A\x07$ \x1b]133;B\x07sh x\r\n\x1b]133;C\x07", 0);
+    // The last row with text is output, so the erase is in place.
+    f.feed("a\r\nb\r\n\x1b[H\x1b[2Jerror\r\n\x1b]133;D;1\x07", 1);
+    const marks = try f.only(.mark);
+    defer testing.allocator.free(marks);
+    try testing.expectEqual(null, marks[3].output_tail);
+}
+
+test "events: a prompt with no end mark drops the output start" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ \x1b]133;B\x07make\r\n\x1b]133;C\x07out\r\n\x1b]133;A\x07$ ", 0);
+    try testing.expectEqual(null, f.w.output_start);
 }
 
 test "events: the shell's own command line wins over the input cells" {

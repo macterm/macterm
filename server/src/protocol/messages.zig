@@ -1512,7 +1512,7 @@ pub const Mark = struct {
     command: ?msgpack.Bin = null,
     /// For `end`: the exit code, when the shell sent one.
     exit_code: ?i32 = null,
-    /// For `end` with a nonzero exit code: the end of the command's output,
+    /// For `end` with a nonzero exit code: the last rows of the command's output,
     /// as text (`events.outputTail`). Null when there is no output.
     output_tail: ?msgpack.Bin = null,
 };
