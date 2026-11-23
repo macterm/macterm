@@ -228,7 +228,7 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
         m.SessionInfo => {
             const e = registry.findEntry(s, args.id) orelse
                 return replyError(s, p.id, re, .not_found, "No session has this id.");
-            if (e.listed()) return reply(s, p.id, re, m.SessionInfo, .{ .session = e.info() });
+            if (e.listed()) return registry.replyInfo(s, p.id, re, e);
             registry.wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .info });
         },
         m.SessionKill => registry.kill(s, p, re, args.id),
@@ -559,7 +559,12 @@ pub fn handleChannelFrame(s: *Server, p: *Peer, ch: *Channel, t: i64, f: frame.F
             const msg = msgpack.decodeSlice(m.PaneMessage, arena, f.body) catch return channelGone(s, p, ch);
             if (std.mem.eql(u8, msg.t, m.SnapshotStart.name)) break :blk .snapshot_start;
             if (std.mem.eql(u8, msg.t, m.SnapshotEnd.name)) break :blk .snapshot_end;
-            if (std.mem.eql(u8, msg.t, m.Exit.name)) ch.exited = true;
+            if (std.mem.eql(u8, msg.t, m.Exit.name)) {
+                ch.exited = true;
+                // The queue keeps the `exit` for the client after the
+                // session ends.
+                if (registry.findEntry(s, ch.session)) |e| registry.statusRead(s, e);
+            }
             break :blk .message;
         },
         .bytes => if (ch.flow.in_snapshot) .snapshot else .output,

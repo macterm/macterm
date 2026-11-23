@@ -9,11 +9,9 @@ private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 /// opens its channel on it, and it lists and ends the sessions.
 ///
 /// It connects at the first use, and again after the connection ends (the
-/// server exits when it has no session and no client). The app owns every
-/// local session, so a session whose shell exited is ended here: at its
-/// `session.exit` event, and at each connect for one that exited while no
-/// app was connected. Its pane already closed, or closes from the client's
-/// exit.
+/// server exits when it has no session and no client). The server ends a
+/// session whose shell exited when a client read the status, so nothing
+/// here ends one.
 actor LocalSessions: ServerEndpoint {
     static let shared = LocalSessions(server: LocalServer.bundled)
 
@@ -145,18 +143,8 @@ actor LocalSessions: ServerEndpoint {
 
     private func watch(_ connection: ServerConnection) {
         Task { [weak self] in
-            if let sessions = try? await connection.call(MactermProtocol.SessionList.self, .init()).sessions {
-                for session in sessions where session.state == .exited {
-                    await self?.kill(session.id)
-                }
-            }
-        }
-        Task { [weak self] in
             await self?.feedModel(.connected)
             for await batch in connection.events {
-                for case let .sessionExit(exit) in batch.events {
-                    await self?.kill(exit.id)
-                }
                 if batch.events.contains(where: \.isModel) {
                     await self?.feedModel(.batch(batch))
                 }

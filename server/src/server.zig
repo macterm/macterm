@@ -551,6 +551,9 @@ pub const Server = struct {
         while (i < s.entries.items.len) {
             const e = s.entries.items[i];
             if (e.conn.dead) {
+                // A create that waits for this session to go starts now.
+                registry.startReplacements(s, e);
+                e.replacing.deinit(s.gpa);
                 e.conn.deinit(s.gpa);
                 e.waiters.deinit(s.gpa);
                 s.gpa.free(e.build);

@@ -137,6 +137,11 @@ c.type(ch, "exit 4\r")
 assert c.wait_msg(ch, "exit") == {"code": 4}
 c.wait(lambda: [v for v in c.control if isinstance(v, dict) and "seq" in v
                 and any(e["e"] == "session.exit" for e in v["ev"])], what="session.exit")
+# The channel gave the client the status: the server ends the session.
+end = time.time() + 5
+while c.call("session.list")["sessions"]:
+    assert time.time() < end, c.call("session.list")
+    time.sleep(0.05)
 c.close()
 PY
 }
