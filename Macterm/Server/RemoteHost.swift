@@ -42,8 +42,14 @@ final class RemoteHost {
 
         var isTrying: Bool {
             switch self {
-            case .loggingIn, .checking, .awaitingConsent, .installing: true
-            case .idle, .ready, .plain, .unreachable: false
+            case .loggingIn,
+                 .checking,
+                 .awaitingConsent,
+                 .installing: true
+            case .idle,
+                 .ready,
+                 .plain,
+                 .unreachable: false
             }
         }
     }
@@ -269,7 +275,8 @@ final class RemoteHost {
             settle(session, lost: false)
             return .channel(link, create: folder)
         case .gone:
-            logger.info("remote pane: session=\(session, privacy: .public) is gone on \(self.destination, privacy: .public), the pane closes")
+            logger
+                .info("remote pane: session=\(session, privacy: .public) is gone on \(self.destination, privacy: .public), the pane closes")
             forget(session)
             return .ended
         }
@@ -314,6 +321,11 @@ final class RemoteHost {
         let signal = tries[session] ?? AsyncSignal<Bool>()
         tries[session] = signal
         return try await signal.wait()
+    }
+
+    /// No view of the session waits for its next try now.
+    func waitersAreEmpty(for session: String) -> Bool {
+        tries[session]?.isEmpty ?? true
     }
 
     /// A key in a pane that waits: connect at once, and the login may ask.
@@ -389,10 +401,10 @@ final class RemoteHost {
         configuration.hostLost(destination)
     }
 
-    /// Marks a session lost, as a pane does when its channel ends. For tests
-    /// of what reads the state.
-    func markLost(_ session: String) {
-        settle(session, lost: true)
+    /// Sets the link state of a session. For tests of what reads it.
+    func setLinkState(of session: String, lost: Bool, reconnecting: Bool) {
+        sessions[session, default: SessionState()].lost = lost
+        sessions[session, default: SessionState()].reconnecting = reconnecting
     }
 
     // MARK: - The connect

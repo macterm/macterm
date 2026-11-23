@@ -110,7 +110,7 @@ final class RemoteHosts {
 
     let connections: SSHConnections
     let servers: RemoteServers
-    let configuration: Configuration
+    var configuration: Configuration
 
     /// One host for each destination. A host stays for the run of the app.
     private(set) var hosts: [String: RemoteHost] = [:]

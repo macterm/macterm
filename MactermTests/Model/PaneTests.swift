@@ -25,14 +25,14 @@ struct PaneTests {
     func a_lost_remote_pane_shows_reconnecting_while_a_try_runs_and_connection_lost_otherwise() {
         let p = Pane(projectPath: "box:/srv", projectID: UUID())
         #expect(p.remoteLinkBadge == nil)
-        p.isRemoteLinkLost = true
+        p.setRemoteLink(lost: true)
         #expect(p.remoteLinkBadge == .lost)
-        p.isRemoteReconnecting = true
+        p.setRemoteLink(reconnecting: true)
         #expect(p.remoteLinkBadge == .reconnecting)
-        p.isRemoteLinkLost = false
+        p.setRemoteLink(lost: false)
         // A slow first connect of a pane that came back after a restart.
         #expect(p.remoteLinkBadge == .reconnecting)
-        p.isRemoteReconnecting = false
+        p.setRemoteLink(reconnecting: false)
         #expect(p.remoteLinkBadge == nil)
     }
 
