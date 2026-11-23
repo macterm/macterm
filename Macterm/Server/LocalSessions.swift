@@ -7,6 +7,10 @@ private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 /// A local v2 session as the server lists it.
 struct LocalSession: Equatable {
     var name: String
+    /// The session process (`__session`), the responsible process of every
+    /// program in the session (server/AGENTS.md, "Session daemons and
+    /// macOS attribution").
+    var pid: pid_t?
     /// The session's shell, the leader of its pty. Its controlling tty's
     /// foreground group is the pane's foreground (`ZmxForegroundResolver`).
     var shellPID: pid_t?
@@ -23,6 +27,7 @@ struct LocalSession: Equatable {
 
     init(
         name: String,
+        pid: pid_t? = nil,
         shellPID: pid_t? = nil,
         ttyPath: String? = nil,
         isRunning: Bool = true,
@@ -30,6 +35,7 @@ struct LocalSession: Equatable {
         buildKey: String? = nil
     ) {
         self.name = name
+        self.pid = pid
         self.shellPID = shellPID
         self.ttyPath = ttyPath
         self.isRunning = isRunning
@@ -40,6 +46,7 @@ struct LocalSession: Equatable {
     init(_ session: MactermProtocol.Session) {
         self.init(
             name: session.id,
+            pid: session.pid.flatMap { pid_t(exactly: $0) },
             shellPID: session.shellPid.flatMap { pid_t(exactly: $0) },
             ttyPath: session.pty.map { String(decoding: $0.bytes, as: UTF8.self) },
             isRunning: session.state == .running,

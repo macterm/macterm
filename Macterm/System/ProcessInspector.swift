@@ -126,6 +126,17 @@ enum ProcessInspector {
         return pid_t(info.pbi_ppid)
     }
 
+    /// True when the process runs and the file it runs from is deleted: an
+    /// update removed the old app bundle. `proc_pidpath` then fails with
+    /// `ENOENT` (measured), and tccd, which makes the same call, denies
+    /// every protected folder to the process and to the programs it is
+    /// responsible for. A process that is gone (`ESRCH`) or that the kernel
+    /// does not show is not marked.
+    nonisolated static func executableIsDeleted(pid: pid_t) -> Bool {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return proc_pidpath(pid, &buffer, UInt32(buffer.count)) <= 0 && errno == ENOENT
+    }
+
     /// The executable's resolved absolute path from the kernel
     /// (`proc_pidpath`), or nil when the process is gone or unreadable.
     static func executablePath(pid: pid_t) -> String? {

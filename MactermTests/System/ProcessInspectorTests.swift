@@ -218,4 +218,12 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "/usr/bin/no-such-program"))
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "usr/bin/sudo"), "relative paths never are")
     }
+
+    @Test
+    func a_process_with_its_file_or_a_gone_process_is_not_deleted() {
+        // A deleted file is measured by hand: a copy of a platform binary
+        // is killed at launch, so a unit test has no file to delete.
+        #expect(!ProcessInspector.executableIsDeleted(pid: getpid()))
+        #expect(!ProcessInspector.executableIsDeleted(pid: 999_999))
+    }
 }

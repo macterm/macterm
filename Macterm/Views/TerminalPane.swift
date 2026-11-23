@@ -108,13 +108,15 @@ struct TerminalPane: View {
                         }
                     }
                     // Outdated-session pill: the session runs from an older
-                    // Macterm version. A click restarts it, and asks first
-                    // when a program runs.
+                    // Macterm version, or from a file that an update deleted
+                    // (then macOS denies it Documents and the other protected
+                    // folders). A click restarts it, and asks first when a
+                    // program runs.
                     if let appState, appState.showsOutdatedSessionBadge(pane) {
                         ModePill(
                             title: String(localized: "Outdated"),
                             systemImage: "arrow.triangle.2.circlepath",
-                            help: String(localized: "This pane is from an outdated Macterm version. Click to refresh")
+                            help: String(localized: "This session is from an older Macterm version and can lose access to folders. Click to restart it.")
                         ) { [weak appState, weak pane] in
                             guard let appState, let pane else { return }
                             appState.requestRestartSession(of: pane)
