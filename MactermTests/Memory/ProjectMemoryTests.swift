@@ -296,6 +296,26 @@ struct ProjectMemoryTests {
         return (memory, summarizer, project)
     }
 
+    @Test
+    func a_project_with_no_folder_reads_no_git() async throws {
+        let (memory, _, _) = makeBackgroundMemory {}
+        var reads = 0
+        memory.gitReader = { _ in
+            reads += 1
+            return GitStatus(branch: "main")
+        }
+        let parent = Project(name: "parent", path: "", sortOrder: 0)
+        memory.projectLookup = { $0 == parent.id ? parent : nil }
+        memory.refreshGit(parent.id)
+        let deadline = Date().addingTimeInterval(2)
+        while !memory.gitAnswered.contains(parent.id), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(memory.gitAnswered.contains(parent.id))
+        #expect(reads == 0)
+        #expect(memory.git[parent.id] == nil)
+    }
+
     private func waitForSummary(_ summarizer: ProjectMemorySummarizer, _ project: UUID) async throws {
         let deadline = Date().addingTimeInterval(5)
         while summarizer.state(for: project).phase != .done, Date() < deadline {

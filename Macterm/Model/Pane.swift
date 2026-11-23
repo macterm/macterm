@@ -656,6 +656,9 @@ final class Pane: Identifiable {
         env: [String: String]? = nil,
         activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay
     ) {
+        // A project with no folder (`Project.hasFolder`) starts its shells
+        // in the folder of the scratch tabs.
+        let projectPath = projectPath.isEmpty ? ScratchTabs.fallbackRoot : projectPath
         self.projectPath = projectPath
         self.projectID = projectID
         self.id = id

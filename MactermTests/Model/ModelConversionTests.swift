@@ -30,8 +30,8 @@ struct ModelConversionTests {
     }
 
     @Test
-    func every_project_gets_a_workspace_and_a_group_is_a_project() {
-        let group = Project.group(name: "G")
+    func every_project_gets_a_workspace_a_project_with_no_folder_too() {
+        let group = Project(name: "G", path: "")
         let a = Project(name: "a", path: "/a", parent: group.id)
         let b = Project(name: "b", path: "/b")
         let model = ModelConversion.model(

@@ -13,7 +13,7 @@ struct ModelShadowTests {
         try await withServer { server in
             let dir = server.directory.deletingLastPathComponent()
             let store = ProjectStore(fileURL: dir.appending(path: "projects.json"))
-            let group = store.add(.group(name: "Group"))
+            let group = store.add(Project(name: "Group", path: ""))
             let a = store.add(Project(name: "a", path: "/tmp", sortOrder: 0))
             let b = store.add(Project(name: "b", path: "/var", sortOrder: 0))
             store.move(b.id, into: group.id)

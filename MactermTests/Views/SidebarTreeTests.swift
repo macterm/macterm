@@ -10,6 +10,7 @@ struct SidebarTreeTests {
     }
 
     /// Top level: `a`, group `g` (holds `b` and group `inner` with `c`), `d`.
+    /// A group is a project with no folder.
     private struct Fixture {
         let store: ProjectStore
         let a: Project
@@ -23,9 +24,9 @@ struct SidebarTreeTests {
     private func makeFixture() -> Fixture {
         let store = makeStore()
         let a = store.create(name: "a", path: "/tmp/a")
-        let g = store.add(.group(name: "g"))
+        let g = store.add(Project(name: "g", path: ""))
         let b = store.add(Project(name: "b", path: "/tmp/b", parent: g.id))
-        let inner = store.add(.group(name: "inner", parent: g.id))
+        let inner = store.add(Project(name: "inner", path: "", parent: g.id))
         let c = store.add(Project(name: "c", path: "/tmp/c", parent: inner.id))
         let d = store.create(name: "d", path: "/tmp/d")
         return Fixture(store: store, a: a, g: g, b: b, inner: inner, c: c, d: d)
@@ -116,5 +117,14 @@ struct SidebarTreeTests {
         let f = makeFixture()
         #expect(SidebarTree.pathName(of: f.inner, in: f.store) == "g / inner")
         #expect(SidebarTree.pathName(of: f.g, in: f.store) == "g")
+    }
+
+    @Test
+    func the_children_of_a_project_with_a_folder_follow_it() {
+        let f = makeFixture()
+        let child = f.store.add(Project(name: "child", path: "/tmp/child", parent: f.a.id))
+        _ = child
+        #expect(names(SidebarTree.nodes(in: f.store)).first == "a")
+        #expect(Array(names(SidebarTree.nodes(in: f.store)).prefix(2)) == ["a", "child"])
     }
 }

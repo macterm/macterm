@@ -304,8 +304,10 @@ final class ProjectMemory {
         return summarizer.state(for: project.id).key != key
     }
 
-    /// One read of a project's git state, local or remote.
+    /// One read of a project's git state, local or remote. A project with
+    /// no folder has no git state, and nothing reads git for it.
     private func readGit(_ project: Project) async -> ProjectGit.RemoteResult {
+        guard project.hasFolder else { return .read(nil) }
         if let remote = ProjectPath.parse(project.path), case .remote = remote {
             return await remoteGitReader(remote)
         }

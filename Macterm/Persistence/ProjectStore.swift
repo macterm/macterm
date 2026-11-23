@@ -5,12 +5,13 @@ private let logger = Logger(subsystem: appBundleID, category: "ProjectStore")
 
 @MainActor @Observable
 final class ProjectStore {
-    /// The projects in tree order: depth first, and the rows of each parent
-    /// in `sortOrder`. It never holds a group, so a caller that needs a path
-    /// or a workspace reads this list. `normalize` derives it from `rows`
-    /// after each change. It is stored because many view bodies read it.
+    /// Every project in tree order: depth first, a parent before its
+    /// children, and the children of each parent in `sortOrder` (design
+    /// 013). A project can have no folder (`Project.hasFolder`).
+    /// `normalize` derives it from `rows` after each change. It is stored
+    /// because many view bodies read it.
     private(set) var projects: [Project] = []
-    /// Every row of projects.json: the projects and the groups (design 013).
+    /// Every row of projects.json, in the order of the file.
     private var rows: [Project] = []
     private let fileURL: URL
     /// Set when `load()` found a present-but-undecodable projects.json. While
@@ -71,22 +72,20 @@ final class ProjectStore {
         return add(project)
     }
 
-    /// Append a row at the end of its parent, and return it as stored. A
-    /// group's path is cleared. A parent that is not a group of this store
-    /// becomes nil (top level).
+    /// Append a project at the end of its parent, and return it as stored.
+    /// A parent that is not a project of this store becomes nil (top level).
     @discardableResult
     func add(_ project: Project) -> Project {
         var project = project
-        project.path = project.isGroup ? "" : ProjectPath.normalizedForStorage(project.path)
-        if !isGroup(project.parent) { project.parent = nil }
+        project.path = ProjectPath.normalizedForStorage(project.path)
+        if !isPlace(project.parent) { project.parent = nil }
         project.sortOrder = children(of: project.parent).count
         rows.append(project)
         changed()
         return project
     }
 
-    /// Remove a row. The rows of a removed group go to the end of the top
-    /// level.
+    /// Remove a project. Its children go to the end of the top level.
     func remove(id: UUID) {
         rows.removeAll { $0.id == id }
         changed()
@@ -94,21 +93,16 @@ final class ProjectStore {
 
     // MARK: - Tree
 
-    /// Every row, the groups too, in the order of the file. The model of
-    /// design/010 holds both (`ModelShadow`).
-    var allRows: [Project] {
-        rows
-    }
-
-    /// The rows whose parent is `parent` (nil: the top level), projects and
-    /// groups, in `sortOrder`.
+    /// The projects whose parent is `parent` (nil: the top level), in
+    /// `sortOrder`.
     func children(of parent: UUID?) -> [Project] {
         rows.filter { $0.parent == parent }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    /// Move a row into the group `parent` (nil: the top level), at its end.
-    /// A row that is already in `parent` does not move. Returns false when
-    /// `parent` is not a group, or is the row or a group inside the row.
+    /// Move a project into the project `parent` (nil: the top level), at its
+    /// end. A project that is already in `parent` does not move. Returns
+    /// false when `parent` is not a project of this store, or is the project
+    /// itself or a project inside it.
     @discardableResult
     func move(_ id: UUID, into parent: UUID?) -> Bool {
         move(id, into: parent, saving: true)
@@ -117,7 +111,7 @@ final class ProjectStore {
     /// `move(_:into:)`. With `saving` false, the caller saves after its own
     /// next change.
     private func move(_ id: UUID, into parent: UUID?, saving: Bool) -> Bool {
-        guard let index = rows.firstIndex(where: { $0.id == id }), isGroup(parent) else { return false }
+        guard let index = rows.firstIndex(where: { $0.id == id }), isPlace(parent) else { return false }
         if let parent, parent == id || ancestors(of: parent).contains(id) { return false }
         guard rows[index].parent != parent else { return true }
         rows[index].sortOrder = children(of: parent).count
@@ -144,21 +138,13 @@ final class ProjectStore {
         }
     }
 
-    /// The row `id`, a project or a group.
+    /// The project `id`.
     func row(_ id: UUID) -> Project? {
         rows.first { $0.id == id }
     }
 
-    /// Every group, in tree order (a group before the groups inside it).
-    var groups: [Project] {
-        func walk(_ parent: UUID?) -> [Project] {
-            children(of: parent).filter(\.isGroup).flatMap { [$0] + walk($0.id) }
-        }
-        return walk(nil)
-    }
-
-    /// The projects inside the group `id`, at any depth, in tree order.
-    func projects(inGroup id: UUID) -> [Project] {
+    /// The projects inside the project `id`, at any depth, in tree order.
+    func descendants(of id: UUID) -> [Project] {
         treeOrder(under: id)
     }
 
@@ -166,7 +152,7 @@ final class ProjectStore {
     /// at the place of `target`. In one parent, a row that moves down goes
     /// after `target` and a row that moves up goes before it. A row from
     /// another parent goes before `target`. Returns false when the move
-    /// would put a group inside itself.
+    /// would put a project inside itself.
     @discardableResult
     func place(_ id: UUID, beside target: UUID) -> Bool {
         guard id != target, let targetRow = row(target), let moving = row(id) else { return false }
@@ -182,8 +168,8 @@ final class ProjectStore {
         return true
     }
 
-    /// Move the row `id` out of its group, to the place after that group.
-    /// A row at the top level does not move.
+    /// Move the project `id` out of its parent, to the place after that
+    /// parent. A project at the top level does not move.
     func moveOut(_ id: UUID) {
         guard let parent = row(id)?.parent else { return }
         let grandparent = row(parent)?.parent
@@ -211,54 +197,56 @@ final class ProjectStore {
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
     }
 
-    /// Add a new group. With `beside`, the group goes after that row, in its
-    /// parent. Without it, the group goes at the end of the top level.
+    /// Add `project`. With `beside`, it goes after that project, in its
+    /// parent. Without it, it goes at the end of the top level.
     @discardableResult
-    func createGroup(name: String, beside: UUID? = nil) -> Project {
-        let parent = beside.flatMap { row($0)?.parent }
-        let group = add(.group(name: name, parent: parent))
+    func add(_ project: Project, beside: UUID?) -> Project {
+        var project = project
+        project.parent = beside.flatMap { row($0)?.parent }
+        let added = add(project)
         if let beside {
-            var siblings = children(of: parent).map(\.id).filter { $0 != group.id }
+            var siblings = children(of: added.parent).map(\.id).filter { $0 != added.id }
             let index = siblings.firstIndex(of: beside).map { $0 + 1 } ?? siblings.endIndex
-            siblings.insert(group.id, at: index)
-            reorder(parent: parent, ids: siblings)
+            siblings.insert(added.id, at: index)
+            reorder(parent: added.parent, ids: siblings)
         }
-        return group
+        return added
     }
 
-    /// Remove the group `id` and keep its rows: they go to the parent of the
-    /// group, at its place, in their order.
-    func ungroup(_ id: UUID) {
-        guard let group = row(id), group.isGroup else { return }
+    /// Remove the project `id` and keep its children: they go to the parent
+    /// of the project, at its place, in their order. The caller ends the
+    /// sessions of the project first.
+    func removeKeepingChildren(_ id: UUID) {
+        guard let project = row(id) else { return }
         let inside = children(of: id).map(\.id)
-        var siblings = children(of: group.parent).map(\.id)
+        var siblings = children(of: project.parent).map(\.id)
         let index = siblings.firstIndex(of: id) ?? siblings.endIndex
         siblings.replaceSubrange(index ..< min(index + 1, siblings.endIndex), with: inside)
         for child in inside {
-            if let at = rows.firstIndex(where: { $0.id == child }) { rows[at].parent = group.parent }
+            if let at = rows.firstIndex(where: { $0.id == child }) { rows[at].parent = project.parent }
         }
         rows.removeAll { $0.id == id }
-        setOrder(parent: group.parent, ids: siblings)
+        setOrder(parent: project.parent, ids: siblings)
         changed()
     }
 
-    /// Remove the group `id` and every row inside it, at any depth. The
-    /// caller ends the sessions of `projects(inGroup:)` first.
-    func removeGroup(_ id: UUID) {
-        guard row(id)?.isGroup == true else { return }
+    /// Remove the project `id` and every project inside it, at any depth.
+    /// The caller ends the sessions of all of them first.
+    func removeWithDescendants(_ id: UUID) {
+        guard row(id) != nil else { return }
         let removed = Set(rows.map(\.id).filter { $0 == id || ancestors(of: $0).contains(id) })
         rows.removeAll { removed.contains($0.id) }
         changed()
     }
 
-    /// Whether `id` is nil (the top level) or a group of this store: the
-    /// two places a row can be.
-    private func isGroup(_ id: UUID?) -> Bool {
+    /// Whether `id` is nil (the top level) or a project of this store: the
+    /// two places a project can be.
+    private func isPlace(_ id: UUID?) -> Bool {
         guard let id else { return true }
-        return rows.contains { $0.id == id && $0.isGroup }
+        return rows.contains { $0.id == id }
     }
 
-    /// The groups above `id`, nearest first. Stops at a loop.
+    /// The projects above `id`, nearest first. Stops at a loop.
     func ancestors(of id: UUID) -> [UUID] {
         var result: [UUID] = []
         var next = rows.first { $0.id == id }?.parent
@@ -304,9 +292,9 @@ final class ProjectStore {
         changed()
     }
 
-    /// Set a project's path. A group has no path, so it is refused.
+    /// Set a project's path. A project with no folder gets one this way.
     func setPath(id: UUID, to newPath: String) {
-        guard let index = rows.firstIndex(where: { $0.id == id }), !rows[index].isGroup else { return }
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         let normalized = ProjectPath.normalizedForStorage(newPath)
         guard rows[index].path != normalized else { return }
         rows[index].path = normalized
@@ -321,18 +309,14 @@ final class ProjectStore {
 
     /// Repair the rows, then derive `projects`. Load calls it too. It writes
     /// nothing to disk; the next save writes the repaired rows.
-    /// - A group has no path.
-    /// - A parent that is not a group of this list (a removed group, a hand
-    ///   edit, a project) becomes nil, and the row goes to the end of the
-    ///   top level. A parent link in a loop becomes nil too.
-    /// - The rows of each parent get `sortOrder` 0, 1, 2 in their order.
+    /// - A parent that is not a project of this list (a removed project, a
+    ///   hand edit) becomes nil, and the project goes to the end of the top
+    ///   level. A parent link in a loop becomes nil too.
+    /// - The children of each parent get `sortOrder` 0, 1, 2 in their order.
     private func normalize() {
-        let groups = Set(rows.filter(\.isGroup).map(\.id))
+        let ids = Set(rows.map(\.id))
         for index in rows.indices {
-            if rows[index].isGroup {
-                rows[index].path = ""
-            }
-            if let parent = rows[index].parent, !groups.contains(parent) {
+            if let parent = rows[index].parent, !ids.contains(parent) {
                 moveToEndOfTopLevel(index)
             }
         }
@@ -359,7 +343,7 @@ final class ProjectStore {
     }
 
     private func treeOrder(under parent: UUID?) -> [Project] {
-        children(of: parent).flatMap { $0.isGroup ? treeOrder(under: $0.id) : [$0] }
+        children(of: parent).flatMap { [$0] + treeOrder(under: $0.id) }
     }
 
     private func save() {
@@ -395,7 +379,7 @@ final class ProjectStore {
             // Migrate paths stored before normalization existed (e.g. with the
             // trailing slash `URL.path(percentEncoded:)` keeps on directories).
             // In-memory only; the cleaned form persists on the next mutation.
-            for i in rows.indices where !rows[i].isGroup {
+            for i in rows.indices {
                 rows[i].path = ProjectPath.normalizedForStorage(rows[i].path)
             }
             normalize()

@@ -10,16 +10,11 @@ struct Project: Identifiable, Codable, Hashable {
     /// so an unknown value (hand-edited json, newer build) reads as untagged
     /// instead of failing the row's decode. Absent in older projects.json.
     var colorName: String?
-    /// The group that holds this row, or nil at the top level (design 013).
-    /// `sortOrder` orders the rows of one parent. Absent in older
+    /// The project that holds this one, or nil at the top level (design
+    /// 013). `sortOrder` orders the children of one parent. Absent in older
     /// projects.json. `ProjectStore` reads a parent that is not one of its
-    /// groups as nil.
+    /// projects as nil.
     var parent: UUID?
-    /// A project, or a group: a row that only holds other rows. A group has
-    /// an empty `path` and never gets a workspace, so `ProjectStore.projects`
-    /// never returns one. Absent in older projects.json, where every row is
-    /// a project.
-    var kind: ProjectKind
 
     init(
         name: String,
@@ -34,15 +29,7 @@ struct Project: Identifiable, Codable, Hashable {
         self.sortOrder = sortOrder
         self.colorName = colorName
         self.parent = parent
-        kind = .project
         createdAt = Date()
-    }
-
-    /// A new group. It has no path.
-    static func group(name: String, sortOrder: Int = 0, parent: UUID? = nil) -> Project {
-        var group = Project(name: name, path: "", sortOrder: sortOrder, parent: parent)
-        group.kind = .group
-        return group
     }
 
     /// Explicit-id variant for SYNTHETIC projects only (`PinnedTabs.project`,
@@ -56,7 +43,6 @@ struct Project: Identifiable, Codable, Hashable {
         sortOrder = 0
         colorName = nil
         parent = nil
-        kind = .project
         createdAt = Date()
     }
 
@@ -68,11 +54,15 @@ struct Project: Identifiable, Codable, Hashable {
         case createdAt
         case colorName
         case parent
+        /// Read only: a dev build wrote `kind: group` (design 013).
         case kind
     }
 
-    /// `parent` and `kind` are optional keys, so a file from before groups
-    /// decodes as before. A file with no group writes neither key.
+    /// `parent` is an optional key, so a file from before nested projects
+    /// decodes as before. A row of a dev build with `kind: group` decodes as
+    /// a project with no folder, with its `parent`. Any other `kind` is
+    /// ignored. The encoder never writes `kind`, so the next save drops it
+    /// (design 013, "Ethan chose B").
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -82,7 +72,9 @@ struct Project: Identifiable, Codable, Hashable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         colorName = try container.decodeIfPresent(String.self, forKey: .colorName)
         parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
-        kind = try container.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? .project
+        if try container.decodeIfPresent(String.self, forKey: .kind) == "group" {
+            path = ""
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -94,23 +86,19 @@ struct Project: Identifiable, Codable, Hashable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(colorName, forKey: .colorName)
         try container.encodeIfPresent(parent, forKey: .parent)
-        if kind != .project { try container.encode(kind, forKey: .kind) }
     }
-}
-
-/// What a `ProjectStore` row is. An unknown value fails the decode of the
-/// file, and the store does not save over it. Thus a row of a newer kind
-/// never opens as a project.
-enum ProjectKind: String, Codable {
-    case project
-    case group
 }
 
 extension Project {
     /// nil when untagged, or tagged with a value this build doesn't know.
     var color: ProjectColor? { colorName.flatMap(ProjectColor.init(rawValue:)) }
 
-    var isGroup: Bool { kind == .group }
+    /// Whether the project has a folder. Only a row of a dev build that
+    /// was a group has none (design 013): no command makes one. The places
+    /// that read `path` skip a project with no folder: Project Insights,
+    /// Finder file routing, layout files, the Worktrees menu. Its shells
+    /// start in `ScratchTabs.fallbackRoot` (`Pane.init`).
+    var hasFolder: Bool { !path.isEmpty }
 
     /// Parsed location: `.local` for a directory path, `.remote` for an
     /// scp-style `[user@]host:dir` spec (#104). nil when `path` parses as
