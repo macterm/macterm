@@ -159,6 +159,35 @@ struct ThemeResolverTests {
         #expect(theme(["/root"], files) == "Home")
     }
 
+    @Test
+    func reads_crlf_lines() {
+        let files = ["/root": "font-size = 14\r\nconfig-file = /inc\r\n", "/inc": "theme = CRLF\r\n"]
+        #expect(theme(["/root"], files) == "CRLF")
+    }
+
+    /// libghostty resolves a relative include from the real directory of the
+    /// file, so a `..` goes up from where a symbolic link points.
+    @Test
+    func a_relative_include_goes_up_from_the_real_directory() throws {
+        let fm = FileManager.default
+        let top = fm.temporaryDirectory.appendingPathComponent("macterm-include-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: top) }
+        let real = top.appendingPathComponent("dotfiles/ghostty")
+        try fm.createDirectory(at: real, withIntermediateDirectories: true)
+        try fm.createDirectory(at: top.appendingPathComponent("dotfiles/shared"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: top.appendingPathComponent("config"), withIntermediateDirectories: true)
+        let link = top.appendingPathComponent("config/ghostty")
+        try fm.createSymbolicLink(at: link, withDestinationURL: real)
+        try "config-file = ../shared/theme.conf\n".write(
+            to: real.appendingPathComponent("config"), atomically: true, encoding: .utf8
+        )
+        try "theme = Shared\n".write(
+            to: top.appendingPathComponent("dotfiles/shared/theme.conf"), atomically: true, encoding: .utf8
+        )
+        let root = link.appendingPathComponent("config").path
+        #expect(ThemeResolver.themeValue(rootPaths: [root]) { try? String(contentsOfFile: $0, encoding: .utf8) } == "Shared")
+    }
+
     /// An empty `config-file` value clears libghostty's queue while it loads
     /// it. That merge is not read: the theme is not certain.
     @Test

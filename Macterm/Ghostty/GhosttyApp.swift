@@ -78,12 +78,20 @@ final class GhosttyApp {
     /// The tint of whichever window is currently key, for the few consumers
     /// that are not painting a specific window (a pane preview, a drag proxy).
     private(set) var adaptiveBackgroundColor: NSColor?
-    /// Memoized `splitThemeColors(_:)`, for each side, keyed on `configVersion`
-    /// (it bumps on a reload and on an appearance flip): each read builds
-    /// whole configs, and `MactermTheme` fans one SwiftUI render into a dozen
-    /// color reads.
+    /// Memoized `effectiveThemeValue()` and the two sides of `splitThemeColors(_:)`,
+    /// keyed on `configVersion` (it bumps on a reload and on an appearance
+    /// flip): the value walks every config file and its includes, and the
+    /// sides build three whole configs. `MactermTheme` fans one SwiftUI render
+    /// into a dozen color reads.
     @ObservationIgnored
-    private var splitSideCache: [ThemeResolver.Scheme: (version: Int, colors: ResolvedColors?)] = [:]
+    private var themeValueCache: (version: Int, value: String?)?
+    @ObservationIgnored
+    private var splitSidesCache: (version: Int, sides: SplitSides?)?
+
+    private struct SplitSides {
+        var light: ResolvedColors
+        var dark: ResolvedColors?
+    }
 
     private init() {
         // ghostty_init captures `environ` as a pointer+length slice for the
@@ -630,13 +638,13 @@ final class GhosttyApp {
         return Loaded(config: cfg, disabledCursor: disabledCursor, result: result)
     }
 
-    /// One finalized config from the layers. `last`: one more file, after
-    /// every other layer.
     /// The user's config files that `buildConfig` loads. A hermetic run loads none.
     private var configSelection: GhosttyConfigSelection {
         MactermConfig.isHermetic ? .disabled : Preferences.shared.ghosttyConfigSelection
     }
 
+    /// One finalized config from the layers. `last`: one more file, after
+    /// every other layer.
     private func buildConfig(missingPaths: inout [String], last: String? = nil) -> ghostty_config_t? {
         guard let cfg = ghostty_config_new() else { return nil }
         // Three-layer ghostty config:
@@ -730,6 +738,13 @@ final class GhosttyApp {
     /// cannot give the value back, so `splitThemeColors` checks the read
     /// against libghostty's merge.
     private func effectiveThemeValue() -> String? {
+        if let cache = themeValueCache, cache.version == configVersion { return cache.value }
+        let value = readThemeValue()
+        themeValueCache = (configVersion, value)
+        return value
+    }
+
+    private func readThemeValue() -> String? {
         let config = MactermConfig.shared
         let roots = [config.defaultsPath]
             + GhosttyConfigSource(selection: configSelection).pathsForRawInspection
@@ -749,21 +764,21 @@ final class GhosttyApp {
     /// merges them: the config of the app with the side as its last layer
     /// (`ThemeResolver.sideLayer`). Nil for a theme with one side, and when
     /// the side cannot be read with certainty (`readThemeSideColors`,
-    /// `readsTheLightSide`). Each read builds configs, so it is kept until
-    /// `configVersion` changes.
+    /// `readsTheLightSide`). Only the light side is checked against
+    /// libghostty's merge: no C API gives the dark side of a config. Both
+    /// sides are read together and kept until `configVersion` changes.
     func splitThemeColors(_ scheme: ThemeResolver.Scheme) -> ResolvedColors? {
-        if let cache = splitSideCache[scheme], cache.version == configVersion {
-            return cache.colors
+        if splitSidesCache?.version != configVersion {
+            splitSidesCache = (configVersion, computeSplitThemeColors())
         }
-        let colors = computeSplitThemeColors(scheme)
-        splitSideCache[scheme] = (configVersion, colors)
-        return colors
+        let sides = splitSidesCache?.sides
+        return scheme == .light ? sides?.light : sides?.dark
     }
 
-    private func computeSplitThemeColors(_ scheme: ThemeResolver.Scheme) -> ResolvedColors? {
+    private func computeSplitThemeColors() -> SplitSides? {
         guard themeHasTwoSides, let value = effectiveThemeValue(),
               let light = ThemeResolver.resolve(themeValue: value, scheme: .light),
-              let side = ThemeResolver.resolve(themeValue: value, scheme: scheme)
+              let dark = ThemeResolver.resolve(themeValue: value, scheme: .dark)
         else { return nil }
         var ignored: [String] = []
         guard let baseline = buildConfig(missingPaths: &ignored) else { return nil }
@@ -774,7 +789,7 @@ final class GhosttyApp {
             logger.info("the theme pair that Macterm read does not agree with libghostty; one icon")
             return nil
         }
-        return scheme == .light ? lightColors : readSide(side, baseline: baseline)
+        return SplitSides(light: lightColors, dark: readSide(dark, baseline: baseline))
     }
 
     /// The colors of the config with `side` as its last layer.

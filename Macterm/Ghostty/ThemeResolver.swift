@@ -123,7 +123,8 @@ enum ThemeResolver {
     /// The `key = value` lines of ghostty config text, in order. Comments
     /// (`#`) and blank lines are skipped.
     private static func entries(inConfigText text: String) -> [(key: String, value: String)] {
-        text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { rawLine in
+        // `isNewline`, so that a CRLF line ends at "\r\n" (one `Character`).
+        text.split(whereSeparator: \.isNewline).compactMap { rawLine in
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { return nil }
             let key = line[line.startIndex ..< eq].trimmingCharacters(in: .whitespaces)
@@ -140,12 +141,13 @@ enum ThemeResolver {
 
     /// The absolute path of a `config-file` value, as libghostty expands it
     /// (`Path.expand`): an absolute path stays, `~/` is the home directory,
-    /// and any other path is relative to the directory of the file that
-    /// names it, with its symbolic links resolved.
-    private static func includePath(_ value: String, base: String) -> String {
+    /// and any other path is relative to the real directory of the file that
+    /// names it (`realPathFile`): a `..` goes up from where a symbolic link
+    /// points, not from the link.
+    static func includePath(_ value: String, base: String) -> String {
         if value.hasPrefix("/") { return value }
         if value.hasPrefix("~/") { return (value as NSString).expandingTildeInPath }
-        return URL(fileURLWithPath: (base as NSString).appendingPathComponent(value))
-            .standardizedFileURL.resolvingSymlinksInPath().path
+        return URL(fileURLWithPath: base, isDirectory: true).resolvingSymlinksInPath()
+            .appendingPathComponent(value).resolvingSymlinksInPath().path
     }
 }
