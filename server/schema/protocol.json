@@ -43,7 +43,8 @@
         "local"
       ],
       "args": "ControlResume.Args",
-      "result": "ControlResume.Result"
+      "result": "ControlResume.Result",
+      "doc": "Asks for the event batches that this client missed after a lost link."
     },
     {
       "name": "channel.open",
@@ -53,7 +54,8 @@
         "local"
       ],
       "args": "ChannelOpen.Args",
-      "result": "ChannelOpen.Result"
+      "result": "ChannelOpen.Result",
+      "doc": "Opens a channel for the pane of a session."
     },
     {
       "name": "channel.close",
@@ -63,7 +65,8 @@
         "local"
       ],
       "args": "ChannelClose.Args",
-      "result": "ChannelClose.Result"
+      "result": "ChannelClose.Result",
+      "doc": "Closes a channel."
     },
     {
       "name": "channel.pause",
@@ -73,7 +76,8 @@
         "local"
       ],
       "args": "ChannelPause.Args",
-      "result": "ChannelPause.Result"
+      "result": "ChannelPause.Result",
+      "doc": "Stops the pane output of a channel. The messages of the session still come."
     },
     {
       "name": "channel.resume",
@@ -83,7 +87,8 @@
         "local"
       ],
       "args": "ChannelResume.Args",
-      "result": "ChannelResume.Result"
+      "result": "ChannelResume.Result",
+      "doc": "Starts the output of a paused channel again, after a snapshot of the screen."
     },
     {
       "name": "ping",
@@ -95,7 +100,8 @@
         "remote"
       ],
       "args": "Ping.Args",
-      "result": "Ping.Result"
+      "result": "Ping.Result",
+      "doc": "Answers when the server is up."
     },
     {
       "name": "session.create",
@@ -105,7 +111,8 @@
         "local"
       ],
       "args": "SessionCreate.Args",
-      "result": "SessionCreate.Result"
+      "result": "SessionCreate.Result",
+      "doc": "Starts a session. The reply comes when the session accepts connections."
     },
     {
       "name": "session.list",
@@ -115,7 +122,8 @@
         "local"
       ],
       "args": "SessionList.Args",
-      "result": "SessionList.Result"
+      "result": "SessionList.Result",
+      "doc": "Lists the sessions of the server."
     },
     {
       "name": "session.info",
@@ -125,7 +133,8 @@
         "local"
       ],
       "args": "SessionInfo.Args",
-      "result": "SessionInfo.Result"
+      "result": "SessionInfo.Result",
+      "doc": "Shows one session."
     },
     {
       "name": "session.kill",
@@ -135,7 +144,8 @@
         "local"
       ],
       "args": "SessionKill.Args",
-      "result": "SessionKill.Result"
+      "result": "SessionKill.Result",
+      "doc": "Ends a session and its shell."
     },
     {
       "name": "pane.seen",
@@ -145,7 +155,8 @@
         "local"
       ],
       "args": "PaneSeen.Args",
-      "result": "PaneSeen.Result"
+      "result": "PaneSeen.Result",
+      "doc": "Clears the attention flags of a session."
     },
     {
       "name": "session.send",
@@ -155,7 +166,8 @@
         "local"
       ],
       "args": "SessionSend.Args",
-      "result": "SessionSend.Result"
+      "result": "SessionSend.Result",
+      "doc": "Types text into a session as it is. With submit, a newline follows."
     },
     {
       "name": "session.key",
@@ -165,7 +177,8 @@
         "local"
       ],
       "args": "SessionKey.Args",
-      "result": "SessionKey.Result"
+      "result": "SessionKey.Result",
+      "doc": "Sends one key press to a session, for example ctrl+c."
     },
     {
       "name": "session.history",
@@ -175,7 +188,8 @@
         "local"
       ],
       "args": "SessionHistory.Args",
-      "result": "SessionHistory.Result"
+      "result": "SessionHistory.Result",
+      "doc": "Gives the text of the screen of a session, or of its scrollback and screen."
     },
     {
       "name": "session.inspect",
@@ -185,7 +199,8 @@
         "local"
       ],
       "args": "SessionInspect.Args",
-      "result": "SessionInspect.Result"
+      "result": "SessionInspect.Result",
+      "doc": "Gives the state of the terminal of a session."
     },
     {
       "name": "server.exit",
@@ -195,7 +210,8 @@
         "local"
       ],
       "args": "ServerExit.Args",
-      "result": "ServerExit.Result"
+      "result": "ServerExit.Result",
+      "doc": "Stops the server. The sessions continue to run."
     },
     {
       "name": "command.run",
@@ -205,7 +221,8 @@
         "local"
       ],
       "args": "CommandRun.Args",
-      "result": "CommandRun.Result"
+      "result": "CommandRun.Result",
+      "doc": "Runs a command on the machine of the server to its end, and gives its stdout."
     },
     {
       "name": "link.open",
@@ -215,7 +232,8 @@
         "local"
       ],
       "args": "LinkOpen.Args",
-      "result": "LinkOpen.Result"
+      "result": "LinkOpen.Result",
+      "doc": "Opens a roaming link on a UDP port."
     },
     {
       "name": "link.close",
@@ -225,7 +243,8 @@
         "local"
       ],
       "args": "LinkClose.Args",
-      "result": "LinkClose.Result"
+      "result": "LinkClose.Result",
+      "doc": "Ends a roaming link that this connection opened."
     },
     {
       "name": "state.subscribe",
@@ -235,7 +254,8 @@
         "local"
       ],
       "args": "StateSubscribe.Args",
-      "result": "StateSubscribe.Result"
+      "result": "StateSubscribe.Result",
+      "doc": "Gives the full state: the model and the sessions."
     },
     {
       "name": "project.create",
@@ -245,7 +265,8 @@
         "local"
       ],
       "args": "ProjectCreate.Args",
-      "result": "ProjectCreate.Result"
+      "result": "ProjectCreate.Result",
+      "doc": "Makes a project."
     },
     {
       "name": "project.set",
@@ -255,7 +276,8 @@
         "local"
       ],
       "args": "ProjectSet.Args",
-      "result": "ProjectSet.Result"
+      "result": "ProjectSet.Result",
+      "doc": "Changes the fields of a project that are not null."
     },
     {
       "name": "project.reorder",
@@ -265,7 +287,8 @@
         "local"
       ],
       "args": "ProjectReorder.Args",
-      "result": "ProjectReorder.Result"
+      "result": "ProjectReorder.Result",
+      "doc": "Sets the order of the children of a group, or of the top level."
     },
     {
       "name": "project.remove",
@@ -275,7 +298,8 @@
         "local"
       ],
       "args": "ProjectRemove.Args",
-      "result": "ProjectRemove.Result"
+      "result": "ProjectRemove.Result",
+      "doc": "Removes a project and its workspace, or an empty group."
     },
     {
       "name": "workspace.create",
@@ -285,7 +309,8 @@
         "local"
       ],
       "args": "WorkspaceCreate.Args",
-      "result": "WorkspaceCreate.Result"
+      "result": "WorkspaceCreate.Result",
+      "doc": "Makes a workspace that is not the workspace of a project."
     },
     {
       "name": "workspace.remove",
@@ -295,7 +320,8 @@
         "local"
       ],
       "args": "WorkspaceRemove.Args",
-      "result": "WorkspaceRemove.Result"
+      "result": "WorkspaceRemove.Result",
+      "doc": "Removes a workspace that is not the workspace of a project, with its tabs."
     },
     {
       "name": "tab.create",
@@ -305,7 +331,8 @@
         "local"
       ],
       "args": "TabCreate.Args",
-      "result": "TabCreate.Result"
+      "result": "TabCreate.Result",
+      "doc": "Makes a tab with one pane or a tree of panes."
     },
     {
       "name": "tab.close",
@@ -315,7 +342,8 @@
         "local"
       ],
       "args": "TabClose.Args",
-      "result": "TabClose.Result"
+      "result": "TabClose.Result",
+      "doc": "Closes a tab."
     },
     {
       "name": "tab.set",
@@ -325,7 +353,8 @@
         "local"
       ],
       "args": "TabSet.Args",
-      "result": "TabSet.Result"
+      "result": "TabSet.Result",
+      "doc": "Sets the title of a tab. Null removes it."
     },
     {
       "name": "tab.select",
@@ -335,7 +364,8 @@
         "local"
       ],
       "args": "TabSelect.Args",
-      "result": "TabSelect.Result"
+      "result": "TabSelect.Result",
+      "doc": "Sets the active tab of a workspace."
     },
     {
       "name": "tab.reorder",
@@ -345,7 +375,8 @@
         "local"
       ],
       "args": "TabReorder.Args",
-      "result": "TabReorder.Result"
+      "result": "TabReorder.Result",
+      "doc": "Moves a tab to a position in its workspace."
     },
     {
       "name": "tab.move",
@@ -355,7 +386,8 @@
         "local"
       ],
       "args": "TabMove.Args",
-      "result": "TabMove.Result"
+      "result": "TabMove.Result",
+      "doc": "Moves a tab to another workspace and makes it the active tab there."
     },
     {
       "name": "tab.merge",
@@ -365,7 +397,8 @@
         "local"
       ],
       "args": "TabMerge.Args",
-      "result": "TabMerge.Result"
+      "result": "TabMerge.Result",
+      "doc": "Puts the panes of one tab into another tab, and closes the first tab."
     },
     {
       "name": "pane.split",
@@ -375,7 +408,8 @@
         "local"
       ],
       "args": "PaneSplit.Args",
-      "result": "PaneSplit.Result"
+      "result": "PaneSplit.Result",
+      "doc": "Splits a pane and puts a new pane next to it."
     },
     {
       "name": "pane.close",
@@ -385,7 +419,8 @@
         "local"
       ],
       "args": "PaneClose.Args",
-      "result": "PaneClose.Result"
+      "result": "PaneClose.Result",
+      "doc": "Closes a pane. The last pane of a tab closes the tab."
     },
     {
       "name": "pane.move",
@@ -395,7 +430,8 @@
         "local"
       ],
       "args": "PaneMove.Args",
-      "result": "PaneMove.Result"
+      "result": "PaneMove.Result",
+      "doc": "Moves a pane next to another pane."
     },
     {
       "name": "pane.separate",
@@ -405,7 +441,8 @@
         "local"
       ],
       "args": "PaneSeparate.Args",
-      "result": "PaneSeparate.Result"
+      "result": "PaneSeparate.Result",
+      "doc": "Moves a pane out of its tab into a new tab."
     },
     {
       "name": "pane.focus",
@@ -415,7 +452,8 @@
         "local"
       ],
       "args": "PaneFocus.Args",
-      "result": "PaneFocus.Result"
+      "result": "PaneFocus.Result",
+      "doc": "Sets the focused pane of a tab."
     },
     {
       "name": "pane.zoom",
@@ -425,7 +463,8 @@
         "local"
       ],
       "args": "PaneZoom.Args",
-      "result": "PaneZoom.Result"
+      "result": "PaneZoom.Result",
+      "doc": "Zooms a pane of a tab. A null pane ends the zoom."
     },
     {
       "name": "split.ratio",
@@ -435,7 +474,8 @@
         "local"
       ],
       "args": "SplitRatio.Args",
-      "result": "SplitRatio.Result"
+      "result": "SplitRatio.Result",
+      "doc": "Sets the ratio of a split, from 0.15 to 0.85."
     },
     {
       "name": "select.set",
@@ -445,7 +485,8 @@
         "local"
       ],
       "args": "SelectSet.Args",
-      "result": "SelectSet.Result"
+      "result": "SelectSet.Result",
+      "doc": "Sets the selection of the key window."
     },
     {
       "name": "model.import",
@@ -455,7 +496,8 @@
         "local"
       ],
       "args": "ModelImport.Args",
-      "result": "ModelImport.Result"
+      "result": "ModelImport.Result",
+      "doc": "Puts the conversion of the v1 files in place of the model, one time."
     },
     {
       "name": "model.replace",
@@ -465,7 +507,8 @@
         "local"
       ],
       "args": "ModelReplace.Args",
-      "result": "ModelReplace.Result"
+      "result": "ModelReplace.Result",
+      "doc": "Puts the copy of the model of the client in place of the model of the server."
     },
     {
       "name": "model.options",
@@ -475,7 +518,8 @@
         "local"
       ],
       "args": "ModelOptions.Args",
-      "result": "ModelOptions.Result"
+      "result": "ModelOptions.Result",
+      "doc": "Sets the defaults of this client for requests that do not give them."
     }
   ],
   "events": [

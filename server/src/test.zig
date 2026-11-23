@@ -31,4 +31,5 @@ comptime {
     _ = @import("cli/client.zig");
     _ = @import("cli/cli.zig");
     _ = @import("cli/skills.zig");
+    _ = @import("cli/api.zig");
 }
