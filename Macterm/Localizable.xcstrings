@@ -11291,18 +11291,18 @@
         }
       }
     },
-    "This session is from an older Macterm and can lose access to folders. Click to restart it." : {
+    "This session is from an older version of Macterm. It can lose access to folders. Click to restart it." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 세션은 이전 Macterm 버전에서 시작되어 폴더에 접근하지 못할 수 있습니다. 클릭하여 다시 시작합니다."
+            "value" : "이 세션은 이전 버전의 Macterm에서 시작되었습니다. 폴더에 접근하지 못할 수 있습니다. 클릭하여 다시 시작하십시오."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此会话来自旧版 Macterm，可能无法访问文件夹。点按以重新启动。"
+            "value" : "此会话来自旧版 Macterm。它可能无法访问文件夹。点按以重新启动。"
           }
         }
       }

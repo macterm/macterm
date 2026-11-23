@@ -116,9 +116,10 @@ struct TerminalPane: View {
                         ModePill(
                             title: String(localized: "Outdated"),
                             systemImage: "arrow.triangle.2.circlepath",
-                            help: String(
-                                localized: "This session is from an older Macterm and can lose access to folders. Click to restart it."
-                            )
+                            help: String(localized: """
+                            This session is from an older version of Macterm. \
+                            It can lose access to folders. Click to restart it.
+                            """)
                         ) { [weak appState, weak pane] in
                             guard let appState, let pane else { return }
                             appState.requestRestartSession(of: pane)

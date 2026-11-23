@@ -8,7 +8,7 @@ import Foundation
 /// compares it with the key of the bundled server (`ServerBuilds.bundledKey`).
 /// Two keys that differ mean another build. Each build flavor has its own
 /// runtime folder, so a session of another build is an older one. If either
-/// side has no key, nothing is known by the key.
+/// side has no key, the key marks nothing.
 ///
 /// A session whose own file an update deleted is older too, also with the
 /// same key: an update that did not change the server still replaces the
