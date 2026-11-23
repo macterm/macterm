@@ -78,6 +78,9 @@ enum PaneChannelEvent: Equatable {
 /// the events buffer without a limit until then.
 final class PaneChannel: @unchecked Sendable {
     let number: UInt32
+    /// The `epoch` of the session's `hello`, from the `channel.open` result.
+    /// Nil from a server that does not give it: the channel cannot resume.
+    let epoch: UInt64?
     let events: AsyncStream<PaneChannelEvent>
 
     private weak var connection: (any ServerLink)?
@@ -104,9 +107,10 @@ final class PaneChannel: @unchecked Sendable {
         }
     }
 
-    init(connection: any ServerLink, number: UInt32) {
+    init(connection: any ServerLink, number: UInt32, epoch: UInt64? = nil) {
         self.connection = connection
         self.number = number
+        self.epoch = epoch
         let (events, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
         self.events = events
         sink = Sink(continuation)

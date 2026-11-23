@@ -152,7 +152,7 @@ final class ServerConnection: @unchecked Sendable {
     /// returned object. The pane sends `attach` first, to get output.
     func openChannel(session: String) async throws -> PaneChannel {
         let result = try await call(MactermProtocol.ChannelOpen.self, .init(session: session))
-        let channel = PaneChannel(connection: self, number: result.channel)
+        let channel = PaneChannel(connection: self, number: result.channel, epoch: result.epoch)
         guard register(channel.sink, as: result.channel) else {
             channel.sink.finish()
             throw ServerClientError.disconnected

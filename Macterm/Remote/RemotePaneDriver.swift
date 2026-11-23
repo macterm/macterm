@@ -63,6 +63,11 @@ final class RemotePaneDriver: PaneInputRoute {
     private var undelivered = Data()
     /// The session attached at least once in this run.
     private var attached = false
+    /// Where the next session asks to resume: the point of the last one
+    /// (`PaneSession.resumePoint`). A pane that comes back within the
+    /// session's ring keeps its screen and scrollback. A new session or a
+    /// plain shell clears it.
+    private var resume: PaneSession.ResumePoint?
     /// After this time with no attach, the first connect is slow
     /// (`RemoteHost.firstConnectIsSlow`).
     private let slowConnectAfter: Duration
@@ -153,6 +158,7 @@ final class RemotePaneDriver: PaneInputRoute {
             case let .plain(arguments):
                 earlyInput = Data()
                 undelivered = Data()
+                resume = nil
                 surface.paneFeed(PaneSession.resetScreen)
                 end = await runPlain(arguments)
             case let .channel(link, create):
@@ -196,11 +202,13 @@ final class RemotePaneDriver: PaneInputRoute {
             }
             guard !Task.isCancelled else { return .done }
             launch = made.launch
+            resume = nil
             if let note = made.note { surface.paneFeed(Data(Self.paneText(note).utf8)) }
         }
         let forward = Forward(driver: self, surface: surface)
         let session = PaneSession(
             name: name, launch: launch, wantsForeground: true, wantsTty: true,
+            resume: resume,
             host: forward,
             endpoint: OneAttach(link)
         )
@@ -268,6 +276,7 @@ final class RemotePaneDriver: PaneInputRoute {
             session.stop()
             // Input that never reached a channel waits for the next session.
             undelivered.append(session.takePendingInput())
+            resume = session.resumePoint
         case let .plain(shell): shell.terminate()
         default: break
         }

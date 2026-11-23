@@ -26,5 +26,5 @@ The frames and messages between the app, the server and the session processes (d
   - `snapshot.start` carries the `offset` that its screen shows.
   - `attach` can carry `resume_epoch` (the epoch in the session's `hello`) and `resume_offset`. The session answers `resumed` and the missing bytes, with no snapshot and no repaint. It sends a snapshot when the epoch differs or the ring lost the bytes.
   - The server keeps the last 256 event batches. `control.resume {epoch, seq}` replays the batches after `seq`. Otherwise it answers `replayed: false`, and the client reads `session.list`.
-  - `macterm connect` tracks its offset and connects again after a lost link. The app's pane channels do not resume: the relay does not give the client the session's epoch, so a lost link draws a snapshot again.
-  - The relay needs no change. It drops queued output and then a snapshot follows, so a client's count is a prefix of the stream until the snapshot resets it.
+  - `macterm connect` tracks its offset and connects again after a lost link. The app's pane channels resume too: the `channel.open` result gives the session's epoch (level 3), because the relay's client never sees the session's `hello`.
+  - The relay's skip-ahead drops queued output and then a snapshot follows, so a client's count is a prefix of the stream until the snapshot resets it (`server/test/relay_v2.bats`).
