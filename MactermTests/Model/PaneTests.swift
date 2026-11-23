@@ -66,38 +66,10 @@ struct PaneTests {
         #expect(p.sidebarSegmentTitle == p.processTitle)
     }
 
-    /// After an app restart, a restored pane attaches to a session whose
-    /// `sleep 300` still runs. The session sends its run status at `hello`,
-    /// before the foreground that the attach asks for. The pane has had no
-    /// input in this app, but the run is real: the name and the state agree.
-    @Test
-    func a_restored_pane_whose_session_runs_a_program_is_running() {
-        let p = Pane(projectPath: "/", projectID: UUID(), sessionName: "macterm-proj-aaaaaaaabbbb")
-        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
-        report(p, "sleep")
-        #expect(p.foregroundProcessName == "sleep")
-        #expect(p.executionState == .running)
-        report(p, "zsh", shell: true)
-        #expect(p.executionState == .done)
-    }
+    // MARK: - Run state from the session
 
-    /// The same, when the foreground report comes first.
-    @Test
-    func a_running_status_after_the_report_starts_the_run() {
-        let p = Pane(projectPath: "/", projectID: UUID(), sessionName: "macterm-proj-aaaaaaaabbbb")
-        report(p, "sleep")
-        #expect(p.executionState == .idle)
-        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
-        #expect(p.executionState == .running)
-    }
-
-    /// A session at its prompt trusts nothing: start-up foregrounds stay idle.
-    @Test
-    func an_idle_status_keeps_startup_foregrounds_idle() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.receiveSessionStatus(MactermProtocol.Status(state: .idle))
-        report(p, "login")
-        #expect(p.executionState == .idle)
+    private func status(_ state: MactermProtocol.RunState, failed: Bool = false) -> MactermProtocol.Status {
+        MactermProtocol.Status(state: state, failed: failed)
     }
 
     @Test
@@ -106,144 +78,90 @@ struct PaneTests {
         #expect(p.executionState == .idle)
     }
 
+    /// The session's status starts the run, its end with the `unseen` flag
+    /// is `.done`, and the user's look is `.idle` again.
     @Test
-    func initialForegroundBeforeUserInteraction_staysIdle() {
+    func a_run_is_running_then_done_then_idle_when_seen() {
         let p = Pane(projectPath: "/", projectID: UUID())
+        #expect(p.receiveSessionStatus(status(.running)) == false)
+        #expect(p.executionState == .running)
+        // The session sends the status before the flags.
+        #expect(p.receiveSessionStatus(status(.done)) == true)
+        #expect(p.executionState == .idle)
+        p.receiveAttention(MactermProtocol.Attention(unseen: true))
+        #expect(p.executionState == .done)
+        p.markSeen()
+        #expect(p.executionState == .idle)
+    }
+
+    /// A status that says the same again ends no run.
+    @Test
+    func a_repeated_status_ends_no_run() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        #expect(p.receiveSessionStatus(status(.done)) == false)
+        p.receiveSessionStatus(status(.running))
+        #expect(p.receiveSessionStatus(status(.running)) == false)
+        #expect(p.receiveSessionStatus(status(.idle)) == true)
+        #expect(p.receiveSessionStatus(status(.done)) == false)
+    }
+
+    /// Running wins over a flag that a run before it left.
+    @Test
+    func running_wins_over_an_unseen_flag() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.receiveAttention(MactermProtocol.Attention(unseen: true))
+        p.receiveSessionStatus(status(.running))
+        #expect(p.executionState == .running)
+    }
+
+    /// After an app restart, a restored pane attaches to a session whose
+    /// `sleep 300` still runs. The session sends its status at `hello`: the
+    /// pane is running with no input in this app, and the name agrees.
+    @Test
+    func a_restored_pane_whose_session_runs_a_program_is_running() {
+        let p = Pane(projectPath: "/", projectID: UUID(), sessionName: "macterm-proj-aaaaaaaabbbb")
+        p.receiveSessionStatus(status(.running))
         report(p, "sleep")
-        p.markTerminalActivity()
-        p.settleTerminalActivityIfQuiet(now: Date(timeIntervalSince1970: 3), quietInterval: 3)
         #expect(p.foregroundProcessName == "sleep")
+        #expect(p.executionState == .running)
+    }
+
+    /// The foreground alone is no run: only the session's status is. A
+    /// start-up foreground (login(1)) and a TUI in raw mode stay idle.
+    @Test
+    func a_foreground_report_alone_starts_no_run() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        report(p, "login")
+        #expect(p.executionState == .idle)
+        report(p, "vim", raw: true)
+        #expect(p.executionState == .idle)
+        report(p, shellName(), shell: true)
         #expect(p.executionState == .idle)
     }
 
+    /// A surface teardown ends what the channel said: the next channel's
+    /// session sends its status again.
     @Test
-    func progressBeforeUserInteraction_staysIdle() {
+    func teardown_ends_the_run_state() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.markCommandRunning()
-        p.markProgressFinished()
+        p.receiveSessionStatus(status(.running))
+        p.surfacesWillTearDown(hadView: true)
         #expect(p.executionState == .idle)
     }
 
-    @Test
-    func layoutCommand_tracksInitialForegroundBeforeUserInteraction() {
-        let p = Pane(projectPath: "/", projectID: UUID(), start: .typed("npm test"))
-        report(p, "npm")
-        #expect(p.executionState == .running)
-    }
+    // MARK: - The prompt, from the session's marks
 
     @Test
-    func executionState_marks_running_then_done_then_idle_on_acknowledge() {
+    func the_shell_is_at_its_prompt_from_the_end_mark_until_the_next_command() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markCommandRunning()
-        #expect(p.executionState == .running)
-        p.markCommandFinished()
-        #expect(p.executionState == .done)
-        p.acknowledgeCommandCompletion()
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func progressFinishedFromIdle_staysIdle() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.markProgressFinished()
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func progressStartAndFinish_tracksRunningThenDone() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markCommandRunning()
-        #expect(p.executionState == .running)
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func progressRunning_isNotCompletedByForegroundOrOutputActivity() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markCommandRunning()
-        report(p, "sleep")
-        p.markTerminalActivity(at: Date(timeIntervalSince1970: 100))
-        p.settleTerminalActivityIfQuiet(now: Date(timeIntervalSince1970: 200), quietInterval: 3)
-        #expect(p.executionState == .running)
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func progressFinished_settlesCurrentForegroundProcess() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "node")
-        p.markCommandRunning()
-        #expect(p.executionState == .running)
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-        report(p, "node")
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func progressFinished_settlesNextForegroundProcessWhenNoneWasCaptured() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markCommandRunning()
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-        report(p, "node")
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func progressFinished_ignoresOutputFromSettledForegroundProcess() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "node")
-        p.markCommandRunning()
-        p.markProgressFinished()
-        p.markTerminalActivity()
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func progressFinished_allowsForegroundRestartAfterProcessChanges() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "node")
-        p.markCommandRunning()
-        p.markProgressFinished()
-        report(p, "python")
-        #expect(p.executionState == .running)
-    }
-
-    // MARK: - Progress failure (OSC 9;4 ERROR)
-
-    /// The state a SET leaves a pane in once it has had input: a
-    /// progress-owned run.
-    private func progressRunningPane() -> Pane {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markCommandRunning()
-        return p
-    }
-
-    @Test
-    func progressEnd_endsTheRun() {
-        let p = progressRunningPane()
-        p.markProgressFinished()
-        #expect(p.executionState == .done)
-    }
-
-    /// An end with no run to end marks nothing.
-    @Test
-    func progressEndBeforeAnyRun_marksNothing() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        p.markProgressFinished()
-        #expect(p.executionState == .idle)
+        #expect(!p.isShellAtPrompt)
+        p.receiveSessionMark(MactermProtocol.Mark(kind: .end))
+        #expect(p.isShellAtPrompt)
+        p.receiveSessionMark(MactermProtocol.Mark(kind: .prompt))
+        p.receiveSessionMark(MactermProtocol.Mark(kind: .input))
+        #expect(p.isShellAtPrompt)
+        p.receiveSessionMark(MactermProtocol.Mark(kind: .output))
+        #expect(!p.isShellAtPrompt)
     }
 
     @Test
@@ -284,9 +202,11 @@ struct PaneTests {
 
     @Test
     func markSeen_clearsTheFlagsAndADoneRun() {
-        let p = progressRunningPane()
-        p.markProgressFinished()
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        p.receiveSessionStatus(MactermProtocol.Status(state: .done))
         p.receiveAttention(MactermProtocol.Attention(unseen: true, failed: true, bell: true))
+        #expect(p.executionState == .done)
         p.markSeen()
         #expect(p.attention == MactermProtocol.Attention())
         #expect(p.executionState == .idle)
@@ -308,238 +228,6 @@ struct PaneTests {
         p.receiveAttention(MactermProtocol.Attention(unseen: true, bell: true))
         p.surfacesWillTearDown(hadView: false)
         #expect(p.attention == MactermProtocol.Attention())
-    }
-
-    @Test
-    func commandFinishedFromIdle_staysIdle() {
-        // Shell integration emits OSC 133;D on every precmd, including empty
-        // commands (Enter, Ctrl-C, Ctrl-L on an idle prompt). A COMMAND_FINISHED
-        // with no preceding running state must not flip the pane to `.done`, or
-        // clearing an idle terminal would persist a spurious checkmark.
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.markCommandFinished()
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func commandFinishedFromRunning_marksDone() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "sleep")
-        #expect(p.executionState == .running)
-        p.markCommandFinished()
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func foregroundReport_marks_nonShell_process_as_running() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "sleep")
-        #expect(p.foregroundProcessName == "sleep")
-        #expect(p.executionState == .running)
-    }
-
-    @Test
-    func foregroundReport_marks_done_when_foreground_returns_to_shell() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "sleep")
-        report(p, shellName(), shell: true)
-        #expect(p.foregroundProcessName == shellName())
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func foregroundReport_marks_longLivedApps_as_running_without_exclusions_when_terminalIsCanonical() {
-        for process in ["claude", "pi", "node", "ssh"] {
-            let p = Pane(projectPath: "/", projectID: UUID())
-            p.recordUserInteraction()
-            report(p, process)
-            #expect(p.foregroundProcessName == process)
-            #expect(p.executionState == .running)
-        }
-    }
-
-    @Test
-    func rawForegroundProcess_doesNotStartFromForegroundAlone() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        report(p, "node", raw: true)
-        #expect(p.foregroundProcessName == "node")
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func rawForegroundProcess_demotesExistingForegroundOnlyRun_thenSettlesWhenQuiet() {
-        // A TUI that spawns canonical, prints, then goes raw (claude, pi) is
-        // *starting* its work, not finishing — the raw switch demotes the
-        // foreground-owned run to the activity source instead of completing
-        // it outright, so it stays `.running` until output actually goes
-        // quiet rather than locking the pane `.done` for the whole session.
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.recordUserInteraction()
-        report(p, "node")
-        #expect(p.executionState == .running)
-
-        report(p, "node", raw: true)
-        #expect(p.executionState == .running)
-
-        // No further output: the demoted run quiet-settles like any other
-        // activity-sourced run.
-        p.settleTerminalActivityIfQuiet(now: Date().addingTimeInterval(5), quietInterval: 3)
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func rawForegroundProcess_usesOutputActivityUntilQuiet() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let start = Date(timeIntervalSince1970: 100)
-        p.recordUserInteraction()
-        report(p, "node", raw: true)
-        p.markTerminalActivity(at: start)
-        #expect(p.executionState == .running)
-
-        report(p, "node", raw: true)
-        #expect(p.executionState == .running)
-        p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func terminalActivityWithoutUserInteraction_staysIdle() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.markTerminalActivity()
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func terminalActivityAfterUserInteraction_marksRunningUntilQuiet() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let start = Date(timeIntervalSince1970: 100)
-        p.recordUserInteraction()
-        p.markTerminalActivity(at: start)
-        #expect(p.executionState == .running)
-        p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(2), quietInterval: 3)
-        #expect(p.executionState == .running)
-        p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func commandSubmissionStartsOnSecondInPlaceOutputHeartbeatForAgent() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.foregroundProcessName = "pi"
-        let submittedAt = Date(timeIntervalSince1970: 100)
-        p.recordCommandSubmission(hasContent: true, at: submittedAt)
-        p.markOutputActivity(totalRows: 10, now: submittedAt.addingTimeInterval(0.5))
-        #expect(p.executionState == .idle)
-        p.markOutputActivity(totalRows: 10, now: submittedAt.addingTimeInterval(1))
-        #expect(p.executionState == .running)
-    }
-
-    /// The view carries a programmatic payload's content evidence past the
-    /// submission that consumed it only when this is true — otherwise a
-    /// `pane run "…"` followed within the carry window by a genuinely blank
-    /// Return would report content it doesn't have.
-    @Test
-    func inPlaceOutputStartIsAllowedOnlyForAnAgentForeground() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        #expect(!p.allowsInPlaceOutputStart)
-        p.foregroundProcessName = "zsh"
-        #expect(!p.allowsInPlaceOutputStart)
-        p.foregroundProcessName = "pi"
-        #expect(p.allowsInPlaceOutputStart)
-    }
-
-    @Test
-    func commandSubmissionDoesNotArmInPlaceOutputForOrdinaryRawProgram() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        p.foregroundProcessName = "nvim"
-        let submittedAt = Date(timeIntervalSince1970: 100)
-        p.recordCommandSubmission(hasContent: true, at: submittedAt)
-        p.markOutputActivity(totalRows: 10, now: submittedAt.addingTimeInterval(0.5))
-        p.markOutputActivity(totalRows: 10, now: submittedAt.addingTimeInterval(1))
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func blankSubmissionSuppressesImmediateGrowthAndScrollbarActivity() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let submittedAt = Date(timeIntervalSince1970: 100)
-        p.markOutputActivity(totalRows: 10, now: submittedAt.addingTimeInterval(-1))
-        p.recordCommandSubmission(hasContent: false, at: submittedAt)
-
-        p.markOutputActivity(totalRows: 20, now: submittedAt.addingTimeInterval(0.25))
-        p.markTerminalActivity(at: submittedAt.addingTimeInterval(0.5))
-        #expect(p.executionState == .idle)
-    }
-
-    @Test
-    func outputActivitySchedulesQuietPollWake() async {
-        let p = Pane(projectPath: "/", projectID: UUID(), activityQuietPollDelay: 0.02)
-        p.recordUserInteraction()
-        p.markOutputActivity(totalRows: 10)
-
-        await confirmation("quiet output wakes the paused poll") { confirm in
-            let fired = LockedBox(false)
-            let token = NotificationCenter.default.addObserver(
-                forName: .terminalQuietSettleDeadline,
-                object: p,
-                queue: .main
-            ) { _ in
-                fired.mutate { $0 = true }
-                confirm()
-            }
-            defer { NotificationCenter.default.removeObserver(token) }
-
-            p.markOutputActivity(totalRows: 20)
-            // Poll rather than sleeping a fixed multiple of the delay: a
-            // co-scheduled spike on a loaded CI runner can push a 20ms timer
-            // well past any fixed margin (cf. #181). The generous ceiling only
-            // bounds a genuine failure; a healthy run exits on the first tick.
-            for _ in 0 ..< 200 where !fired.value {
-                try? await Task.sleep(for: .milliseconds(25))
-            }
-        }
-    }
-
-    /// The scheduled wake must land strictly *after* the quiet threshold it
-    /// needs to observe as crossed — a wake at exactly the threshold only
-    /// settles while timer jitter runs positive, and an occluded window has no
-    /// other timer left to retry with.
-    @Test
-    func quietPollWakeLandsAfterTheSettleThreshold() {
-        #expect(TerminalActivityTiming.quietPollDelay > TerminalActivityTiming.quietInterval)
-        #expect(
-            TerminalActivityTiming.quietPollDelay
-                == TerminalActivityTiming.quietInterval + TerminalActivityTiming.quietPollMargin
-        )
-    }
-
-    @Test
-    func foregroundProcessWithOutput_remainsRunningUntilItReturnsToShell() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let start = Date(timeIntervalSince1970: 100)
-        p.recordUserInteraction()
-        report(p, "node")
-        p.markTerminalActivity(at: start)
-        p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(30), quietInterval: 3)
-        #expect(p.executionState == .running)
-
-        report(p, shellName(), shell: true)
-        #expect(p.executionState == .done)
-    }
-
-    @Test
-    func silentForegroundProcess_doesNotSettleUntilItReturnsToShell() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let start = Date(timeIntervalSince1970: 100)
-        p.recordUserInteraction()
-        report(p, "sleep")
-        p.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(30), quietInterval: 3)
-        #expect(p.executionState == .running)
-        report(p, shellName(), shell: true)
-        #expect(p.executionState == .done)
     }
 
     @Test
@@ -673,7 +361,7 @@ struct PaneTests {
         let local = Pane(projectPath: "/", projectID: UUID())
         #expect(!local.needsConfirmClose)
         let remote = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        remote.executionState = .running
+        remote.receiveSessionStatus(MactermProtocol.Status(state: .running))
         remote.applyForegroundName("hx")
         #expect(!remote.needsConfirmClose)
     }
@@ -683,7 +371,7 @@ struct PaneTests {
         // A command mid-output (OSC 133 / activity heartbeats) is busy even
         // before any report lands.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
-        p.executionState = .running
+        p.receiveSessionStatus(MactermProtocol.Status(state: .running))
         #expect(p.remoteNeedsConfirmClose == true)
     }
 

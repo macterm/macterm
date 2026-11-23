@@ -474,12 +474,14 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         }
     }
 
-    /// The channel ended. The lead and the flags were this channel's: the
-    /// next attach tells them again. The session sends its flags at an
-    /// attach only when one is set, so a copy kept here could stay wrong.
+    /// The channel ended. The lead, the flags and the run status were this
+    /// channel's: the next attach tells them again. The session sends its
+    /// flags and its status at an attach only when they are not clear, so a
+    /// copy kept here could stay wrong.
     private func channelEnded() {
         host.paneLead(nil)
         host.paneAttention(MactermProtocol.Attention())
+        host.paneStatus(MactermProtocol.Status(state: .idle))
     }
 
     private func install(_ channel: PaneChannel) -> Bool {

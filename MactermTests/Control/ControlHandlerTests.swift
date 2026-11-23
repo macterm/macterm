@@ -234,12 +234,12 @@ struct ControlHandlerTests {
         appState.isAppActive = { false }
         let pane = try #require(appState.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
 
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         var response = await handler.handle(request("pane.list"))
         #expect(response.data?.panes?.first?.state == "running")
 
-        pane.markCommandFinished()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
+        pane.receiveAttention(MactermProtocol.Attention(unseen: true))
         response = await handler.handle(request("pane.list"))
         #expect(response.data?.panes?.first?.state == "done")
     }
