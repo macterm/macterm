@@ -18,6 +18,7 @@ const m = protocol.messages;
 
 const Handler = ghostty_vt.TerminalStream.Handler;
 const SemanticPrompt = Handler.SemanticPrompt;
+const SemanticContent = ghostty_vt.Cell.SemanticContent;
 const ProgressReport = ghostty_vt.osc.Command.ProgressReport;
 const ProgramStatus = ghostty_vt.osc.Command.ProgramStatus;
 const program_status = ghostty_vt.osc.program_status;
@@ -71,6 +72,10 @@ pub const Watch = struct {
     run_by_progress: bool = false,
     /// The command that runs now, for its `end` mark.
     command: ?[]u8 = null,
+    /// Where the cursor was at the command's output mark, tracked on the
+    /// primary screen (never removed) so that it follows its row as the
+    /// output scrolls. Null when the command did not start there.
+    output_start: ?*ghostty_vt.Pin = null,
     /// An input mark came, and no output or end mark since: the input
     /// cells above the cursor are the user's command.
     at_input: bool = false,
@@ -94,6 +99,7 @@ pub const Watch = struct {
         w.clearReady();
         w.ready.deinit(w.gpa);
         if (w.command) |c| w.gpa.free(c);
+        w.setOutputStart(false);
         for (w.records.items) |r| freeRecord(w.gpa, r.rec);
         w.records.deinit(w.gpa);
         w.reply.deinit(w.gpa);
@@ -133,7 +139,7 @@ pub const Watch = struct {
             if (!h.held or now - h.sent_at.? < m.coalesce_ms) continue;
             h.held = false;
             h.sent_at = now;
-            w.emit(@enumFromInt(i));
+            w.emit(@fromBackingInt(@intCast(i)));
         }
     }
 
@@ -186,7 +192,7 @@ pub const Watch = struct {
     /// The first value in a quiet period goes at once; later ones wait for
     /// the end of the window, where the newest goes.
     fn coalesce(w: *Watch, key: Key) void {
-        const h = &w.holds[@intFromEnum(key)];
+        const h = &w.holds[@backingInt(key)];
         if (h.sent_at) |at| if (w.now_ms - at < m.coalesce_ms) {
             h.held = true;
             return;
@@ -271,6 +277,7 @@ pub const Watch = struct {
                     null;
                 w.at_input = false;
                 w.setCommand(command);
+                w.setOutputStart(true);
                 w.push(.{ .mark = .{ .kind = .output, .command = w.dupeCommand() } });
                 w.startRun(false);
                 // The command owns the run now: a progress report that
@@ -286,13 +293,45 @@ pub const Watch = struct {
                     .kind = .end,
                     .command = w.dupeCommand(),
                     .exit_code = e.exit_code,
-                    .output_tail = if (failed) outputTail(w.gpa, &w.term) else null,
+                    .output_tail = if (failed) w.outputTail() else null,
                 } });
+                w.setOutputStart(false);
                 w.setCommand(null);
                 if (w.status.state == .running) w.setStatus(.done, false);
             },
             else => {},
         }
+    }
+
+    /// Drops the output start, and with `at_cursor` tracks a new one at the
+    /// cursor of the primary screen.
+    fn setOutputStart(w: *Watch, at_cursor: bool) void {
+        const pages = &w.term.screens.get(.primary).?.pages;
+        if (w.output_start) |p| pages.untrackPin(p);
+        w.output_start = null;
+        if (!at_cursor or w.term.screens.active_key != .primary) return;
+        w.output_start = pages.trackPin(w.term.screens.active.cursor.page_pin.*) catch null;
+    }
+
+    /// The text of the output cells from the output mark to the cursor, at
+    /// most the last `output_tail_rows` rows: the end of what the command
+    /// printed, a line for each row that does not wrap. Read at the
+    /// command's end mark, before the shell prints its next prompt, so what
+    /// comes after the end (a `clear`, the next command) does not change it.
+    /// An erase inside the command does not move the start: output that it
+    /// printed above the start after the erase is not in the text. Null when
+    /// the command did not start on the primary screen, the primary screen
+    /// is not active now, or the command printed nothing.
+    fn outputTail(w: *Watch) ?[]u8 {
+        const start_pin = w.output_start orelse return null;
+        if (w.term.screens.active_key != .primary) return null;
+        const cursor = w.term.screens.active.cursor.page_pin.*;
+        const top = switch (cursor.upOverflow(output_tail_rows - 1)) {
+            .offset => |p| p,
+            .overflow => |o| o.end,
+        }.left(cursor.x);
+        const start = if (start_pin.isBetween(top, cursor)) start_pin.* else top;
+        return cellText(w.gpa, start, cursor, .output);
     }
 
     fn setCommand(w: *Watch, command: ?[]u8) void {
@@ -422,7 +461,7 @@ pub const Watch = struct {
     pub fn shellExited(w: *Watch, now: i64) void {
         w.now_ms = now;
         if (!w.removeRecords("", .ended)) return;
-        w.holds[@intFromEnum(Key.program)] = .{ .sent_at = now };
+        w.holds[@backingInt(Key.program)] = .{ .sent_at = now };
         w.emit(.program);
     }
 
@@ -592,72 +631,31 @@ pub fn inputText(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]u8 {
     var prompts = cursor.promptIterator(.left_up, cursor.up(max_input_rows));
     const prompt = prompts.next() orelse return null;
 
+    return cellText(gpa, prompt, cursor, .input);
+}
+
+/// The most rows that `Watch.outputTail` reads, the cursor's row with them.
+pub const output_tail_rows = 20;
+
+/// The text of the cells with `content` from `start` to `end`, a line for
+/// each row that does not wrap, with no spaces at the ends of the rows and
+/// no blank lines at the ends. Null when there is no such text.
+fn cellText(gpa: std.mem.Allocator, start: ghostty_vt.Pin, end: ghostty_vt.Pin, content: SemanticContent) ?[]u8 {
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-    var cells = prompt.cellIterator(.right_down, cursor);
+    defer out.deinit(gpa);
+    var cells = start.cellIterator(.right_down, end);
     var last: ?ghostty_vt.Pin = null;
     while (cells.next()) |p| {
         if (last) |l| if (l.node != p.node or l.y != p.y) {
-            // A space at the end of a row that wraps is part of the command.
+            // A space at the end of a row that wraps is part of the text.
             if (!l.rowAndCell().row.wrap) {
                 trimEndSpaces(&out);
                 out.append(gpa, '\n') catch return null;
             }
         };
         last = p;
-        const rac = p.rowAndCell();
-        const cell = rac.cell;
-        if (cell.semantic_content != .input) continue;
-        if (cell.wide == .spacer_tail or cell.wide == .spacer_head) continue;
-        if (!cell.hasText()) {
-            out.append(gpa, ' ') catch return null;
-            continue;
-        }
-        appendCodepoint(gpa, &out, cell.codepoint()) catch return null;
-        if (cell.hasGrapheme()) if (p.grapheme(cell)) |cps| {
-            for (cps) |cp| appendCodepoint(gpa, &out, cp) catch return null;
-        };
-    }
-    const text = std.mem.trim(u8, out.items, " \n");
-    if (text.len == 0) {
-        out.deinit(gpa);
-        return null;
-    }
-    const result = gpa.dupe(u8, text) catch null;
-    out.deinit(gpa);
-    return result;
-}
-
-/// The most rows above the cursor that `outputTail` reads.
-pub const output_tail_rows = 20;
-
-/// The text of the output cells in the last `output_tail_rows` rows above
-/// the cursor, after the prompt of the command when it is in those rows: the
-/// end of what the command printed, a line for each row that does not wrap.
-/// Read at the command's end mark, before the shell prints its next prompt.
-/// A `clear` keeps only what came after it. Null when there is no output.
-pub fn outputTail(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]u8 {
-    const screen = term.screens.active;
-    const cursor = screen.cursor.page_pin.*;
-    const top = switch (cursor.upOverflow(output_tail_rows)) {
-        .offset => |p| p,
-        .overflow => |o| o.end,
-    };
-    var prompts = cursor.promptIterator(.left_up, top);
-    const start = if (screen.semantic_prompt.seen) prompts.next() orelse top.left(top.x) else top.left(top.x);
-
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(gpa);
-    var cells = start.cellIterator(.right_down, cursor);
-    var last: ?ghostty_vt.Pin = null;
-    while (cells.next()) |p| {
-        if (last) |l| if (l.node != p.node or l.y != p.y) {
-            trimEndSpaces(&out);
-            if (!l.rowAndCell().row.wrap) out.append(gpa, '\n') catch return null;
-        };
-        last = p;
         const cell = p.rowAndCell().cell;
-        if (cell.semantic_content != .output) continue;
+        if (cell.semantic_content != content) continue;
         if (cell.wide == .spacer_tail or cell.wide == .spacer_head) continue;
         if (!cell.hasText()) {
             out.append(gpa, ' ') catch return null;
@@ -848,6 +846,17 @@ test "events: a success, and output longer than the tail, keep only what they mu
     try testing.expect(std.mem.endsWith(u8, tail, "\n24"));
     try testing.expect(std.mem.indexOf(u8, tail, "seq") == null);
     try testing.expect(std.mem.count(u8, tail, "\n") < output_tail_rows);
+}
+
+test "events: with no prompt marks, the tail starts at the output mark" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    // bash 3.2 with no shell integration: a script sends 133;C and 133;D.
+    f.feed("old output\r\n$ sh fail.sh\r\n\x1b]133;C;cmdline_url=sh%20fail.sh\x07rejected\r\n\x1b]133;D;1\x07", 0);
+    const marks = try f.only(.mark);
+    defer testing.allocator.free(marks);
+    try testing.expectEqualStrings("rejected", marks[1].output_tail.?);
 }
 
 test "events: the shell's own command line wins over the input cells" {
