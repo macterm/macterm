@@ -95,7 +95,10 @@ enum Output {
         print(line)
     }
 
+    /// The group column shows only when a project is in a group, so a user
+    /// with no groups sees the columns as before.
     private static func renderProjects(_ projects: [ControlProjectInfo]) {
+        let showsGroup = projects.contains { !($0.group ?? "").isEmpty }
         let rows = projects.map { project -> [String] in
             let tabs = project.tabCount.map { "\($0) tab\($0 == 1 ? "" : "s")" } ?? "—"
             return [
@@ -106,6 +109,7 @@ enum Output {
                 project.index.map { "project:\($0)" } ?? project.id,
                 project.active ? "*" : " ",
                 project.name,
+            ] + (showsGroup ? [project.group ?? ""] : []) + [
                 project.loaded ? tabs : "not loaded",
                 project.path,
             ]

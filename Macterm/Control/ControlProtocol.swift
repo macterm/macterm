@@ -490,6 +490,9 @@ struct ControlProjectInfo: Codable, Equatable {
     /// Whether a live workspace exists for the project this launch.
     var loaded: Bool
     var tabCount: Int?
+    /// The name of the group that holds the project directly (design 013),
+    /// or empty at the top level. Absent from an app before groups.
+    var group: String?
 }
 
 struct ControlTabInfo: Codable, Equatable {

@@ -1680,7 +1680,8 @@ final class ControlHandler {
             // "Loaded" = a workspace exists (tabs/panes addressable over
             // this protocol), whether or not its panes have started shells.
             loaded: appState.workspaces[project.id] != nil,
-            tabCount: appState.workspaces[project.id]?.tabs.count
+            tabCount: appState.workspaces[project.id]?.tabs.count,
+            group: projectStore.group(of: project.id)?.name ?? ""
         )
     }
 

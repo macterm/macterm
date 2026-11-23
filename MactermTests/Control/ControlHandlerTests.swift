@@ -142,6 +142,52 @@ struct ControlHandlerTests {
         #expect(two?.tabCount == nil)
     }
 
+    @Test
+    func project_list_indexes_projects_in_tree_order_and_names_their_group() async {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "first")
+        let work = projectStore.createGroup(name: "Work")
+        _ = seedProject(appState, projectStore, name: "last", select: false)
+        let api = seedProject(appState, projectStore, name: "api", select: false)
+        #expect(projectStore.move(api.id, into: work.id))
+
+        let projects = await handler.handle(request("project.list")).data?.projects
+        // The group takes no index, and its project comes before the
+        // project that is after the group.
+        #expect(projects?.map(\.name) == ["first", "api", "last"])
+        #expect(projects?.map(\.index) == [1, 2, 3])
+        #expect(projects?.map(\.group) == ["", "Work", ""])
+        #expect(projects?.contains { $0.id == work.id.uuidString } == false)
+
+        let selected = await handler.handle(request("project.select", args: ControlArgs(project: "project:2")))
+        #expect(selected.data?.projects?.first?.id == api.id.uuidString)
+        #expect(selected.data?.projects?.first?.group == "Work")
+    }
+
+    @Test
+    func a_group_name_does_not_resolve_as_a_project() async {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "app")
+        let work = projectStore.createGroup(name: "Work")
+        let response = await handler.handle(request("project.select", args: ControlArgs(project: "Work")))
+        #expect(response.error?.code == .notFound)
+        let byID = await handler.handle(request("project.select", args: ControlArgs(project: work.id.uuidString)))
+        #expect(byID.error?.code == .notFound)
+    }
+
+    @Test
+    func one_name_in_two_groups_is_still_ambiguous() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let work = projectStore.createGroup(name: "Work")
+        let home = projectStore.createGroup(name: "Home")
+        let one = seedProject(appState, projectStore, name: "api")
+        let two = seedProject(appState, projectStore, name: "api", select: false)
+        #expect(projectStore.move(one.id, into: work.id))
+        #expect(projectStore.move(two.id, into: home.id))
+        let response = await handler.handle(request("tab.list", args: ControlArgs(project: "api")))
+        #expect(response.error?.code == .ambiguous)
+    }
+
     // MARK: - tab.list
 
     @Test

@@ -69,6 +69,33 @@ struct ProjectSourceTests {
         #expect(item.score < 0) // boosted below a bare command's typical positive score
     }
 
+    @Test
+    func a_project_in_a_group_shows_the_group_as_its_subtitle() throws {
+        let api = Project(name: "api", path: "/tmp/api")
+        let top = Project(name: "notes", path: "/tmp/notes")
+        let (ctx, _, store) = makeContext([api, top])
+        let work = store.createGroup(name: "Work")
+        #expect(store.move(api.id, into: work.id))
+
+        let inGroup = try #require(ProjectSource().items(query: "api", context: ctx).first)
+        #expect(inGroup.subtitle == "Work")
+        let atTop = try #require(ProjectSource().items(query: "notes", context: ctx).first)
+        #expect(atTop.subtitle == "/tmp/notes")
+    }
+
+    @Test
+    func a_query_finds_a_project_with_or_without_its_group() {
+        let api = Project(name: "api", path: "/tmp/api")
+        let (ctx, _, store) = makeContext([api, Project(name: "app", path: "/tmp/app")])
+        let work = store.createGroup(name: "Work")
+        #expect(store.move(api.id, into: work.id))
+
+        #expect(ProjectSource().items(query: "api", context: ctx).map(\.title) == ["api"])
+        #expect(ProjectSource().items(query: "work api", context: ctx).map(\.title) == ["api"])
+        // A group is never a row.
+        #expect(ProjectSource().items(query: "work", context: ctx).map(\.title) == ["api"])
+    }
+
     // MARK: - emptyItems
 
     @Test

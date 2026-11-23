@@ -149,6 +149,12 @@ final class ProjectStore {
         rows.first { $0.id == id }
     }
 
+    /// The group that holds the row `id` directly, or nil at the top level.
+    /// The CLI's `group` field and the palette's subtitle show its name.
+    func group(of id: UUID) -> Project? {
+        row(id)?.parent.flatMap(row)
+    }
+
     /// Every group, in tree order (a group before the groups inside it).
     var groups: [Project] {
         func walk(_ parent: UUID?) -> [Project] {
