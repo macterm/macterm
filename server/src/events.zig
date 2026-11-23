@@ -82,13 +82,18 @@ pub const Foreground = struct {
 };
 
 /// A program that takes the foreground within this time after a submission
-/// is the user's command. Two heartbeats within this time after a
-/// submission to a raw program start a run.
+/// is the user's command.
 pub const submit_window_ms = 2000;
 
 /// A run with a raw program in front ends after this time with no output:
-/// an agent finished its reply.
+/// an agent finished its reply. Output that comes later than this after a
+/// submission to a raw program does not start a run either: a reply that
+/// sparse cannot be told from output that nobody asked for.
 pub const quiet_ms = 3000;
+
+/// Output in this time after a submission to a raw program starts no run:
+/// it is the echo of the key, or the redraw of the input line.
+pub const echo_ms = 250;
 
 /// A program status record, and when it last changed.
 const Record = struct {
@@ -124,9 +129,8 @@ pub const Watch = struct {
     fg: Foreground = .{},
     /// A submission while the shell was in front, in a shell with no marks.
     fg_armed_at: ?i64 = null,
-    /// A submission to a raw program, and the heartbeats since.
+    /// A submission to a raw program, with no reply yet.
     agent_armed_at: ?i64 = null,
-    agent_beats: u8 = 0,
     /// The last output, or the start of the run or of raw mode when later.
     quiet_from: i64 = 0,
     /// The command that runs now, for its `end` mark.
@@ -182,10 +186,10 @@ pub const Watch = struct {
         stream.nextSlice(data);
         if (data.len == 0) return;
         w.quiet_from = @max(w.quiet_from, now);
+        w.agentOutput(now);
         if (w.activity_at) |at| if (now - at < m.activity_ms) return;
         w.activity_at = now;
         w.push(.activity);
-        w.heartbeat(now);
     }
 
     /// The user submitted input (`isSubmission`) at `now`. The session
@@ -196,7 +200,6 @@ pub const Watch = struct {
             if (!w.has_marks) w.fg_armed_at = now;
         } else if (w.fg.raw) {
             w.agent_armed_at = now;
-            w.agent_beats = 0;
         }
     }
 
@@ -232,16 +235,15 @@ pub const Watch = struct {
         return now - at < submit_window_ms;
     }
 
-    /// The second heartbeat within `submit_window_ms` of a submission to a
-    /// raw program starts a run. One heartbeat can be the echo of the key.
-    fn heartbeat(w: *Watch, now: i64) void {
+    /// Output from `echo_ms` to `quiet_ms` after a submission to a raw
+    /// program starts a run: the program replies.
+    fn agentOutput(w: *Watch, now: i64) void {
         const at = w.agent_armed_at orelse return;
-        if (now - at >= submit_window_ms or w.fg.idle or !w.fg.raw) {
+        if (now - at >= quiet_ms or w.fg.idle or !w.fg.raw) {
             w.agent_armed_at = null;
             return;
         }
-        w.agent_beats += 1;
-        if (w.agent_beats < 2) return;
+        if (now - at < echo_ms) return;
         w.agent_armed_at = null;
         w.startRun(.agent);
     }
@@ -1419,18 +1421,27 @@ test "events: a submission to a raw program with output after it is a run, and q
     f.feed("e", 9500);
     try testing.expectEqual(.running, f.w.status.state);
     try testing.expectEqual(m.Attention{}, f.w.attention);
+    f.w.flush(9500 + quiet_ms);
+    // A slow reply: its first output comes late, but before `quiet_ms`.
+    f.w.submitted(20_000);
+    f.feed("f", 20_000 + quiet_ms - 1);
+    try testing.expectEqual(.running, f.w.status.state);
 }
 
-test "events: the echo of a submission alone, or output too late, starts no run" {
+test "events: the echo of a submission, or output after quiet_ms, starts no run" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
     f.w.foreground(raw_program, 0);
     f.w.submitted(1000);
     f.feed("a", 1000);
+    f.feed("b", 1000 + echo_ms - 1);
     f.w.flush(5000);
     try testing.expectEqual(.idle, f.w.status.state);
-    f.feed("b", 1000 + submit_window_ms);
+    f.feed("c", 1000 + quiet_ms);
+    try testing.expectEqual(.idle, f.w.status.state);
+    // The rule ends with the output that came too late.
+    f.feed("d", 1000 + quiet_ms + echo_ms);
     try testing.expectEqual(.idle, f.w.status.state);
     // A program in canonical mode gets no agent rule.
     f.w.foreground(.{ .idle = false, .raw = false }, 6000);

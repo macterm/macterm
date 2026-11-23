@@ -341,10 +341,11 @@ c = Client("s1")
 c.attach()
 c.wait_msg("state")
 path = os.path.join(os.environ["RT"], "agent.py")
-# The agent: raw mode, and a reply of 1.2 s of output for each Return.
+# The agent: raw mode, and for each Return a sparse reply, one line each
+# 0.5 s for 1.5 s, as the review's slow agent printed.
 agent = ("import sys,time,tty;tty.setraw(0);print('ready',end='\\r\\n',flush=True)\n"
          "while sys.stdin.read(1)!='q':\n"
-         " [print('.',end='',flush=True) or time.sleep(0.1) for _ in range(12)]\n")
+         " [time.sleep(0.5) or print('line',end='\\r\\n',flush=True) for _ in range(3)]\n")
 open(path, "w").write(agent)
 c.type("python3 %s\r" % path)
 c.wait_output("ready")
