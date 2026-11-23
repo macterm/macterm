@@ -225,7 +225,15 @@ pub const ChannelOpen = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { session: []const u8 };
-    pub const Result = struct { channel: u32 };
+    pub const Result = struct {
+        channel: u32,
+        /// The `epoch` of the session's `hello`. A client keeps it with its
+        /// output offset, and its next `Attach` on a new channel asks to
+        /// resume with both (design/003 §7).
+        epoch: ?u64 = null,
+
+        pub const field_since = .{ .epoch = 3 };
+    };
 };
 
 pub const ChannelClose = struct {

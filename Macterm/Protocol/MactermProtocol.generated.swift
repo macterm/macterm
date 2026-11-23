@@ -833,26 +833,36 @@ extension MactermProtocol.ChannelOpen.Args: ProtocolValue {
 extension MactermProtocol.ChannelOpen {
     struct Result: Equatable {
         var channel: UInt32
+        var epoch: UInt64?
     }
 }
 
 extension MactermProtocol.ChannelOpen.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         var channel: UInt32?
+        var epoch: UInt64?
         try reader.readMap { key, reader in
             switch key {
             case "channel": channel = try UInt32(from: &reader)
+            case "epoch": epoch = try reader.readOptional(UInt64.self)
             default: return false
             }
             return true
         }
         self.channel = try MessagePackReader.required(channel, "channel")
+        self.epoch = epoch
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        writer.writeMapHeader(1)
+        var keyCount = 1
+        if epoch != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
         writer.writeString("channel")
         channel.encode(to: &writer)
+        if let epoch {
+            writer.writeString("epoch")
+            epoch.encode(to: &writer)
+        }
     }
 }
 
