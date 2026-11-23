@@ -1,79 +1,38 @@
 import Foundation
-import notify
 import os
 
 private let logger = Logger(subsystem: appBundleID, category: "RemoteHosts")
 
-/// What a remote pane's client asks (`macterm remote-pane`, 0057).
-enum RemotePaneEvent: String, Codable {
-    /// What now: at the start, and after the app woke the client.
-    case ask
-    /// The pane's ssh exited 255: the connection stopped.
-    case lost
-    /// The user pressed a key in a pane that waits: connect now.
-    case retry
-}
-
-/// The app's answer to a remote pane's driver (`RemotePaneDriver`).
-enum RemotePaneAnswer {
-    /// Wait for the wake notification or a key. `message` goes into the pane
-    /// first.
-    case wait(message: String?)
-    /// Open a channel to the session on the host's link. `create`: the
-    /// session does not run: make it in this folder first.
-    case attach(link: RemoteServers.Link, create: String?)
-    /// No server on the host: a plain ssh shell over the master (`ssh`
-    /// arguments). The pane shows no line about it: the sidebar's project row
-    /// does (`plainDestinations`).
-    case plain(arguments: [String])
-    /// The pane ends: no pane has the session any more, or the session is
-    /// gone from the host.
-    case close
-}
-
-/// Each remote pane is a session of the host's server, reached over the
-/// host's one ssh connection (0057). This type keeps, for each host, the
-/// route of that connection and one link to the server (`RemoteServers.Link`),
-/// and answers each pane's client (`macterm remote-pane`).
+/// The remote hosts (0057, 0264): one `RemoteHost` for each ssh destination,
+/// which owns that host's state, and the work on a host that is not a pane's:
+/// the folder check of a new project, background reads, the end of a
+/// session, the install from Settings.
 ///
-/// - **The interim shape.** The client runs on the pane's pty, as
-///   `macterm attach` does for a local pane, until the GUI feeds a surface
-///   from a channel (m3). It runs `ssh -S <master> -t <host> 'macterm-<key>
-///   connect <name>'`: each pane is one ssh channel over the one connection,
-///   so one login serves every pane. The link to the server lists and ends
-///   sessions.
-/// - **One request is short.** A login or an install can wait minutes for the
-///   user, and the control socket has 16 connections. So `answer` never waits
-///   for them: it starts the work and says `wait`; when the work ends, the
-///   app posts the pane's Darwin notification (`wakeName`), and the client
-///   asks again.
 /// - **Lost.** A pane whose link stopped, or whose connect failed, is lost
-///   (`Pane.isRemoteLinkLost`): its cursor says disabled, and its badge
-///   says `Reconnecting` while a try runs (`Pane.isRemoteReconnecting`),
-///   else `Connection Lost`. A pane that came back after a restart says
-///   `Reconnecting` while a slow first connect runs (`firstConnectIsSlow`).
-///   It connects again by itself (`AppState.reconnectDroppedRemotePanes`
-///   with `RemoteReconnectPolicy`): such a try never asks the user anything
-///   (`reconnect`, a quiet login). A key in the pane connects at once, and
-///   may ask for the login. The attach replays the session's screen.
+///   (`Pane.isRemoteLinkLost`, from its host's session table): its cursor
+///   says disabled, and its badge says `Reconnecting` while a try runs
+///   (`Pane.isRemoteReconnecting`), else `Connection Lost`. A pane that came
+///   back after a restart says `Reconnecting` while a slow first connect
+///   runs (`RemoteHost.firstConnectIsSlow`). It connects again by itself
+///   (`AppState.reconnectDroppedRemotePanes` → `reconnect`, with the host's
+///   backoff): such a try never asks the user anything. A key in the pane
+///   connects at once, and may ask for the login. The attach replays the
+///   session's screen.
 /// - **Gone.** A pane whose session ran on the host
 ///   (`Pane.hostSessionDirectory`) and is gone there (a host restart) closes:
-///   the pane exists only while its session exists. A
-///   server is never started empty in silence for a pane that expects a
-///   session. A pane from before v2 has no such folder: its first session
-///   starts with no question, as local panes did at the cut-over.
+///   the pane exists only while its session exists. A server is never
+///   started empty in silence for a pane that expects a session. A pane from
+///   before v2 has no such folder: its first session starts with no
+///   question, as local panes did at the cut-over.
 /// - **No server.** When the user declined the install, or the host has no
-///   build, each pane is a plain ssh shell, with one line that says so. The
-///   decline is kept (`declined`); Settings → Projects offers the install
-///   again.
+///   build, each pane is a plain ssh shell. The decline is kept (`declined`);
+///   Settings → Projects offers the install again.
 /// - v1 sessions on a host keep running: nothing here ends one.
 @MainActor @Observable
 final class RemoteHosts {
     struct Configuration {
         /// The build key of the bundled server.
         var key: String?
-        /// Posts a Darwin notification.
-        var post: (String) -> Void = { notify_post($0) }
         /// A host's link came back: the reconnect sweep, with its backoff
         /// and its setting, lets the other lost panes of the host attach.
         var hostDidConnect: @MainActor (String) -> Void = {
@@ -88,17 +47,28 @@ final class RemoteHosts {
             NotificationCenter.default.post(name: .remoteHostDidAnswer, object: $0)
         }
 
-        /// A pane became lost: its link stopped, or a try failed
-        /// (`failedTry`). The reconnect sweep runs now, so a try starts at
-        /// once or is planned. After a failed try the backoff starts now
-        /// (`RemoteReconnectPolicy.tryFailed`).
-        var paneLost: @MainActor (_ session: String, _ failedTry: Bool) -> Void = { session, failedTry in
-            NotificationCenter.default.post(name: .remoteLinkDidStop, object: failedTry ? session : nil)
+        /// A pane of the host became lost: its link stopped, or a try
+        /// failed. The reconnect sweep runs now, so a try starts at once or
+        /// is planned, after the host's backoff.
+        /// The post goes on the next turn of the main queue: the pane then
+        /// waits for its try.
+        var hostLost: @MainActor (String) -> Void = { destination in
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .remoteLinkDidStop, object: destination)
+            }
         }
+
+        /// Logs in and connects to the host's server. nil: the live way, over
+        /// `SSHConnections` and `RemoteServers`. Tests give a fake link.
+        var open: (@MainActor (
+            _ destination: String,
+            _ prompts: Bool,
+            _ step: @escaping @MainActor (RemoteHost.Step) -> Void
+        ) async throws -> RemoteHost.Opened)?
 
         var declines: DeclineStore
         /// How long a session that the app told a client to make counts as
-        /// made (`created`).
+        /// made (`RemoteHost.SessionState.created`).
         var creationGrace: TimeInterval = 30
         /// A host's link to its server is up: its background work starts
         /// (the terminfo install).
@@ -138,73 +108,35 @@ final class RemoteHosts {
     /// declined the install of the server there.
     private(set) var declined: Set<String>
 
-    private let connections: SSHConnections
-    private let servers: RemoteServers
-    private let configuration: Configuration
+    let connections: SSHConnections
+    let servers: RemoteServers
+    let configuration: Configuration
 
-    private enum Host {
-        /// A login and a check run. The token tells this prepare from a
-        /// later one. `prompts`: the login may ask the user.
-        case preparing(UUID, Task<Void, Never>, prompts: Bool)
-        case ready(RemoteServers.Link)
-        /// No server: plain shells.
-        case plain(SSHConnections.Route)
-    }
+    /// One host for each destination. A host stays for the run of the app.
+    private(set) var hosts: [String: RemoteHost] = [:]
 
     /// The remote pane that shows a session (`AppState.remotePane`), set
     /// when the app starts: a pane's driver asks with it, so the host and
     /// the folder come from the user's own pane.
-    @ObservationIgnored var pane: (@MainActor (String) -> Pane?)?
-
-    @ObservationIgnored private var hosts: [String: Host] = [:] {
-        didSet {
-            var plain = plainDestinations
-            for (destination, host) in hosts {
-                switch host {
-                case .plain: plain.insert(destination)
-                case .ready: plain.remove(destination)
-                case .preparing: break
-                }
-            }
-            if plain != plainDestinations { plainDestinations = plain }
-        }
+    @ObservationIgnored var pane: (@MainActor (String) -> Pane?)? {
+        didSet { if pane != nil { paneInstalled.fire(()) } }
     }
 
+    @ObservationIgnored private let paneInstalled = AsyncSignal<Void>()
+
     /// The destinations whose panes are plain ssh shells: the user declined
-    /// the server, or the host has no build. Derived from `hosts`. A host
-    /// stays in it while its connection is down, until a link to its server
-    /// is ready. The sidebar's project row shows it, so the pane prints no
-    /// line.
-    private(set) var plainDestinations: Set<String> = []
+    /// the server, or the host has no build (`RemoteHost.isPlain`). The
+    /// sidebar's project row shows it, so the pane prints no line.
+    var plainDestinations: Set<String> {
+        Set(hosts.values.filter(\.isPlain).map(\.destination))
+    }
+
     /// The destinations whose roaming link hears nothing from the host now
-    /// (`LinkTransport.isQuiet`). The link stays and its panes keep their
-    /// channels, but the host cannot be reached. The sidebar's project row
-    /// shows the host as lost.
-    private(set) var quietDestinations: Set<String> = []
-    /// The roaming link of a host (design/009), and the ssh link that it
-    /// replaced as the host's link. Panes that attached over the ssh link
-    /// stay on it until it ends.
-    @ObservationIgnored private var transports: [String: LinkTransport] = [:]
-    @ObservationIgnored private var standby: [String: RemoteServers.Link] = [:]
-    /// Tells a late `onDead` of an older link from the current one.
-    @ObservationIgnored private var roamingGeneration: [String: Int] = [:]
-    /// The sessions that wait for their host to be ready.
-    @ObservationIgnored private var waiting: [String: Set<String>] = [:]
-    /// Sessions whose connection stopped: they wait for a trigger or a key.
-    @ObservationIgnored private var lost: Set<String> = []
-    /// Sessions that the reconnect sweep woke: their next connect asks the
-    /// user nothing.
-    @ObservationIgnored private var quiet: Set<String> = []
-    /// Lists that failed on the current link of a host, in a row.
-    @ObservationIgnored private var listFailures: [String: Int] = [:]
-    /// When the app last told a session's client to make it. A second client
-    /// of the same pane (in a second window) can ask before the host lists
-    /// the new session, and a channel can drop before the session starts: in
-    /// this time a missing session is made, not reported as gone.
-    @ObservationIgnored private var created: [String: Date] = [:]
-    /// The folder of a session that the app told a client to make, until
-    /// the session attaches.
-    @ObservationIgnored private var creating: [String: String] = [:]
+    /// (`RemoteHost.isQuiet`). The sidebar's project row shows the host as
+    /// lost.
+    var quietDestinations: Set<String> {
+        Set(hosts.values.filter(\.isQuiet).map(\.destination))
+    }
 
     init(connections: SSHConnections, servers: RemoteServers, configuration: Configuration) {
         self.connections = connections
@@ -213,64 +145,47 @@ final class RemoteHosts {
         declined = Set(configuration.declines.read())
     }
 
-    /// The Darwin notification that wakes the client of `session`.
-    nonisolated static func wakeName(for session: String) -> String {
-        "\(appBundleID).remote-pane.\(session)"
+    /// The host of `destination`. It is made at the first ask.
+    func host(_ destination: String) -> RemoteHost {
+        if let host = hosts[destination] { return host }
+        let host = RemoteHost(destination: destination, owner: self)
+        hosts[destination] = host
+        return host
     }
 
-    // MARK: - A pane's client
+    /// The host of a remote pane, which the pane then reads its state from.
+    /// nil for a local pane, or one whose host is not a valid destination.
+    func host(of pane: Pane) -> RemoteHost? {
+        guard let target = Target(pane) else { return nil }
+        let host = host(target.destination)
+        if pane.linkHost !== host { pane.linkHost = host }
+        return host
+    }
 
-    /// The answer to `event` from a client of `session`. `pane` is the pane
-    /// that shows the session; nil means the pane closed.
-    func answer(_ event: RemotePaneEvent, session: String, pane: Pane?) async -> RemotePaneAnswer {
-        guard let pane, let target = Target(pane) else { return .close }
-        switch event {
-        case .ask:
-            if lost.contains(session) {
-                mark(pane, lost: true)
-                return .wait(message: nil)
-            }
-        case .lost:
-            logger.info("remote pane: session=\(session, privacy: .public) host=\(target.destination, privacy: .public) lost")
-            lost.insert(session)
-            mark(pane, lost: true)
-            // The next connect checks the connection again. A roaming link
-            // stays: the host may still hold it, and the next attach asks it
-            // (`decide` drops it when it does not answer).
-            if !isRoamingLink(target.destination) {
-                drop(target.destination)
-            }
-            configuration.paneLost(session, false)
-            return .wait(message: nil)
-        case .retry:
-            lost.remove(session)
-            quiet.remove(session)
-            markReconnecting(pane)
+    /// The pane that shows `session`. A pane that restores before the app
+    /// has installed its state waits for it. nil: the pane closed.
+    func pane(for session: String) async throws -> Pane? {
+        while pane == nil {
+            try await paneInstalled.wait()
         }
-        return await resolve(session, pane: pane, target: target, prompts: !quiet.contains(session))
+        return pane?(session)
     }
 
-    /// The session of this pane attached: it ran on the host, so from now
-    /// on a missing session is gone and closes the pane.
-    func sessionAttached(_ session: String, pane: Pane?) {
-        let directory = creating.removeValue(forKey: session)
-        // No try runs now. A slow first connect can mark the pane after the
-        // answer to attach (`firstConnectIsSlow`).
-        if let pane, !pane.isRemoteLinkLost, pane.isRemoteReconnecting { pane.isRemoteReconnecting = false }
-        guard let pane, pane.hostSessionDirectory == nil,
-              let folder = directory ?? Target(pane)?.directory
-        else { return }
-        pane.hostSessionDirectory = folder
+    /// The sweep of the app: these hosts let their lost panes try again,
+    /// after each host's backoff. `answered`: the hosts answer again, which
+    /// clears their backoff.
+    func reconnect(_ destinations: Set<String>, answered: Bool = false) {
+        let now = Date()
+        for destination in destinations {
+            hosts[destination]?.reconnect(answered: answered, now: now)
+        }
     }
 
-    /// A trigger lets these lost panes connect again. The caller applies
-    /// the backoff.
-    func reconnect(_ sessions: Set<String>) {
-        for session in sessions where lost.remove(session) != nil {
-            // Every view of the session asks quietly until one attaches.
-            quiet.insert(session)
-            markReconnecting(pane?(session))
-            configuration.post(Self.wakeName(for: session))
+    /// The network changed or the Mac woke: each roaming link uses a new
+    /// socket, so that its packets leave on the new path.
+    func networkDidChange() {
+        for host in hosts.values {
+            host.networkDidChange()
         }
     }
 
@@ -278,17 +193,13 @@ final class RemoteHosts {
     /// only a connection that is up: a close never asks for a login. With no
     /// connection, the session stays.
     func endSession(_ session: String, destination: String) async {
-        forget(session)
-        switch hosts[destination] {
-        case let .ready(link):
+        let host = hosts[destination]
+        host?.forget(session)
+        if let link = host?.link {
             await Self.kill(session, over: link)
             return
-        case .plain:
-            return
-        case .preparing,
-             nil:
-            break
         }
+        if case .plain = host?.state { return }
         do {
             let link = try await servers.connect(destination, login: false, install: false)
             await Self.kill(session, over: link)
@@ -309,15 +220,9 @@ final class RemoteHosts {
         destination: String,
         timeout: Duration
     ) async -> MactermProtocol.CommandRun.Result? {
-        switch hosts[destination] {
-        case let .ready(link):
-            return await Self.run(argv, timeout: timeout, over: link)
-        case .plain:
-            return nil
-        case .preparing,
-             nil:
-            break
-        }
+        let host = hosts[destination]
+        if let link = host?.link { return await Self.run(argv, timeout: timeout, over: link) }
+        if case .plain = host?.state { return nil }
         do {
             let link = try await servers.connect(destination, login: false, install: false)
             defer { link.close() }
@@ -350,7 +255,7 @@ final class RemoteHosts {
             logger.info("folder check: \(destination, privacy: .public) is not a valid host")
             return .unreachable
         }
-        if case let .ready(link) = hosts[destination], let answer = await checkFolder(directory, destination: destination, over: link) {
+        if let link = hosts[destination]?.link, let answer = await checkFolder(directory, destination: destination, over: link) {
             return answer
         }
         guard let command = HostCommands.folderCheckCommand(directory: directory) else {
@@ -368,26 +273,14 @@ final class RemoteHosts {
         guard found == .exists else { return found }
         // A dialog that closed adds nothing: no install question for it.
         guard !Task.isCancelled else { return .unreachable }
-        switch hosts[destination] {
-        case nil:
-            prepare(destination, prompts: true)
-        case let .preparing(_, _, asks) where !asks:
-            prepare(destination, prompts: true)
-        default:
-            break
-        }
-        // Another step (an install from Settings) can replace this prepare:
-        // wait for the one that is current.
-        while case let .preparing(_, task, _) = hosts[destination] {
-            await task.value
-        }
-        switch hosts[destination] {
+        let host = host(destination)
+        await host.connectAsking()
+        switch host.state {
         case .ready,
              .plain:
             return .exists
-        case .preparing,
-             nil:
-            // `prepare` logged the reason.
+        default:
+            // The host logged the reason.
             logger.info("folder check: \(destination, privacy: .public): no connection after the check")
             return .unreachable
         }
@@ -407,7 +300,7 @@ final class RemoteHosts {
             logger.info("folder check: \(destination, privacy: .public): the server did not answer")
             return .unreachable
         }
-        if case let .ready(current) = hosts[destination], current === link { drop(destination) }
+        if let host = hosts[destination], host.link === link { host.drop() }
         return nil
     }
 
@@ -447,27 +340,11 @@ final class RemoteHosts {
     /// user's click. New panes then get sessions; a plain shell stays plain.
     /// A second decline keeps the host plain, so its sidebar mark stays.
     func installServer(_ destination: String) async throws {
-        undecline(destination)
-        if case let .preparing(_, task, _) = hosts[destination] { await task.value }
-        drop(destination)
-        let route = try await connections.connect(destination)
-        do {
-            let link = try await servers.connect(destination)
-            if case let .ready(old) = hosts[destination] { old.close() }
-            hosts[destination] = .ready(link)
-            configuration.linkReady(destination)
-            adoptRoaming(destination, over: link)
-        } catch RemoteServers.Failure.declined {
-            decline(destination)
-            hosts[destination] = .plain(route)
-            throw RemoteServers.Failure.declined
-        }
+        try await host(destination).installServer()
     }
 
-    // MARK: - Steps
-
     /// What a pane needs from its project path.
-    private struct Target {
+    struct Target {
         var destination: String
         var host: String
         var directory: String
@@ -478,109 +355,6 @@ final class RemoteHosts {
             self.destination = destination
             self.host = host
             self.directory = directory
-        }
-    }
-
-    /// `prompts`: a connect may ask the user (a login, the install). Only a
-    /// pane's own start and a key in it may; the reconnect sweep may not.
-    private func resolve(_ session: String, pane: Pane, target: Target, prompts: Bool = true) async -> RemotePaneAnswer {
-        let destination = target.destination
-        switch hosts[destination] {
-        case nil:
-            prepare(destination, prompts: prompts)
-            waiting[destination, default: []].insert(session)
-            return .wait(message: nil)
-        case let .preparing(_, _, asks):
-            // A quiet try cannot answer a key: a key logs in itself. The
-            // quiet try's end then wakes its panes, which find this one.
-            if prompts, !asks { prepare(destination, prompts: true) }
-            waiting[destination, default: []].insert(session)
-            return .wait(message: nil)
-        case let .plain(route):
-            mark(pane, lost: false)
-            guard let command = configuration.scripts?.plainCommand(directory: target.directory) else {
-                return .wait(message: RemotePaneText.noPlainShell)
-            }
-            return .plain(arguments: connections.ttyArguments(route, destination, command))
-        case let .ready(link):
-            return await decide(session, pane: pane, target: target, link: link, prompts: prompts)
-        }
-    }
-
-    private func decide(
-        _ session: String,
-        pane: Pane,
-        target: Target,
-        link: RemoteServers.Link,
-        prompts: Bool
-    ) async -> RemotePaneAnswer {
-        let destination = target.destination
-        guard configuration.key != nil else { return .close }
-        guard let sessions = await Self.list(over: link) else {
-            // A roaming link whose transport still runs is waiting for the
-            // network: the next trigger asks again. Only a dead transport
-            // drops it (`roamingEnded`).
-            if link.isRoaming, link.connection.isOpen, case let .ready(current) = hosts[destination], current === link {
-                lost.insert(session)
-                mark(pane, lost: true)
-                configuration.paneLost(session, true)
-                return .wait(message: nil)
-            }
-            // The link broke. Only a failure on the host's current link
-            // counts, and drops it: another request may have made a new one
-            // meanwhile. Two failures in a row are the host's answer.
-            guard case let .ready(current) = hosts[destination], current === link else {
-                return await resolve(session, pane: pane, target: target, prompts: prompts)
-            }
-            drop(destination)
-            let failures = listFailures[destination, default: 0] + 1
-            listFailures[destination] = failures
-            guard failures < 2 else {
-                listFailures[destination] = nil
-                lost.insert(session)
-                mark(pane, lost: true)
-                configuration.paneLost(session, true)
-                return .wait(message: nil)
-            }
-            return await resolve(session, pane: pane, target: target, prompts: prompts)
-        }
-        listFailures[destination] = nil
-        let found = sessions.first { $0.name == session }
-        if let found, !found.isRunning {
-            // The shell exited while no pane showed it.
-            await Self.kill(session, over: link)
-        }
-        // A reported folder with a control character, or a relative one, gives the project folder.
-        let known = pane.hostSessionDirectory
-            .map { HostCommands.isSafeHostFolder($0) ? $0 : target.directory }
-        let justCreated = created[session].map { Date().timeIntervalSince($0) < configuration.creationGrace } ?? false
-        if found?.isRunning == true { created[session] = nil }
-        let step = Self.step(
-            running: found?.isRunning == true,
-            // A second client makes the session in the folder of the first create.
-            sessionDirectory: justCreated ? known ?? creating[session] : known,
-            justCreated: justCreated,
-            projectDirectory: target.directory
-        )
-        switch step {
-        case .attach:
-            mark(pane, lost: false)
-            if pane.hostSessionDirectory == nil {
-                pane.hostSessionDirectory = target.directory
-            }
-            return .attach(link: link, create: nil)
-        case let .create(directory):
-            mark(pane, lost: false)
-            created[session] = Date()
-            // The folder counts only when the session attaches
-            // (`sessionAttached`): a create that fails must not make the
-            // pane close later as gone.
-            creating[session] = directory
-            return .attach(link: link, create: directory)
-        case .gone:
-            logger.info("remote pane: session=\(session, privacy: .public) is gone on \(destination, privacy: .public), the pane closes")
-            forget(session)
-            return .close
         }
     }
 
@@ -607,258 +381,12 @@ final class RemoteHosts {
         return .gone
     }
 
-    /// Log in, then check and install the server, for the sessions that
-    /// wait. The end wakes them. With `prompts` false, nothing asks the
-    /// user: no login question, no install, no plain shell.
-    private func prepare(_ destination: String, prompts: Bool) {
-        let token = UUID()
-        let task = Task { [weak self] in
-            guard let self else { return }
-            let result: Result<Host, Error>
-            do {
-                result = try await .success(open(destination, prompts: prompts))
-            } catch {
-                logger.info("remote host \(destination, privacy: .public): \(String(describing: error), privacy: .public)")
-                result = .failure(error)
-            }
-            finish(destination, token: token, result)
-        }
-        hosts[destination] = .preparing(token, task, prompts: prompts)
-    }
-
-    private func open(_ destination: String, prompts: Bool) async throws -> Host {
-        let route = try await connections.connect(destination, prompts: prompts)
-        do {
-            let link = try await servers.connect(destination, login: prompts, install: prompts && !declined.contains(destination))
-            return .ready(link)
-        } catch let failure as RemoteServers.Failure {
-            // A quiet try leaves the choice of plain shells to the user.
-            guard prompts else { throw failure }
-            switch failure {
-            case .declined:
-                decline(destination)
-                return .plain(route)
-            case .notInstalled,
-                 .noWritableHome,
-                 .unsupported,
-                 .noBuild,
-                 .notBundled:
-                logger.info("remote host \(destination, privacy: .public): plain shells: \(failure.description, privacy: .public)")
-                return .plain(route)
-            default:
-                // `.windowsHost` ends here on purpose: the plain-shell command is POSIX.
-                throw failure
-            }
-        }
-    }
-
-    private func finish(_ destination: String, token: UUID, _ result: Result<Host, Error>) {
-        let sessions = waiting.removeValue(forKey: destination) ?? []
-        guard case let .preparing(current, _, _) = hosts[destination], current == token else {
-            // Another step replaced this prepare (an install from Settings).
-            // Its waiting panes ask again and find that step's state.
-            if case let .success(.ready(link)) = result { link.close() }
-            for session in sessions {
-                configuration.post(Self.wakeName(for: session))
-            }
-            return
-        }
-        switch result {
-        case let .success(host):
-            hosts[destination] = host
-            // One login serves every pane of the host. The sweep owns when a
-            // lost pane connects again, so this never loops.
-            configuration.hostDidConnect(destination)
-            if case let .ready(link) = host {
-                configuration.linkReady(destination)
-                adoptRoaming(destination, over: link)
-            }
-        case .failure:
-            hosts[destination] = nil
-            for session in sessions {
-                lost.insert(session)
-                mark(pane?(session), lost: true)
-                configuration.paneLost(session, true)
-            }
-        }
-        for session in sessions {
-            configuration.post(Self.wakeName(for: session))
-        }
-    }
-
-    // MARK: - The roaming link
-
-    /// Opens a roaming link over the host's ssh link, in the background. If
-    /// it works, it becomes the host's link: new attaches use it, and it
-    /// survives sleep and a new network. The ssh link stays for the panes that
-    /// attached over it. A host that cannot do it keeps the ssh link.
-    private func adoptRoaming(_ destination: String, over ssh: RemoteServers.Link) {
-        let connections = connections
-        let enabled = configuration.roamingEnabled()
-        let generation = roamingGeneration[destination, default: 0] + 1
-        roamingGeneration[destination] = generation
-        setQuiet(destination, false)
-        Task { [weak self] in
-            let opened = await RoamingLink.open(
-                destination: destination,
-                over: ssh,
-                connections: connections,
-                enabled: enabled,
-                events: .init(
-                    dead: { [weak self] in
-                        Task { @MainActor in self?.roamingEnded(destination, generation: generation) }
-                    },
-                    quiet: { [weak self] in
-                        Task { @MainActor in self?.roamingQuiet(destination, generation: generation) }
-                    },
-                    answered: { [weak self] in
-                        Task { @MainActor in self?.roamingAnswered(destination, generation: generation) }
-                    }
-                )
-            )
-            guard let self, let opened else { return }
-            // The host may have changed while the link opened.
-            guard case let .ready(current) = hosts[destination], current === ssh else {
-                opened.link.close()
-                opened.transport.stop()
-                return
-            }
-            guard roamingGeneration[destination] == generation else {
-                opened.link.close()
-                opened.transport.stop()
-                return
-            }
-            standby[destination]?.close()
-            standby[destination] = ssh
-            transports[destination]?.stop()
-            transports[destination] = opened.transport
-            hosts[destination] = .ready(opened.link)
-            setQuiet(destination, opened.transport.isQuiet)
-        }
-    }
-
-    /// The roaming link of this generation stopped or started to hear the
-    /// host. The state comes from the transport, not from the event, so
-    /// events in a different order give the same result.
-    private func roamingQuiet(_ destination: String, generation: Int) {
-        guard roamingGeneration[destination] == generation, let transport = transports[destination] else { return }
-        let quiet = transport.isQuiet
-        logger.info("link: host=\(destination, privacy: .public) quiet=\(quiet, privacy: .public)")
-        setQuiet(destination, quiet)
-    }
-
-    /// The roaming link of this generation heard its host after a gap. A
-    /// pane that went lost in the gap (on the ssh standby, or a try that
-    /// failed on this link) has no other sign that the host is back.
-    /// Without this, its backoff (up to 60 s) decides.
-    private func roamingAnswered(_ destination: String, generation: Int) {
-        guard roamingGeneration[destination] == generation, transports[destination] != nil else { return }
-        logger.info("link: host=\(destination, privacy: .public) answers again")
-        configuration.hostAnswered(destination)
-    }
-
-    private func setQuiet(_ destination: String, _ quiet: Bool) {
-        if quiet {
-            if !quietDestinations.contains(destination) { quietDestinations.insert(destination) }
-        } else if quietDestinations.contains(destination) {
-            quietDestinations.remove(destination)
-        }
-    }
-
-    /// The link ended by itself: no packet for a long time. The panes on it
-    /// are lost, and the next connect uses ssh.
-    private func roamingEnded(_ destination: String, generation: Int) {
-        guard roamingGeneration[destination] == generation,
-              case let .ready(link) = hosts[destination], link.isRoaming
-        else { return }
-        logger.info("link: host=\(destination, privacy: .public) ended")
-        drop(destination)
-    }
-
-    private func isRoamingLink(_ destination: String) -> Bool {
-        if case let .ready(link) = hosts[destination] { return link.isRoaming }
-        return false
-    }
-
-    private func endRoaming(_ destination: String) {
-        roamingGeneration[destination, default: 0] += 1
-        setQuiet(destination, false)
-        transports.removeValue(forKey: destination)?.stop()
-        standby.removeValue(forKey: destination)?.close()
-    }
-
-    /// The network changed or the Mac woke: each roaming link uses a new
-    /// socket, so that its packets leave on the new path.
-    func networkDidChange() {
-        for transport in transports.values {
-            transport.pathChanged()
-        }
-    }
-
-    /// Forget a host's link: the next pane checks the connection again.
-    private func drop(_ destination: String) {
-        switch hosts[destination] {
-        case let .ready(link):
-            link.close()
-            hosts[destination] = nil
-            if link.isRoaming { endRoaming(destination) }
-        case .plain:
-            hosts[destination] = nil
-        case .preparing,
-             nil:
-            break
-        }
-    }
-
-    private func forget(_ session: String) {
-        created[session] = nil
-        creating[session] = nil
-        lost.remove(session)
-        quiet.remove(session)
-        for destination in waiting.keys {
-            waiting[destination]?.remove(session)
-        }
-    }
-
-    /// `lost`: no try runs now, and the badge says `Connection Lost`. Not
-    /// lost: the session attaches. Either way a try ended.
-    private func mark(_ pane: Pane?, lost: Bool) {
-        guard let pane else { return }
-        if pane.isRemoteLinkLost != lost {
-            logger.info("remote pane: session=\(pane.sessionName, privacy: .public) isRemoteLinkLost=\(lost, privacy: .public)")
-            pane.isRemoteLinkLost = lost
-        }
-        if pane.isRemoteReconnecting { pane.isRemoteReconnecting = false }
-        if !lost { quiet.remove(pane.sessionName) }
-    }
-
-    /// The first connect of a pane whose session ran on the host (a pane
-    /// that came back after a restart) runs long: the badge says
-    /// `Reconnecting` until the session attaches or the connect fails. A new
-    /// pane shows nothing, because its first connect can wait for a login
-    /// question. A host whose link is ready connects no more: another view
-    /// of the pane (a second window) can show it live.
-    func firstConnectIsSlow(_ pane: Pane?) {
-        guard let pane, pane.hostSessionDirectory != nil, !pane.isRemoteLinkLost, !pane.isRemoteReconnecting,
-              let target = Target(pane)
-        else { return }
-        if case .ready = hosts[target.destination] { return }
-        logger.info("remote pane: session=\(pane.sessionName, privacy: .public) first connect is slow")
-        pane.isRemoteReconnecting = true
-    }
-
-    /// A try starts for this lost pane: the badge says `Reconnecting`.
-    private func markReconnecting(_ pane: Pane?) {
-        guard let pane, pane.isRemoteLinkLost, !pane.isRemoteReconnecting else { return }
-        pane.isRemoteReconnecting = true
-    }
-
-    private func decline(_ destination: String) {
+    func decline(_ destination: String) {
         declined.insert(destination)
         configuration.declines.write(declined.sorted())
     }
 
-    private func undecline(_ destination: String) {
+    func undecline(_ destination: String) {
         guard declined.remove(destination) != nil else { return }
         configuration.declines.write(declined.sorted())
     }
@@ -896,7 +424,7 @@ final class RemoteHosts {
 
     // MARK: - The link
 
-    private static func list(over link: RemoteServers.Link) async -> [LocalSession]? {
+    static func list(over link: RemoteServers.Link) async -> [LocalSession]? {
         let connection = link.connection
         do {
             return try await LocalSessions.bounded {
@@ -929,7 +457,7 @@ final class RemoteHosts {
         }
     }
 
-    private static func kill(_ session: String, over link: RemoteServers.Link) async {
+    static func kill(_ session: String, over link: RemoteServers.Link) async {
         let connection = link.connection
         do {
             _ = try await LocalSessions.bounded {

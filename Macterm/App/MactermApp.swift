@@ -533,7 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // System wake fires a short burst — wifi isn't up at wake, and when
         // the app is already frontmost no activation ever follows — while
         // app activation is a single sweep. Every sweep is additionally gated
-        // per pane by `RemoteReconnectPolicy`, so notification churn here can
+        // per host by `RemoteReconnectPolicy`, so notification churn here can
         // never turn into a retry loop against an unreachable host.
         reconnectObservers = [
             NSWorkspace.shared.notificationCenter.addObserver(
@@ -576,11 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: .remoteLinkDidStop,
                 object: nil,
                 queue: .main
-            ) { [weak self] note in
-                // The session of a pane whose try failed, else nil.
-                let failedTry = note.object as? String
+            ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped, failedTry: failedTry)
+                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped)
                 }
             },
         ]

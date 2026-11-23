@@ -1,39 +1,57 @@
 import Foundation
-import notify
 import os
 
 private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver")
 
-/// What one remote pane does (0057, 0195): it asks `RemoteHosts` what to do,
-/// and runs the answer on the pane's surface. Its states:
+/// What one view of a remote pane does (0057, 0195, 0264): one task that
+/// asks the pane's `RemoteHost` what to run, and runs it on the pane's
+/// surface. Its states:
 ///
+/// - connecting: it waits for the host (`RemoteHost.attachment`): a login,
+///   a check or an install that runs;
 /// - running: a `PaneSession` on the host's link feeds the surface;
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server;
-/// - waiting: no session yet. A wake (a login that ended, the reconnect
-///   sweep) or a key asks again.
+/// - waiting: the pane is lost, or it has nothing to run. It waits for the
+///   host's next try (`RemoteHost.nextTry`): a trigger of the app after the
+///   host's backoff, or a key.
 ///
-/// A lost link ends the session's reading and asks `RemoteHosts` with
-/// `lost`: the pane shows its badge and its disabled cursor, and waits.
-/// The app's sweep (`AppState.reconnectDroppedRemotePanes`) owns the next
-/// quiet try, and a key connects at once. A session that is gone from the
-/// host closes the pane.
+/// A lost link ends the session's reading and tells the host
+/// (`RemoteHost.lost`): the pane shows its badge and its disabled cursor,
+/// and waits. A session that is gone from the host closes the pane. `stop`
+/// cancels the task, and every wait ends.
 @MainActor
 final class RemotePaneDriver: PaneInputRoute {
     private enum State {
-        case idle
+        case connecting
         case waiting
         case running(PaneSession)
         case plain(PlainShell)
         case closed
     }
 
+    /// How a session or a plain shell of the driver ended.
+    private enum End {
+        /// The connection stopped.
+        case lost
+        /// A key found the connection down: connect at once, and the login
+        /// may ask.
+        case keyFoundLinkDown
+        /// Nothing to run now (ssh did not start, a create that the host did
+        /// not answer): wait for the next try.
+        case nothing
+        /// The shell exited, or the driver stopped.
+        case done
+    }
+
     let name: String
     private let surface: any PaneSessionHost
     private let hosts: RemoteHosts
-    private var state = State.idle
-    /// Tells a late answer from a current one.
-    private var generation = 0
-    private var wakeToken: Int32 = NOTIFY_TOKEN_INVALID
+    private var state = State.connecting
+    private var task: Task<Void, Never>?
+    private weak var pane: Pane?
+    private var host: RemoteHost?
+    /// The end of the session or the plain shell that runs.
+    private var ending: CheckedContinuation<End, Never>?
     /// Input that waits for the first session: a layout's `initial_input`,
     /// and keys typed before the first connect ends. The next attach sends
     /// it. A pane that runs plain drops it, because it was for another
@@ -43,12 +61,10 @@ final class RemotePaneDriver: PaneInputRoute {
     /// Input of a session that never attached, in order. It goes before
     /// `earlyInput`.
     private var undelivered = Data()
-    /// A key found the link down: connect at once after the `lost` answer.
-    private var retryAfterLost = false
     /// The session attached at least once in this run.
     private var attached = false
     /// After this time with no attach, the first connect is slow
-    /// (`RemoteHosts.firstConnectIsSlow`).
+    /// (`RemoteHost.firstConnectIsSlow`).
     private let slowConnectAfter: Duration
 
     /// A connect to a host whose server does not answer runs until the
@@ -69,9 +85,17 @@ final class RemotePaneDriver: PaneInputRoute {
     }
 
     func start() {
-        registerWake()
-        step(.ask)
+        guard task == nil else { return }
+        task = Task { [weak self] in await self?.run() }
         watchFirstConnect()
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        teardown()
+        state = .closed
+        end(.done)
     }
 
     /// A pane that came back after a restart shows nothing while its first
@@ -79,10 +103,10 @@ final class RemotePaneDriver: PaneInputRoute {
     private func watchFirstConnect() {
         Task { @MainActor [weak self, slowConnectAfter] in
             try? await Task.sleep(for: slowConnectAfter)
-            guard let self, !attached else { return }
+            guard let self, !attached, let host, let pane else { return }
             switch state {
-            case .idle,
-                 .waiting: hosts.firstConnectIsSlow(hosts.pane?(name))
+            case .connecting,
+                 .waiting: host.firstConnectIsSlow(name, pane: pane)
             case .running,
                  .plain,
                  .closed: break
@@ -90,128 +114,152 @@ final class RemotePaneDriver: PaneInputRoute {
         }
     }
 
-    func stop() {
-        generation += 1
-        retryAfterLost = false
-        teardown()
-        state = .closed
-        if wakeToken != NOTIFY_TOKEN_INVALID {
-            notify_cancel(wakeToken)
-            wakeToken = NOTIFY_TOKEN_INVALID
+    // MARK: - The loop
+
+    private func run() async {
+        // A pane that restores before the app has installed its state waits
+        // for it. No pane: the pane closed.
+        guard let pane = try? await hosts.pane(for: name) else {
+            if !Task.isCancelled { close() }
+            return
         }
-    }
-
-    // MARK: - Steps
-
-    private func step(_ event: RemotePaneEvent) {
-        generation += 1
-        let mine = generation
-        Task { @MainActor in
-            // A pane that restores before the app has installed its state
-            // waits: no pane would read as "the pane closed".
-            while hosts.pane == nil {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard mine == generation else { return }
-            }
-            let answer = await hosts.answer(event, session: name, pane: hosts.pane?(name))
-            guard mine == generation else { return }
-            apply(answer, generation: mine)
+        guard let host = hosts.host(of: pane), let directory = RemoteHosts.Target(pane)?.directory else {
+            close()
+            return
         }
-    }
-
-    private func apply(_ answer: RemotePaneAnswer, generation mine: Int) {
-        if case .closed = state { return }
-        teardown()
-        switch answer {
-        case let .wait(message):
-            if let message { surface.paneFeed(Data(Self.paneText(message).utf8)) }
-            state = .waiting
-            if retryAfterLost {
-                retryAfterLost = false
-                step(.retry)
-            }
-        case .close:
-            state = .closed
-            surface.paneExited(code: nil, signal: nil)
-        case let .plain(arguments):
-            earlyInput = Data()
-            undelivered = Data()
-            surface.paneFeed(PaneSession.resetScreen)
-            runPlain(arguments)
-        case let .attach(link, create):
-            attach(link: link, create: create, generation: mine)
-        }
-    }
-
-    private func attach(link: RemoteServers.Link, create: String?, generation mine: Int) {
-        Task { @MainActor in
-            var launch: PaneSession.Launch?
-            if let create {
-                guard let made = await hosts.createLaunch(link: link, directory: create) else {
-                    guard mine == generation else { return }
-                    linkStopped()
-                    return
+        self.pane = pane
+        self.host = host
+        var prompts = true
+        while !Task.isCancelled {
+            state = .connecting
+            let attachment: RemoteHost.Attachment
+            do {
+                attachment = try await host.attachment(for: name, pane: pane, directory: directory, prompts: prompts)
+            } catch is CancellationError {
+                return
+            } catch {
+                if case RemoteHost.Failure.noPlainShell = error {
+                    surface.paneFeed(Data(Self.paneText(RemotePaneText.noPlainShell).utf8))
                 }
-                guard mine == generation else { return }
-                launch = made.launch
-                if let note = made.note { surface.paneFeed(Data(Self.paneText(note).utf8)) }
+                guard let next = await waitForTry(host) else { return }
+                prompts = next
+                continue
             }
-            // A step that came after this answer owns the pane now.
-            guard mine == generation else { return }
-            let forward = Forward(driver: self, surface: surface)
-            let session = PaneSession(
-                name: name, launch: launch, wantsForeground: true, wantsTty: true, reconnects: false,
-                host: forward,
-                connect: { link.connection }
-            )
-            forward.session = session
-            state = .running(session)
-            session.start()
-            let waiting = undelivered + earlyInput
-            undelivered = Data()
-            earlyInput = Data()
-            if !waiting.isEmpty { session.sendInput(waiting) }
+            let end: End
+            switch attachment {
+            case .ended:
+                close()
+                return
+            case let .plain(arguments):
+                earlyInput = Data()
+                undelivered = Data()
+                surface.paneFeed(PaneSession.resetScreen)
+                end = await runPlain(arguments)
+            case let .channel(link, create):
+                end = await runChannel(link: link, create: create)
+            }
+            teardown()
+            switch end {
+            case .done:
+                return
+            case .lost:
+                host.lost(name, pane: pane)
+            case .keyFoundLinkDown:
+                host.lost(name, pane: pane)
+                host.retry(name)
+                prompts = true
+                continue
+            case .nothing:
+                break
+            }
+            guard let next = await waitForTry(host) else { return }
+            prompts = next
         }
     }
 
-    private func runPlain(_ arguments: [String]) {
-        let mine = generation
+    /// Waits for the host's next try. nil when the driver stopped.
+    private func waitForTry(_ host: RemoteHost) async -> Bool? {
+        state = .waiting
+        return try? await host.nextTry(for: name)
+    }
+
+    private func close() {
+        state = .closed
+        surface.paneExited(code: nil, signal: nil)
+    }
+
+    private func runChannel(link: RemoteServers.Link, create: String?) async -> End {
+        var launch: PaneSession.Launch?
+        if let create {
+            guard let made = await hosts.createLaunch(link: link, directory: create) else {
+                return Task.isCancelled ? .done : .lost
+            }
+            guard !Task.isCancelled else { return .done }
+            launch = made.launch
+            if let note = made.note { surface.paneFeed(Data(Self.paneText(note).utf8)) }
+        }
+        let forward = Forward(driver: self, surface: surface)
+        let session = PaneSession(
+            name: name, launch: launch, wantsForeground: true, wantsTty: true, reconnects: false,
+            host: forward,
+            connect: { link.connection }
+        )
+        forward.session = session
+        state = .running(session)
+        session.start()
+        let waiting = undelivered + earlyInput
+        undelivered = Data()
+        earlyInput = Data()
+        if !waiting.isEmpty { session.sendInput(waiting) }
+        return await withCheckedContinuation { ending = $0 }
+    }
+
+    private func runPlain(_ arguments: [String]) async -> End {
         let shell = PlainShell(arguments: arguments, grid: surface.paneGrid(), host: surface) { [weak self] status in
-            DispatchQueue.main.async { self?.plainExited(status, generation: mine) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.plainExited(status) } }
         }
-        if let shell {
-            state = .plain(shell)
-        } else {
+        guard let shell else {
             surface.paneFeed(Data(Self.paneText("Macterm cannot start ssh.").utf8))
-            state = .waiting
+            return .nothing
         }
+        state = .plain(shell)
+        return await withCheckedContinuation { ending = $0 }
     }
 
-    private func plainExited(_ status: Int32, generation mine: Int) {
-        guard mine == generation, case .plain = state else { return }
+    private func plainExited(_ status: Int32) {
+        guard case .plain = state else { return }
         // ssh exits 255 when the connection stops: the pane waits. Any other
         // status is the shell's: the pane ends.
         let code = (status >> 8) & 0xFF
         if code == 255 {
-            linkStopped()
+            end(.lost)
         } else {
             state = .closed
             surface.paneExited(code: UInt8(truncatingIfNeeded: code), signal: nil)
+            end(.done)
         }
+    }
+
+    /// The session or the plain shell that runs ended.
+    private func end(_ end: End) {
+        guard let ending else { return }
+        self.ending = nil
+        ending.resume(returning: end)
     }
 
     fileprivate func sessionAttached() {
         attached = true
-        hosts.sessionAttached(name, pane: hosts.pane?(name))
+        host?.sessionAttached(name, pane: pane)
     }
 
     /// The connection stopped: the pane is lost and waits for a try.
     fileprivate func linkStopped() {
-        if case .closed = state { return }
         logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
-        teardown()
-        state = .waiting
-        step(.lost)
+        end(.lost)
+    }
+
+    fileprivate func sessionExited() {
+        end(.done)
     }
 
     private func teardown() {
@@ -223,21 +271,8 @@ final class RemotePaneDriver: PaneInputRoute {
         case let .plain(shell): shell.terminate()
         default: break
         }
-        state = .idle
-    }
-
-    private func registerWake() {
-        notify_register_dispatch(RemoteHosts.wakeName(for: name), &wakeToken, .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.woke() }
-        }
-    }
-
-    private func woke() {
-        switch state {
-        case .waiting,
-             .idle: step(.ask)
-        default: break
-        }
+        if case .closed = state { return }
+        state = .waiting
     }
 
     // MARK: - Input
@@ -274,11 +309,13 @@ final class RemotePaneDriver: PaneInputRoute {
             // The key connects at once. Its bytes wait only for a first
             // session, never in a lost pane.
             if !isLost { keep(data) }
-            step(.retry)
-        case .idle:
+            host?.retry(name)
+        case .connecting:
             // The `initial_input` of a layout, written while the surface
-            // starts: it goes to the session when one runs.
-            keep(data)
+            // starts, or a key during the connect: it goes to the session
+            // when one runs. A key lets the connect ask for the login.
+            if !isLost { keep(data) }
+            host?.retry(name)
         case .closed: break
         }
     }
@@ -286,12 +323,11 @@ final class RemotePaneDriver: PaneInputRoute {
     /// A key that the running session could not send: the link is down. The
     /// key is dropped, and asks to connect, as a key in a lost pane does.
     fileprivate func keyFoundLinkDown() {
-        retryAfterLost = true
-        linkStopped()
+        end(.keyFoundLinkDown)
     }
 
     private var isLost: Bool {
-        hosts.pane?(name)?.isRemoteLinkLost ?? false
+        host?.isLost(name) ?? false
     }
 
     private func keep(_ data: Data) {
@@ -307,8 +343,9 @@ final class RemotePaneDriver: PaneInputRoute {
     // MARK: - The session's host
 
     /// What a session of this driver reports: everything goes to the
-    /// surface, and a lost link goes to the driver. A report counts only from
-    /// the driver's running session: an old session must not stop a new one.
+    /// surface, and the end of the channel goes to the driver. A report counts
+    /// only from the driver's running session: an old session must not stop
+    /// a new one.
     private final class Forward: PaneSessionHost, @unchecked Sendable {
         private weak var driver: RemotePaneDriver?
         private let surface: any PaneSessionHost
@@ -320,10 +357,14 @@ final class RemotePaneDriver: PaneInputRoute {
             self.surface = surface
         }
 
-        @MainActor
-        private func isCurrent(_ driver: RemotePaneDriver) -> Bool {
-            guard case let .running(running) = driver.state, let session else { return false }
-            return running === session
+        /// Runs `body` on the main actor, for the driver's running session only.
+        private func onDriver(_ body: @escaping @MainActor (RemotePaneDriver) -> Void) {
+            DispatchQueue.main.async { [weak driver, self] in
+                MainActor.assumeIsolated {
+                    guard let driver, case let .running(running) = driver.state, let session, running === session else { return }
+                    body(driver)
+                }
+            }
         }
 
         func paneFeed(_ data: Data) {
@@ -355,12 +396,7 @@ final class RemotePaneDriver: PaneInputRoute {
             // The session tells each client that attached whether it leads:
             // the session runs on the host.
             guard leader != nil else { return }
-            DispatchQueue.main.async { [weak driver, self] in
-                MainActor.assumeIsolated {
-                    guard let driver, isCurrent(driver) else { return }
-                    driver.sessionAttached()
-                }
-            }
+            onDriver { $0.sessionAttached() }
         }
 
         func paneForeground(_ foreground: MactermProtocol.Foreground) {
@@ -377,24 +413,15 @@ final class RemotePaneDriver: PaneInputRoute {
 
         func paneExited(code: UInt8?, signal: UInt8?) {
             surface.paneExited(code: code, signal: signal)
+            onDriver { $0.sessionExited() }
         }
 
         func paneLinkLost() {
-            DispatchQueue.main.async { [weak driver, self] in
-                MainActor.assumeIsolated {
-                    guard let driver, isCurrent(driver) else { return }
-                    driver.linkStopped()
-                }
-            }
+            onDriver { $0.linkStopped() }
         }
 
         func paneInputUndelivered(_: Data) {
-            DispatchQueue.main.async { [weak driver, self] in
-                MainActor.assumeIsolated {
-                    guard let driver, isCurrent(driver) else { return }
-                    driver.keyFoundLinkDown()
-                }
-            }
+            onDriver { $0.keyFoundLinkDown() }
         }
 
         func paneGone() {
