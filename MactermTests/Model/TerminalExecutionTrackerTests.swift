@@ -144,6 +144,25 @@ struct TerminalExecutionTrackerTests {
         #expect(state == .done)
     }
 
+    /// A program that leaves raw mode long after its start (vim's `:!make`)
+    /// is not the race: no run starts.
+    @Test
+    func rawStartExpiresAfterTheSubmissionWindow() {
+        var tracker = TerminalExecutionTracker()
+        let submittedAt = Date(timeIntervalSince1970: 100)
+        tracker.recordUserInteraction()
+        tracker.recordCommandSubmission(at: submittedAt, allowInPlaceOutputStart: false, hasContent: true)
+        var state = tracker.refreshForeground(
+            name: "vim", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true,
+            at: submittedAt.addingTimeInterval(0.5), currentState: .idle
+        )
+        state = tracker.refreshForeground(
+            name: "vim", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false,
+            at: submittedAt.addingTimeInterval(600), currentState: state
+        )
+        #expect(state == .idle)
+    }
+
     /// With no submission, the same reports start nothing.
     @Test
     func rawThenCanonicalForegroundWithNoSubmissionStaysIdle() {
