@@ -28,7 +28,7 @@ extension Pane {
             guard let surface = view?.owningSurface else { return }
             NotificationCenter.default.post(name: .terminalSurfaceSized, object: surface.id)
         }
-        view.onCommandSubmitted = { [weak self, weak view] _ in
+        view.onCommandSubmitted = { [weak self, weak view] in
             guard let self else { return }
             // Memory captures the line only while the shell is at its prompt,
             // which the session's 133;C ends after this Return.
@@ -52,19 +52,21 @@ extension Pane {
             AdaptiveTerminalChrome.shared.terminalBackgroundDidChange(color, in: view)
         }
         // Every surface's channel gets the same messages from the session.
-        view.onAttention = { [weak self] flags in self?.receiveAttention(flags) }
+        view.onAttention = { [weak self, weak view] flags in
+            self?.receiveAttention(flags)
+            // A run ended that no client showed: the window that draws this
+            // surface marks it seen when the user looks at it. The session
+            // sends the flags after the status that ended the run.
+            if flags.unseen { view?.onRunEnded?() }
+        }
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
         view.onSessionState = { [weak self] state in self?.receiveSessionState(state) }
         view.onSessionForeground = { [weak self] foreground in self?.applyForeground(foreground) }
         view.onTtyMode = { [weak self] mode in self?.lineMode = mode }
         view.onSessionMark = { [weak self] mark in self?.receiveSessionMark(mark) }
-        view.onSessionStatus = { [weak self] status in
-            // Each window that draws the pane may mark it seen. The first
-            // surface's message ends the run, so tell every surface.
-            guard let self, receiveSessionStatus(status) else { return }
-            for surface in SurfaceRegistry.shared.surfaces(of: self) {
-                surface.nsView?.onRunEnded?()
-            }
+        view.onSessionStatus = { [weak self, weak view] status in
+            guard let channel = view?.owningSurface?.id else { return }
+            self?.receiveSessionStatus(status, channel: channel)
         }
         // libghostty's callbacks: only the feed surface counts what it parses.
         let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
@@ -82,6 +84,9 @@ extension Pane {
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
             guard let self, isFeed() else { return }
+            // A surface with no session has only libghostty's 133;D: the
+            // prompt gate and the title expiry read it.
+            if view?.channelRuntime == nil { receiveSessionMark(MactermProtocol.Mark(kind: .end)) }
             // Project memory: off unless the user turned it on, macOS 26+.
             ProjectMemory.shared.commandFinished(
                 pane: self, view: view, exitCode: exitCode, durationNs: durationNs, reportedCommand: command

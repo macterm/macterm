@@ -165,39 +165,44 @@ final class Pane: Identifiable {
     /// channel (a plain surface, a remote shell with no server) has no
     /// status, so it stays idle.
     var executionState: TerminalExecutionState {
-        if isSessionRunning { return .running }
+        if !runningChannels.isEmpty { return .running }
         return attention.unseen ? .done : .idle
     }
 
-    /// The session's `status` message says a run goes on. The session ends
-    /// a run at OSC 133;D, at a new prompt and at the end of a progress
-    /// report, and also for a program with no marks (`events.zig`). The
-    /// channel's end sets it false (`PaneSession.channelEnded`): at an
-    /// attach, the session sends its status only when it is not idle.
-    private(set) var isSessionRunning = false {
+    /// The surfaces whose channel's `status` message says that a run goes
+    /// on. The session ends a run at OSC 133;D, at a new prompt, at the end
+    /// of a progress report, and for a program with no marks (`events.zig`).
+    /// One set for the pane, keyed by surface: the end of one window's
+    /// channel (`PaneSession.channelEnded` sends `idle`) does not stop the
+    /// run that another window's channel still shows. At an attach, the
+    /// session sends its status only when it is not idle.
+    private var runningChannels: Set<UUID> = [] {
         didSet {
-            guard isSessionRunning != oldValue else { return }
+            guard runningChannels.isEmpty != oldValue.isEmpty else { return }
             // A program's OSC title expires when its command ends (see
             // `receiveReportedTitle`). An agent that finishes a turn ends its
             // run and keeps the foreground, so the title stays while the
             // latest report says a program holds the pty: the shell's own
             // report comes before the prompt that ended the run. A pane with
             // no report keeps no title.
-            if oldValue, programTitle != nil, !programHoldsForeground {
+            if runningChannels.isEmpty, programTitle != nil, !programHoldsForeground {
                 programTitle = nil
             }
             NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
         }
     }
 
-    /// The session's run status. True when it ended a run of this pane.
-    @discardableResult
-    func receiveSessionStatus(_ status: MactermProtocol.Status) -> Bool {
-        let running = status.state == .running
-        guard running != isSessionRunning else { return false }
-        isSessionRunning = running
-        return !running
+    /// A `status` message on the channel of the surface `channel`.
+    func receiveSessionStatus(_ status: MactermProtocol.Status, channel: UUID = Pane.soleChannel) {
+        if status.state == .running {
+            runningChannels.insert(channel)
+        } else {
+            runningChannels.remove(channel)
+        }
     }
+
+    /// The channel key of a caller with one channel only (tests).
+    static let soleChannel = UUID()
 
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
@@ -272,7 +277,7 @@ final class Pane: Identifiable {
     ///   channel gets at `hello` comes before its first report, so it is
     ///   dropped.
     ///
-    /// It expires at the end of a run (`isSessionRunning`), at OSC
+    /// It expires at the end of a run (`runningChannels`), at OSC
     /// 133;D (`receiveSessionMark`), and at a report of the shell or of
     /// another program (`applyForeground`).
     func receiveReportedTitle(_ title: String) {
@@ -460,7 +465,7 @@ final class Pane: Identifiable {
         foregroundReportIsShell = false
         lastAppliedForeground = nil
         sessionShell = nil
-        isSessionRunning = false
+        runningChannels = []
         isShellAtPrompt = false
         // A notification whose pane no longer exists routes nowhere on tap, so
         // drop any still sitting in Notification Center. Ghostty does the same

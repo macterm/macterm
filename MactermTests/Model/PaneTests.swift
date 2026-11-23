@@ -83,10 +83,10 @@ struct PaneTests {
     @Test
     func a_run_is_running_then_done_then_idle_when_seen() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        #expect(p.receiveSessionStatus(status(.running)) == false)
+        p.receiveSessionStatus(status(.running))
         #expect(p.executionState == .running)
         // The session sends the status before the flags.
-        #expect(p.receiveSessionStatus(status(.done)) == true)
+        p.receiveSessionStatus(status(.done))
         #expect(p.executionState == .idle)
         p.receiveAttention(MactermProtocol.Attention(unseen: true))
         #expect(p.executionState == .done)
@@ -94,15 +94,27 @@ struct PaneTests {
         #expect(p.executionState == .idle)
     }
 
-    /// A status that says the same again ends no run.
+    /// Two windows show the pane, each on its own channel. The end of one
+    /// channel (`idle`) does not stop the run that the other still shows.
     @Test
-    func a_repeated_status_ends_no_run() {
+    func the_end_of_one_channel_keeps_the_run_of_another() {
         let p = Pane(projectPath: "/", projectID: UUID())
-        #expect(p.receiveSessionStatus(status(.done)) == false)
-        p.receiveSessionStatus(status(.running))
-        #expect(p.receiveSessionStatus(status(.running)) == false)
-        #expect(p.receiveSessionStatus(status(.idle)) == true)
-        #expect(p.receiveSessionStatus(status(.done)) == false)
+        let a = UUID()
+        let b = UUID()
+        p.receiveSessionStatus(status(.running), channel: a)
+        p.receiveSessionStatus(status(.running), channel: b)
+        p.receiveSessionStatus(status(.idle), channel: b)
+        #expect(p.executionState == .running)
+        p.receiveSessionStatus(status(.done), channel: a)
+        #expect(p.executionState == .idle)
+    }
+
+    /// A pane with no run ignores a status that says none.
+    @Test
+    func a_done_status_with_no_run_changes_nothing() {
+        let p = Pane(projectPath: "/", projectID: UUID())
+        p.receiveSessionStatus(status(.done))
+        #expect(p.executionState == .idle)
     }
 
     /// Running wins over a flag that a run before it left.
@@ -368,7 +380,7 @@ struct PaneTests {
 
     @Test
     func remoteCloseVerdict_running_execution_state_is_busy() {
-        // A command mid-output (OSC 133 / activity heartbeats) is busy even
+        // A command mid-output (the session says it runs) is busy even
         // before any report lands.
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
         p.receiveSessionStatus(MactermProtocol.Status(state: .running))
@@ -388,8 +400,8 @@ struct PaneTests {
 
     @Test
     func remoteCloseVerdict_program_foreground_is_busy() {
-        // A reported program is busy even when the execution tracker has
-        // quiet-settled (a silent editor produces no heartbeats).
+        // A reported program is busy even when the session says no run
+        // goes on (an editor between commands).
         let p = Pane(projectPath: "me@host.example:proj", projectID: UUID())
         p.applyForegroundName("hx")
         #expect(p.executionState != .running)

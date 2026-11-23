@@ -92,10 +92,7 @@ struct ProcessInspectorTests {
     /// Every nushell pane runs the exact argv below — ghostty's command-wrapper
     /// injects `--execute 'use ghostty *'` to load shell integration. Unlike
     /// `-c`, nushell's `--execute` runs its code and THEN enters the
-    /// interactive REPL, so the invocation is an idle shell. Reading it as
-    /// foreground work costs the execution tracker its return-to-prompt
-    /// completion edge, which stranded the tab spinner for the whole
-    /// quiet-settle window after fast commands.
+    /// interactive REPL, so the invocation is an idle shell.
     @Test
     func shellIntegrationExecuteInvocation_isIdleShell() throws {
         // Resolved from the host's own login shell, not a hardcoded `nu` path:

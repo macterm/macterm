@@ -32,8 +32,8 @@ enum ForegroundPolicy {
     /// Local panes trust libghostty's own signal (`surfaceBusy`,
     /// `ghostty_surface_needs_confirm_quit`). A remote pane can't: its local
     /// process is the ssh client, a perpetually "running program", so the
-    /// verdict derives from the remote-side signals instead — the OSC
-    /// 133/heartbeat execution state (catches a command mid-output), else
+    /// verdict derives from the remote-side signals instead — the
+    /// session's run state (catches a command mid-output), else
     /// the host's latest report (an idle shell is not worth a dialog;
     /// anything else is). A pane with no report (a host with no server, or
     /// before the first report) falls back to the surface's reading, which

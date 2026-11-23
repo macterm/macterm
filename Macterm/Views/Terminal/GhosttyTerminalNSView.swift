@@ -186,10 +186,8 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     }
 
     func surfaceDidUpdateScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
-        // Renderer-driven, so it's suppressed while occluded — it feeds only the
-        // overlay scrollbar UI, never activity detection. Activity comes solely
-        // from the occlusion-independent `surfaceDidOutputActivity` heartbeat,
-        // which also carries row growth.
+        // Renderer-driven, so it's suppressed while occluded. It feeds only the
+        // overlay scrollbar UI.
         lastScrollbarSnapshot = ScrollbarSnapshot(total: total, offset: offset, len: len)
         onScrollbarUpdate?(total, offset, len)
     }
@@ -353,12 +351,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// empty/whitespace clipboard or a remapped Command-V binding.
     func surfaceDidPasteText(_ text: String) {
         PasswordPromptMonitor.shared.viewDidPaste(self, text: text)
-        recordCommandInput(text)
-        if TerminalCommandSubmission.textContainsNewline(text),
-           TerminalCommandSubmission.textContainsContent(text)
-        {
-            preserveProgrammaticCommandInput(text)
-        }
     }
 
     var onFocus: (() -> Void)?
@@ -370,19 +362,13 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// leadership claim can be sent (`sendLeadershipClaim` refuses before it).
     var onSurfaceSized: (() -> Void)?
     private var hasReportedSurfaceSize = false
-    /// Bool is best-effort evidence that the submitted prompt contained text.
-    /// Project memory reads the submission; the run state is the session's.
-    var onCommandSubmitted: ((Bool) -> Void)?
+    /// A Return went to the program. Project memory reads the submission.
+    var onCommandSubmitted: (() -> Void)?
     /// The text that `sendText` submitted, for the length of its
     /// `onCommandSubmitted` call; nil for a Return that the user typed. Its
     /// echo may not be on the screen yet, so project memory reads the
     /// command from here, and from the screen only for a typed Return.
     private(set) var submittedText: String?
-    /// Whether a programmatic payload's content evidence may be carried past
-    /// the submission that consumed it — true only for a raw-mode agent
-    /// foreground, where a bracketed paste can leave it unsubmitted. See
-    /// `preserveProgrammaticCommandInput`.
-    var canCarryCommandInput: (() -> Bool)?
     /// Whether a key event matching a passthrough-flagged binding should reach
     /// the program instead of being claimed as an app shortcut. Injected rather
     /// than computed here because the decision needs the PANE: a zmx-wrapped
@@ -531,8 +517,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     }
 
     private var lastScrollbarSnapshot: ScrollbarSnapshot?
-    private var commandSubmissionEvidence = TerminalCommandSubmission.Evidence()
-    private var commandSubmissionEvidenceReset: DispatchWorkItem?
 
     /// The most recent `GHOSTTY_ACTION_SCROLLBAR` values (`total`/`offset`/`len`
     /// rows), or nil before the first scrollbar update. Read-only introspection
@@ -906,7 +890,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     func destroySurface() {
         isDestroyed = true
         stopChannel()
-        clearCommandSubmissionEvidence()
         // The selection dies with the surface; the mode must not outlive it.
         copyMode.reset()
         // A composition in flight has nowhere left to commit — drop it before
@@ -1224,48 +1207,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
 
     // MARK: - Keyboard
 
-    private func recordCommandInput(_ text: String) {
-        commandSubmissionEvidenceReset?.cancel()
-        commandSubmissionEvidenceReset = nil
-        commandSubmissionEvidence.recordText(text)
-    }
-
-    private func consumeCommandSubmissionEvidence() -> Bool {
-        commandSubmissionEvidenceReset?.cancel()
-        commandSubmissionEvidenceReset = nil
-        return commandSubmissionEvidence.consume()
-    }
-
-    private func clearCommandSubmissionEvidence() {
-        commandSubmissionEvidenceReset?.cancel()
-        commandSubmissionEvidenceReset = nil
-        commandSubmissionEvidence.clear()
-    }
-
-    /// `sendText` may contain a newline that executes directly, or it may be
-    /// bracketed-pasted into a raw TUI and need a following encoded Return.
-    /// Preserve its content briefly for the latter without leaving stale
-    /// evidence behind indefinitely in the former.
-    ///
-    /// Gated on `canCarryCommandInput`, because the two cases are
-    /// indistinguishable from here and the evidence only ORs in — never clears
-    /// — so an unconditional carry makes a genuinely blank Return arriving
-    /// inside the window report content it doesn't have (a `pane run "…"`
-    /// immediately followed by a bare newline is enough). The carry is only
-    /// *needed* where a bracketed paste can swallow the newline, which is the
-    /// same agent-TUI foreground the in-place heuristic requires, so scoping it
-    /// there keeps the ambiguous window out of the ordinary shell case.
-    private func preserveProgrammaticCommandInput(_ text: String) {
-        guard canCarryCommandInput?() ?? false else { return }
-        commandSubmissionEvidence.recordText(text)
-        let reset = DispatchWorkItem { [weak self] in
-            self?.commandSubmissionEvidence.clear()
-            self?.commandSubmissionEvidenceReset = nil
-        }
-        commandSubmissionEvidenceReset = reset
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reset)
-    }
-
     override func keyDown(with event: NSEvent) {
         onInteraction?()
         guard let surface else { super.keyDown(with: event)
@@ -1283,13 +1224,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         if copyMode.isActive, copyMode.handle(CopyModeKey(event: event)) { return }
         let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if TerminalCommandSubmission.clearsInputEvidence(
-            keyCode: event.keyCode,
-            hasControl: flags.contains(.control),
-            hasCommand: flags.contains(.command)
-        ) {
-            clearCommandSubmissionEvidence()
-        }
 
         if flags.contains(.control), !flags.contains(.command), !flags.contains(.option), !hasMarkedText() {
             if isAppShortcut(event) { return }
@@ -1366,9 +1300,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
                 text.withCString { commitKE.text = $0
                     _ = ghostty_surface_key(surface, commitKE)
                 }
-                if TerminalCommandSubmission.shouldRecordLiteralText(hasOption: flags.contains(.option)) {
-                    recordCommandInput(text)
-                }
                 forwarded = true
             }
         } else if !hasMarkedText() {
@@ -1376,9 +1307,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             if !text.isEmpty, !ke.composing {
                 text.withCString { ke.text = $0
                     _ = ghostty_surface_key(surface, ke)
-                }
-                if TerminalCommandSubmission.shouldRecordLiteralText(hasOption: flags.contains(.option)) {
-                    recordCommandInput(text)
                 }
             } else {
                 ke.consumed_mods = GHOSTTY_MODS_NONE
@@ -1418,7 +1346,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
                hasUserModifiers: !flags.isDisjoint(with: userModifiers)
            )
         {
-            onCommandSubmitted?(consumeCommandSubmissionEvidence())
+            onCommandSubmitted?()
         }
     }
 
@@ -1455,13 +1383,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         guard event.type == .keyDown, let surface else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command) || flags.contains(.control) || flags.contains(.option) else { return false }
-        if TerminalCommandSubmission.clearsInputEvidence(
-            keyCode: event.keyCode,
-            hasControl: flags.contains(.control),
-            hasCommand: flags.contains(.command)
-        ) {
-            clearCommandSubmissionEvidence()
-        }
         var ke = buildKeyEvent(from: event, action: event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS)
         func performIfBinding(_ ke: ghostty_input_key_s) -> Bool {
             guard ghostty_surface_key_is_binding(surface, ke, nil) else { return false }
@@ -2060,32 +1981,28 @@ extension GhosttyTerminalNSView {
     @discardableResult
     func sendText(_ text: String) -> Bool {
         guard let surface, !text.isEmpty else { return false }
-        // Same liveness signal a keystroke sends (execution tracking + poll
-        // resume), so an injected command updates the tab title promptly.
+        // Same liveness signal a keystroke sends (poll resume, seen), so an
+        // injected command updates the tab title promptly.
         onInteraction?()
         // Text a program reads at a password prompt is the password, whoever
         // typed it — the e2e suite answers prompts this way.
         PasswordPromptMonitor.shared.viewDidSendText(self, text: text)
-        recordCommandInput(text)
         text.withCString { ptr in
             _ = ghostty_surface_key(surface, Self.textOnlyKeyEvent(ptr))
         }
         if TerminalCommandSubmission.textContainsNewline(text) {
-            let hasContent = consumeCommandSubmissionEvidence()
             submittedText = text
-            onCommandSubmitted?(hasContent)
+            onCommandSubmitted?()
             submittedText = nil
-            if hasContent { preserveProgrammaticCommandInput(text) }
         }
         return true
     }
 
     /// Type a saved password into the program reading it, then Return. The
     /// password goes through the same text path as `sendText` — not paste, so
-    /// no bracketed-paste markers reach the password read — but records no
-    /// command-submission evidence: a password is never a command. The Return
-    /// rides `sendKey`, so it does ping `onInteraction` and reports a bare
-    /// `onCommandSubmitted(false)`, exactly as a Return the user presses.
+    /// no bracketed-paste markers reach the password read. The Return rides
+    /// `sendKey`, so it does ping `onInteraction` and `onCommandSubmitted`,
+    /// exactly as a Return the user presses.
     /// `submit: false` leaves the Return to the user (an on-demand fill into
     /// a line that echoes).
     @discardableResult
@@ -2160,23 +2077,11 @@ extension GhosttyTerminalNSView {
         if copyMode.isActive, copyMode.handle(CopyModeKey(keyCode: keyCode, flags: flags)) { return true }
         onInteraction?()
         PasswordPromptMonitor.shared.viewDidSendKey(self, keyCode: keyCode, mods: flags)
-        if TerminalCommandSubmission.clearsInputEvidence(
-            keyCode: keyCode,
-            hasControl: flags.contains(.control),
-            hasCommand: flags.contains(.command)
-        ) {
-            clearCommandSubmissionEvidence()
-        }
         for action in [GHOSTTY_ACTION_PRESS, GHOSTTY_ACTION_RELEASE] {
             Self.withChordEvent(keyCode: keyCode, mods: flags, action: action) { ke in
                 _ = ghostty_surface_key(surface, ke)
             }
         }
-        let text = Self.chordText(keyCode: keyCode, mods: flags)
-        // Typed characters are the evidence a following `pane key return` reads
-        // to tell a real submission from a bare Return (the AI-agent activity
-        // heuristic), exactly as `keyDown` records its literal text.
-        if let text { recordCommandInput(text) }
         let userModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
         if TerminalCommandSubmission.isReturn(
             keyCode: keyCode,
@@ -2184,7 +2089,7 @@ extension GhosttyTerminalNSView {
             hasMarkedText: false,
             hasUserModifiers: !flags.isDisjoint(with: userModifiers)
         ) {
-            onCommandSubmitted?(consumeCommandSubmissionEvidence())
+            onCommandSubmitted?()
         }
         return true
     }
@@ -2295,12 +2200,8 @@ extension GhosttyTerminalNSView {
         return true
     }
 
-    /// Write raw bytes straight to the pty, recording NONE of the
-    /// command-submission evidence `sendText` does.
-    ///
-    /// A control sequence the user never typed must leave that evidence
-    /// untouched, or a following Return would read as submitting content
-    /// that does not exist.
+    /// Write raw bytes straight to the pty, with none of the password
+    /// capture and submission reports that `sendText` makes.
     ///
     /// Rides the key path with only `.text` set: libghostty writes such an
     /// event's bytes verbatim under both its legacy and kitty encoders (no
@@ -2393,7 +2294,6 @@ extension GhosttyTerminalNSView: @preconcurrency NSTextInputClient {
                 ke.text = ptr
                 _ = ghostty_surface_key(surface, ke)
             }
-            recordCommandInput(text)
         }
     }
 
