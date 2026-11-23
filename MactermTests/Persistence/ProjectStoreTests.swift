@@ -304,8 +304,8 @@ struct ProjectStoreTests {
     func an_old_group_row_reads_as_a_project_with_no_folder() throws {
         let fileURL = tempURL("old-group")
         defer { try? FileManager.default.removeItem(at: fileURL) }
-        let group = "11111111-1111-1111-1111-111111111111"
-        let inner = "22222222-2222-2222-2222-222222222222"
+        let group = UUID()
+        let inner = UUID()
         try Data("""
         [
           {"colorName": "green", "createdAt": 0, "id": "\(group)", "kind": "group",
@@ -322,12 +322,12 @@ struct ProjectStoreTests {
         let store = makeStore(fileURL: fileURL)
         #expect(!store.loadFailed)
         #expect(store.projects.map(\.name) == ["work", "client", "api", "top"])
-        let work = try #require(try store.row(#require(UUID(uuidString: group))))
+        let work = try #require(store.row(group))
         #expect(!work.hasFolder)
         #expect(work.color == .green)
         #expect(work.parent == nil)
-        #expect(try store.row(#require(UUID(uuidString: inner)))?.parent == work.id)
-        #expect(try store.children(of: #require(UUID(uuidString: inner))).map(\.name) == ["api"])
+        #expect(store.row(inner)?.parent == work.id)
+        #expect(store.children(of: inner).map(\.name) == ["api"])
 
         store.rename(id: work.id, to: "work2")
         let written = try #require(String(data: Data(contentsOf: fileURL), encoding: .utf8))
@@ -400,9 +400,10 @@ struct ProjectStoreTests {
         try JSONEncoder().encode([a, b, leaf]).write(to: fileURL)
 
         let store = makeStore(fileURL: fileURL)
-        #expect(Set(store.children(of: nil).map(\.id)) == [a.id, b.id])
-        #expect(store.children(of: b.id).map(\.id) == [leaf.id])
-        #expect(store.projects.count == 3)
+        // One link of the loop breaks: `a` goes to the top level, `b`
+        // stays in it.
+        #expect(store.children(of: nil).map(\.id) == [a.id])
+        #expect(store.projects.map(\.id) == [a.id, b.id, leaf.id])
     }
 
     @Test
