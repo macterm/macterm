@@ -30,8 +30,15 @@ struct RemoteHostsTests {
         defer { driver.stop() }
         driver.start()
         try await view.waitFor { $0.exit != nil }
+        // A local pane has no host: its view ends too.
         let local = Pane(projectPath: "/tmp", projectID: UUID())
         #expect(hosts.host(of: local) == nil)
+        hosts.pane = { _ in local }
+        let localView = RecordingPaneHost()
+        let localDriver = RemotePaneDriver(name: local.sessionName, surface: localView, hosts: hosts)
+        defer { localDriver.stop() }
+        localDriver.start()
+        try await localView.waitFor { $0.exit != nil }
     }
 
     // MARK: - Against a local sshd
@@ -512,7 +519,7 @@ struct RemoteHostsTests {
             let again = try await fixture.start(left)
             defer { again.stop() }
             #expect(fixture.connected.dropFirst(logins) == ["box"])
-            #expect(!fixture.host.waitersAreEmpty(for: right.sessionName))
+            #expect(fixture.host.waiterCount(for: right.sessionName) == 1)
             fixture.hosts.reconnect(["box"])
             #expect(try await rightWait.value == false)
             let rightAgain = try await fixture.start(right, prompts: false)
@@ -764,7 +771,7 @@ struct RemoteHostsTests {
         /// Waits until a view of the pane waits for its next try.
         func untilWaiting(_ pane: Pane) async throws {
             let deadline = Date().addingTimeInterval(20)
-            while host.waitersAreEmpty(for: pane.sessionName), Date() < deadline {
+            while host.waiterCount(for: pane.sessionName) == 0, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(25))
             }
         }

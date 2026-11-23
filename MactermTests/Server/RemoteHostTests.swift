@@ -50,16 +50,17 @@ struct RemoteHostTests {
                 #expect(pane.isRemoteLinkLost)
                 #expect(pane.remoteLinkBadge == .lost)
             }
-            guard case let .unreachable(_, retryAt) = fake.host.state else {
+            guard case .unreachable = fake.host.state else {
                 Issue.record("state: \(fake.host.state)")
                 return
             }
+            let retryAt = try #require(fake.host.nextTryAt)
             #expect(fake.lost == ["fake", "fake"])
 
             // Both panes wait. The host's backoff holds the sweep's try: the
             // two lost panes are one streak, not two.
             let waits = [left, right].map { pane in Task { try await fake.host.nextTry(for: pane.sessionName) } }
-            try await until { fake.host.sessions.count == 2 && !fake.waitersEmpty(left) && !fake.waitersEmpty(right) }
+            try await until { fake.waiters(left) == 1 && fake.waiters(right) == 1 }
             fake.host.reconnect(answered: false, now: retryAt - 1)
             #expect(!left.isRemoteReconnecting && !right.isRemoteReconnecting)
             fake.host.reconnect(answered: false, now: retryAt)
@@ -68,7 +69,10 @@ struct RemoteHostTests {
                 #expect(try await wait.value == false)
             }
             // The next step of the one streak: 20 s, not 5 s for each pane.
-            #expect(fake.host.backoff.nextAttempt == retryAt + 20)
+            #expect(fake.host.nextTryAt == retryAt + 20)
+            // While the try runs, a later sweep starts no second try.
+            fake.host.reconnect(answered: false, now: retryAt + 100)
+            #expect(fake.host.nextTryAt == retryAt + 20)
         }
     }
 
@@ -79,11 +83,42 @@ struct RemoteHostTests {
             let pane = fake.pane()
             await #expect(throws: RemoteHost.Failure.self) { try await fake.attachment(pane) }
             let wait = Task { try await fake.host.nextTry(for: pane.sessionName) }
-            try await until { !fake.waitersEmpty(pane) }
+            try await until { fake.waiters(pane) == 1 }
             fake.host.reconnect(answered: false, now: Date())
             #expect(!pane.isRemoteReconnecting)
             fake.host.reconnect(answered: true, now: Date())
             #expect(pane.isRemoteReconnecting)
+            #expect(try await wait.value == false)
+        }
+    }
+
+    /// A key in one lost pane connects. The host is reachable again, so the
+    /// sweep that the connect starts lets its other lost panes try at once,
+    /// past the backoff of the failed tries.
+    @Test
+    func a_connect_that_works_clears_the_backoff_for_the_other_lost_panes() async throws {
+        try await withFakeHost { fake in
+            fake.fails = true
+            let keyed = fake.pane()
+            let other = fake.pane()
+            for pane in [keyed, other] {
+                await #expect(throws: RemoteHost.Failure.self) { try await fake.attachment(pane) }
+            }
+            let wait = Task { try await fake.host.nextTry(for: other.sessionName) }
+            try await until { fake.waiters(other) == 1 }
+            #expect(fake.host.nextTryAt != nil)
+            fake.host.reconnect(answered: false, now: Date())
+            #expect(!other.isRemoteReconnecting)
+
+            fake.fails = false
+            guard case .channel = try await fake.attachment(keyed) else {
+                Issue.record("no channel")
+                return
+            }
+            #expect(fake.host.nextTryAt == nil)
+            #expect(!keyed.isRemoteLinkLost)
+            fake.host.reconnect(answered: false, now: Date())
+            #expect(other.isRemoteReconnecting)
             #expect(try await wait.value == false)
         }
     }
@@ -95,8 +130,7 @@ struct RemoteHostTests {
             let pane = fake.pane()
             await #expect(throws: RemoteHost.Failure.self) { try await fake.attachment(pane) }
             let views = (0 ..< 2).map { _ in Task { try await fake.host.nextTry(for: pane.sessionName) } }
-            try await until { !fake.waitersEmpty(pane) }
-            try await Task.sleep(for: .milliseconds(50))
+            try await until { fake.waiters(pane) == 2 }
             fake.host.retry(pane.sessionName)
             #expect(pane.remoteLinkBadge == .reconnecting)
             for view in views {
@@ -116,9 +150,10 @@ struct RemoteHostTests {
             await #expect(throws: CancellationError.self) { try await ask.value }
 
             let wait = Task { try await fake.host.nextTry(for: pane.sessionName) }
-            try await Task.sleep(for: .milliseconds(50))
+            try await until { fake.waiters(pane) == 1 }
             wait.cancel()
             await #expect(throws: CancellationError.self) { try await wait.value }
+            try await until { fake.waiters(pane) == 0 }
             fake.releaseConnect()
         }
     }
@@ -158,7 +193,7 @@ struct RemoteHostTests {
             try await until { pane.hostSessionDirectory != nil }
 
             try #require(fake.host.link).close()
-            try await until { pane.isRemoteLinkLost && !fake.waitersEmpty(pane) }
+            try await until { pane.isRemoteLinkLost && fake.waiters(pane) == 1 }
             #expect(pane.remoteLinkBadge == .lost)
             #expect(fake.host.link == nil)
 
@@ -205,8 +240,7 @@ struct RemoteHostTests {
             try await view.waitFor { $0.resets > 0 }
             try await until { pane.hostSessionDirectory != nil }
             try #require(fake.host.link).close()
-            try await until { pane.isRemoteLinkLost }
-            try await until { !fake.waitersEmpty(pane) }
+            try await until { pane.isRemoteLinkLost && fake.waiters(pane) == 1 }
 
             driver.sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
             try await view.waitFor { $0.resets > 1 }
@@ -332,8 +366,8 @@ struct RemoteHostTests {
 
         private let panes = LockedBox<[String: Pane]>([:])
 
-        func waitersEmpty(_ pane: Pane) -> Bool {
-            host.waitersAreEmpty(for: pane.sessionName)
+        func waiters(_ pane: Pane) -> Int {
+            host.waiterCount(for: pane.sessionName)
         }
 
         func attachment(_ pane: Pane, prompts: Bool = true) async throws -> RemoteHost.Attachment {

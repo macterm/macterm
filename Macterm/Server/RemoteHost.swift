@@ -4,15 +4,18 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "RemoteHost")
 
 /// One remote host, by its ssh destination (0264, design/005). It is the one
-/// owner of the host's state: the login, the check and the install, the link
-/// to the host's server and its roaming link, the plain shells of a host with
-/// no server, the sessions of the host's panes, and one backoff for the
-/// automatic tries.
+/// owner of the host's state. It keeps:
+///
+/// - the login, the check and the install;
+/// - the link to the host's server, and its roaming link;
+/// - the plain shells of a host with no server;
+/// - the sessions of the host's panes;
+/// - one backoff for the automatic tries.
 ///
 /// - **One state** (`State`). The panes read it: `Pane.isRemoteLinkLost` and
 ///   `Pane.isRemoteReconnecting` come from the session table, not from a
 ///   copy that something must keep in step.
-/// - **A pane asks with `await`** (`attachment(for:pane:prompts:)`). A login
+/// - **A pane asks with `await`** (`attachment(for:pane:directory:prompts:)`). A login
 ///   or an install can wait minutes for the user: the call waits with it,
 ///   and every pane of the host waits for the same login. Task cancellation
 ///   ends a wait.
@@ -37,8 +40,9 @@ final class RemoteHost {
         case ready(RemoteServers.Link)
         /// No server: each pane is a plain ssh shell over the login.
         case plain(SSHConnections.Route)
-        /// The last try failed. The next automatic try waits for `retryAt`.
-        case unreachable(reason: String, retryAt: Date)
+        /// The last try failed. The next automatic try waits for the
+        /// backoff (`nextTryAt`).
+        case unreachable(reason: String)
 
         var isTrying: Bool {
             switch self {
@@ -60,6 +64,15 @@ final class RemoteHost {
         case checking
         case awaitingConsent
         case installing
+
+        var state: State {
+            switch self {
+            case .loggingIn: .loggingIn
+            case .checking: .checking
+            case .awaitingConsent: .awaitingConsent
+            case .installing: .installing
+            }
+        }
     }
 
     /// What a pane runs.
@@ -160,6 +173,11 @@ final class RemoteHost {
         if case let .ready(link) = state { link } else { nil }
     }
 
+    /// The time of the next automatic try. nil: a try may start now.
+    var nextTryAt: Date? {
+        backoff.nextAttempt
+    }
+
     func isLost(_ session: String) -> Bool {
         sessions[session]?.lost ?? false
     }
@@ -208,7 +226,7 @@ final class RemoteHost {
     /// Waits until the connect that runs ends. Throws when it failed.
     private func waitForOpen(_ session: String, pane: Pane) async throws {
         if opening != nil { try await opened.wait() }
-        if case let .unreachable(reason, _) = state {
+        if case let .unreachable(reason) = state {
             lose(session, pane: pane)
             throw Failure.unreachable(reason)
         }
@@ -323,9 +341,9 @@ final class RemoteHost {
         return try await signal.wait()
     }
 
-    /// No view of the session waits for its next try now.
-    func waitersAreEmpty(for session: String) -> Bool {
-        tries[session]?.isEmpty ?? true
+    /// The views of the session that wait for its next try now.
+    func waiterCount(for session: String) -> Int {
+        tries[session]?.count ?? 0
     }
 
     /// A key in a pane that waits: connect at once, and the login may ask.
@@ -345,11 +363,8 @@ final class RemoteHost {
     /// answers again, which clears the backoff.
     func reconnect(answered: Bool, now: Date) {
         let lost = sessions.filter { $0.value.lost && !$0.value.reconnecting }.map(\.key)
-        guard !lost.isEmpty else {
-            if !sessions.values.contains(where: \.lost) { backoff.observeAlive(now: now) }
-            return
-        }
-        if answered { backoff.hostAnswered() }
+        guard !lost.isEmpty else { return }
+        if answered { backoff.clear() }
         // A try runs now: its end decides.
         guard !state.isTrying, backoff.shouldAttempt(now: now) else { return }
         var woken = 0
@@ -418,13 +433,7 @@ final class RemoteHost {
         state = .loggingIn
         let destination = destination
         let step: @MainActor (Step) -> Void = { [weak self] step in
-            guard let self, opening?.token == token else { return }
-            switch step {
-            case .loggingIn: state = .loggingIn
-            case .checking: state = .checking
-            case .awaitingConsent: state = .awaitingConsent
-            case .installing: state = .installing
-            }
+            self?.show(step, of: token)
         }
         let connect = configuration.open ?? { [weak self] destination, prompts, step in
             guard let self else { throw CancellationError() }
@@ -444,6 +453,12 @@ final class RemoteHost {
             }
             finish(token, result)
         }
+    }
+
+    /// A step of the connect `token`, when it is still the current one.
+    private func show(_ step: Step, of token: UUID) {
+        guard opening?.token == token else { return }
+        state = step.state
     }
 
     private func connectLive(_ destination: String, prompts: Bool, step: @escaping @MainActor (Step) -> Void) async throws -> Opened {
@@ -486,6 +501,7 @@ final class RemoteHost {
         switch result {
         case let .success(.link(link)):
             listFailures = 0
+            backoff.clear()
             state = .ready(link)
             // One login serves every pane of the host. The sweep owns when a
             // lost pane connects again, so this never loops.
@@ -493,12 +509,12 @@ final class RemoteHost {
             configuration.linkReady(destination)
             adoptRoaming(over: link)
         case let .success(.plain(route)):
+            backoff.clear()
             state = .plain(route)
             configuration.hostDidConnect(destination)
         case let .failure(error):
-            let now = Date()
-            backoff.tryFailed(now: now)
-            state = .unreachable(reason: String(describing: error), retryAt: backoff.nextAttempt ?? now)
+            backoff.tryFailed(now: Date())
+            state = .unreachable(reason: String(describing: error))
         }
         opened.fire(())
     }
@@ -543,8 +559,11 @@ final class RemoteHost {
             let route = try await owner.connections.connect(destination)
             if opening?.token == token { state = .checking }
             do {
-                let link = try await owner.servers.connect(destination)
+                let link = try await owner.servers.connect(destination, step: { [weak self] step in
+                    self?.show(step, of: token)
+                })
                 if opening?.token == token {
+                    backoff.clear()
                     state = .ready(link)
                     configuration.linkReady(destination)
                     adoptRoaming(over: link)
@@ -684,6 +703,10 @@ final class AsyncSignal<Value: Sendable> {
 
     var isEmpty: Bool {
         waiters.isEmpty
+    }
+
+    var count: Int {
+        waiters.count
     }
 
     func wait() async throws -> Value {

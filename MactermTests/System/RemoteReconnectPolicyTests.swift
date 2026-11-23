@@ -41,20 +41,16 @@ struct RemoteReconnectPolicyTests {
     }
 
     @Test
-    func alive_observation_resets_the_streak_only_after_the_grace_period() {
+    func a_host_that_is_reachable_again_clears_the_streak() {
         var policy = RemoteReconnectPolicy()
         policy.recordAttempt(now: epoch)
-
-        // A dial still in flight looks alive (processExited == false) for up
-        // to the TCP connect timeout — it must NOT reset the backoff.
-        policy.observeAlive(now: epoch + 30)
-        #expect(!policy.shouldAttempt(now: epoch + 1))
-
-        // Surviving past the grace window means the reconnect really took.
-        policy.observeAlive(now: epoch + RemoteReconnectPolicy.recoveryGrace)
-        policy.recordAttempt(now: epoch + 200)
-        // Streak restarted at 1 → back to the 5s gate, not 20s.
-        #expect(policy.shouldAttempt(now: epoch + 205))
+        policy.recordAttempt(now: epoch + 5)
+        #expect(!policy.shouldAttempt(now: epoch + 6))
+        policy.clear()
+        #expect(policy.shouldAttempt(now: epoch + 6))
+        // Streak restarted at 1: back to the 5 s step, not 60 s.
+        policy.recordAttempt(now: epoch + 6)
+        #expect(policy.shouldAttempt(now: epoch + 11))
     }
 
     @Test
@@ -67,7 +63,7 @@ struct RemoteReconnectPolicyTests {
         }
         // Deep in the backoff: the next try waits a minute.
         #expect(!policy.shouldAttempt(now: now + 1))
-        policy.hostAnswered()
+        policy.clear()
         #expect(policy.shouldAttempt(now: now + 1))
         // A try that still fails waits the first step again, not a minute.
         policy.recordAttempt(now: now + 1)

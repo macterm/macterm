@@ -1716,7 +1716,7 @@ final class AppState {
         case hostConnected
         /// A roaming link heard its host after a gap
         /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
-        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        /// backoff (`RemoteReconnectPolicy.clear`).
         case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).

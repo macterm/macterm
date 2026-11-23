@@ -2,33 +2,25 @@ import Foundation
 
 /// The backoff of one host's automatic tries (#281, 0264). `RemoteHost`
 /// keeps one for each host: N lost panes of one host make one streak, not N.
-/// Pure state machine — no clocks, no I/O — so the host owns the triggers,
-/// and this type only answers "may the host be tried NOW?". Two properties
-/// matter:
+/// It is a pure state machine with no clock and no I/O. The host owns the
+/// triggers, and this type only says if the host may be tried now.
 ///
-/// - **It never polls hard.** The sweep runs on triggers, and again every
-///   few seconds while a pane is lost and the app is active. The backoff
-///   below bounds how often a host that is still unreachable is tried: at
-///   most once a minute after the first few tries. Only a sign that the host
-///   answers again (`hostAnswered`) clears it early.
-/// - **Recovery is judged by survival, not by the attempt.** A connect that
-///   came back and dies at once must not clear the streak, so the streak
-///   clears only after the host stayed up for `recoveryGrace`.
+/// - The sweep runs on triggers, and again every few seconds while a pane
+///   is lost and the app is active. The backoff tries a host that stays
+///   unreachable at most once a minute after the first few tries.
+/// - A connect that works (`connected`) or a host that answers again
+///   (`hostAnswered`) clears the streak. The other lost panes of the host
+///   then try at once.
 struct RemoteReconnectPolicy {
-    /// Minimum quiet time before the host may be tried again, indexed by its
-    /// consecutive-attempt streak (0 attempts → immediate, then escalating;
-    /// the last entry repeats).
+    /// The time to wait before the next try, by the number of tries in a row
+    /// (0 tries: no wait). The last step repeats.
     static let backoff: [TimeInterval] = [0, 5, 20, 60]
-
-    /// How long the host must stay up after its last attempt before the
-    /// attempt is judged successful and its streak resets.
-    static let recoveryGrace: TimeInterval = 120
 
     private var lastAttempt: Date?
     private var streak = 0
 
-    /// Whether the backoff window has elapsed. Does not record — call
-    /// `recordAttempt` when the try is actually issued.
+    /// Whether the backoff window has passed. It records nothing: call
+    /// `recordAttempt` when the try starts.
     func shouldAttempt(now: Date) -> Bool {
         guard let next = nextAttempt else { return true }
         return now >= next
@@ -58,22 +50,10 @@ struct RemoteReconnectPolicy {
         lastAttempt = now
     }
 
-    /// A sweep found no lost pane on the host. Clears the streak only once
-    /// the host has outlived `recoveryGrace` since its last attempt (see the
-    /// type comment).
-    mutating func observeAlive(now: Date) {
-        guard let lastAttempt else { return }
-        if now.timeIntervalSince(lastAttempt) >= Self.recoveryGrace { reset() }
-    }
-
-    /// The host answers again (its roaming link heard it after a gap): the
-    /// next sweep may try it at once. The streak starts again, so a try that
-    /// still fails backs off from the start.
-    mutating func hostAnswered() {
-        reset()
-    }
-
-    private mutating func reset() {
+    /// The host is reachable again: a connect to it worked (a key, a sweep, a
+    /// new pane), or its roaming link heard it after a gap. Its other lost
+    /// panes may try at once. A try that then fails backs off from the start.
+    mutating func clear() {
         lastAttempt = nil
         streak = 0
     }
