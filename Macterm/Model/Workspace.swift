@@ -641,16 +641,7 @@ final class Workspace: Identifiable {
         tab.markSeen()
     }
 
-    /// No active tab (the project screen): show the first tab, or with
-    /// `previous` the last.
-    private func selectEdgeTab(previous: Bool) -> Bool {
-        guard activeTabID == nil, let tab = previous ? tabs.last : tabs.first else { return false }
-        selectTab(tab.id)
-        return true
-    }
-
     fileprivate func selectNextTab() {
-        if selectEdgeTab(previous: false) { return }
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
         else { return }
@@ -658,7 +649,6 @@ final class Workspace: Identifiable {
     }
 
     fileprivate func selectPreviousTab() {
-        if selectEdgeTab(previous: true) { return }
         guard tabs.count > 1, let activeTabID,
               let i = tabs.firstIndex(where: { $0.id == activeTabID })
         else { return }
@@ -685,14 +675,6 @@ final class Workspace: Identifiable {
     }
 
     /// Switch to a tab without recording history (used during Ctrl+Tab cycling).
-    /// No active tab, with the current one put in the recent-tab history:
-    /// the key window shows the project screen.
-    fileprivate func deselectTab() {
-        guard let current = activeTabID else { return }
-        tabHistory.push(current)
-        activeTabID = nil
-    }
-
     fileprivate func peekTab(_ tabID: UUID) {
         guard tabs.contains(where: { $0.id == tabID }) else { return }
         activeTabID = tabID
@@ -821,13 +803,6 @@ enum ModelWriter {
         } else {
             workspace.activeTabID = nil
         }
-    }
-
-    /// No active tab: the key window shows the project screen
-    /// (`WindowState.showsProjectScreen`). The tab goes to the recent-tab
-    /// history, so Recent Tab goes back to it.
-    static func tabDeselect(in workspace: Workspace) {
-        workspace.deselectTab()
     }
 
     /// `tab.reorder` with a drop offset (see `Workspace.moveTab`).

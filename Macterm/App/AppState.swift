@@ -561,11 +561,23 @@ final class AppState {
               workspaces[project.id]?.kind == .project, !target.showsProjectScreen
         else { return }
         target.showsProjectScreen = true
-        if keyWindowID == target.id {
-            alignKeyWindowTab()
-        } else {
-            settleWindowSelections()
-        }
+        settleWindowSelections()
+        persistWindows()
+    }
+
+    /// Whether the key window shows the project screen. A command that acts on
+    /// the shown tab or pane (`AppCommand.actsOnShownTab`) then does nothing,
+    /// as in a project with no tabs: the workspace's active tab is not on
+    /// screen.
+    var keyWindowShowsProjectScreen: Bool {
+        guard let key = keyWindow, let projectID = key.activeProjectID, let ws = workspaces[projectID] else { return false }
+        return showsProjectScreen(projectID, in: key, ws: ws)
+    }
+
+    /// A tab of the window's project is selected: the window shows it.
+    private func endProjectScreen(in window: WindowState) {
+        guard window.showsProjectScreen else { return }
+        window.showsProjectScreen = false
         persistWindows()
     }
 
@@ -598,7 +610,7 @@ final class AppState {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
             guard let projectID = window.activeProjectID, let ws = workspaces[projectID] else { continue }
-            if ws.kind != .pinned, !showsProjectScreen(projectID, in: window, ws: ws) {
+            if ws.kind != .pinned {
                 let valid = window.activeTabIDs[projectID].map { id in ws.tabs.contains { $0.id == id } } ?? false
                 if !valid, let current = ws.activeTabID {
                     window.activeTabIDs[projectID] = current
@@ -655,13 +667,11 @@ final class AppState {
     /// own.
     func selectTab(_ tabID: UUID, projectID: UUID, in window: WindowState) {
         if keyWindowID == window.id || projectID == PinnedTabs.workspaceID {
-            // The workspace hook clears the key window's project screen: its
-            // active tab is nil there, so the selection always changes it.
             selectTab(tabID, projectID: projectID)
             return
         }
         guard let ws = workspaces[projectID], ws.tabs.contains(where: { $0.id == tabID }) else { return }
-        if window.activeProjectID == projectID { window.showsProjectScreen = false }
+        if window.activeProjectID == projectID { endProjectScreen(in: window) }
         window.activeTabIDs[projectID] = tabID
         settleWindowSelections()
         persistWindows()
@@ -678,15 +688,15 @@ final class AppState {
     /// window on the pinned workspace, which has no selection of its own to
     /// align.
     ///
-    /// A key window on the project screen has no tab: the workspace's active
-    /// tab becomes nil (the last one goes to the recent-tab history).
+    /// A key window on the project screen keeps its record too: the
+    /// workspace's active tab is then the tab that the screen replaced, which
+    /// Recent Tab and the CLI act on. The window draws no tab
+    /// (`selectedTab(for:in:)`).
     private func alignKeyWindowTab() {
         if let key = keyWindow, let projectID = key.activeProjectID,
            let ws = workspaces[projectID], ws.kind != .pinned
         {
-            if showsProjectScreen(projectID, in: key, ws: ws) {
-                if ws.activeTabID != nil { ModelWriter.tabDeselect(in: ws) }
-            } else if let chosen = key.activeTabIDs[projectID], ws.tabs.contains(where: { $0.id == chosen }) {
+            if let chosen = key.activeTabIDs[projectID], ws.tabs.contains(where: { $0.id == chosen }) {
                 if ws.activeTabID != chosen { ModelWriter.tabPeek(chosen, in: ws) }
             } else if let current = ws.activeTabID {
                 key.activeTabIDs[projectID] = current
@@ -736,16 +746,10 @@ final class AppState {
         if let tab = ws.activeTabID {
             target.activeTabIDs[ws.id] = tab
             // A selected tab ends the project screen: it is what shows now.
-            if target.showsProjectScreen {
-                target.showsProjectScreen = false
-                persistWindows()
-            }
-        } else if ws.tabs.isEmpty {
+            endProjectScreen(in: target)
+        } else {
             target.activeTabIDs.removeValue(forKey: ws.id)
         }
-        // A nil with tabs is the project screen (`tabDeselect`): the window
-        // keeps its record, so a later move back to the project with no
-        // project screen (Next Project) shows that tab again.
         settleWindowSelections()
         if target.id == keyWindowID { claimLeadershipForKeyWindow() }
     }
@@ -1643,7 +1647,10 @@ final class AppState {
                         activeProjectID: window.activeProjectID,
                         sidebarWidth: window.sidebarWidth,
                         isKey: window.id == keyWindowID,
-                        activeTabID: window.activeProjectID.flatMap { selectedTab(for: $0, in: window)?.id },
+                        // On the project screen: the tab that the screen replaced.
+                        activeTabID: window.activeProjectID.flatMap {
+                            selectedTab(for: $0, in: window)?.id ?? window.activeTabIDs[$0]
+                        },
                         sidebarVisible: window.sidebarVisible,
                         projectMemoryPanelVisible: window.projectMemoryPanelVisible,
                         frame: window.frame,
@@ -2544,6 +2551,13 @@ final class AppState {
         ModelWriter.tabSelect(tabID, in: ws)
         if ws.activeTabID != before {
             saveWorkspaces()
+        } else if ws.tabs.contains(where: { $0.id == tabID }) {
+            // The tab that a project screen replaced: no change for the hook
+            // to see, so end the screen of the window that the hook targets.
+            let onProject = windows.filter { $0.activeProjectID == projectID }
+            if let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first {
+                endProjectScreen(in: target)
+            }
         }
     }
 
@@ -2816,9 +2830,11 @@ final class AppState {
     func cycleRecentTab(projectID: UUID) {
         guard let ws = workspaces[projectID] else { return }
         // The project screen has no current tab to cycle away from: Recent
-        // Tab shows the last tab it showed, with no switcher.
-        if ws.activeTabID == nil, let last = ws.recencyOrder().first {
-            selectTab(last, projectID: projectID)
+        // Tab shows the tab that the screen replaced, with no switcher.
+        if let key = keyWindow, key.activeProjectID == projectID, key.showsProjectScreen,
+           let current = ws.activeTabID
+        {
+            selectTab(current, projectID: projectID)
             return
         }
         tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) {
