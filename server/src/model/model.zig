@@ -45,15 +45,14 @@ pub const Project = struct {
     /// Unix time in milliseconds.
     created_at: i64 = 0,
     /// The project that holds this one. Null or empty is the top level.
-    /// Any project can hold tabs and projects at the same time. `Model.parentOf`
+    /// A project can hold tabs and projects at the same time. `Model.parentOf`
     /// reads an unknown parent as the top level. The file stays valid
-    /// (design/013 §2).
+    /// (design/013, "Ethan chose B" §1).
     parent: ?ProjectId = null,
 
-    /// Reads a project of `model.json`. A file of a build before issue 0480
-    /// can have `kind`. This reads it and drops it, because the parser
-    /// refuses an unknown key. `file.parse` gives a former group its
-    /// workspace, and the next save writes no `kind`.
+    /// Reads a project of `model.json`, and drops the `kind` that an older
+    /// build wrote: the parser refuses an unknown key. Only the token
+    /// parsers call it (`parseFromSlice`), not `parseFromValue`.
     pub fn jsonParse(a: Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!Project {
         const InFile = struct {
             id: ProjectId,

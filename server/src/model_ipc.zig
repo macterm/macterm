@@ -397,7 +397,10 @@ fn putModel(s: *Server, a: std.mem.Allocator, data: model.ModelData, how: union(
 const Snapshot = struct {
     projects: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     /// Parent id ("" for the top level) to the encoded order of its children.
+    /// Every project is a parent.
     orders: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
+    /// The parents in `orders` that hold no project.
+    empty_orders: std.StringHashMapUnmanaged(void) = .empty,
     /// Workspace id to its encoded `TabOrder`.
     workspaces: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     workspace_kinds: std.StringHashMapUnmanaged(model.Kind) = .empty,
@@ -422,6 +425,7 @@ const Snapshot = struct {
             const ids = try childOrder(a, mo, parent);
             const value: m.ProjectOrder = .{ .parent = if (parent.len == 0) null else .of(parent), .ids = ids };
             try snap.orders.put(a, parent, try msgpack.encodeAlloc(a, value));
+            if (ids.len == 0) try snap.empty_orders.put(a, parent, {});
         }
         for (mo.data.workspaces) |*w| {
             const ids = try a.alloc(model.TabId, w.tabs.len);
@@ -495,6 +499,8 @@ fn diff(
     }
     for (after.orders.keys(), after.orders.values()) |id, bytes| {
         const old = before.orders.get(id);
+        // A new project holds no project yet: its `project.set` says enough.
+        if (old == null and after.empty_orders.contains(id)) continue;
         if (old == null or !std.mem.eql(u8, old.?, bytes)) try events.append(a, try event(a, m.ProjectOrder, bytes));
     }
     for (after.workspaces.keys(), after.workspaces.values()) |id, bytes| {

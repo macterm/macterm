@@ -54,11 +54,9 @@ pub fn parse(gpa: Allocator, bytes: []const u8, fault: *model.Fault) LoadError!M
     return m;
 }
 
-/// A build before issue 0480 wrote `kind: group` on a project with no
-/// workspace. Now every project has a workspace (design/013, "Ethan chose
-/// B" §1), so such a project gets an empty one here. Only a project that the
-/// file marks as a group gets one: any other project with no workspace
-/// stays a fault.
+/// Gives an empty workspace to each project that an older build wrote as
+/// `kind: group` (design/013, "Ethan chose B" §1). Any other project with
+/// no workspace stays a fault.
 fn addFormerGroupWorkspaces(gpa: Allocator, m: *Model, bytes: []const u8) LoadError!void {
     const Old = struct {
         projects: []const struct {
@@ -72,15 +70,19 @@ fn addFormerGroupWorkspaces(gpa: Allocator, m: *Model, bytes: []const u8) LoadEr
     };
     defer parsed.deinit();
     const a = m.arena.allocator();
+    var added: std.ArrayList(model.Workspace) = .empty;
     for (parsed.value.projects) |p| {
         if (p.kind != .group) continue;
         const id: model.WorkspaceId = .of(p.id);
         if (m.findWorkspace(id) != null) continue;
-        const added = try a.alloc(model.Workspace, m.data.workspaces.len + 1);
-        @memcpy(added[0..m.data.workspaces.len], m.data.workspaces);
-        added[m.data.workspaces.len] = .{ .id = try id.dupe(a), .kind = .project };
-        m.data.workspaces = added;
+        try added.append(gpa, .{ .id = try id.dupe(a), .kind = .project });
     }
+    defer added.deinit(gpa);
+    if (added.items.len == 0) return;
+    const all = try a.alloc(model.Workspace, m.data.workspaces.len + added.items.len);
+    @memcpy(all[0..m.data.workspaces.len], m.data.workspaces);
+    @memcpy(all[m.data.workspaces.len..], added.items);
+    m.data.workspaces = all;
 }
 
 /// Writes the model as JSON.

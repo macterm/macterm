@@ -847,7 +847,7 @@ test "a project and its parent write and read back" {
     try testing.expectEqual(@as(?model.ProjectId, null), back.findProject(.of("p")).?.parent);
 }
 
-test "a file with kind loads: a former group gets a workspace and the next save drops kind" {
+test "an old file with kind loads, a former group gets a workspace, and a save writes no kind" {
     // The shape that a build before issue 0480 wrote.
     const text =
         \\{"version":1,"projects":[
@@ -871,7 +871,11 @@ test "a file with kind loads: a former group gets a workspace and the next save 
 
     const out = try written(&m);
     defer testing.allocator.free(out);
-    try testing.expect(std.mem.indexOf(u8, out, "\"kind\": \"group\"") == null);
+    const Written = struct { projects: []const struct { kind: ?[]const u8 = null } };
+    const read = try std.json.parseFromSlice(Written, testing.allocator, out, .{ .ignore_unknown_fields = true });
+    defer read.deinit();
+    try testing.expectEqual(@as(usize, 2), read.value.projects.len);
+    for (read.value.projects) |p| try testing.expectEqual(@as(?[]const u8, null), p.kind);
     var back = try file.parse(testing.allocator, out, &fault);
     defer back.deinit();
     const again = try written(&back);
@@ -879,11 +883,19 @@ test "a file with kind loads: a former group gets a workspace and the next save 
     try testing.expectEqualStrings(out, again);
 }
 
-test "only a former group gets a workspace on load" {
+test "only a former group gets a workspace on load, and a project stays strict" {
     const text =
         \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p","kind":"project"}]}
     ;
     try testing.expectEqualStrings("workspaces: a project has no workspace", try faultOf(text));
+    var fault: model.Fault = .{};
+    for ([_][]const u8{ "\"kind\":\"folder\"", "\"bogus\":1" }) |extra| {
+        var buf: [64]u8 = undefined;
+        const with = try std.fmt.bufPrint(&buf, "\"path\":\"/p\",{s}", .{extra});
+        const bad = try std.mem.replaceOwned(u8, testing.allocator, base_ok, "\"path\":\"/p\"", with);
+        defer testing.allocator.free(bad);
+        try testing.expectError(error.Syntax, file.parse(testing.allocator, bad, &fault));
+    }
 }
 
 test "an unknown parent, or a loop of parents, reads as the top level" {
