@@ -64,7 +64,8 @@ final class PaneLink {
 
     private enum Creation {
         case none
-        case running(Task<Void, Never>)
+        /// The number tells a create that was cancelled from the current one.
+        case running(Int, Task<Void, Never>)
         case made
     }
 
@@ -74,6 +75,7 @@ final class PaneLink {
     var onEvent: ((PaneLinkEvent) -> Void)?
     private var views: [View] = []
     private var creation = Creation.none
+    private var creations = 0
     /// The launch of the first surface: what a new session runs.
     private var launch: PaneSession.Launch?
     private var driver: RemotePaneDriver?
@@ -144,7 +146,7 @@ final class PaneLink {
             // No surface shows the pane: the next one starts again.
             driver?.stop()
             driver = nil
-            if case let .running(task) = creation {
+            if case let .running(_, task) = creation {
                 task.cancel()
                 creation = .none
             }
@@ -170,13 +172,15 @@ final class PaneLink {
         guard case let .local(connect) = transport, let launch else { return }
         let name = name
         let grid = views.first(where: \.ready)?.host.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
-        creation = .running(Task { [weak self] in
+        creations += 1
+        let number = creations
+        creation = .running(number, Task { [weak self] in
             var tries = 0
             while !Task.isCancelled {
                 do {
                     let connection = try await connect()
                     try await PaneSession.create(on: connection, name: name, launch: launch, grid: grid)
-                    self?.made()
+                    self?.made(number)
                     return
                 } catch is CancellationError {
                     return
@@ -193,8 +197,8 @@ final class PaneLink {
         })
     }
 
-    private func made() {
-        guard !hasEnded else { return }
+    private func made(_ number: Int) {
+        guard !hasEnded, case .running(number, _) = creation else { return }
         creation = .made
         NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
         for view in views where view.ready {
@@ -205,20 +209,30 @@ final class PaneLink {
     // MARK: - The session's messages
 
     /// A message of the session, from the channel of `host`. Every channel
-    /// gets the same messages, so only the first view's count: the pane
+    /// gets the same messages, so only the counting view's count: the pane
     /// hears each one once.
     func receive(_ event: PaneLinkEvent, from host: SurfaceChannelHost) {
+        guard !hasEnded, counts(host) else { return }
         if case .ended = event {
             sessionEnded()
-            return
+        } else {
+            onEvent?(event)
         }
-        guard !hasEnded, isFirstView(host) else { return }
-        onEvent?(event)
     }
 
-    /// Whether `host` is the first view: its channel's messages count.
-    func isFirstView(_ host: SurfaceChannelHost) -> Bool {
-        views.first?.host === host
+    /// The session ended for certain: its shell exited, or it is not there
+    /// after the create. Any view's channel can tell it.
+    func receiveExit() {
+        sessionEnded()
+    }
+
+    /// Whether the channel of `host` counts for the pane: the first view
+    /// that is ready. It counts the session's messages, and its surface
+    /// counts what libghostty parses (`PaneSurface.countsOutput`), until the
+    /// session sends those facts too (issue 0260). The rule changes only
+    /// when a view comes or goes, never with the lead.
+    func counts(_ host: SurfaceChannelHost) -> Bool {
+        views.first(where: \.ready)?.host === host
     }
 
     /// The shell's folder goes to every surface: each keeps it for itself.

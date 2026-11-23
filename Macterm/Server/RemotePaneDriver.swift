@@ -12,10 +12,8 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 /// - running: the session runs on the host's link, and each view that is
 ///   ready has a `PaneSession` (its own channel, size and claim);
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server. It
-///   shows in one view only, the first that is ready (`plainOwner`); the
-///   other views show one line that says so. Its output is one stream for
-///   one terminal: a second view would answer the terminal's queries again
-///   and show a screen with no start;
+///   shows in one view only (`plainOwner`), because a pty is one terminal;
+///   the other views show one line that says so;
 /// - waiting: no session yet. A wake (a login that ended, the reconnect
 ///   sweep) or a key asks again.
 ///

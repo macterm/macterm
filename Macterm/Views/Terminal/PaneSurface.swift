@@ -89,17 +89,13 @@ final class PaneSurface: Identifiable {
 
     /// Whether this surface's libghostty callbacks count what it parses for
     /// the pane (runs, notifications, project memory). Every surface parses
-    /// the same output, so one counts: the one whose client leads the
-    /// session, as the session's `lead` message says. A surface with no
-    /// session counts its own output. Before the session's first `lead`
-    /// (a host's server of an older build sends none), the link's first
-    /// view counts. A plain ssh shell counts in the view that shows it.
-    /// Each callback asks when it fires (`Pane.connectViewCallbacks`).
+    /// the same output, so one counts: the pane's link decides
+    /// (`PaneLink.counts`), and a plain ssh shell counts in the view that
+    /// shows it. A surface with no session counts its own output. Each
+    /// callback asks when it fires (`Pane.connectViewCallbacks`).
     var countsOutput: Bool {
         guard let host = nsView?.channelRuntime?.host, let link = host.link else { return true }
-        if let shows = link.showsPlainShell(in: host) { return shows }
-        if let lead { return lead }
-        return link.isFirstView(host)
+        return link.showsPlainShell(in: host) ?? link.counts(host)
     }
 
     /// The live terminal NSView. Created lazily the first time it's requested,

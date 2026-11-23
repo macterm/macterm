@@ -97,9 +97,19 @@ extension GhosttyTerminalNSView {
         channelRuntime = ChannelRuntime(
             route: route,
             host: host,
-            start: { [weak link] in DispatchQueue.main.async { MainActor.assumeIsolated { link?.viewReady(host) } } },
-            stop: { [weak link] in DispatchQueue.main.async { MainActor.assumeIsolated { link?.detach(host) } } }
+            start: { [weak link] in Self.onMain { link?.viewReady(host) } },
+            stop: { [weak link] in Self.onMain { link?.detach(host) } }
         )
+    }
+
+    /// Runs `body` on the main actor: at once from the main thread, so a view
+    /// that goes stops counting before anything else runs.
+    nonisolated private static func onMain(_ body: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { body() }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
+        }
     }
 
     /// Gives the host its surface and starts the reading. The surface exists.
@@ -203,7 +213,7 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         guard let path = Self.path(ofCwdURL: url) else { return }
         DispatchQueue.main.async { [self] in
             MainActor.assumeIsolated {
-                guard let link, link.isFirstView(self) else { return }
+                guard let link, link.counts(self) else { return }
                 link.receiveCwd(path)
             }
         }
@@ -255,10 +265,16 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         DispatchQueue.main.async { [weak view] in view?.onLead?(leader) }
     }
 
+    /// The session's exit, or a session that is gone after the create: a
+    /// fact of the session, so any view's channel tells it.
     func paneExited(code _: UInt8?, signal _: UInt8?) {
-        toLink(.ended)
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated { link?.receiveExit() }
+        }
     }
 
+    /// The channel could not come back. It counts only from the counting
+    /// view: another window's channel that fails alone is a detach.
     func paneGone() {
         toLink(.ended)
     }

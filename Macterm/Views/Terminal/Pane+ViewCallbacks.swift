@@ -16,9 +16,8 @@ extension Pane {
     /// `PaneLink` (`receiveLinkEvent`), not through the views. Every surface
     /// of a pane parses the same output with libghostty, so the callbacks
     /// that count what it reads (runs, notifications, project memory) act
-    /// only for the surface whose client leads the session
-    /// (`PaneSurface.countsOutput`): the session says which one, and when it
-    /// changes. `PaneSurface` sets the search, copy mode, link and read-only
+    /// only for the surface of the link's counting view
+    /// (`PaneSurface.countsOutput`). `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
     func connectViewCallbacks(_ view: GhosttyTerminalNSView) {
         view.onInteraction = { [weak self] in
@@ -58,7 +57,7 @@ extension Pane {
         }
         // A surface with no session reports its own titles.
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
-        // libghostty's callbacks: only the surface that leads counts what it parses.
+        // libghostty's callbacks: only the counting surface counts what it parses.
         let counts = { [weak view] in view?.owningSurface?.countsOutput ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
             guard let self, counts() else { return }

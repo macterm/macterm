@@ -211,9 +211,6 @@ final class Pane: Identifiable {
         return made
     }
 
-    /// The link, when a surface made one. Makes nothing.
-    var existingSessionLink: PaneLink? { link }
-
     /// A message of the pane's session, once for the pane.
     func receiveLinkEvent(_ event: PaneLinkEvent) {
         switch event {

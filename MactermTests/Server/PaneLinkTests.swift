@@ -84,6 +84,34 @@ struct PaneLinkTests {
         }
     }
 
+    /// One view counts for the pane: the first that is ready. It changes
+    /// only when a view comes or goes.
+    @Test
+    func the_first_ready_view_counts_until_it_goes() {
+        // A create that never ends: the rule needs no session.
+        let link = PaneLink(name: "pl-count", transport: .local(connect: {
+            try await Task.sleep(for: .seconds(600))
+            throw ServerClientError.noAnswer
+        }))
+        let launch = PaneSession.Launch(cwd: nil, argv: nil, env: [])
+        let first = SurfaceChannelHost(view: nil)
+        let second = SurfaceChannelHost(view: nil)
+        _ = link.attach(first, launch: launch)
+        _ = link.attach(second, launch: launch)
+        #expect(!link.counts(first) && !link.counts(second), "no view is ready")
+
+        link.viewReady(second)
+        #expect(link.counts(second))
+        link.viewReady(first)
+        #expect(link.counts(first), "the first ready view in the order the views came")
+        #expect(!link.counts(second))
+
+        link.detach(first)
+        #expect(link.counts(second))
+        link.detach(second)
+        #expect(!link.counts(second))
+    }
+
     // MARK: - Support
 
     private func waitFor(_ condition: () -> Bool) async throws {
