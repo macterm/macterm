@@ -327,7 +327,9 @@ final class Pane: Identifiable {
     /// nested shell is a running child, as libghostty reads it. A local
     /// session starts login(1), which starts the shell in a group of its own,
     /// so a local pane uses the shell verdict for both (issue 0448). A
-    /// prompt hook never names the pane (`isPromptHook`).
+    /// prompt hook never names the pane (`isPromptHook`). For the run
+    /// tracker only, a shell that runs `-c` or a script is a program
+    /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
     ///
     /// `remoteForegroundCommand` follows the local `runningCommand` contract:
     /// a shell foreground records no command, anything else records the
