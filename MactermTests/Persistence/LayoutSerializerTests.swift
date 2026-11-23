@@ -49,7 +49,7 @@ struct LayoutSerializerTests {
         let root = "devbox:~/dev/api"
         let ws = Workspace(id: UUID(), projectPath: root)
         let pane = Pane(projectPath: root, projectID: ws.id)
-        pane.applyRemoteForeground(RemoteForeground(comm: "btop", command: "btop --utf-force"))
+        pane.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
         ModelWriter.tabSetTree(ws.tabs[0], root: .pane(pane), focusedPaneID: ws.tabs[0].focusedPaneID)
 
         let file = LayoutSerializer.layout(for: ws, projectName: "api", projectRoot: root)
@@ -69,7 +69,7 @@ struct LayoutSerializerTests {
         let root = "devbox:~/dev/api"
         let ws = Workspace(id: UUID(), projectPath: root)
         let pane = Pane(projectPath: root, projectID: ws.id)
-        pane.applyRemoteForeground(RemoteForeground(comm: "-zsh", command: "-zsh"))
+        pane.applyForeground(SessionForeground(comm: "-zsh", command: "-zsh"))
         ModelWriter.tabSetTree(ws.tabs[0], root: .pane(pane), focusedPaneID: ws.tabs[0].focusedPaneID)
 
         let file = LayoutSerializer.layout(for: ws, projectName: "api", projectRoot: root)

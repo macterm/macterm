@@ -171,15 +171,17 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// `ghostty_surface_new`. Retained here and freed in `destroySurface`.
     nonisolated(unsafe) private var configCStrings: [UnsafeMutablePointer<CChar>] = []
 
-    /// Fires on each OSC title with the reported string. Whether the string
-    /// is *used* for naming is the pane's call (`Pane.receiveReportedTitle`
-    /// gates on the foreground process); every arrival also marks a command
-    /// boundary that drives a foreground-process refresh.
+    /// Fires on each OSC title with the reported string: the session's
+    /// `title` message, or libghostty's for a surface with no session.
+    /// Whether the string is *used* for naming is the pane's call
+    /// (`Pane.receiveReportedTitle` gates on the session's foreground).
     var onTitleChange: ((String) -> Void)?
 
     /// Deliver a title reported by libghostty (OSC 0/2 / `SET_TITLE`).
-    /// Called by `GhosttyCallbacks`.
+    /// Called by `GhosttyCallbacks`. A surface that runs from a channel
+    /// takes the session's title, which the session coalesces.
     func surfaceDidReportTitle(_ title: String) {
+        guard channelRuntime == nil else { return }
         onTitleChange?(title)
     }
 
@@ -448,12 +450,16 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// current total row count. Occlusion-independent — see
     /// `surfaceDidOutputActivity`.
     var onOutputActivity: ((UInt64) -> Void)?
-    /// A snapshot of the pane's session starts (true) or ends (false).
-    var onSnapshotMark: ((Bool) -> Void)?
-    /// The host's session reports the pane's foreground (`PaneChannelEvent`).
-    var onRemoteForeground: ((RemoteForeground) -> Void)?
-    /// The host's session reports how the pane's pty reads input.
-    var onRemoteTtyMode: ((TerminalLineMode) -> Void)?
+    /// The session's `state`: its shell's pid and its pty.
+    var onSessionState: ((MactermProtocol.State) -> Void)?
+    /// The session reports the pane's foreground (`PaneChannelEvent`).
+    var onSessionForeground: ((SessionForeground) -> Void)?
+    /// The session reports how the pane's pty reads input.
+    var onTtyMode: ((TerminalLineMode) -> Void)?
+    /// An OSC 133 mark that the session parsed.
+    var onSessionMark: ((MactermProtocol.Mark) -> Void)?
+    /// The session's run status.
+    var onSessionStatus: ((MactermProtocol.Status) -> Void)?
     /// The session's attention flags (`PaneSessionHost.paneAttention`).
     var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
