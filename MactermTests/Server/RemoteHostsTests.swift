@@ -808,8 +808,8 @@ struct RemoteHostsTests {
             }
             let host = RecordingPaneHost()
             let session = PaneSession(
-                name: pane.sessionName, launch: launch, wantsForeground: true, reconnects: false,
-                host: host, connect: { link.connection }
+                name: pane.sessionName, launch: launch, wantsForeground: true,
+                host: host, endpoint: link
             )
             session.start()
             try await host.waitFor { $0.resets > 0 }

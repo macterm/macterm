@@ -200,9 +200,9 @@ final class RemotePaneDriver: PaneInputRoute {
         }
         let forward = Forward(driver: self, surface: surface)
         let session = PaneSession(
-            name: name, launch: launch, wantsForeground: true, wantsTty: true, reconnects: false,
+            name: name, launch: launch, wantsForeground: true, wantsTty: true,
             host: forward,
-            connect: { link.connection }
+            endpoint: link
         )
         forward.session = session
         state = .running(session)

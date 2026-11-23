@@ -8,6 +8,8 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         var screen = ""
         var exit: (code: UInt8?, signal: UInt8?)?
         var linkLost = 0
+        /// The session stopped: its endpoint had no connection to give.
+        var gone = 0
         var undelivered = Data()
         var resets = 0
         var foreground: MactermProtocol.Foreground?
@@ -121,5 +123,9 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
         lock.unlock()
     }
 
-    func paneGone() {}
+    func paneGone() {
+        lock.lock()
+        state.gone += 1
+        lock.unlock()
+    }
 }

@@ -2293,7 +2293,7 @@ extension GhosttyTerminalNSView {
 extension GhosttyTerminalNSView {
     /// Tells the session that the user saw the pane (`PaneSession.seen`).
     func sendSeen() {
-        channelRuntime?.route.seen()
+        channelRuntime?.route.input.seen()
     }
 
     /// The live terminal grid + cell/surface pixel dimensions
@@ -2308,7 +2308,7 @@ extension GhosttyTerminalNSView {
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }
-        runtime.route.claim(grid: nil)
+        runtime.route.input.claim(grid: nil)
         return true
     }
 

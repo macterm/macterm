@@ -234,7 +234,7 @@ final class RemoteHost {
 
     private func decide(_ session: String, pane: Pane, directory: String, link: RemoteServers.Link) async throws -> Attachment? {
         guard configuration.key != nil else { return .ended }
-        guard let listed = await RemoteHosts.list(over: link) else {
+        guard let listed = await link.list() else {
             try Task.checkCancellation()
             // A roaming link whose transport still runs is waiting for the
             // network: the next trigger asks again. Only a dead transport
@@ -263,7 +263,7 @@ final class RemoteHost {
         let found = listed.first { $0.name == session }
         if let found, !found.isRunning {
             // The shell exited while no pane showed it.
-            await RemoteHosts.kill(session, over: link)
+            await link.kill(session)
         }
         var entry = sessions[session] ?? SessionState()
         // A reported folder with a control character, or a relative one, gives the project folder.

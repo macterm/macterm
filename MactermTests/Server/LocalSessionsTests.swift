@@ -122,9 +122,9 @@ struct LocalSessionConversionTests {
             id: "macterm-x", state: .running, build: "b", level: 1, buildKey: "k",
             pid: 10, shellPid: 11, pty: ProtocolBin(Data("/dev/ttys004".utf8)), cols: 80, rows: 24, clients: 2
         )
-        #expect(LocalSession(session) == LocalSession(name: "macterm-x", pid: 10, shellPID: 11, clients: 2, buildKey: "k"))
+        #expect(SessionInfo(session) == SessionInfo(name: "macterm-x", pid: 10, shellPID: 11, clients: 2, buildKey: "k"))
         var exited = session
         exited.state = .exited
-        #expect(!LocalSession(exited).isRunning)
+        #expect(!SessionInfo(exited).isRunning)
     }
 }

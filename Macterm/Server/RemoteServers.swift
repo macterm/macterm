@@ -114,9 +114,12 @@ final class RemoteServers {
         }
     }
 
-    /// One connection to a host's server. Call `close()` when done.
-    /// Its parts are thread-safe and never change.
-    final class Link: @unchecked Sendable {
+    /// One connection to a host's server, and the `ServerEndpoint` of the
+    /// panes that attach over it. It gives only its own connection: a link
+    /// that ended has no next one, and the pane's `RemoteHost` connects
+    /// again with its backoff. Call `close()` when done. Its parts are
+    /// thread-safe and never change.
+    final class Link: ServerEndpoint, @unchecked Sendable {
         let connection: ServerConnection
         /// The ssh process of the proxy. Nil for a roaming link.
         let process: Process?
@@ -165,6 +168,11 @@ final class RemoteServers {
                 logger.info("link heartbeat: link is dead, closing it")
                 self?.close()
             }
+        }
+
+        func connection() async throws -> any ServerLink {
+            guard connection.isOpen else { throw ServerClientError.disconnected }
+            return connection
         }
 
         func close() {
