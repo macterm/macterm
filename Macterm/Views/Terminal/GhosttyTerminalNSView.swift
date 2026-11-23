@@ -711,7 +711,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
 
         // A remote pane runs from a channel on the host's link
-        // (`startRemoteChannel`). Without a server to ask (the unit-test
+        // (`prepareChannel`, through the pane's `PaneLink`). Without a server to ask (the unit-test
         // host) it keeps the fixed line below.
         let remoteChannel = remoteSpec != nil && SessionClient.liveBypass != .unitTestHost
         if remoteChannel {

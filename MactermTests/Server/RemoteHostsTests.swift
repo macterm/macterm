@@ -608,6 +608,35 @@ struct RemoteHostsTests {
         }
     }
 
+    /// Two windows show one pane on a host with no server. The pane's one
+    /// plain shell shows in the first view; the second says so and types
+    /// nowhere. When the first view goes, the second shows the shell.
+    @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
+    func a_plain_shell_shows_in_one_view_and_moves_to_the_next() async throws {
+        try await withSSHDHost(answer: false) { host in
+            let fixture = Fixture(host, wakes: true)
+            let pane = fixture.pane()
+            fixture.hosts.pane = { _ in pane }
+            let left = RecordingPaneHost()
+            let right = RecordingPaneHost()
+            let driver = RemotePaneDriver(name: pane.sessionName, hosts: fixture.hosts)
+            defer { driver.stop() }
+            let routes = driver.start(showing: [left, right])
+            try await right.waitFor { $0.screen.contains(RemotePaneDriver.plainElsewhereText) }
+            routes[1].sendInput(Data("printf 'right-%s\\n' typed\n".utf8))
+            routes[0].sendInput(Data("printf 'left-%s\\n' typed\n".utf8))
+            try await left.waitFor { $0.screen.contains("left-typed") }
+            #expect(!left.snapshot().screen.contains("right-typed"))
+            #expect(!right.snapshot().screen.contains("left-typed"))
+
+            // The first window closes: the shell shows in the second.
+            routes[0].stop()
+            routes[1].sendInput(Data("printf 'moved-%s\\n' here\n".utf8))
+            try await right.waitFor { $0.screen.contains("moved-here") }
+            #expect(right.snapshot().exit == nil)
+        }
+    }
+
     // MARK: - The folder check of a new project (0358)
 
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))

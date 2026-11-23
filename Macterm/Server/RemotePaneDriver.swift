@@ -274,7 +274,8 @@ final class RemotePaneDriver {
                     let grid = views.first(where: \.ready)?.host.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
                     try await PaneSession.create(on: link.connection, name: name, launch: made.launch, grid: grid)
                 } catch {
-                    logger.info("remote pane: session=\(self.name, privacy: .public) create failed: \(String(describing: error), privacy: .public)")
+                    let reason = String(describing: error)
+                    logger.info("remote pane: session=\(self.name, privacy: .public) create failed: \(reason, privacy: .public)")
                     guard mine == generation else { return }
                     linkStopped()
                     return
@@ -362,7 +363,7 @@ final class RemotePaneDriver {
         }
     }
 
-    fileprivate func sessionAttached() {
+    private func sessionAttached() {
         attached = true
         guard !runAttached else { return }
         runAttached = true
@@ -370,7 +371,7 @@ final class RemotePaneDriver {
     }
 
     /// The connection stopped: the pane is lost and waits for a try.
-    fileprivate func linkStopped() {
+    private func linkStopped() {
         if case .closed = state { return }
         logger.info("remote pane: session=\(self.name, privacy: .public) link stopped")
         teardown()
@@ -454,7 +455,7 @@ final class RemotePaneDriver {
 
     /// A key that the running session could not send: the link is down. The
     /// key is dropped, and asks to connect, as a key in a lost pane does.
-    fileprivate func keyFoundLinkDown() {
+    private func keyFoundLinkDown() {
         retryAfterLost = true
         linkStopped()
     }
