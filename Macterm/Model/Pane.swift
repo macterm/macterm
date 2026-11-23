@@ -211,6 +211,12 @@ final class Pane: Identifiable {
     /// The channel key of a caller with one channel only (tests).
     static let soleChannel = UUID()
 
+    /// When the running command started: the session's `output` mark (OSC
+    /// 133;C), for the `CommandEnd` of its `end` mark. nil while no command
+    /// runs, and for a command that started before the channel attached.
+    @ObservationIgnored
+    var commandStartedAt: Date?
+
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
     /// `ProcessInspector.passwordAsker` and the `run:` capture of a layout.
@@ -530,6 +536,9 @@ final class Pane: Identifiable {
         shell: String? = nil,
         env: [String: String]? = nil
     ) {
+        // A project with no folder (`Project.hasFolder`) starts its shells
+        // in the folder of the scratch tabs.
+        let projectPath = projectPath.isEmpty ? ScratchTabs.fallbackRoot : projectPath
         self.projectPath = projectPath
         self.projectID = projectID
         self.id = id

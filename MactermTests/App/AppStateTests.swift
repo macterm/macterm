@@ -1011,7 +1011,7 @@ struct AppStateTests {
     @Test
     func requestRemoveGroup_asks_only_when_the_group_has_projects() {
         let state = makeAppState()
-        let group = Project.group(name: "g")
+        let group = Project(name: "g", path: "")
 
         var ran = false
         state.requestRemoveGroup(group, projectCount: 0) { ran = true }
@@ -1856,6 +1856,50 @@ struct AppStateTests {
         #expect(saved.path == root)
         #expect(saved.tabs?.count == 1)
         #expect(files.find(forProjectPath: root)?.url.lastPathComponent == "proj.yaml")
+    }
+
+    // MARK: - A project with no folder
+
+    @Test
+    func a_project_with_no_folder_starts_its_shells_in_the_scratch_folder() throws {
+        let state = makeAppState()
+        let p = Project(name: "parent", path: "", sortOrder: 0)
+        state.selectProject(p)
+        let pane = try #require(state.workspaces[p.id]?.activeTab?.focusedPane)
+        #expect(pane.projectPath == ScratchTabs.fallbackRoot)
+    }
+
+    @Test
+    func next_project_skips_a_project_with_no_folder() {
+        let state = makeAppState()
+        let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
+        let group = Project(name: "g", path: "", sortOrder: 1)
+        let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
+        state.selectProject(a)
+        state.selectNextProject(projects: [a, group, b])
+        #expect(state.activeProjectID == b.id)
+        state.selectPreviousProject(projects: [a, group, b])
+        #expect(state.activeProjectID == a.id)
+    }
+
+    @Test
+    func a_project_with_no_folder_has_no_layout_file() {
+        let files = makeProjectFileStore()
+        let state = makeAppState(projectFiles: files)
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-no-folder-\(UUID().uuidString).json"))
+        let p = store.add(Project(name: "parent", path: ""))
+        state.selectProject(p)
+
+        func isNoFolder(_ error: Error?) -> Bool {
+            if case .noFolder? = error as? LayoutFileError { true } else { false }
+        }
+        #expect(isNoFolder(state.saveLayout(project: p)))
+        #expect(isNoFolder(state.applyLayout(project: p)))
+        #expect(files.scan().isEmpty)
+        let ctx = AppCommandContext(appState: state, projectStore: store)
+        #expect(AppCommand.saveLayout.action(in: ctx) == nil)
+        #expect(AppCommand.applyLayout.action(in: ctx) == nil)
     }
 
     // MARK: - panesToWarm (eager process start for focused project)

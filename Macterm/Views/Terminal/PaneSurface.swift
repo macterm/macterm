@@ -250,7 +250,6 @@ final class PaneSurface: Identifiable {
         view.onSearchSelected = nil
         view.onFocus = nil
         view.onInteraction = nil
-        view.onCommandSubmitted = nil
         view.onSplitRequest = nil
         view.onOpenLink = nil
         view.onDesktopNotification = nil

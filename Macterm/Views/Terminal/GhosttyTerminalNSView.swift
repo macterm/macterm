@@ -362,13 +362,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// leadership claim can be sent (`sendLeadershipClaim` refuses before it).
     var onSurfaceSized: (() -> Void)?
     private var hasReportedSurfaceSize = false
-    /// A Return went to the program. Project memory reads the submission.
-    var onCommandSubmitted: (() -> Void)?
-    /// The text that `sendText` submitted, for the length of its
-    /// `onCommandSubmitted` call; nil for a Return that the user typed. Its
-    /// echo may not be on the screen yet, so project memory reads the
-    /// command from here, and from the screen only for a typed Return.
-    private(set) var submittedText: String?
     /// Whether a key event matching a passthrough-flagged binding should reach
     /// the program instead of being claimed as an app shortcut. Injected rather
     /// than computed here because the decision needs the PANE: a zmx-wrapped
@@ -1292,7 +1285,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         // here even though this specific text is finalized). Without this,
         // Korean / Japanese / Chinese input drops every committed character.
         // The text itself carries no composing flag since it's already final.
-        var forwarded = false
         if !keyTextAccumulator.isEmpty {
             var commitKE = ke
             commitKE.composing = false
@@ -1300,7 +1292,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
                 text.withCString { commitKE.text = $0
                     _ = ghostty_surface_key(surface, commitKE)
                 }
-                forwarded = true
             }
         } else if !hasMarkedText() {
             let text = filterSpecial(event.characters ?? "")
@@ -1313,7 +1304,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
                 ke.text = nil
                 _ = ghostty_surface_key(surface, ke)
             }
-            forwarded = true
         }
 
         // What the password capture sees is what went to the tty: the IME's
@@ -1335,18 +1325,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
                 input
             }
             PasswordPromptMonitor.shared.viewDidType(self, input: typed)
-        }
-
-        let userModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
-        if forwarded,
-           TerminalCommandSubmission.isReturn(
-               keyCode: event.keyCode,
-               isRepeat: event.isARepeat,
-               hasMarkedText: hadMarkedText || hasMarkedText(),
-               hasUserModifiers: !flags.isDisjoint(with: userModifiers)
-           )
-        {
-            onCommandSubmitted?()
         }
     }
 
@@ -1990,19 +1968,14 @@ extension GhosttyTerminalNSView {
         text.withCString { ptr in
             _ = ghostty_surface_key(surface, Self.textOnlyKeyEvent(ptr))
         }
-        if TerminalCommandSubmission.textContainsNewline(text) {
-            submittedText = text
-            onCommandSubmitted?()
-            submittedText = nil
-        }
         return true
     }
 
     /// Type a saved password into the program reading it, then Return. The
     /// password goes through the same text path as `sendText` — not paste, so
     /// no bracketed-paste markers reach the password read. The Return rides
-    /// `sendKey`, so it does ping `onInteraction` and `onCommandSubmitted`,
-    /// exactly as a Return the user presses.
+    /// `sendKey`, so it does ping `onInteraction`, exactly as a Return the
+    /// user presses.
     /// `submit: false` leaves the Return to the user (an on-demand fill into
     /// a line that echoes).
     @discardableResult
@@ -2026,27 +1999,6 @@ extension GhosttyTerminalNSView {
         guard h > 0 else { return nil }
         let rect = NSRect(x: x, y: bounds.height - y - h, width: max(w, 1), height: h)
         return bounds.intersects(rect) ? rect.intersection(bounds) : nil
-    }
-
-    /// The column of the cursor on its screen row, or nil without a surface
-    /// or while the cursor is scrolled out of view.
-    ///
-    /// From the IME point: libghostty puts it at the MIDDLE of the cursor's
-    /// cell, measured from the view's edge, so the left window padding is in
-    /// it (`Surface.imePointScaled`). The cell width comes from the surface
-    /// size, because the point's own width is the preedit's, zero with
-    /// nothing composed. `window-padding-balance` adds under half a cell on
-    /// the left, which the round down absorbs with the half cell of the
-    /// midpoint.
-    func cursorColumn() -> Int? {
-        guard let surface, let size = surfaceSize, size.cell_width_px > 0 else { return nil }
-        var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
-        ghostty_surface_ime_point(surface, &x, &y, &w, &h)
-        guard h > 0 else { return nil }
-        let scale = Double(window?.backingScaleFactor ?? 2.0)
-        let cellWidth = Double(size.cell_width_px) / scale
-        let column = ((x - GhosttyApp.shared.windowPadding.left) / cellWidth).rounded(.down)
-        return column >= 0 ? Int(column) : nil
     }
 
     /// Send a single key chord through libghostty's key-*encoding* path — the
@@ -2081,15 +2033,6 @@ extension GhosttyTerminalNSView {
             Self.withChordEvent(keyCode: keyCode, mods: flags, action: action) { ke in
                 _ = ghostty_surface_key(surface, ke)
             }
-        }
-        let userModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
-        if TerminalCommandSubmission.isReturn(
-            keyCode: keyCode,
-            isRepeat: false,
-            hasMarkedText: false,
-            hasUserModifiers: !flags.isDisjoint(with: userModifiers)
-        ) {
-            onCommandSubmitted?()
         }
         return true
     }

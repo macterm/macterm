@@ -309,7 +309,7 @@ extension AppCommand {
             // purpose: invoking it surfaces the parse-error dialog instead of
             // failing silently. `.none`/`.emptyTabs` disable the menu item and
             // mute the palette row (see `paletteDisabledHint`).
-            guard let current else { return nil }
+            guard let current, current.hasFolder else { return nil }
             switch ctx.appState.projectFiles.applyState(forProjectPath: current.path, preferredSlug: ProjectSlug.slug(from: current.name)) {
             case .applicable,
                  .invalid:
@@ -319,7 +319,8 @@ extension AppCommand {
                 return nil
             }
         case .saveLayout:
-            guard let current else { return nil }
+            // A layout file matches a project by its folder.
+            guard let current, current.hasFolder else { return nil }
             return { ctx.appState.saveLayoutPresentingError(current, siblingProjects: ctx.projectStore.projects) }
         case .nextProject:
             return { ctx.appState.selectNextProject(projects: ctx.projectStore.projects) }
