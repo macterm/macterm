@@ -32,9 +32,6 @@ struct CommandEnd: Equatable {
 struct ExtractedCommand: Equatable {
     var command: String
     var output: String
-    /// The user typed a space before the command: the shells'
-    /// `HISTCONTROL=ignorespace` sign for "do not remember this".
-    var isPrivate = false
 }
 
 /// The last command and its output on a pane's screen, read once the shell

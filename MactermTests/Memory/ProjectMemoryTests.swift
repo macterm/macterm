@@ -122,7 +122,7 @@ struct ProjectMemoryTests {
         app %
         """
         let reported = try #require(ProjectMemory.reportedCommand("make test  "))
-        #expect(reported == ExtractedCommand(command: "make test", output: ""))
+        #expect(reported == "make test")
 
         // The screen shows the same command: its tail is kept.
         let entry = try #require(ProjectMemory.makeEntry(
@@ -188,10 +188,11 @@ struct ProjectMemoryTests {
     }
 
     @Test
-    func a_command_with_a_leading_space_is_private() {
-        #expect(ProjectMemory.reportedCommand(" export TOKEN=x")?.isPrivate == true)
-        #expect(ProjectMemory.makeEntry(end(" export TOKEN=x", exit: 0), screen: nil) == nil)
-        #expect(ProjectMemory.makeEntry(end(" make", exit: 1), screen: "app %  make\nerror\napp %") == nil)
+    func a_command_with_a_leading_space_is_recorded_and_redacted() throws {
+        let entry = try #require(ProjectMemory.makeEntry(end(" export TOKEN=abc", exit: 0), screen: nil))
+        #expect(entry.command == "export TOKEN=\(MemoryRedaction.mask)")
+        let failure = try #require(ProjectMemory.makeEntry(end(" make", exit: 1), screen: "app %  make\nerror\napp %"))
+        #expect(failure.command == "make")
     }
 
     @Test

@@ -7,16 +7,8 @@ import Foundation
 /// every failure tail goes through here before it is stored. The rules
 /// replace a value with `•••` and keep the shape of the line, so a command
 /// is still readable and still ranks with its other runs.
-///
-/// A command that starts with a space is not recorded at all: the shells'
-/// `HISTCONTROL=ignorespace` convention for "do not remember this".
 enum MemoryRedaction {
     static let mask = "•••"
-
-    /// Whether the user asked the shell not to remember `command`.
-    static func isPrivate(_ command: String) -> Bool {
-        command.first == " " || command.first == "\t"
-    }
 
     /// `text` with every secret replaced by `mask`. For program output: a
     /// value ends only at a space, because output does not follow shell rules.

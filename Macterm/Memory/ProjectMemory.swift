@@ -117,8 +117,7 @@ final class ProjectMemory {
     /// failure, after `screenReadDelay`, to keep the tail of the output.
     func commandEnded(_ end: CommandEnd, screen: @escaping @MainActor () -> String? = { nil }) {
         // Any command can move the branch (`git switch`, a commit), recorded
-        // or not: a private command and a command with no text change the
-        // Git state just as well.
+        // or not: a command with no text changes the Git state just as well.
         if panelShows(end.projectID) { refreshGit(end.projectID, after: Self.gitReadAfterCommand) }
         guard Self.isEnabled, Self.covers(end.projectID) else { return }
         guard let entry = Self.makeEntry(end, screen: nil) else { return }
@@ -136,35 +135,32 @@ final class ProjectMemory {
         scheduleBackgroundSummary(projectID)
     }
 
-    /// The command of a command end, as a command: the text with its
-    /// trailing spaces dropped, private when it starts with a space
-    /// (`HISTCONTROL=ignorespace`). nil for text with no command.
-    nonisolated static func reportedCommand(_ text: String) -> ExtractedCommand? {
-        let isPrivate = text.hasPrefix(" ")
+    /// The command of a command end: the text with its outer spaces
+    /// dropped. A command with a leading space is recorded like any other
+    /// (Ethan, 2026-11-23). nil for text with no command.
+    nonisolated static func reportedCommand(_ text: String) -> String? {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else { return nil }
-        return ExtractedCommand(command: command, output: "", isPrivate: isPrivate)
+        return command.isEmpty ? nil : command
     }
 
     /// The entry for a command end, or nil when there is nothing to
-    /// remember: the user asked the shell not to (a leading space), or the
-    /// end has no command. A record with no command is noise in every list
-    /// that shows it.
+    /// remember: the end has no command. A record with no command is noise
+    /// in every list that shows it.
     ///
     /// The command comes from the end only. `screen` gives a failure's
     /// output tail, and only when its last command is this command, with or
     /// without a right prompt. Pure, for the tests.
     nonisolated static func makeEntry(_ end: CommandEnd, screen: String?) -> MemoryEntry? {
-        guard let command = end.command.flatMap(reportedCommand), !command.isPrivate else { return nil }
+        guard let command = end.command.flatMap(reportedCommand) else { return nil }
         var entry = MemoryEntry(
-            command: MemoryRedaction.redactCommand(command.command),
+            command: MemoryRedaction.redactCommand(command),
             directory: end.directory,
             exitCode: end.exitCode,
             finishedAt: end.finishedAt,
             duration: end.duration
         )
         let output = screen.flatMap(ScreenCommandExtractor.extract(screen:)).flatMap { shown in
-            ScreenCommandExtractor.screenCommand(shown.command, shows: command.command) ? shown.output : nil
+            ScreenCommandExtractor.screenCommand(shown.command, shows: command) ? shown.output : nil
         }
         if entry.outcome == .failure, let output, let tail = MemoryEntry.tail(of: output) {
             entry.failureTail = MemoryRedaction.redact(tail)
