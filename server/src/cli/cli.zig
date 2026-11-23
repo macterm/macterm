@@ -231,7 +231,11 @@ fn sshRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed 
     const env: ssh.Env = .{
         .arena = ctx.arena,
         .io = ctx.io,
-        .home = ctx.env.get("HOME"),
+        .home = ctx.env.get("HOME") orelse home: {
+            // As `NSHomeDirectory`: the user's record.
+            const pw = std.c.getpwuid(std.c.getuid()) orelse break :home null;
+            break :home if (pw.dir) |d| std.mem.span(d) else null;
+        },
         .tmp = if (std.mem.endsWith(u8, tmp, "/")) tmp else try std.mem.concat(ctx.arena, u8, &.{ tmp, "/" }),
         .err = ctx.err,
     };

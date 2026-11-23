@@ -71,7 +71,16 @@ struct SSHWrapperTests {
     @Test
     func the_rules_pass_the_shared_fixtures() throws {
         let f = try Self.fixtures()
-        #expect(!f.destination.isEmpty)
+        // An empty list would check nothing.
+        #expect(![
+            f.destination.count,
+            f.destinationArgv.count,
+            f.relayed.count,
+            f.exec.count,
+            f.install.count,
+            f.versionKey.count,
+            f.cache.count,
+        ].contains(0))
         for c in f.destination {
             #expect(SSHWrapper.parseDestination(configDump: c.dump) == c.destination, "\(c.dump)")
         }

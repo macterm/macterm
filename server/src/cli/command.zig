@@ -439,6 +439,31 @@ test "usage errors name the word" {
     try testing.expectEqualStrings("Missing expected argument '<id>'", (try parse(a, &test_root, &.{"needs"})).usage_error.message);
 }
 
+test "a passthrough argument takes every word from the first that is not an option" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const pass: Command = .{
+        .name = "pass",
+        .abstract = "Pass.",
+        .options = &.{ .{ .names = &.{"--cache"}, .value = "cache", .abstract = "Cache." }, .{ .names = &.{"--verbose"}, .abstract = "Verbose." } },
+        .arguments = &.{.{ .name = "args", .abstract = "Args.", .optional = true, .repeating = true, .passthrough = true }},
+    };
+    const root: Command = .{ .name = "macterm", .abstract = "Root.", .subcommands = &.{&pass} };
+    const r = try parse(a, &root, &.{ "pass", "--cache=false", "--verbose", "-p", "22", "host", "--verbose" });
+    try testing.expectEqualStrings("false", r.run.value("--cache").?);
+    try testing.expectEqual(4, r.run.positionals.len);
+    try testing.expectEqualStrings("-p", r.run.positionals[0]);
+    try testing.expectEqualStrings("--verbose", r.run.positionals[3]);
+    // `--` and what follows it, help flags too, go as they are.
+    const sep = try parse(a, &root, &.{ "pass", "--", "-h" });
+    try testing.expectEqualStrings("--", sep.run.positionals[0]);
+    try testing.expectEqualStrings("-h", sep.run.positionals[1]);
+    try testing.expectEqual(2, (try parse(a, &root, &.{ "pass", "--verbose", "-h" })).help.len);
+    // After the first captured word, `-h` is ssh's.
+    try testing.expectEqualStrings("-h", (try parse(a, &root, &.{ "pass", "host", "-h" })).run.positionals[1]);
+}
+
 test "help comes from -h, --help, the help command and a group alone" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();

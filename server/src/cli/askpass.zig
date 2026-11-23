@@ -106,6 +106,13 @@ const Exchange = union(enum) { ok: []const u8, failed: []const u8 };
 /// One v1 round trip: connect, write the line, close the write end, read
 /// to the end.
 fn exchange(arena: std.mem.Allocator, path: []const u8, line: []const u8) error{OutOfMemory}!Exchange {
+    const path_z = try arena.dupeSentinel(u8, path, 0);
+    switch (runtime.socketFile(path_z)) {
+        .socket => {},
+        .missing => return .{ .failed = "no socket file" },
+        .not_a_socket => return .{ .failed = "not a socket" },
+        .unreadable => return .{ .failed = "cannot read the path" },
+    }
     const fd = socket.connectSession(path) catch |e| return .{ .failed = switch (e) {
         error.ConnectionRefused => "connection refused",
         error.Unexpected => "cannot connect",
@@ -133,6 +140,7 @@ fn exchange(arena: std.mem.Allocator, path: []const u8, line: []const u8) error{
         if (n == 0) break;
         try reply.appendSlice(arena, buf[0..n]);
     }
+    if (reply.items.len == 0) return .{ .failed = "connection closed without a response" };
     return .{ .ok = reply.items };
 }
 

@@ -79,8 +79,8 @@ pub fn parseDestination(arena: std.mem.Allocator, config_dump: []const u8) error
 /// system database), then check that `infocmp` finds the entry. Verbose
 /// keeps the stderr of `tic`.
 ///
-/// sshd gives the remote command to the host's login shell, and a login
-/// shell that is not POSIX (nushell, tcsh) cannot read it, so it goes as
+/// sshd gives the remote command to the host's login shell. A login shell
+/// that is not POSIX (nushell, tcsh) cannot read it, so the command is
 /// `sh -c '<script>'`. The script has no single quote.
 pub fn installScript(verbose: bool) []const u8 {
     return if (verbose)
@@ -94,9 +94,9 @@ pub fn installScript(verbose: bool) []const u8 {
 /// user's own arguments go too, so their port, key and alias apply, and
 /// the login can ask for a password as the real one does (no `BatchMode`).
 ///
-/// As in ghostty: when the arguments end in a remote command (`ssh host
-/// uptime`), ssh adds the script to it, the install fails, and the
-/// connection uses `xterm-256color`.
+/// As in ghostty, arguments that end in a remote command (`ssh host
+/// uptime`) make the install fail: ssh adds the script to that command. The
+/// connection then uses `xterm-256color`.
 pub fn installArgv(arena: std.mem.Allocator, ssh: []const u8, control_path: []const u8, args: []const []const u8, verbose: bool) error{OutOfMemory}![]const []const u8 {
     const path_option = try std.fmt.allocPrint(arena, "ControlPath={s}", .{control_path});
     return concat(arena, &.{
@@ -343,11 +343,12 @@ fn runChild(arena: std.mem.Allocator, argv: []const []const u8, child: Child) er
     };
     if (pid == 0) {
         lib_posix.sigaction(lib_posix.SIG.PIPE, &default_action, null);
-        const null_fd = std.c.open("/dev/null", .{ .ACCMODE = .RDWR });
+        // CLOEXEC: the copies on 1 and 2 stay open, this fd does not.
+        const null_fd = std.c.open("/dev/null", .{ .ACCMODE = .RDWR, .CLOEXEC = true });
         if (in) |p| lib_posix.dup2(p[0], 0) catch std.c._exit(127);
         lib_posix.dup2(if (out) |p| p[1] else null_fd, 1) catch std.c._exit(127);
         if (!child.inherit_stderr) lib_posix.dup2(null_fd, 2) catch std.c._exit(127);
-        lib_posix.execvpeZ(argv_z[0].?, argv_z, @ptrCast(std.c.environ)) catch {};
+        _ = execvp(argv_z[0].?, argv_z.ptr);
         std.c._exit(127);
     }
     if (out) |p| lib_posix.close(p[1]);
@@ -399,9 +400,12 @@ pub fn exec(arena: std.mem.Allocator, argv: []const []const u8) error{OutOfMemor
     var action = default_action;
     action.mask = lib_posix.sigemptyset();
     lib_posix.sigaction(lib_posix.SIG.PIPE, &action, null);
-    const err = lib_posix.execvpeZ(argv_z[0].?, argv_z, @ptrCast(std.c.environ));
-    return @errorName(err);
+    const rc = execvp(argv_z[0].?, argv_z.ptr);
+    return std.mem.span(strerror(@backingInt(std.c.errno(rc))));
 }
+
+extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+extern "c" fn strerror(errnum: c_int) [*:0]const u8;
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -425,6 +429,7 @@ test "the ssh rules pass the shared fixtures" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const f = try std.json.parseFromSliceLeaky(Fixtures, arena, fixtures_json, .{});
+    inline for (@typeInfo(Fixtures).@"struct".field_names) |name| try testing.expect(@field(f, name).len > 0);
     for (f.destination) |c| {
         const got = try parseDestination(arena, c.dump);
         if (c.destination) |want| try testing.expectEqualStrings(want, got.?) else try testing.expect(got == null);
