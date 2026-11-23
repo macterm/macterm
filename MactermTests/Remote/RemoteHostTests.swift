@@ -198,9 +198,15 @@ struct RemoteHostTests {
             #expect(fake.host.link == nil)
 
             fake.host.reconnect(answered: false, now: Date())
-            try await view.waitFor { $0.resets > 1 && $0.screen.contains("before-close") }
             try await until { !pane.isRemoteLinkLost && !pane.isRemoteReconnecting }
             #expect(fake.connects == [true, false])
+            // The pane resumed: the screen and the scrollback stay, and no
+            // byte comes twice.
+            driver.sendInput(Data("printf 'after-%s\\n' close\n".utf8))
+            try await view.waitFor { $0.screen.contains("after-close") }
+            let state = view.snapshot()
+            #expect(state.resets == 1)
+            #expect(state.screen.components(separatedBy: "before-close").count == 2)
         }
     }
 
@@ -243,12 +249,12 @@ struct RemoteHostTests {
             try await until { pane.isRemoteLinkLost && fake.waiters(pane) == 1 }
 
             driver.sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
-            try await view.waitFor { $0.resets > 1 }
             try await until { !pane.isRemoteLinkLost }
             #expect(fake.connects == [true, true])
             driver.sendInput(Data("printf 'after-%s\\n' key\n".utf8))
             try await view.waitFor { $0.screen.contains("after-key") }
             #expect(!view.snapshot().screen.contains("dropped-key"))
+            #expect(view.snapshot().resets == 1, "the pane resumed")
         }
     }
 

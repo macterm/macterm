@@ -219,7 +219,11 @@ final class RemotePaneDriver: PaneInputRoute {
         undelivered = Data()
         earlyInput = Data()
         if !waiting.isEmpty { session.sendInput(waiting) }
-        return await withCheckedContinuation { ending = $0 }
+        let end = await withCheckedContinuation { ending = $0 }
+        // A key can end the session while its reading still feeds the
+        // surface: the point is the offset after the last byte fed.
+        resume = await session.finish()
+        return end
     }
 
     private func runPlain(_ arguments: [String]) async -> End {
@@ -276,7 +280,6 @@ final class RemotePaneDriver: PaneInputRoute {
             session.stop()
             // Input that never reached a channel waits for the next session.
             undelivered.append(session.takePendingInput())
-            resume = session.resumePoint
         case let .plain(shell): shell.terminate()
         default: break
         }

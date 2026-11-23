@@ -212,6 +212,17 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         if let channel { Task { await channel.close() } }
     }
 
+    /// Stops the session and waits until its reading ended. Then no byte
+    /// goes to the host any more, and `resumePoint` is the offset of the
+    /// last byte that it got. A driver that starts a new session for the
+    /// same pane takes the point from here, not from `stop()`.
+    func finish() async -> ResumePoint? {
+        stop()
+        let task = lock.withLock { task }
+        await task?.value
+        return resumePoint
+    }
+
     // MARK: - Input
 
     /// Keys, pastes and terminal replies. Input that the channel cannot take
@@ -336,17 +347,23 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     return
                 }
                 let grid = host.paneGrid()
-                let resuming = resumePoint(for: channel)
+                let resuming = matchingResumePoint(channel)
                 try sendAttach(channel, grid, resume: resuming)
+                // The offset that the screen shows. Only a cleared screen
+                // is at 0: a session with no output sends no snapshot.
+                var shown = resuming?.offset
                 if firstAttach {
                     // A pane that asks to resume keeps its screen. Its
                     // reset waits for a snapshot.
-                    if resuming == nil { host.paneFeed(Self.resetScreen) }
+                    if resuming == nil {
+                        host.paneFeed(Self.resetScreen)
+                        shown = 0
+                    }
                     firstAttach = false
                 }
                 if markAttached(channel) { claim(grid: nil) }
                 let started = Date()
-                if await read(channel, reconnected: reconnected || resuming != nil, resuming: resuming != nil, attachedAt: grid) {
+                if await read(channel, reconnected: reconnected || resuming != nil, shows: shown, attachedAt: grid) {
                     return
                 }
                 reconnected = true
@@ -392,15 +409,16 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// The point to resume on `channel`: only for the epoch of the session
     /// that the surface shows. Another epoch is another session process,
     /// whose offsets count from 0.
-    private func resumePoint(for channel: PaneChannel) -> ResumePoint? {
+    private func matchingResumePoint(_ channel: PaneChannel) -> ResumePoint? {
         lock.withLock {
             guard let point = resume, point.epoch == channel.epoch else { return nil }
             return point
         }
     }
 
-    /// The channel ended: the next attach resumes after `offset`, the last
-    /// output byte that the surface got.
+    /// The reading of `channel` ended: the next attach resumes after
+    /// `offset`, the last output byte that the surface got. Nil when the
+    /// screen shows no known offset: the next attach gets a snapshot.
     private func keepResumePoint(_ channel: PaneChannel, _ offset: UInt64?) {
         lock.withLock {
             resume = channel.epoch.flatMap { epoch in offset.map { ResumePoint(epoch: epoch, offset: $0) } }
@@ -419,14 +437,15 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     ///
     /// It counts the output offset that the surface shows: a drawn
     /// snapshot's `offset` or a `resumed` offset, and the output bytes after
-    /// it. A session with no output sends no snapshot, so a count starts at
-    /// 0. The relay's skip-ahead drops output and sends a snapshot, which
+    /// it, from `start`, the offset that the screen shows at the attach. The
+    /// relay's skip-ahead drops output and sends a snapshot, which
     /// sets the count again. When the channel ends, the count is the next
     /// attach's resume point.
-    private func read(_ channel: PaneChannel, reconnected: Bool, resuming: Bool, attachedAt grid: PaneGrid) async -> Bool {
+    private func read(_ channel: PaneChannel, reconnected: Bool, shows start: UInt64?, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
-        // Unknown while a resume waits for its answer.
-        var offset: UInt64? = resuming ? nil : 0
+        // A resume's `resumed` comes before any output, and repeats the
+        // offset. A channel that ends before it leaves the screen as it was.
+        var offset = start
         // The offset of the snapshot that is in progress.
         var snapshotOffset: UInt64?
         defer { keepResumePoint(channel, offset) }
