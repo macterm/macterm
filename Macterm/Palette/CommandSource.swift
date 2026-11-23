@@ -110,7 +110,8 @@ struct CommandSource: PaletteSource {
         // postPaletteAction; `MainWindow` fires it once the palette closes.
         let action: () -> Void = switch command {
         case .renameTab,
-             .renameProject:
+             .renameProject,
+             .newGroup:
             { ctx.appState.postPaletteAction = rawAction }
         default:
             rawAction

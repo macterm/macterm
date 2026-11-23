@@ -279,6 +279,29 @@ extension AppCommand {
             return { ctx.appState.selectNextProject(projects: ctx.projectStore.projects) }
         case .previousProject:
             return { ctx.appState.selectPreviousProject(projects: ctx.projectStore.projects) }
+        // The group commands act on the active project and its group, as
+        // the sidebar's menus of a project and a group do (design 013).
+        case .newGroup:
+            // Beside the active project, else at the end of the top level.
+            let beside = current?.id
+            return {
+                let group = ctx.projectStore.createGroup(name: AppState.newGroupName, beside: beside)
+                ctx.appState.sidebarVisible = true
+                // See .renameTab: defer so the sidebar row exists first.
+                DispatchQueue.main.async { ctx.appState.renamingProjectID = group.id }
+            }
+        case .moveToGroup:
+            guard let current, !SidebarTree.moveTargets(for: current.id, in: ctx.projectStore).isEmpty else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: .moveToGroup) }
+        case .moveOutOfGroup:
+            guard let current, current.parent != nil else { return nil }
+            return { ctx.projectStore.moveOut(current.id) }
+        case .ungroup:
+            guard let group = ctx.appState.activeProjectGroup(in: ctx.projectStore) else { return nil }
+            return { ctx.appState.ungroup(group.id, store: ctx.projectStore) }
+        case .removeGroup:
+            guard let group = ctx.appState.activeProjectGroup(in: ctx.projectStore) else { return nil }
+            return { ctx.appState.removeGroup(group, store: ctx.projectStore) }
         case .toggleSidebar:
             return { ctx.appState.sidebarVisible.toggle() }
         case .toggleProjectMemory:

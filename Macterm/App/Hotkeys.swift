@@ -69,6 +69,11 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
     case autofillPassword = "autofill_password"
     case passwordManager = "password_manager"
     case files
+    case moveToGroup = "move_to_group"
+    case newGroup = "new_group"
+    case moveOutOfGroup = "move_out_of_group"
+    case ungroup
+    case removeGroup = "remove_group"
     case capturePaletteScreenshot = "capture_palette_screenshot"
 
     var id: String { rawValue }
@@ -218,6 +223,13 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
         // Unbound by default: ⌥⌘F, the obvious chord, is Autofill Password's.
         case .passwordManager: "none"
         case .files: "none"
+        // Unbound by default: the sidebar groups change rarely, and Remove
+        // Group ends the sessions of every project inside the group.
+        case .moveToGroup: "none"
+        case .newGroup: "none"
+        case .moveOutOfGroup: "none"
+        case .ungroup: "none"
+        case .removeGroup: "none"
         // Unbound by default: only someone making an extension's screenshots
         // needs it, and it acts on the palette as it stands, so it's bound
         // to be pressed with the palette up.

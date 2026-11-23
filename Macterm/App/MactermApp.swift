@@ -228,6 +228,17 @@ struct MactermApp: App {
                     titleOverride: "Set Project Path to Current Directory"
                 )
                 Divider()
+                AppCommandMenuItem(command: .newGroup, appState: appState, projectStore: projectStore, titleOverride: "New Group")
+                AppCommandMenuItem(command: .moveToGroup, appState: appState, projectStore: projectStore, titleOverride: "Move to Group…")
+                AppCommandMenuItem(
+                    command: .moveOutOfGroup,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "Move Out of Group"
+                )
+                AppCommandMenuItem(command: .ungroup, appState: appState, projectStore: projectStore, titleOverride: "Ungroup")
+                AppCommandMenuItem(command: .removeGroup, appState: appState, projectStore: projectStore, titleOverride: "Remove Group")
+                Divider()
                 AppCommandMenuItem(command: .nextProject, appState: appState, projectStore: projectStore, titleOverride: "Next Project")
                 AppCommandMenuItem(
                     command: .previousProject,

@@ -20,12 +20,13 @@ import Foundation
 enum PaletteScopeID: Hashable {
     case passwords
     case files
+    case moveToGroup
     /// A screen of a custom palette (`CustomPaletteFile`): its file, node,
     /// the values exported above it and the pill naming it.
     case custom(CustomPaletteTarget)
 
     /// The screens Macterm ships.
-    static let builtIn: [PaletteScopeID] = [.passwords, .files]
+    static let builtIn: [PaletteScopeID] = [.passwords, .files, .moveToGroup]
 
     /// What the scope's pill says and shows — also the icon of the row that
     /// opens it, so the row reads as a place to go rather than a thing to do.
@@ -33,6 +34,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PalettePill(title: AppCommand.passwordManager.title, icon: "key.fill")
         case .files: PalettePill(title: AppCommand.files.title, icon: "doc.text.magnifyingglass")
+        case .moveToGroup: PalettePill(title: AppCommand.moveToGroup.title, icon: "folder")
         case let .custom(target): target.pill
         }
     }
@@ -45,6 +47,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
+        case .moveToGroup: String(localized: "Move this project into a sidebar group")
         case .custom: ""
         }
     }
@@ -55,6 +58,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: .passwordManager
         case .files: .files
+        case .moveToGroup: .moveToGroup
         case .custom: nil
         }
     }
@@ -64,6 +68,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PasswordPaletteScope()
         case .files: FilesPaletteScope()
+        case .moveToGroup: MoveToGroupPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
         }
     }

@@ -13,6 +13,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case toggleCommandPalette
     case passwordManager
     case files
+    case moveToGroup
     // Tabs
     case newTab
     case newScratchTab
@@ -66,6 +67,10 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case saveLayout
     case nextProject
     case previousProject
+    case newGroup
+    case moveOutOfGroup
+    case ungroup
+    case removeGroup
     // Window
     case toggleSidebar
     case toggleProjectMemory
@@ -157,6 +162,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .saveLayout: "Save Layout"
         case .nextProject: "Next Project"
         case .previousProject: "Previous Project"
+        case .newGroup: "New Group"
+        case .moveToGroup: "Move to Group"
+        case .moveOutOfGroup: "Move Out of Group"
+        case .ungroup: "Ungroup Current Group"
+        case .removeGroup: "Remove Current Group"
         case .toggleSidebar: "Toggle Sidebar"
         case .toggleProjectMemory: "Toggle Project Insights"
         case .toggleToolbar: "Toggle Toolbar"
@@ -177,7 +187,8 @@ enum AppCommand: String, CaseIterable, Identifiable {
         switch self {
         case .toggleCommandPalette,
              .passwordManager,
-             .files: .palettes
+             .files,
+             .moveToGroup: .palettes
         case .newTab,
              .newScratchTab,
              .closePane,
@@ -227,7 +238,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .applyLayout,
              .saveLayout,
              .nextProject,
-             .previousProject: .projects
+             .previousProject,
+             .newGroup,
+             .moveOutOfGroup,
+             .ungroup,
+             .removeGroup: .projects
         case .toggleSidebar,
              .toggleProjectMemory,
              .toggleToolbar,
@@ -304,6 +319,11 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .autofillPassword: .autofillPassword
         case .passwordManager: .passwordManager
         case .files: .files
+        case .moveToGroup: .moveToGroup
+        case .newGroup: .newGroup
+        case .moveOutOfGroup: .moveOutOfGroup
+        case .ungroup: .ungroup
+        case .removeGroup: .removeGroup
         case .capturePaletteScreenshot: .capturePaletteScreenshot
         case .applyLayout: .applyLayout
         case .saveLayout: .saveLayout
@@ -322,6 +342,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         switch self {
         case .passwordManager: .passwords
         case .files: .files
+        case .moveToGroup: .moveToGroup
         default: nil
         }
     }

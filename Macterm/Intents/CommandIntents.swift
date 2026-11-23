@@ -78,6 +78,11 @@ enum MactermKeybind: String, AppEnum {
     case autofillPassword = "autofill_password"
     case passwordManager = "password_manager"
     case files
+    case moveToGroup = "move_to_group"
+    case newGroup = "new_group"
+    case moveOutOfGroup = "move_out_of_group"
+    case ungroup
+    case removeGroup = "remove_group"
     case capturePaletteScreenshot = "capture_palette_screenshot"
 
     /// The action this case names, nil if it has been retired upstream.
@@ -147,6 +152,11 @@ enum MactermKeybind: String, AppEnum {
         .autofillPassword: "Autofill Password",
         .passwordManager: "Password Manager",
         .files: "Files",
+        .moveToGroup: "Move to Group",
+        .newGroup: "New Group",
+        .moveOutOfGroup: "Move Out of Group",
+        .ungroup: "Ungroup Current Group",
+        .removeGroup: "Remove Current Group",
         .capturePaletteScreenshot: "Capture Palette",
     ]
 }

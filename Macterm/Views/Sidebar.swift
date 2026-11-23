@@ -867,13 +867,8 @@ struct SidebarContent: View {
         Divider()
         treeMoveItems(group)
         Divider()
-        Button("Ungroup") {
-            projectStore.ungroup(group.id)
-            for window in appState.windows {
-                window.expandedRows.remove(group.id)
-            }
-        }
-        Button("Remove Group", role: .destructive) { removeGroup(group) }
+        Button("Ungroup") { appState.ungroup(group.id, store: projectStore) }
+        Button("Remove Group", role: .destructive) { appState.removeGroup(group, store: projectStore) }
     }
 
     /// The items that move a project or a group in the tree: New Group
@@ -910,28 +905,10 @@ struct SidebarContent: View {
     /// its name for editing.
     private func createGroup(beside row: UUID?) {
         let group = projectStore.createGroup(
-            name: String(localized: "sidebar.group.defaultName", defaultValue: "New Group", comment: "Name of a new sidebar group"),
+            name: AppState.newGroupName,
             beside: row
         )
         requestProjectRename(group.id)
-    }
-
-    /// Remove a group and the projects inside it, after the question of
-    /// `AppState.requestRemoveGroup`.
-    private func removeGroup(_ group: Project) {
-        appState.requestRemoveGroup(group, projectCount: projectStore.projects(inGroup: group.id).count) {
-            // Read again at the confirm: a project can move while the
-            // question is up.
-            let inside = projectStore.projects(inGroup: group.id)
-            let groupIDs = [group.id] + projectStore.groups
-                .filter { projectStore.ancestors(of: $0.id).contains(group.id) }
-                .map(\.id)
-            appState.removeProjects(inside.map(\.id))
-            projectStore.removeGroup(group.id)
-            for window in appState.windows {
-                window.expandedRows.subtract(groupIDs)
-            }
-        }
     }
 
     /// The project's other git worktrees, each opening a tab of this project
