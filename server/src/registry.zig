@@ -71,13 +71,13 @@ pub const Entry = struct {
     announced: bool = false,
     /// The server sent `take`.
     taken: bool = false,
-    /// A client sent `session.kill`: the server takes the exit status.
+    /// The server ends the session (`session.kill`, a read status, a
+    /// replace): it takes the exit status.
     killing: bool = false,
     /// When SIGKILL goes, if the session has not ended.
     kill_deadline: ?i64 = null,
-    /// A client read the exit status, or will: the `exit` went into a
-    /// channel's queue, or a list or an info showed `exited`. The server
-    /// then ends the session (`statusRead`).
+    /// A client read the exit status (`statusRead`). The server ends the
+    /// session when its shell exits.
     status_read: bool = false,
     waiters: std.ArrayList(Waiter) = .empty,
     /// The creates that start a new session of this id when this one is
@@ -349,28 +349,25 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     startReplacements(s, e);
 }
 
-/// The exited session is gone: each create that waited starts the new
-/// session now, as if it came now.
+/// The exited session is gone: each create that waited starts now.
 pub fn startReplacements(s: *Server, e: *Entry) void {
-    const pending = e.replacing.toOwnedSlice(s.gpa) catch return;
-    defer {
-        for (pending) |r| s.gpa.free(r.args);
-        s.gpa.free(pending);
-    }
-    for (pending) |r| {
+    // A create here cannot add to this list: `e` is dead, so `findEntry`
+    // does not give it.
+    defer e.replacing.clearRetainingCapacity();
+    for (e.replacing.items) |r| {
+        defer s.gpa.free(r.args);
         var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
         defer arena_state.deinit();
         const args = msgpack.decodeSlice(m.SessionCreate.Args, arena_state.allocator(), r.args) catch {
-            peers.replyError(s, r.peer, r.re, .start_failed, "The server is out of memory.");
+            peers.replyError(s, r.peer, r.re, .start_failed, "The server cannot read the request again.");
             continue;
         };
         createFor(s, r.peer, r.re, args);
     }
 }
 
-/// A client read the exit status of `e`, or will read it from a queue that
-/// outlives the session: the server ends the session. Only the server ends
-/// a session whose shell exited, so no client has to.
+/// A client read the exit status of `e`: the server ends the session. The
+/// server is the one owner that ends a session whose shell exited.
 pub fn statusRead(s: *Server, e: *Entry) void {
     if (e.status_read or e.refused or e.conn.dead) return;
     e.status_read = true;
@@ -562,7 +559,7 @@ fn createFor(s: *Server, peer: u64, re: u64, args: m.SessionCreate.Args) void {
         // A session whose shell exited is not given out as a new one. With
         // `replace_exited`, the server ends it and starts the new one when
         // it is gone.
-        if (e.exit != null) {
+        if (e.exit != null and !e.refused) {
             if (!args.replace_exited) return peers.replyError(s, peer, re, .exited, "The session's shell exited. Send replace_exited to start a new session.");
             const encoded = msgpack.encodeAlloc(s.gpa, args) catch
                 return peers.replyError(s, peer, re, .start_failed, "The server is out of memory.");

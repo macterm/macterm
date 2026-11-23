@@ -144,10 +144,8 @@ actor LocalSessions: ServerEndpoint {
     private func watch(_ connection: ServerConnection) {
         Task { [weak self] in
             await self?.feedModel(.connected)
-            for await batch in connection.events {
-                if batch.events.contains(where: \.isModel) {
-                    await self?.feedModel(.batch(batch))
-                }
+            for await batch in connection.events where batch.events.contains(where: \.isModel) {
+                await self?.feedModel(.batch(batch))
             }
             await self?.drop(connection)
         }
