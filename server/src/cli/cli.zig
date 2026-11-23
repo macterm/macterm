@@ -255,8 +255,13 @@ fn apiCall(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed
     const text = parsed.value("--args") orelse "{}";
     const json = if (!std.mem.eql(u8, text, "-")) text else read: {
         const in = ctx.in orelse break :read "";
-        break :read in.allocRemaining(ctx.arena, .unlimited) catch |err| switch (err) {
+        // A request that is larger than one frame cannot go.
+        break :read in.allocRemaining(ctx.arena, .limited(server_frame_max)) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
+            error.StreamTooLong => {
+                try output.writeError(ctx.err, "the arguments on stdin are larger than one request holds (1 MiB)", null);
+                return 1;
+            },
             else => {
                 try output.writeError(ctx.err, "could not read the arguments from stdin", null);
                 return 1;
@@ -276,12 +281,15 @@ fn apiCall(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed
     unreachable;
 }
 
+/// `server.frame_max`: the server reads no larger request.
+const server_frame_max = 1024 * 1024;
+
 fn apiSend(ctx: Context, parsed: command.Parsed, comptime M: type, value: std.json.Value) error{ OutOfMemory, WriteFailed }!u8 {
     var fault: api.Fault = .{};
     const args = api.fromJson(M.Args, ctx.arena, value, &fault) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.Invalid => {
-            const message = try std.fmt.allocPrint(ctx.arena, "args{s}: expected {s}", .{ fault.path.items, fault.message });
+            const message = try std.fmt.allocPrint(ctx.arena, "args{s}: {s}", .{ fault.path.items, fault.message });
             try output.writeError(ctx.err, message, "run `macterm api describe " ++ M.name ++ "` for the arguments");
             return 1;
         },
@@ -990,7 +998,7 @@ test "the overview of a group wraps as its golden help" {
     }
 }
 
-test "the root help lists the ported commands as the golden text does" {
+test "the root help lists the ported commands as the golden text does, and api" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
     try command.writeHelp(&out.writer, &.{&root});
@@ -1637,6 +1645,8 @@ test "api call refuses bad args before it connects, and prints the server's erro
     const bad = try runOffline(a, &.{ "api", "call", "session.send", "--args", "{\"id\": \"x\"}" }, &.{});
     try testing.expectEqual(1, bad.exit);
     try testing.expectEqualStrings("macterm: args.text: expected a value: the key is required\n  hint: run `macterm api describe session.send` for the arguments\n", bad.err);
+    const typo = try runOffline(a, &.{ "api", "call", "session.kill", "--args", "{\"id\": \"x\", \"force\": true}" }, &.{});
+    try testing.expectEqualStrings("macterm: args.force: not a key of this type\n  hint: run `macterm api describe session.kill` for the arguments\n", typo.err);
     const not_json = try runOffline(a, &.{ "api", "call", "ping", "--args", "{" }, &.{});
     try testing.expectEqual(1, not_json.exit);
     try testing.expect(std.mem.startsWith(u8, not_json.err, "macterm: the arguments are not JSON\n"));

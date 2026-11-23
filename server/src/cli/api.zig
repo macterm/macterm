@@ -196,7 +196,7 @@ fn defaultValue(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}!V
 
 // ── call: JSON to the wire and back ─────────────────────────────────────────
 
-/// Where `fromJson` found a fault: the path to it and what it expected.
+/// Where `fromJson` found a fault: the path to it and what is wrong.
 pub const Fault = struct {
     path: std.ArrayList(u8) = .empty,
     message: []const u8 = "",
@@ -207,6 +207,7 @@ pub const Fault = struct {
 /// fault, because it is a mistake, not a later build's field.
 pub fn fromJson(comptime T: type, arena: std.mem.Allocator, value: Value, fault: *Fault) error{ OutOfMemory, Invalid }!T {
     switch (T) {
+        msgpack.Raw => @compileError("no JSON form for a raw value: give the field a type"),
         msgpack.Bin, msgpack.Secret => return .{ .bytes = try expectString(value, fault) },
         []const u8 => return expectString(value, fault),
         else => {},
@@ -270,7 +271,7 @@ pub fn fromJson(comptime T: type, arena: std.mem.Allocator, value: Value, fault:
                     if (std.mem.eql(u8, entry.key_ptr.*, name)) continue :next;
                 }
                 try enterKey(arena, fault, entry.key_ptr.*);
-                return wrong(fault, "no such key");
+                return unknownKey(fault);
             }
             inline for (s.field_names, s.field_types, s.field_attrs) |name, F, attrs| {
                 const len = fault.path.items.len;
@@ -294,6 +295,13 @@ pub fn fromJson(comptime T: type, arena: std.mem.Allocator, value: Value, fault:
                 else => return wrong(fault, "an object {\"t\": tag, \"a\": payload}"),
             };
             const tag_len = fault.path.items.len;
+            var keys = map.iterator();
+            while (keys.next()) |entry| {
+                const key = entry.key_ptr.*;
+                if (std.mem.eql(u8, key, "t") or std.mem.eql(u8, key, "a")) continue;
+                try enterKey(arena, fault, key);
+                return unknownKey(fault);
+            }
             try enterKey(arena, fault, "t");
             const tag = try expectString(map.get("t") orelse .null, fault);
             fault.path.shrinkRetainingCapacity(tag_len);
@@ -302,7 +310,7 @@ pub fn fromJson(comptime T: type, arena: std.mem.Allocator, value: Value, fault:
                 if (std.mem.eql(u8, tag, name)) {
                     if (P == void) return @unionInit(T, name, {});
                     try enterKey(arena, fault, "a");
-                    const payload = try fromJson(P, arena, map.get("a") orelse .null, fault);
+                    const payload = try fromJson(P, arena, map.get("a") orelse return wrong(fault, "a value: the key is required"), fault);
                     fault.path.shrinkRetainingCapacity(tag_len);
                     return @unionInit(T, name, payload);
                 }
@@ -326,7 +334,12 @@ fn expectString(value: Value, fault: *Fault) error{Invalid}![]const u8 {
 }
 
 fn wrong(fault: *Fault, comptime expected: []const u8) error{Invalid} {
-    fault.message = expected;
+    fault.message = "expected " ++ expected;
+    return error.Invalid;
+}
+
+fn unknownKey(fault: *Fault) error{Invalid} {
+    fault.message = "not a key of this type";
     return error.Invalid;
 }
 
@@ -349,6 +362,7 @@ pub fn toJson(arena: std.mem.Allocator, value: anytype) error{OutOfMemory}!Value
     switch (T) {
         msgpack.Bin => return .{ .string = try utf8(arena, value.bytes) },
         msgpack.Secret => @compileError("a result never holds a secret"),
+        msgpack.Raw => @compileError("no JSON form for a raw value: give the field a type"),
         []const u8 => return .{ .string = value },
         else => {},
     }
@@ -440,6 +454,12 @@ test "describe gives a JSON Schema with the required keys and the defaults" {
     try testing.expectEqual(null, d.get("$defs"));
 }
 
+test "describe gives a schema for every method" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    for (methods) |method| _ = try describe(arena_state.allocator(), method);
+}
+
 test "describe puts named types in $defs, and a tree that holds itself ends" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
@@ -471,10 +491,10 @@ test "fromJson reads the args as the server decodes them, and names a fault by i
     try testing.expect(send.submit);
 
     const cases = .{
-        .{ "{\"id\": \"x\"}", ".text", "a value: the key is required" },
-        .{ "{\"id\": \"x\", \"text\": \"ls\", \"sumbit\": false}", ".sumbit", "no such key" },
-        .{ "{\"id\": 3, \"text\": \"ls\"}", ".id", "a string" },
-        .{ "[]", "", "an object" },
+        .{ "{\"id\": \"x\"}", ".text", "expected a value: the key is required" },
+        .{ "{\"id\": \"x\", \"text\": \"ls\", \"sumbit\": false}", ".sumbit", "not a key of this type" },
+        .{ "{\"id\": 3, \"text\": \"ls\"}", ".id", "expected a string" },
+        .{ "[]", "", "expected an object" },
     };
     inline for (cases) |c| {
         fault = .{};
@@ -485,7 +505,7 @@ test "fromJson reads the args as the server decodes them, and names a fault by i
     fault = .{};
     try testing.expectError(error.Invalid, fromJson(m.SessionCreate.Args, a, try parse(a, "{\"id\": \"x\", \"cols\": 70000, \"rows\": 24}"), &fault));
     try testing.expectEqualStrings(".cols", fault.path.items);
-    try testing.expectEqualStrings("an integer from 0 to 65535", fault.message);
+    try testing.expectEqualStrings("expected an integer from 0 to 65535", fault.message);
     fault = .{};
     try testing.expectError(error.Invalid, fromJson(m.SessionCreate.Args, a, try parse(a, "{\"id\": \"x\", \"cols\": 80, \"rows\": 24, \"command\": [\"sh\", 1]}"), &fault));
     try testing.expectEqualStrings(".command[1]", fault.path.items);
@@ -513,6 +533,18 @@ test "fromJson reads a tree, and toJson writes it back the same" {
     const split = back.object.get("a").?.object;
     try testing.expectEqual(0.25, split.get("ratio").?.float);
     try testing.expectEqualStrings("p2", split.get("second").?.object.get("a").?.object.get("id").?.string);
+
+    // A union takes `t` and `a` only, and a payload case needs `a`.
+    fault = .{};
+    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"pane\", \"a\": {\"id\": \"p1\", \"session\": \"s\"}, \"x\": 1}"), &fault));
+    try testing.expectEqualStrings(".x", fault.path.items);
+    fault = .{};
+    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"pane\"}"), &fault));
+    try testing.expectEqualStrings(".a", fault.path.items);
+    try testing.expectEqualStrings("expected a value: the key is required", fault.message);
+    fault = .{};
+    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"leaf\", \"a\": {}}"), &fault));
+    try testing.expectEqualStrings(".t", fault.path.items);
 }
 
 test "toJson leaves out null fields and writes bad UTF-8 as U+FFFD" {
