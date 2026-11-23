@@ -9,8 +9,8 @@ import Foundation
 /// color getters (`ghostty_config_get("background")`, palette, …) always
 /// resolve a split to the `light:` side and never consult the OS appearance,
 /// and the raw `theme` value isn't readable back through the C API. So for the
-/// chrome — which derives from those getters — Macterm has to pick the side
-/// itself and read the chosen theme file's colors directly. A plain (non-split)
+/// chrome — which derives from those getters — Macterm picks the side itself
+/// and has libghostty load it as a plain theme (`sideLayer`). A plain (non-split)
 /// `theme` resolves correctly through libghostty's getters already, so the
 /// chrome falls back to them in that case. (Issue #38.)
 enum ThemeResolver {
@@ -33,14 +33,6 @@ enum ThemeResolver {
             return effectiveAppearanceIsDark ? .dark : .light
         }
         return globalInterfaceStyle?.caseInsensitiveCompare("Dark") == .orderedSame ? .dark : .light
-    }
-
-    /// The subset of theme-file colors Macterm's chrome needs.
-    struct Colors: Equatable {
-        var background: String?
-        var foreground: String?
-        /// Sparse palette map (index → hex), as found in the theme file.
-        var palette: [Int: String]
     }
 
     /// Given the user's effective `theme` value, return the single theme name
@@ -86,53 +78,76 @@ enum ThemeResolver {
         "theme = \(side)\n"
     }
 
-    /// Extract the effective `theme` value from ghostty config text, honoring
-    /// last-wins like libghostty's own merge. Returns nil when no `theme =`
-    /// line is present. Comments (`#`) and blank lines are ignored.
-    static func themeValue(inConfigText text: String) -> String? {
-        var result: String?
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            guard let eq = line.firstIndex(of: "=") else { continue }
-            let key = line[line.startIndex ..< eq].trimmingCharacters(in: .whitespaces)
-            guard key == "theme" else { continue }
-            var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            // ghostty allows quoting theme names with spaces; strip a matched
-            // pair of surrounding double quotes.
-            if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
-                value = String(value.dropFirst().dropLast())
+    /// The effective `theme` value of a config whose root files load in the
+    /// order of `rootPaths`, as libghostty merges it: the root files, then
+    /// each `config-file` include after all of them, in the order libghostty
+    /// queues the includes (`loadRecursiveFiles`). An include loads one time,
+    /// a file that `read` cannot read is skipped, and the last `theme` line
+    /// wins. Nil when no line sets a theme, and when a `config-file` line
+    /// with no value clears the queue (the merge is then not certain).
+    static func themeValue(rootPaths: [String], read: (String) -> String?) -> String? {
+        var theme: String?
+        var queue: [String] = []
+        func load(_ path: String) -> Bool {
+            guard let text = read(path) else { return true }
+            let base = (path as NSString).deletingLastPathComponent
+            for (key, value) in entries(inConfigText: text) {
+                switch key {
+                case "theme":
+                    if !value.isEmpty { theme = unquoted(value) }
+                case "config-file":
+                    guard !value.isEmpty else { return false }
+                    var include = value.hasPrefix("?") ? String(value.dropFirst()) : value
+                    include = unquoted(include)
+                    if !include.isEmpty { queue.append(includePath(include, base: base)) }
+                default:
+                    continue
+                }
             }
-            if !value.isEmpty { result = value }
+            return true
         }
-        return result
+        for path in rootPaths {
+            guard load(path) else { return nil }
+        }
+        var loaded: Set<String> = []
+        var index = 0
+        while index < queue.count {
+            let path = queue[index]
+            index += 1
+            guard loaded.insert(path).inserted else { continue }
+            guard load(path) else { return nil }
+        }
+        return theme
     }
 
-    /// Parse the `background`, `foreground`, and `palette` entries out of a
-    /// ghostty theme file's text. Theme files are plain `key = value` ghostty
-    /// config fragments (e.g. `background = #191724`, `palette = 0=#26233a`).
-    static func colors(inThemeFile text: String) -> Colors {
-        var bg: String?
-        var fg: String?
-        var palette: [Int: String] = [:]
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    /// The `key = value` lines of ghostty config text, in order. Comments
+    /// (`#`) and blank lines are skipped.
+    private static func entries(inConfigText text: String) -> [(key: String, value: String)] {
+        // `isNewline`, so that a CRLF line ends at "\r\n" (one `Character`).
+        text.split(whereSeparator: \.isNewline).compactMap { rawLine in
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            guard let eq = line.firstIndex(of: "=") else { continue }
+            guard !line.isEmpty, !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { return nil }
             let key = line[line.startIndex ..< eq].trimmingCharacters(in: .whitespaces)
             let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            switch key {
-            case "background": bg = value
-            case "foreground": fg = value
-            case "palette":
-                // value is "<index>=<hex>"
-                let parts = value.split(separator: "=", maxSplits: 1)
-                if parts.count == 2, let idx = Int(parts[0].trimmingCharacters(in: .whitespaces)) {
-                    palette[idx] = parts[1].trimmingCharacters(in: .whitespaces)
-                }
-            default: continue
-            }
+            return (key, value)
         }
-        return Colors(background: bg, foreground: fg, palette: palette)
+    }
+
+    /// `value` without one matched pair of surrounding double quotes.
+    private static func unquoted(_ value: String) -> String {
+        guard value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") else { return value }
+        return String(value.dropFirst().dropLast())
+    }
+
+    /// The absolute path of a `config-file` value, as libghostty expands it
+    /// (`Path.expand`): an absolute path stays, `~/` is the home directory,
+    /// and any other path is relative to the real directory of the file that
+    /// names it (`realPathFile`): a `..` goes up from where a symbolic link
+    /// points, not from the link.
+    static func includePath(_ value: String, base: String) -> String {
+        if value.hasPrefix("/") { return value }
+        if value.hasPrefix("~/") { return (value as NSString).expandingTildeInPath }
+        return URL(fileURLWithPath: base, isDirectory: true).resolvingSymlinksInPath()
+            .appendingPathComponent(value).resolvingSymlinksInPath().path
     }
 }
