@@ -633,7 +633,7 @@ struct RemoteHostsTests {
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
     func a_plain_shell_shows_in_the_view_that_claims_it_and_moves_when_it_goes() async throws {
         try await withSSHDHost(answer: false) { host in
-            let fixture = Fixture(host, wakes: true)
+            let fixture = Fixture(host)
             let pane = fixture.pane()
             fixture.hosts.pane = { _ in pane }
             let left = RecordingPaneHost()
