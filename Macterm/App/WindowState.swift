@@ -32,9 +32,23 @@ final class WindowState: Identifiable {
     var activeProjectID: UUID? {
         didSet {
             guard activeProjectID != oldValue else { return }
+            showsProjectScreen = false
             expandActiveProject()
         }
     }
+
+    /// Whether this window shows the project screen (`EmptyProjectView`) of
+    /// `activeProjectID` in place of a tab, also when the project has tabs.
+    ///
+    /// A click on a project row, a palette project row and CLI `project select`
+    /// set it (`AppState.showProjectScreen`). Any selection of a tab in this
+    /// window clears it, and so does a change of project: a window that moves
+    /// to a project for another reason shows a tab. While the key window shows
+    /// the project screen, the workspace has no active tab (the mirror is nil),
+    /// so a tab or pane command acts as in a project with no tabs.
+    /// Only a `.project` workspace has a project screen. Saved as
+    /// `WindowSnapshot.showsProjectScreen`.
+    var showsProjectScreen = false
 
     /// The rows whose sidebar sections are open in this window: projects and
     /// groups (design 013). The saved key keeps its old name.
