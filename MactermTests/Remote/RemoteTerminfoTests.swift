@@ -65,7 +65,7 @@ struct RemoteTerminfoTests {
         RemoteTerminfoInstaller(
             isEnabled: { enabled },
             terminfoDirectory: { terminfoDirectory },
-            install: { destination, dir in
+            install: { destination, _, dir in
                 recorder.destinations.append(destination)
                 recorder.terminfoDirectories.append(dir)
                 return recorder.result
@@ -95,10 +95,10 @@ struct RemoteTerminfoTests {
         let recorder = Recorder()
         let installer = makeInstaller(recorder: recorder)
         // Two connects to one host must not each rewrite the host's terminfo.
-        installer.ensureInstalled(destination: "deploy@node-1")
-        installer.ensureInstalled(destination: "deploy@node-1")
+        installer.ensureInstalled(destination: "deploy@node-1", over: FakeEndpoint([]))
+        installer.ensureInstalled(destination: "deploy@node-1", over: FakeEndpoint([]))
         // A different user on the same host IS a different destination.
-        installer.ensureInstalled(destination: "root@node-1")
+        installer.ensureInstalled(destination: "root@node-1", over: FakeEndpoint([]))
         await waitForInstalls(recorder, count: 2)
         #expect(recorder.destinations == ["deploy@node-1", "root@node-1"])
         // The source always comes from our own bundled DB.
@@ -110,7 +110,7 @@ struct RemoteTerminfoTests {
     func installer_does_nothing_unless_the_user_enabled_ssh_terminfo() async {
         let recorder = Recorder()
         let installer = makeInstaller(enabled: false, recorder: recorder)
-        installer.ensureInstalled(destination: "devbox")
+        installer.ensureInstalled(destination: "devbox", over: FakeEndpoint([]))
         await waitForInstalls(recorder, count: 0)
         // ghostty ships ssh-terminfo off; writing files onto a user's server is
         // not something to start doing unasked.
@@ -123,7 +123,7 @@ struct RemoteTerminfoTests {
         let recorder = Recorder()
         // No bundled terminfo dir (a dev checkout before setup.sh) must not
         // ship the *system* entry as if it were ours.
-        makeInstaller(terminfoDirectory: nil, recorder: recorder).ensureInstalled(destination: "devbox")
+        makeInstaller(terminfoDirectory: nil, recorder: recorder).ensureInstalled(destination: "devbox", over: FakeEndpoint([]))
         await waitForInstalls(recorder, count: 0)
         #expect(recorder.destinations.isEmpty)
     }
@@ -134,9 +134,9 @@ struct RemoteTerminfoTests {
         let recorder = Recorder()
         recorder.result = false
         let installer = makeInstaller(recorder: recorder)
-        installer.ensureInstalled(destination: "devbox")
+        installer.ensureInstalled(destination: "devbox", over: FakeEndpoint([]))
         await waitForInstalls(recorder, count: 1)
-        installer.ensureInstalled(destination: "devbox")
+        installer.ensureInstalled(destination: "devbox", over: FakeEndpoint([]))
         await waitForInstalls(recorder, count: 0)
         // A host that has already said no (no tic, read-only terminfo dir)
         // is not asked again at each connect. The next launch tries again.

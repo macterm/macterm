@@ -715,7 +715,7 @@ final class Pane: Identifiable {
     /// gone for good (closed, tab/project removed, dropped by a layout apply)
     /// — NOT on transient teardown (window hide, tab-switch churn), where the
     /// session must survive. Fire-and-forget: close paths aren't blocked on
-    /// it; `LocalSessions.requestTimeout` (local) and the host link's request
+    /// it; `serverRequestTimeout` (local) and the host link's request
     /// timeout (remote) bound a stuck peer. The client is
     /// a parameter so AppState's injectable instance flows through in tests.
     func killPersistentSession(using sessionClient: SessionClient) {

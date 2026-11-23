@@ -380,7 +380,7 @@ struct PinnedTabsTests {
         )
         var alive = SessionClient.noop
         alive.isBundled = { true }
-        alive.listSessions = { [LocalSession(name: sessionName)] }
+        alive.listSessions = { [SessionInfo(name: sessionName)] }
         state2.sessionClient = alive
         state2.incubatePane = { _ in }
         state2.restorePinnedState(WorkspaceStore(fileURL: fx.storeURL).load().pinned)
@@ -445,7 +445,7 @@ struct PinnedTabsTests {
         // reattach to it.
         var alive = SessionClient.noop
         alive.isBundled = { true }
-        alive.listSessions = { [LocalSession(name: session)] }
+        alive.listSessions = { [SessionInfo(name: session)] }
         fx.state.sessionClient = alive
 
         fx.state.restoreSelection(projects: [project])
@@ -541,7 +541,7 @@ struct PinnedTabsTests {
         )
         // Computed on the main actor first — the client closure is @Sendable.
         let sessionEntries = [first, second].flatMap { $0.splitRoot.allPanes() }.map {
-            LocalSession(name: $0.sessionName)
+            SessionInfo(name: $0.sessionName)
         }
         var alive = SessionClient.noop
         alive.isBundled = { true }

@@ -15,8 +15,9 @@ This file is the map: the build, the architecture, the folders and the conventio
 | `Macterm/Views/Terminal/` | surface rules, copy mode, Explain Output, read-only panes, animations |
 | `Macterm/Memory/` | Project Insights |
 | `Macterm/Search/` | the one search engine |
-| `Macterm/Server/` | the local server client, local and remote panes as v2 sessions, remote projects, a host's server |
-| `Macterm/System/` | system helpers, one ssh connection for each host |
+| `Macterm/Server/` | the local server client, the session endpoints, local panes as v2 sessions |
+| `Macterm/Remote/` | remote projects, a host's server, the roaming link's app part, one ssh connection for each host |
+| `Macterm/System/` | system helpers |
 | `Macterm/Protocol/` | the v2 protocol and its generated code |
 | `Macterm/Control/` | the control CLI and its socket (`CLI/` links to it) |
 | `Macterm/Intents/` | App Intents, Shortcuts, Spotlight |
@@ -105,10 +106,11 @@ A `Pane` is the record of one terminal: its identity, its session, and the state
 - `Macterm/Model/`: `ModelState`, `SplitNode`, `Pane`, `Workspace` (with `WorkspaceKind`), `TerminalTab`, `Project`, `ProjectPath`, `PinnedTabs`, `DesktopWidget`, `ForegroundSample`, `TerminalExecutionTracker`, `CopyMode`, `OutputExplanation`, `PasswordPrompt`, `FileLink`, `TextFileEditor`.
 - `Macterm/Memory/`: Project Insights.
 - `Macterm/Persistence/`: `WorkspacePersistence`, `ProjectStore`, `LayoutFileService`, `ProjectFileStore`, the layout files, `PinnedLayoutStore`, `WidgetLayoutStore`, `PasswordStore`.
-- `Macterm/System/`: `ProcessInspector`, `SSHConnections`, `SSHWrapper`, `OnDeviceModel`, `ProcessRunner` and other wrappers of system services.
+- `Macterm/System/`: `ProcessInspector`, `SSHWrapper`, `OnDeviceModel`, `ProcessRunner` and other wrappers of system services.
 - `Macterm/Config/`: `MactermConfig`, `MactermConfigFile`, `GhosttyConfigSource` and the readers of single ghostty keys.
 - `Macterm/Settings/`: the Settings panes.
-- `Macterm/Server/`: the client of the local server and of a host's server.
+- `Macterm/Server/`: the client of a server (`ServerEndpoint`, `PaneSession`), and the local server.
+- `Macterm/Remote/`: remote projects: `RemoteHosts`, `RemoteHost`, `RemoteServers`, `SSHConnections`, `SSHPrompt`, `LoginUI`, `HostCommands`.
 - `Macterm/Protocol/`: the v2 protocol (`MessagePack`, `ProtocolFrame`, the generated `MactermProtocol`).
 - `Macterm/Link/`: the packet layer of the roaming link.
 - `Macterm/Control/`: the control socket, its handler and the agent skills.

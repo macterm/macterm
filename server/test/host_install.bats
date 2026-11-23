@@ -4,7 +4,7 @@
 # machine, as the app sends them: `sh -c '<script>' macterm <args>` as the
 # ssh command, joined into one line. Two builds of the server, with the build keys aaaa1111 and
 # bbbb2222, stand for two app versions. The app's half (the consent, the
-# replace) is in MactermTests/Server/RemoteServersTests.swift. The last test
+# replace) is in MactermTests/Remote/RemoteServersTests.swift. The last test
 # runs remote panes as the app does (0057, RemoteHosts): each pane is an ssh
 # channel over one master.
 
