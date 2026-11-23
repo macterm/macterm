@@ -4868,6 +4868,7 @@ extension MactermProtocol {
         var kind: MactermProtocol.MarkKind
         var command: ProtocolBin?
         var exitCode: Int32?
+        var outputTail: ProtocolBin?
     }
 }
 
@@ -4876,11 +4877,13 @@ extension MactermProtocol.Mark: ProtocolValue {
         var kind: MactermProtocol.MarkKind?
         var command: ProtocolBin?
         var exitCode: Int32?
+        var outputTail: ProtocolBin?
         try reader.readMap { key, reader in
             switch key {
             case "kind": kind = try MactermProtocol.MarkKind(from: &reader)
             case "command": command = try reader.readOptional(ProtocolBin.self)
             case "exit_code": exitCode = try reader.readOptional(Int32.self)
+            case "output_tail": outputTail = try reader.readOptional(ProtocolBin.self)
             default: return false
             }
             return true
@@ -4888,12 +4891,14 @@ extension MactermProtocol.Mark: ProtocolValue {
         self.kind = try MessagePackReader.required(kind, "kind")
         self.command = command
         self.exitCode = exitCode
+        self.outputTail = outputTail
     }
 
     func encode(to writer: inout MessagePackWriter) {
         var keyCount = 1
         if command != nil { keyCount += 1 }
         if exitCode != nil { keyCount += 1 }
+        if outputTail != nil { keyCount += 1 }
         writer.writeMapHeader(keyCount)
         writer.writeString("kind")
         kind.encode(to: &writer)
@@ -4904,6 +4909,10 @@ extension MactermProtocol.Mark: ProtocolValue {
         if let exitCode {
             writer.writeString("exit_code")
             exitCode.encode(to: &writer)
+        }
+        if let outputTail {
+            writer.writeString("output_tail")
+            outputTail.encode(to: &writer)
         }
     }
 }

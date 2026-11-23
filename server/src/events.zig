@@ -26,7 +26,7 @@ const program_status = ghostty_vt.osc.program_status;
 pub const Event = union(enum) {
     title: []const u8,
     cwd: []const u8,
-    mark: struct { kind: m.MarkKind, command: ?[]const u8 = null, exit_code: ?i32 = null },
+    mark: struct { kind: m.MarkKind, command: ?[]const u8 = null, exit_code: ?i32 = null, output_tail: ?[]const u8 = null },
     progress: m.Progress,
     bell,
     activity,
@@ -279,7 +279,15 @@ pub const Watch = struct {
             },
             .command_end => {
                 w.at_input = false;
-                w.push(.{ .mark = .{ .kind = .end, .command = w.dupeCommand(), .exit_code = e.exit_code } });
+                // Only a failure carries its output: the app keeps the tail
+                // of a failed command, and nothing else reads it.
+                const failed = if (e.exit_code) |code| code != 0 else false;
+                w.push(.{ .mark = .{
+                    .kind = .end,
+                    .command = w.dupeCommand(),
+                    .exit_code = e.exit_code,
+                    .output_tail = if (failed) outputTail(w.gpa, &w.term) else null,
+                } });
                 w.setCommand(null);
                 if (w.status.state == .running) w.setStatus(.done, false);
             },
@@ -523,7 +531,10 @@ pub const Watch = struct {
 fn freeEvent(gpa: std.mem.Allocator, e: Event) void {
     switch (e) {
         .title, .cwd => |s| gpa.free(s),
-        .mark => |mk| if (mk.command) |c| gpa.free(c),
+        .mark => |mk| {
+            if (mk.command) |c| gpa.free(c);
+            if (mk.output_tail) |t| gpa.free(t);
+        },
         .program => |records| freeProgram(gpa, records),
         else => {},
     }
@@ -615,6 +626,51 @@ pub fn inputText(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]u8 {
     const result = gpa.dupe(u8, text) catch null;
     out.deinit(gpa);
     return result;
+}
+
+/// The most rows above the cursor that `outputTail` reads.
+pub const output_tail_rows = 20;
+
+/// The text of the output cells in the last `output_tail_rows` rows above
+/// the cursor, after the prompt of the command when it is in those rows: the
+/// end of what the command printed, a line for each row that does not wrap.
+/// Read at the command's end mark, before the shell prints its next prompt.
+/// A `clear` keeps only what came after it. Null when there is no output.
+pub fn outputTail(gpa: std.mem.Allocator, term: *ghostty_vt.Terminal) ?[]u8 {
+    const screen = term.screens.active;
+    const cursor = screen.cursor.page_pin.*;
+    const top = switch (cursor.upOverflow(output_tail_rows)) {
+        .offset => |p| p,
+        .overflow => |o| o.end,
+    };
+    var prompts = cursor.promptIterator(.left_up, top);
+    const start = if (screen.semantic_prompt.seen) prompts.next() orelse top.left(top.x) else top.left(top.x);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    var cells = start.cellIterator(.right_down, cursor);
+    var last: ?ghostty_vt.Pin = null;
+    while (cells.next()) |p| {
+        if (last) |l| if (l.node != p.node or l.y != p.y) {
+            trimEndSpaces(&out);
+            if (!l.rowAndCell().row.wrap) out.append(gpa, '\n') catch return null;
+        };
+        last = p;
+        const cell = p.rowAndCell().cell;
+        if (cell.semantic_content != .output) continue;
+        if (cell.wide == .spacer_tail or cell.wide == .spacer_head) continue;
+        if (!cell.hasText()) {
+            out.append(gpa, ' ') catch return null;
+            continue;
+        }
+        appendCodepoint(gpa, &out, cell.codepoint()) catch return null;
+        if (cell.hasGrapheme()) if (p.grapheme(cell)) |cps| {
+            for (cps) |cp| appendCodepoint(gpa, &out, cp) catch return null;
+        };
+    }
+    const text = std.mem.trim(u8, out.items, " \n");
+    if (text.len == 0) return null;
+    return gpa.dupe(u8, text) catch null;
 }
 
 fn trimEndSpaces(out: *std.ArrayList(u8)) void {
@@ -756,6 +812,42 @@ test "events: marks carry the command and the exit code, and the status follows"
     try testing.expectEqual(.running, statuses[0].state);
     // A nonzero exit is not a failed run.
     try testing.expectEqual(m.Status{ .state = .done }, statuses[1]);
+}
+
+test "events: a failed command's end carries the end of its output" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ \x1b]133;B\x07make\r\n\x1b]133;C\x07", 0);
+    f.feed("one\r\nerror: two\r\n\x1b]133;D;2\x07", 1);
+    const marks = try f.only(.mark);
+    defer testing.allocator.free(marks);
+    try testing.expectEqual(.end, marks[3].kind);
+    // No prompt text and no input: only what the command printed.
+    try testing.expectEqualStrings("one\nerror: two", marks[3].output_tail.?);
+}
+
+test "events: a success, and output longer than the tail, keep only what they must" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ \x1b]133;B\x07ok\r\n\x1b]133;C\x07done\r\n\x1b]133;D;0\x07", 0);
+    f.feed("\x1b]133;A\x07$ \x1b]133;B\x07seq\r\n\x1b]133;C\x07", 1);
+    var i: usize = 0;
+    while (i < output_tail_rows + 5) : (i += 1) {
+        var buf: [16]u8 = undefined;
+        f.feed(try std.fmt.bufPrint(&buf, "{d}\r\n", .{i}), 1);
+    }
+    f.feed("\x1b]133;D;1\x07", 2);
+    const marks = try f.only(.mark);
+    defer testing.allocator.free(marks);
+    try testing.expectEqual(null, marks[3].output_tail);
+    const tail = marks[7].output_tail.?;
+    // The prompt scrolled out of the rows read: the tail starts at a row
+    // of output and ends at the last one.
+    try testing.expect(std.mem.endsWith(u8, tail, "\n24"));
+    try testing.expect(std.mem.indexOf(u8, tail, "seq") == null);
+    try testing.expect(std.mem.count(u8, tail, "\n") < output_tail_rows);
 }
 
 test "events: the shell's own command line wins over the input cells" {

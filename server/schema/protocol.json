@@ -3678,6 +3678,12 @@
           "type": "i32",
           "optional": true,
           "since": 1
+        },
+        {
+          "name": "output_tail",
+          "type": "bin",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],

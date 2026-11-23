@@ -1074,6 +1074,7 @@ const Session = struct {
                 .kind = mk.kind,
                 .command = if (mk.command) |c| .{ .bytes = c } else null,
                 .exit_code = mk.exit_code,
+                .output_tail = if (mk.output_tail) |t| .{ .bytes = t } else null,
             }, false),
             .progress => |p| s.broadcastPane(m.Progress, p, true),
             .bell => {
