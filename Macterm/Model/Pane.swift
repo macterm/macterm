@@ -188,6 +188,12 @@ final class Pane: Identifiable {
     private var activityQuietPollWork: DispatchWorkItem?
     private let activityQuietPollDelay: TimeInterval
 
+    /// When the running command started: the session's `output` mark (OSC
+    /// 133;C), for the `CommandEnd` of its `end` mark. nil while no command
+    /// runs, and for a command that started before the channel attached.
+    @ObservationIgnored
+    var commandStartedAt: Date?
+
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
     /// `ProcessInspector.passwordAsker` and the `run:` capture of a layout.
