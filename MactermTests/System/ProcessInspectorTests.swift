@@ -101,6 +101,9 @@ struct ProcessInspectorTests {
         // not a script.
         #expect(!ProcessInspector.shellCommandLineRunsCommand("/opt/homebrew/bin/nu --execute use ghostty *"))
         #expect(!ProcessInspector.shellCommandLineRunsCommand(""))
+        // A word after an unknown option can be its value: no run.
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash -o vi"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("nu --config /x/config.nu"))
     }
 
     /// Every nushell pane runs the exact argv below — ghostty's command-wrapper

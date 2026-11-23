@@ -118,6 +118,21 @@ struct PaneTests {
         #expect(p.executionState == .done)
     }
 
+    /// A login shell and nushell under ghostty's wrapper own their prompt:
+    /// a Return there starts no run.
+    @Test
+    func a_shell_at_its_prompt_is_no_run() {
+        for command in ["-zsh", "/opt/homebrew/bin/nu --execute use ghostty *"] {
+            let p = Pane(projectPath: "/", projectID: UUID())
+            p.lineMode = .echoing
+            p.recordUserInteraction()
+            p.recordCommandSubmission(hasContent: true)
+            let comm = String(command.split(separator: " ")[0])
+            p.applyForeground(SessionForeground(comm: comm, isIdle: false, isShell: true, command: command))
+            #expect(p.executionState == .idle)
+        }
+    }
+
     @Test
     func executionState_defaults_to_idle() {
         let p = Pane(projectPath: "/", projectID: UUID())
