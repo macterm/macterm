@@ -45,7 +45,7 @@ struct ProjectSource: PaletteSource {
             category: category,
             score: score
         ) { [appState = context.appState] in
-            appState.selectProject(project)
+            appState.showProjectScreen(project, in: nil)
         }
     }
 }
