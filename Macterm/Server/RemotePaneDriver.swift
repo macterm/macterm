@@ -12,8 +12,10 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 /// - running: the session runs on the host's link, and each view that is
 ///   ready has a `PaneSession` (its own channel, size and claim);
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server. It
-///   shows in one view only (`plainOwner`), because a pty is one terminal;
-///   the other views show one line that says so;
+///   shows in one view only (`plainOwner`), because a pty is one terminal.
+///   That view leads and the others do not, so a window that is not key
+///   shows "Showing in another window" as for a session. A claim from
+///   another view moves the shell there, with its screen replayed;
 /// - waiting: no session yet. A wake (a login that ended, the reconnect
 ///   sweep) or a key asks again.
 ///
@@ -40,8 +42,6 @@ final class RemotePaneDriver {
         /// Read and written on the main actor.
         fileprivate var ready = false
         fileprivate var session: PaneSession?
-        /// The view showed the line that the plain shell is in another view.
-        fileprivate var toldPlainElsewhere = false
 
         fileprivate init(host: any PaneSessionHost, driver: RemotePaneDriver) {
             self.host = host
@@ -65,7 +65,7 @@ final class RemotePaneDriver {
         }
 
         nonisolated func claim(grid: PaneGrid?) {
-            DispatchQueue.main.async { MainActor.assumeIsolated { self.driver?.inputRoute(of: self)?.claim(grid: grid) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.driver?.claim(grid: grid, from: self) } }
         }
 
         nonisolated func sendSize(_ grid: PaneGrid?) {
@@ -84,7 +84,8 @@ final class RemotePaneDriver {
     private var views: [View] = []
     /// The view that shows the plain shell.
     private weak var plainOwner: View?
-    /// The plain shell's output, for its owner.
+    /// The plain shell's output, for its owner, and the log that replays
+    /// its screen in the next owner.
     private let plainOutput = PlainOutput()
     /// Tells a late answer from a current one.
     private var generation = 0
@@ -114,9 +115,6 @@ final class RemotePaneDriver {
     /// handshake gives up (15 s, `RemoteServers.Configuration.handshakeTimeout`).
     /// A login that is slower than this time shows the badge too.
     static let slowConnectAfter: Duration = .seconds(3)
-
-    /// The line of a view that does not show the pane's plain shell.
-    static let plainElsewhereText = "macterm: this ssh shell shows in one window only."
 
     init(
         name: String,
@@ -197,7 +195,7 @@ final class RemotePaneDriver {
             if case let .plain(shell) = state, let next = views.first(where: \.ready) {
                 hand(shell, to: next)
             } else {
-                plainOutput.target = nil
+                plainOutput.retarget(nil)
             }
         }
     }
@@ -320,32 +318,49 @@ final class RemotePaneDriver {
             state = .waiting
             return
         }
+        plainOutput.clearLog()
         state = .plain(shell)
         for view in views where view.ready {
             showPlain(in: view)
         }
     }
 
-    /// The plain shell shows in its owner only. Any other view says so, once.
+    /// The plain shell shows in its owner only. Any other view starts clear
+    /// and does not lead, as a client of a session that another window
+    /// leads: the app shows the same notice.
     private func showPlain(in view: View) {
         guard case let .plain(shell) = state else { return }
         if plainOwner == nil {
             hand(shell, to: view)
-        } else if plainOwner !== view, !view.toldPlainElsewhere {
-            view.toldPlainElsewhere = true
+        } else if plainOwner !== view {
             view.host.paneFeed(PaneSession.resetScreen)
-            view.host.paneFeed(Data(Self.paneText(Self.plainElsewhereText).utf8))
+            view.host.paneLead(false)
         }
     }
 
-    /// `view` shows the plain shell from now on: its screen starts clear,
-    /// and the pty takes its size.
+    /// `view` shows the plain shell from now on: its screen is the shell's
+    /// output again (`PlainOutput.retarget`), it leads, and the pty takes
+    /// its size.
     private func hand(_ shell: PlainShell, to view: View) {
+        let previous = plainOwner
         plainOwner = view
-        view.toldPlainElsewhere = false
-        view.host.paneFeed(PaneSession.resetScreen)
-        plainOutput.target = view.host
+        plainOutput.retarget(view.host)
+        if let previous, previous !== view {
+            previous.host.paneFeed(PaneSession.resetScreen)
+            previous.host.paneLead(false)
+        }
+        view.host.paneLead(true)
         shell.sendSize(view.host.paneGrid())
+    }
+
+    /// A view claims, as the key window's surfaces do. A plain shell moves
+    /// to a ready view that claims it; a session takes the claim itself.
+    private func claim(grid: PaneGrid?, from view: View) {
+        if case let .plain(shell) = state {
+            if view.ready, plainOwner !== view { hand(shell, to: view) }
+            return
+        }
+        inputRoute(of: view)?.claim(grid: grid)
     }
 
     private func plainExited(_ status: Int32, generation mine: Int) {
@@ -390,9 +405,11 @@ final class RemotePaneDriver {
         case let .plain(shell):
             shell.terminate()
             plainOwner = nil
-            plainOutput.target = nil
+            plainOutput.retarget(nil)
+            plainOutput.clearLog()
+            // No view leads a shell that is gone.
             for view in views {
-                view.toldPlainElsewhere = false
+                view.host.paneLead(nil)
             }
         default: break
         }
@@ -476,29 +493,48 @@ final class RemotePaneDriver {
 
     /// The plain shell's output goes to the view that shows it. The target
     /// changes on the main actor; the shell reads on a queue of its own.
+    ///
+    /// A pty has no snapshot, so the output is also kept in a log: the next
+    /// owner gets the log from a clear screen, and shows what the last owner
+    /// showed. A log over `logLimit` keeps its last `logKept` bytes, so a
+    /// long run replays its end only.
     private final class PlainOutput: PaneSessionHost, @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: (any PaneSessionHost)?
+        static let logLimit = 2 << 20
+        static let logKept = 1 << 20
 
-        var target: (any PaneSessionHost)? {
-            get {
-                lock.lock()
-                defer { lock.unlock() }
-                return stored
-            }
-            set {
-                lock.lock()
-                stored = newValue
-                lock.unlock()
-            }
+        private let lock = NSLock()
+        private var target: (any PaneSessionHost)?
+        private var log = Data()
+
+        /// The output goes to `host` from now on, after the log. The lock
+        /// keeps the order: no output comes between the log and the next.
+        func retarget(_ host: (any PaneSessionHost)?) {
+            lock.lock()
+            defer { lock.unlock() }
+            target = host
+            guard let host else { return }
+            host.paneFeed(PaneSession.resetScreen)
+            if !log.isEmpty { host.paneFeed(log) }
+        }
+
+        func clearLog() {
+            lock.lock()
+            log = Data()
+            lock.unlock()
         }
 
         func paneFeed(_ data: Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            log.append(data)
+            if log.count > Self.logLimit { log = Data(log.suffix(Self.logKept)) }
             target?.paneFeed(data)
         }
 
         func paneGrid() -> PaneGrid {
-            target?.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
+            lock.lock()
+            defer { lock.unlock() }
+            return target?.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
         }
 
         // A plain shell has no session: nothing reports these.

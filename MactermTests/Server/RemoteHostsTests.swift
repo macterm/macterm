@@ -609,10 +609,11 @@ struct RemoteHostsTests {
     }
 
     /// Two windows show one pane on a host with no server. The pane's one
-    /// plain shell shows in the first view; the second says so and types
-    /// nowhere. When the first view goes, the second shows the shell.
+    /// plain shell shows in one view, which leads; the other does not lead
+    /// and types nowhere. A claim moves the shell with its screen, and so
+    /// does the close of the view that shows it.
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_plain_shell_shows_in_one_view_and_moves_to_the_next() async throws {
+    func a_plain_shell_shows_in_the_view_that_claims_it_and_moves_when_it_goes() async throws {
         try await withSSHDHost(answer: false) { host in
             let fixture = Fixture(host, wakes: true)
             let pane = fixture.pane()
@@ -622,18 +623,31 @@ struct RemoteHostsTests {
             let driver = RemotePaneDriver(name: pane.sessionName, hosts: fixture.hosts)
             defer { driver.stop() }
             let routes = driver.start(showing: [left, right])
-            try await right.waitFor { $0.screen.contains(RemotePaneDriver.plainElsewhereText) }
+            // The first view leads the shell; the second does not, so the app
+            // shows its notice there.
+            try await left.waitFor { $0.leads.last == true }
+            try await right.waitFor { $0.leads.last == false }
             routes[1].sendInput(Data("printf 'right-%s\\n' typed\n".utf8))
             routes[0].sendInput(Data("printf 'left-%s\\n' typed\n".utf8))
             try await left.waitFor { $0.screen.contains("left-typed") }
             #expect(!left.snapshot().screen.contains("right-typed"))
             #expect(!right.snapshot().screen.contains("left-typed"))
 
-            // The first window closes: the shell shows in the second.
-            routes[0].stop()
-            routes[1].sendInput(Data("printf 'moved-%s\\n' here\n".utf8))
-            try await right.waitFor { $0.screen.contains("moved-here") }
-            #expect(right.snapshot().exit == nil)
+            // The second view claims, as the key window does: the shell moves
+            // there with its screen, and the first view stands aside.
+            routes[1].claim(grid: nil)
+            try await right.waitFor { $0.screen.contains("left-typed") && $0.leads.last == true }
+            try await left.waitFor { $0.leads.last == false }
+            routes[1].sendInput(Data("printf 'claimed-%s\\n' here\n".utf8))
+            try await right.waitFor { $0.screen.contains("claimed-here") }
+
+            // That window closes: the shell shows in the first view again,
+            // with what the second showed.
+            routes[1].stop()
+            try await left.waitFor { $0.screen.contains("claimed-here") && $0.leads.last == true }
+            routes[0].sendInput(Data("printf 'moved-%s\\n' back\n".utf8))
+            try await left.waitFor { $0.screen.contains("moved-back") }
+            #expect(left.snapshot().exit == nil)
         }
     }
 
