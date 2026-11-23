@@ -868,7 +868,8 @@ struct SidebarContent: View {
         treeMoveItems(group)
         Divider()
         Button("Ungroup") {
-            projectStore.ungroup(group.id)
+            appState.removeProjects([group.id])
+            projectStore.removeKeepingChildren(group.id)
             for window in appState.windows {
                 window.expandedRows.remove(group.id)
             }
@@ -909,8 +910,11 @@ struct SidebarContent: View {
     /// Add a group (beside `row`, or at the end of the top level) and open
     /// its name for editing.
     private func createGroup(beside row: UUID?) {
-        let group = projectStore.createGroup(
-            name: String(localized: "sidebar.group.defaultName", defaultValue: "New Group", comment: "Name of a new sidebar group"),
+        let group = projectStore.add(
+            Project(
+                name: String(localized: "sidebar.group.defaultName", defaultValue: "New Group", comment: "Name of a new sidebar group"),
+                path: ""
+            ),
             beside: row
         )
         requestProjectRename(group.id)
@@ -919,17 +923,14 @@ struct SidebarContent: View {
     /// Remove a group and the projects inside it, after the question of
     /// `AppState.requestRemoveGroup`.
     private func removeGroup(_ group: Project) {
-        appState.requestRemoveGroup(group, projectCount: projectStore.projects(inGroup: group.id).count) {
+        appState.requestRemoveGroup(group, projectCount: projectStore.descendants(of: group.id).count) {
             // Read again at the confirm: a project can move while the
             // question is up.
-            let inside = projectStore.projects(inGroup: group.id)
-            let groupIDs = [group.id] + projectStore.groups
-                .filter { projectStore.ancestors(of: $0.id).contains(group.id) }
-                .map(\.id)
-            appState.removeProjects(inside.map(\.id))
-            projectStore.removeGroup(group.id)
+            let inside = projectStore.descendants(of: group.id).map(\.id)
+            appState.removeProjects([group.id] + inside)
+            projectStore.removeWithDescendants(group.id)
             for window in appState.windows {
-                window.expandedRows.subtract(groupIDs)
+                window.expandedRows.subtract([group.id] + inside)
             }
         }
     }
@@ -1002,9 +1003,11 @@ struct SidebarContent: View {
             appState.reorderPinnedTab(record.id, toIndex: index + 2)
         }
         .disabled(index >= appState.pinnedRecords.count - 1)
-        if isLoaded, !projectStore.projects.isEmpty {
+        // A project with no folder is a group row, with no tabs.
+        let unpinTargets = projectStore.projects.filter(\.hasFolder)
+        if isLoaded, !unpinTargets.isEmpty {
             Menu("Unpin to Project") {
-                ForEach(projectStore.projects) { destination in
+                ForEach(unpinTargets) { destination in
                     Button(destination.name) {
                         appState.moveTab(
                             record.id,
@@ -1056,7 +1059,8 @@ struct SidebarContent: View {
             appState.reorderTab(tab.id, inProject: project.id, toIndex: tabIndex + 2)
         }
         .disabled(tabIndex >= tabs.count - 1)
-        let moveTargets = projectStore.projects.filter { $0.id != project.id }
+        // A project with no folder is a group row, with no tabs.
+        let moveTargets = projectStore.projects.filter { $0.id != project.id && $0.hasFolder }
         if !moveTargets.isEmpty {
             Menu("Move to Project") {
                 ForEach(moveTargets) { destination in

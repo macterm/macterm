@@ -33,7 +33,7 @@ struct SessionClient {
     /// Every local v2 session from the server (`LocalSessions`), or nil when
     /// the server cannot be reached. nil means UNKNOWN: a caller never ends
     /// or restarts anything on it.
-    var listSessions: @Sendable () async -> [LocalSession]?
+    var listSessions: @Sendable () async -> [SessionInfo]?
     /// Ends v1's local zmx sessions of these names and their programs
     /// (`V1Sessions`), at the first v2 launch (design/008 §4). True only
     /// when none of them runs after it. False on the unit-test host, which
@@ -180,7 +180,7 @@ enum ZmxReaper {
     /// this build flavor's own (`LocalServer.folderName`), so every session
     /// in it was made by an app of this flavor. These are the leftovers of a
     /// crash, or of a close whose kill did not reach the server.
-    static func localOrphans(in sessions: [LocalSession], known: Set<String>) -> [String] {
+    static func localOrphans(in sessions: [SessionInfo], known: Set<String>) -> [String] {
         sessions.compactMap { session in
             guard session.isRunning,
                   session.name.hasPrefix(ZmxSessionName.prefix),

@@ -3,13 +3,14 @@ with its exit code, its secrets masked, and a tail of its output when it
 fails. Without the on-device model the panel suggests nothing, also after
 a failure: Suggested holds only the model's suggestions.
 
-Recording starts at OSC 133;D (`GHOSTTY_ACTION_COMMAND_FINISHED`). CI's
-bash 3.2 login shell gets no shell integration, so the script prints the
-marks itself, the same bytes that shell integration sends: 133;C when the
-command starts, then 133;D. libghostty drops a D that no C started
-(`Surface.zig`, `stop_command` with no `command_timer`). Where the shell
-does have integration, it sends a second mark for the script's own exit; the
-assertions look for the script's run, so they hold in both cases.
+Recording starts at the session's `end` mark (OSC 133;D), which carries the
+command line that the session read at 133;C. CI's bash 3.2 login shell gets
+no shell integration, so the script prints the marks itself, the same bytes
+that a shell integration sends: 133;C with the command line as
+`cmdline_url`, then 133;D. With no prompt marks there are no input cells
+for the session to read. Where the shell does have integration, it sends a second mark for
+the script's own exit; the assertions look for the script's run, so they
+hold in both cases.
 
 The debug-only `project memory` verb turns recording on and reads back what
 the panel would show. macOS 26 and later only: below that, the verb refuses
@@ -25,8 +26,12 @@ import pytest
 from _harness import wait_for
 
 SECRET = "hunter2-" + uuid.uuid4().hex[:8]
-# The command-start mark, as a script's first line (see the module doc).
-START = "printf '\\033]133;C\\007'\n"
+# The command-start mark with the command line that ran the script, as the
+# script's first line (see the module doc). The line is percent-encoded.
+START = (
+    "printf '\\033]133;C;cmdline_url=%s\\007' "
+    "\"$(printf '/bin/sh %s' \"$0 $*\" | sed 's/%/%25/g; s/ /%20/g; s/=/%3D/g; s/;/%3B/g')\"\n"
+)
 
 
 def _active_project(app):

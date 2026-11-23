@@ -57,11 +57,12 @@ enum DocumentOpenRequest {
 /// local project whose directory holds it most closely, else the active
 /// project when it is local, else the first local one. nil when there is no
 /// local project at all — the caller then makes one for the file's folder,
-/// the same way opening that folder would. A remote project is never chosen:
+/// the same way opening that folder would. A project with no folder is never
+/// chosen (`Project.hasFolder`). A remote project is never chosen:
 /// the file is on this Mac, and a pane there would start on the host.
 enum TextFileProject {
     static func project(for file: String, in projects: [Project], activeProjectID: UUID?) -> Project? {
-        let local = projects.filter { !$0.isRemote }
+        let local = projects.filter { $0.hasFolder && !$0.isRemote }
         var closest: (project: Project, depth: Int)?
         for project in local {
             let directory = ProjectPath.canonicalLocal(project.path)

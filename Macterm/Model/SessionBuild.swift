@@ -27,7 +27,7 @@ enum SessionBuild {
     /// `executableIsDeleted` is asked for each session process
     /// (`ProcessInspector.executableIsDeleted`).
     static func outdatedNames(
-        in sessions: [LocalSession],
+        in sessions: [SessionInfo],
         appKey: String?,
         executableIsDeleted: (pid_t) -> Bool = ProcessInspector.executableIsDeleted
     ) -> Set<String> {

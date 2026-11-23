@@ -268,7 +268,7 @@ struct ControlHandlerTests {
 
     private func stubZmx(
         _ appState: AppState,
-        sessions: [LocalSession]?
+        sessions: [SessionInfo]?
     ) {
         appState.sessionClient = SessionClient(
             runsSessions: { false },
@@ -288,9 +288,9 @@ struct ControlHandlerTests {
         stubZmx(
             appState,
             sessions: [
-                LocalSession(name: pane.sessionName, shellPID: 4242, clients: 1),
-                LocalSession(name: "macterm-orphan-aaaabbbbcccc"),
-                LocalSession(name: "macterm-exited-aaaabbbbcccc", isRunning: false),
+                SessionInfo(name: pane.sessionName, shellPID: 4242, clients: 1),
+                SessionInfo(name: "macterm-orphan-aaaabbbbcccc"),
+                SessionInfo(name: "macterm-exited-aaaabbbbcccc", isRunning: false),
             ]
         )
         let response = await handler.handle(request("session.list"))
@@ -315,7 +315,7 @@ struct ControlHandlerTests {
     @Test
     func session_info_finds_by_name_or_404s() async {
         let (handler, appState, _) = makeHandler()
-        stubZmx(appState, sessions: [LocalSession(name: "macterm-x-000011112222")])
+        stubZmx(appState, sessions: [SessionInfo(name: "macterm-x-000011112222")])
 
         let hit = await handler.handle(request("session.info", args: ControlArgs(session: "macterm-x-000011112222")))
         #expect(hit.ok)
@@ -1520,7 +1520,7 @@ struct ControlHandlerTests {
             isBundled: { true },
             killSession: { name in await killed.append(name) },
             killRemoteSession: { _, _ in },
-            listSessions: { [LocalSession(name: "macterm-x-000011112222")] },
+            listSessions: { [SessionInfo(name: "macterm-x-000011112222")] },
             endV1Sessions: { _ in true }
         )
 

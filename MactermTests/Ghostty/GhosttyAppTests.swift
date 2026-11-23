@@ -21,12 +21,15 @@ struct GhosttyAppTests {
         return url.path
     }
 
-    /// A finalized config from `files`, loaded in order.
-    private func makeConfig(_ files: [String]) throws -> ghostty_config_t {
+    /// A finalized config from `files`, loaded in order, then their
+    /// `config-file` includes, then `last`, as `GhosttyApp.buildConfig` loads.
+    private func makeConfig(_ files: [String], last: String? = nil) throws -> ghostty_config_t {
         let config = try #require(ghostty_config_new())
         for file in files {
             ghostty_config_load_file(config, file)
         }
+        ghostty_config_load_recursive_files(config)
+        if let last { ghostty_config_load_file(config, last) }
         ghostty_config_finalize(config)
         return config
     }
@@ -36,9 +39,18 @@ struct GhosttyAppTests {
         let layer = try write("layer", ThemeResolver.sideLayer(side))
         let baseline = try makeConfig([user])
         defer { ghostty_config_free(baseline) }
-        let config = try makeConfig([user, layer])
+        let config = try makeConfig([user], last: layer)
         defer { ghostty_config_free(config) }
         return GhosttyApp.readThemeSideColors(from: config, baseline: baseline)
+    }
+
+    /// Whether the side layer `side` over `user` gives the colors that
+    /// libghostty merges for `user` with no conditional state.
+    private func readsTheLightSide(_ side: String, over user: String) throws -> Bool {
+        let colors = try #require(try readSide(side, over: user))
+        let baseline = try makeConfig([user])
+        defer { ghostty_config_free(baseline) }
+        return GhosttyApp.readsTheLightSide(colors, baseline: baseline)
     }
 
     private func rgb(_ hex: UInt32) -> GhosttyApp.ResolvedColors.RGB {
@@ -103,5 +115,37 @@ struct GhosttyAppTests {
         let split = try makeSplit(paletteOverride: "window-theme = bogus\nno-such-key = 1")
         let colors = try #require(try readSide(split.dark, over: split.user))
         #expect(colors.background == rgb(0x202020))
+    }
+
+    /// A pair set in an included file: Macterm reads it from the include,
+    /// libghostty agrees on the light side, and the dark side has the
+    /// user's color key over it.
+    @Test
+    func aPairInAnIncludeReadsBothSides() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let split = try makeSplit()
+        let included = try write("included.conf", "theme = light:\(split.light),dark:\(split.dark)\n")
+        let user = try write("root", "config-file = included.conf\ntheme = Root Theme\npalette = 1=#abcdef\n")
+        let value = try #require(ThemeResolver.themeValue(rootPaths: [user]) {
+            try? String(contentsOfFile: $0, encoding: .utf8)
+        })
+        let light = try #require(ThemeResolver.resolve(themeValue: value, scheme: .light))
+        let dark = try #require(ThemeResolver.resolve(themeValue: value, scheme: .dark))
+        #expect(light == split.light)
+        #expect(try readsTheLightSide(light, over: user))
+        let colors = try #require(try readSide(dark, over: user))
+        #expect(colors.background == rgb(0x202020))
+        #expect(colors.palette[1] == rgb(0xABCDEF))
+    }
+
+    /// A theme value that is not the one libghostty loaded fails the check,
+    /// so the preview shows one icon.
+    @Test
+    func aWrongThemeValueFailsTheLightSideCheck() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let split = try makeSplit()
+        let other = try write("Other Light", "background = #0a0b0c\n")
+        #expect(try readsTheLightSide(split.light, over: split.user))
+        #expect(try !readsTheLightSide(other, over: split.user))
     }
 }

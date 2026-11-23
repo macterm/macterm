@@ -195,6 +195,12 @@ final class Pane: Identifiable {
     private var activityQuietPollWork: DispatchWorkItem?
     private let activityQuietPollDelay: TimeInterval
 
+    /// When the running command started: the session's `output` mark (OSC
+    /// 133;C), for the `CommandEnd` of its `end` mark. nil while no command
+    /// runs, and for a command that started before the channel attached.
+    @ObservationIgnored
+    var commandStartedAt: Date?
+
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
     /// `ProcessInspector.passwordAsker` and the `run:` capture of a layout.
@@ -656,6 +662,9 @@ final class Pane: Identifiable {
         env: [String: String]? = nil,
         activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay
     ) {
+        // A project with no folder (`Project.hasFolder`) starts its shells
+        // in the folder of the scratch tabs.
+        let projectPath = projectPath.isEmpty ? ScratchTabs.fallbackRoot : projectPath
         self.projectPath = projectPath
         self.projectID = projectID
         self.id = id
@@ -706,7 +715,7 @@ final class Pane: Identifiable {
     /// gone for good (closed, tab/project removed, dropped by a layout apply)
     /// — NOT on transient teardown (window hide, tab-switch churn), where the
     /// session must survive. Fire-and-forget: close paths aren't blocked on
-    /// it; `LocalSessions.requestTimeout` (local) and the host link's request
+    /// it; `serverRequestTimeout` (local) and the host link's request
     /// timeout (remote) bound a stuck peer. The client is
     /// a parameter so AppState's injectable instance flows through in tests.
     func killPersistentSession(using sessionClient: SessionClient) {

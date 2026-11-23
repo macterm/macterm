@@ -45,13 +45,14 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneLead(_ leader: Bool?)
     /// The shell exited. The session ended.
     func paneExited(code: UInt8?, signal: UInt8?)
-    /// The channel ended with no exit. The session tries to connect again,
-    /// unless it was made with no reconnect.
+    /// The channel ended with no exit. The session asks its endpoint for a
+    /// connection again.
     func paneLinkLost()
     /// Input that the channel could not take (the link is down). The host
     /// keeps it for the next attach: a key never goes away with no sign.
     func paneInputUndelivered(_ data: Data)
-    /// The session did not come back. The pane has nothing to show.
+    /// The endpoint has no connection to give, or the channel failed too
+    /// often. The session stops. The pane has nothing to show.
     func paneGone()
 }
 
@@ -83,14 +84,19 @@ extension PaneSessionHost {
     func paneInputUndelivered(_: Data) {}
 }
 
-/// One pane's session on a server: it makes the session when a `launch` is
-/// given, opens a channel, attaches, and feeds the host from the channel.
-/// Input, claims and sizes go back on the same channel, in order, from a
-/// queue of its own, so a stalled server never blocks the caller.
+/// One pane's session on a server, local or on a host: it makes the session
+/// when a `launch` is given, opens a channel, attaches, and feeds the host
+/// from the channel. Input, claims and sizes go back on the same channel, in
+/// order, from a queue of its own, so a stalled server never blocks the
+/// caller.
 ///
-/// A channel that ends with no exit is a lost link: the session connects
-/// again (`connect` gives a connection that is up), attaches again, and the
-/// snapshot that follows draws the pane over a cleared screen.
+/// One rule for a lost link: a channel that ends with no exit reports
+/// `paneLinkLost`, and the session asks its endpoint for a connection again,
+/// attaches again, and the snapshot that follows draws the pane over a
+/// cleared screen. The endpoint decides if there is a next connection
+/// (`ServerEndpoint`): the local server tries for a few seconds, and a
+/// host's link has none after it ended. An endpoint with no connection to
+/// give ends the session with `paneGone`.
 final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// What a new session runs: the launch that libghostty resolved for the
     /// pane (`ghostty_launch_resolve`), or nothing for a remote pane, whose
@@ -101,13 +107,14 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         var env: [String]
     }
 
-    typealias Connect = @Sendable () async throws -> ServerConnection
-
     /// Clears the screen, the scrollback and the cursor.
     static let resetScreen = Data("\u{1B}[0m\u{1B}[3J\u{1B}[2J\u{1B}[H".utf8)
 
-    private static let reconnectTries = 12
-    private static let reconnectWait: Duration = .milliseconds(500)
+    /// A channel that fails or ends at once counts as a failed try. After
+    /// more than this many in a row the pane is gone, so a server that drops
+    /// each channel does not make a tight loop.
+    private static let channelTries = 12
+    private static let channelWait: Duration = .milliseconds(500)
     /// The limit of new attaches on one channel for a grid that changes
     /// before its snapshot. After the limit, the snapshot is drawn.
     static let attachAgainLimit = 3
@@ -118,13 +125,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     let name: String
     private let host: any PaneSessionHost
-    private let connect: Connect
+    private let endpoint: any ServerEndpoint
     private let launch: Launch?
     private let wantsForeground: Bool
     private let wantsTty: Bool
-    /// A lost link is tried again (a local server that restarted). A remote\n    /// pane's driver connects again itself, with the app's
-    /// backoff.
-    private let reconnects: Bool
     private let startWait: Duration
 
     private let lock = NSLock()
@@ -155,19 +159,17 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         launch: Launch?,
         wantsForeground: Bool,
         wantsTty: Bool = false,
-        reconnects: Bool = true,
         startWait: Duration = PaneSession.shellStartWait,
         host: any PaneSessionHost,
-        connect: @escaping Connect
+        endpoint: any ServerEndpoint
     ) {
         self.name = name
         self.launch = launch
         self.wantsForeground = wantsForeground
         self.wantsTty = wantsTty
-        self.reconnects = reconnects
         self.startWait = startWait
         self.host = host
-        self.connect = connect
+        self.endpoint = endpoint
     }
 
     /// Starts the session and the reading. Call it once.
@@ -292,18 +294,30 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         var reconnected = false
         var tries = 0
         while !Task.isCancelled {
+            let link: any ServerLink
             do {
-                let connection = try await connect()
+                link = try await endpoint.connection()
+            } catch {
+                if !(error is CancellationError), !Task.isCancelled {
+                    logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
+                    host.paneGone()
+                }
+                return
+            }
+            // After a failed try, wait before the next one. The endpoint
+            // answers first: one with no next connection ends the pane now.
+            if tries > 0 { try? await Task.sleep(for: Self.channelWait) }
+            if Task.isCancelled { return }
+            do {
                 // Only the first attach makes the session. A session that is
                 // gone later ended: the app ends a session whose shell exited,
                 // and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: connection, launch) }
-                let channel = try await connection.openChannel(session: name)
+                if firstAttach, let launch { try await createSession(on: link, launch) }
+                let channel = try await link.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()
                     return
                 }
-                tries = 0
                 let grid = host.paneGrid()
                 try sendAttach(channel, grid)
                 if firstAttach {
@@ -314,17 +328,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 let started = Date()
                 if await read(channel, reconnected: reconnected, attachedAt: grid) { return }
                 reconnected = true
-                // A channel that ends at once counts as a failed try, so a
-                // server that drops each channel does not make a tight loop.
-                if Date().timeIntervalSince(started) < 2 { tries += 1 }
-                if !reconnects {
-                    // The session does not connect again (a remote pane), so
-                    // it reports the end of the channel here: no `lead`.
-                    uninstall()
-                    channelEnded()
-                    host.paneLinkLost()
-                    return
-                }
+                // A channel that ends at once counts as a failed try.
+                tries = Date().timeIntervalSince(started) < 2 ? tries + 1 : 0
+                uninstall()
+                channelEnded()
                 host.paneLinkLost()
             } catch is CancellationError {
                 return
@@ -333,19 +340,13 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                if uninstall() { channelEnded() }
+                tries += 1
             }
-            uninstall()
-            channelEnded()
-            tries += 1
-            if !reconnects {
-                host.paneLinkLost()
-                return
-            }
-            if tries > Self.reconnectTries {
+            if tries > Self.channelTries {
                 host.paneGone()
                 return
             }
-            try? await Task.sleep(for: Self.reconnectWait)
         }
     }
 
@@ -456,7 +457,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     /// Makes the session, or finds it. A session whose shell exited while no
     /// app was there is ended and made again, as `zmx attach` did in v1.
-    private func createSession(on connection: ServerConnection, _ launch: Launch) async throws {
+    private func createSession(on connection: any ServerLink, _ launch: Launch) async throws {
         let grid = host.paneGrid()
         let args = MactermProtocol.SessionCreate.Args(
             id: name,
@@ -490,10 +491,13 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return true
     }
 
-    private func uninstall() {
+    /// True when a channel was installed.
+    @discardableResult
+    private func uninstall() -> Bool {
         lock.lock()
-        channel = nil
-        lock.unlock()
+        defer { lock.unlock() }
+        defer { channel = nil }
+        return channel != nil
     }
 
     /// An attach went out. The input from before the first attach becomes
