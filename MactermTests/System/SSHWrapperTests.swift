@@ -3,75 +3,124 @@ import Foundation
 import Testing
 
 struct SSHWrapperTests {
-    // MARK: - parseDestination (mirrors ghostty's own ssh.zig tests)
+    // MARK: - The cases shared with the Zig `macterm ssh`
 
-    @Test
-    func destination_from_typical_ssh_G_output() {
-        let dump = "user alice\nhostname example.com\nport 22\nidentityfile ~/.ssh/id_ed25519\n"
-        #expect(SSHWrapper.parseDestination(configDump: dump) == "alice@example.com")
+    /// `server/src/cli/fixtures/ssh.json`: `ssh.zig` reads the same file, so
+    /// that the two copies of the rules stay equal (design 011 §2, no FFI).
+    private struct Fixtures: Decodable {
+        struct Destination: Decodable { var dump: String
+            var destination: String?
+        }
+
+        struct DestinationArgv: Decodable { var ssh: String
+            var args: [String]
+            var argv: [String]
+        }
+
+        struct Relayed: Decodable { var captured: [String]
+            var args: [String]
+        }
+
+        struct Exec: Decodable { var ssh: String
+            var term: String?
+            var args: [String]
+            var argv: [String]
+        }
+
+        struct Install: Decodable {
+            var ssh: String
+            var controlPath: String
+            var args: [String]
+            var verbose: Bool
+            var argv: [String]
+        }
+
+        struct VersionKey: Decodable { var source: String
+            var key: String
+        }
+
+        struct Cache: Decodable {
+            var text: String
+            var destination: String
+            var version: String
+            var contains: Bool
+            var updated: String
+        }
+
+        var destination: [Destination]
+        var destinationArgv: [DestinationArgv]
+        var relayed: [Relayed]
+        var exec: [Exec]
+        var install: [Install]
+        var versionKey: [VersionKey]
+        var cache: [Cache]
+    }
+
+    static let cliFolder = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent() // System
+        .deletingLastPathComponent() // MactermTests
+        .deletingLastPathComponent() // repo root
+        .appendingPathComponent("server/src/cli")
+
+    private static func fixtures() throws -> Fixtures {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(Fixtures.self, from: Data(contentsOf: cliFolder.appendingPathComponent("fixtures/ssh.json")))
     }
 
     @Test
-    func destination_with_hostname_before_user() {
-        let dump = "hostname example.com\nport 22\nuser alice\n"
-        #expect(SSHWrapper.parseDestination(configDump: dump) == "alice@example.com")
+    func the_rules_pass_the_shared_fixtures() throws {
+        let f = try Self.fixtures()
+        #expect(!f.destination.isEmpty)
+        for c in f.destination {
+            #expect(SSHWrapper.parseDestination(configDump: c.dump) == c.destination, "\(c.dump)")
+        }
+        for c in f.destinationArgv {
+            #expect(SSHWrapper.destinationArgv(ssh: c.ssh, sshArgs: c.args) == c.argv)
+        }
+        for c in f.relayed {
+            #expect(SSHWrapper.relayedArguments(c.captured) == c.args)
+        }
+        for c in f.exec {
+            #expect(SSHWrapper.execArgv(ssh: c.ssh, term: c.term, sshArgs: c.args) == c.argv)
+        }
+        for c in f.install {
+            #expect(SSHWrapper.installArgv(ssh: c.ssh, controlPath: c.controlPath, sshArgs: c.args, verbose: c.verbose) == c.argv)
+        }
+        for c in f.versionKey {
+            #expect(SSHWrapper.versionKey(source: Data(c.source.utf8)) == c.key)
+        }
+        for c in f.cache {
+            #expect(SSHWrapper.cacheContains(cacheText: c.text, destination: c.destination, version: c.version) == c.contains)
+            #expect(SSHWrapper.cacheUpdating(cacheText: c.text, destination: c.destination, version: c.version) == c.updated)
+        }
     }
 
+    /// The Zig CLI embeds the entry as text. It must be the entry of the
+    /// pinned GhosttyKit, which `mise run setup` puts in
+    /// `Macterm/Resources/terminfo`: after a pin that changes it, write the
+    /// file again with `infocmp -x xterm-ghostty`, without its first line.
     @Test
-    func destination_missing_hostname_is_nil() {
-        #expect(SSHWrapper.parseDestination(configDump: "user alice\nport 22\n") == nil)
-    }
-
-    @Test
-    func destination_missing_user_is_nil() {
-        #expect(SSHWrapper.parseDestination(configDump: "hostname example.com\nport 22\n") == nil)
-    }
-
-    @Test
-    func destination_empty_input_is_nil() {
-        #expect(SSHWrapper.parseDestination(configDump: "") == nil)
-    }
-
-    @Test
-    func destination_ipv6_hostname() {
-        #expect(SSHWrapper.parseDestination(configDump: "user alice\nhostname ::1\n") == "alice@::1")
-    }
-
-    @Test
-    func destination_first_occurrence_wins() {
-        let dump = "user alice\nuser mallory\nhostname a.example\nhostname b.example\n"
-        #expect(SSHWrapper.parseDestination(configDump: dump) == "alice@a.example")
-    }
-
-    // MARK: - argv construction
-
-    @Test
-    func destination_argv_inserts_G_before_user_args() {
-        #expect(
-            SSHWrapper.destinationArgv(ssh: "ssh", sshArgs: ["-p", "2222", "host"])
-                == ["ssh", "-G", "-p", "2222", "host"]
-        )
-    }
-
-    @Test
-    func exec_argv_with_forwarding_sets_term_and_sendenv() {
-        let argv = SSHWrapper.execArgv(ssh: "ssh", term: "xterm-ghostty", sshArgs: ["host"])
-        #expect(argv == [
-            "ssh",
-            "-o", "SetEnv=TERM=xterm-ghostty",
-            "-o", "SendEnv=COLORTERM",
-            "-o", "SendEnv=TERM_PROGRAM",
-            "-o", "SendEnv=TERM_PROGRAM_VERSION",
-            "host",
-        ])
-    }
-
-    @Test
-    func the_relays_separator_never_reaches_ssh() {
-        // `ghostty +ssh -- "$@"` for a typed `ssh -p 2222 prod`.
-        #expect(SSHWrapper.relayedArguments(["--", "-p", "2222", "prod"]) == ["-p", "2222", "prod"])
-        #expect(SSHWrapper.relayedArguments(["prod", "--", "ls"]) == ["prod", "--", "ls"])
-        #expect(SSHWrapper.relayedArguments(["--", "--", "prod"]) == ["--", "prod"], "the user's own `--` stays")
+    func the_embedded_terminfo_is_the_bundled_entry() throws {
+        let resources = Self.cliFolder
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Macterm/Resources/terminfo")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: SSHWrapper.infocmpPath)
+        process.arguments = SSHWrapper.sourceArgv()
+        process.environment = ["TERMINFO": resources.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        let out = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        // The first line is a comment with the path of the database.
+        let source = String(decoding: out, as: UTF8.self).split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let embedded = try String(contentsOf: Self.cliFolder.appendingPathComponent("terminfo/xterm-ghostty.terminfo"), encoding: .utf8)
+        #expect(source.count == 2)
+        #expect(source.first?.hasPrefix("#") == true)
+        #expect(source.last.map(String.init) == embedded)
     }
 
     @Test
@@ -89,30 +138,6 @@ struct SSHWrapperTests {
         // Options that aren't exactly the wrapper's are the user's.
         #expect(SSHWrapper.userArguments(fromExecArguments: ["-o", "SetEnv=TERM=dumb", "prod"]) == ["-o", "SetEnv=TERM=dumb", "prod"])
         #expect(SSHWrapper.userArguments(fromExecArguments: ["--"]) == ["--"])
-    }
-
-    @Test
-    func exec_argv_without_forwarding_is_plain_ssh() {
-        #expect(
-            SSHWrapper.execArgv(ssh: "ssh", term: nil, sshArgs: ["-p", "2222", "host"])
-                == ["ssh", "-p", "2222", "host"]
-        )
-    }
-
-    @Test
-    func install_argv_scopes_a_throwaway_control_connection() {
-        let argv = SSHWrapper.installArgv(
-            ssh: "ssh", controlPath: "/tmp/cp", sshArgs: ["host"], verbose: false
-        )
-        #expect(argv.count == 9)
-        #expect(Array(argv[0 ..< 7]) == [
-            "ssh",
-            "-o", "ControlMaster=yes",
-            "-o", "ControlPersist=no",
-            "-o", "ControlPath=/tmp/cp",
-        ])
-        #expect(argv[7] == "host")
-        #expect(argv[8] == SSHWrapper.installScript(verbose: false))
     }
 
     @Test
@@ -197,34 +222,5 @@ struct SSHWrapperTests {
         #expect(a == b)
         #expect(a != c)
         #expect(a.count == 16)
-    }
-
-    @Test
-    func cache_round_trip() {
-        var text = ""
-        text = SSHWrapper.cacheUpdating(cacheText: text, destination: "alice@a.example", version: "v1")
-        text = SSHWrapper.cacheUpdating(cacheText: text, destination: "bob@b.example", version: "v1")
-        #expect(SSHWrapper.cacheContains(cacheText: text, destination: "alice@a.example", version: "v1"))
-        #expect(SSHWrapper.cacheContains(cacheText: text, destination: "bob@b.example", version: "v1"))
-        #expect(!SSHWrapper.cacheContains(cacheText: text, destination: "carol@c.example", version: "v1"))
-    }
-
-    @Test
-    func cache_misses_on_version_change_and_update_replaces() {
-        // A GhosttyKit bump changes the bundled entry and every destination
-        // must reinstall once — the stale line is replaced, not duplicated.
-        var text = SSHWrapper.cacheUpdating(cacheText: "", destination: "alice@a.example", version: "v1")
-        #expect(!SSHWrapper.cacheContains(cacheText: text, destination: "alice@a.example", version: "v2"))
-        text = SSHWrapper.cacheUpdating(cacheText: text, destination: "alice@a.example", version: "v2")
-        #expect(SSHWrapper.cacheContains(cacheText: text, destination: "alice@a.example", version: "v2"))
-        #expect(!SSHWrapper.cacheContains(cacheText: text, destination: "alice@a.example", version: "v1"))
-        #expect(text == "alice@a.example\tv2\n")
-    }
-
-    @Test
-    func cache_ignores_malformed_lines() {
-        let text = "garbage\n\nalice@a.example\tv1\n"
-        #expect(SSHWrapper.cacheContains(cacheText: text, destination: "alice@a.example", version: "v1"))
-        #expect(!SSHWrapper.cacheContains(cacheText: text, destination: "garbage", version: "v1"))
     }
 }

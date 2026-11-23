@@ -1,0 +1,262 @@
+{
+  "destination": [
+    {
+      "dump": "user alice\nhostname example.com\nport 22\nidentityfile ~/.ssh/id_ed25519\n",
+      "destination": "alice@example.com"
+    },
+    {
+      "dump": "hostname example.com\nport 22\nuser alice\n",
+      "destination": "alice@example.com"
+    },
+    {
+      "dump": "user alice\nport 22\n",
+      "destination": null
+    },
+    {
+      "dump": "hostname example.com\nport 22\n",
+      "destination": null
+    },
+    {
+      "dump": "",
+      "destination": null
+    },
+    {
+      "dump": "user alice\nhostname ::1\n",
+      "destination": "alice@::1"
+    },
+    {
+      "dump": "user alice\nuser mallory\nhostname a.example\nhostname b.example\n",
+      "destination": "alice@a.example"
+    },
+    {
+      "dump": "user \nuser alice\nhostname a.example\n",
+      "destination": "alice@a.example"
+    }
+  ],
+  "destination_argv": [
+    {
+      "ssh": "ssh",
+      "args": [
+        "-p",
+        "2222",
+        "host"
+      ],
+      "argv": [
+        "ssh",
+        "-G",
+        "-p",
+        "2222",
+        "host"
+      ]
+    }
+  ],
+  "relayed": [
+    {
+      "captured": [
+        "--",
+        "-p",
+        "2222",
+        "prod"
+      ],
+      "args": [
+        "-p",
+        "2222",
+        "prod"
+      ]
+    },
+    {
+      "captured": [
+        "prod",
+        "--",
+        "ls"
+      ],
+      "args": [
+        "prod",
+        "--",
+        "ls"
+      ]
+    },
+    {
+      "captured": [
+        "--",
+        "--",
+        "prod"
+      ],
+      "args": [
+        "--",
+        "prod"
+      ]
+    },
+    {
+      "captured": [
+        "--"
+      ],
+      "args": []
+    },
+    {
+      "captured": [],
+      "args": []
+    }
+  ],
+  "exec": [
+    {
+      "ssh": "ssh",
+      "term": "xterm-ghostty",
+      "args": [
+        "host"
+      ],
+      "argv": [
+        "ssh",
+        "-o",
+        "SetEnv=TERM=xterm-ghostty",
+        "-o",
+        "SendEnv=COLORTERM",
+        "-o",
+        "SendEnv=TERM_PROGRAM",
+        "-o",
+        "SendEnv=TERM_PROGRAM_VERSION",
+        "host"
+      ]
+    },
+    {
+      "ssh": "/usr/bin/ssh",
+      "term": "xterm-256color",
+      "args": [
+        "-p",
+        "2222",
+        "host"
+      ],
+      "argv": [
+        "/usr/bin/ssh",
+        "-o",
+        "SetEnv=TERM=xterm-256color",
+        "-o",
+        "SendEnv=COLORTERM",
+        "-o",
+        "SendEnv=TERM_PROGRAM",
+        "-o",
+        "SendEnv=TERM_PROGRAM_VERSION",
+        "-p",
+        "2222",
+        "host"
+      ]
+    },
+    {
+      "ssh": "ssh",
+      "term": null,
+      "args": [
+        "-p",
+        "2222",
+        "host"
+      ],
+      "argv": [
+        "ssh",
+        "-p",
+        "2222",
+        "host"
+      ]
+    }
+  ],
+  "install": [
+    {
+      "ssh": "ssh",
+      "control_path": "/tmp/cp",
+      "args": [
+        "host"
+      ],
+      "verbose": false,
+      "argv": [
+        "ssh",
+        "-o",
+        "ControlMaster=yes",
+        "-o",
+        "ControlPersist=no",
+        "-o",
+        "ControlPath=/tmp/cp",
+        "host",
+        "sh -c 'tic -x -o ~/.terminfo - 2>/dev/null && infocmp -x xterm-ghostty >/dev/null 2>&1'"
+      ]
+    },
+    {
+      "ssh": "ssh",
+      "control_path": "/tmp/cp",
+      "args": [
+        "-p",
+        "2222",
+        "host"
+      ],
+      "verbose": true,
+      "argv": [
+        "ssh",
+        "-o",
+        "ControlMaster=yes",
+        "-o",
+        "ControlPersist=no",
+        "-o",
+        "ControlPath=/tmp/cp",
+        "-p",
+        "2222",
+        "host",
+        "sh -c 'tic -x -o ~/.terminfo - && infocmp -x xterm-ghostty >/dev/null'"
+      ]
+    }
+  ],
+  "version_key": [
+    {
+      "source": "entry-v1",
+      "key": "14ebf465b9cf716a"
+    },
+    {
+      "source": "entry-v2",
+      "key": "6a35213a82fc3110"
+    },
+    {
+      "source": "",
+      "key": "e3b0c44298fc1c14"
+    }
+  ],
+  "cache": [
+    {
+      "text": "",
+      "destination": "alice@a.example",
+      "version": "v1",
+      "contains": false,
+      "updated": "alice@a.example\tv1\n"
+    },
+    {
+      "text": "alice@a.example\tv1\n",
+      "destination": "bob@b.example",
+      "version": "v1",
+      "contains": false,
+      "updated": "alice@a.example\tv1\nbob@b.example\tv1\n"
+    },
+    {
+      "text": "alice@a.example\tv1\nbob@b.example\tv1\n",
+      "destination": "alice@a.example",
+      "version": "v1",
+      "contains": true,
+      "updated": "bob@b.example\tv1\nalice@a.example\tv1\n"
+    },
+    {
+      "text": "alice@a.example\tv1\n",
+      "destination": "alice@a.example",
+      "version": "v2",
+      "contains": false,
+      "updated": "alice@a.example\tv2\n"
+    },
+    {
+      "text": "garbage\n\nalice@a.example\tv1\n",
+      "destination": "alice@a.example",
+      "version": "v1",
+      "contains": true,
+      "updated": "garbage\nalice@a.example\tv1\n"
+    },
+    {
+      "text": "garbage\n",
+      "destination": "garbage",
+      "version": "v1",
+      "contains": false,
+      "updated": "garbage\tv1\n"
+    }
+  ]
+}
