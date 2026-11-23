@@ -142,3 +142,43 @@ wait_dump() {
   run "$ZMX" pane run --session nope -- ls
   [ "$status" -eq 1 ]
 }
+
+@test "api list and describe work with no server" {
+  run "$ZMX" api list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"session.send"*"since 3"*"Types text into a session"* ]]
+  # A message that only a session process sends is not a method.
+  [[ "$output" != *"history_read"* ]]
+  run "$ZMX" api describe session.send
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(",".join(d["args"]["required"]))')" = "id,text" ]
+  [ ! -S "$MACTERM_RUNTIME_DIR/.server" ]
+  run "$ZMX" api describe nope
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'no method named "nope"'* ]]
+}
+
+@test "api call sends a request to the server and prints the result" {
+  run "$ZMX" api call ping
+  [ "$status" -eq 2 ]
+  "$ZMX" __create-session api1 -- /bin/sh
+  run "$ZMX" api call session.info --args '{"id": "api1"}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | python3 -c 'import json,sys; s=json.load(sys.stdin)["session"]; print(s["id"], s["state"])')" = "api1 running" ]
+
+  printf '{"id": "api1", "text": "echo via-api"}' | "$ZMX" api call session.send --args -
+  wait_dump api1 via-api
+
+  # Bad args fail before the request; the server's error names its code.
+  run "$ZMX" api call session.send --args '{"id": "api1"}'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"args.text: expected a value: the key is required"* ]]
+  run "$ZMX" api call session.kill --args '{"id": "nope"}'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(not_found)"* ]]
+
+  run "$ZMX" api call session.kill --args '{"id": "api1"}'
+  [ "$status" -eq 0 ]
+  run "$ZMX" session info api1
+  [ "$status" -eq 1 ]
+}
