@@ -5431,6 +5431,22 @@
         }
       }
     },
+    "Move Out of Group" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그룹에서 꺼내기"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移出分组"
+          }
+        }
+      }
+    },
     "Move Pane Down" : {
       "localizations" : {
         "ko" : {
@@ -5543,6 +5559,22 @@
         }
       }
     },
+    "Move this project into a sidebar group" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트를 사이드바 그룹으로 이동"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将此项目移到侧边栏分组"
+          }
+        }
+      }
+    },
     "Move to Group" : {
       "comment" : "Sidebar menu item for a project group",
       "localizations" : {
@@ -5556,6 +5588,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "移到分组"
+          }
+        }
+      }
+    },
+    "Move to Group…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그룹으로 이동…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移到分组…"
           }
         }
       }
@@ -8145,6 +8193,22 @@
         }
       }
     },
+    "Remove Current Group" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 그룹 제거"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除当前分组"
+          }
+        }
+      }
+    },
     "Remove Current Project" : {
       "localizations" : {
         "ko" : {
@@ -9160,6 +9224,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按名称或路径搜索文件..."
+          }
+        }
+      }
+    },
+    "Search groups..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그룹 검색..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索分组..."
           }
         }
       }
@@ -11643,6 +11723,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "取消分组"
+          }
+        }
+      }
+    },
+    "Ungroup Current Group" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 그룹 해제"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消当前分组"
           }
         }
       }

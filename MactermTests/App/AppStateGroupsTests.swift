@@ -6,6 +6,7 @@ import Testing
 /// Remove Group): when each applies to the active project, and what it does.
 @MainActor
 struct AppStateGroupsTests {
+    @MainActor
     private struct Fixture {
         let state: AppState
         let store: ProjectStore
@@ -42,7 +43,8 @@ struct AppStateGroupsTests {
     @Test
     func new_group_goes_beside_the_active_project() throws {
         let f = makeFixture()
-        try #require(AppCommand.newGroup.action(in: f.ctx))()
+        let run = try #require(AppCommand.newGroup.action(in: f.ctx))
+        run()
         #expect(f.store.groups.count == 1)
         #expect(f.store.children(of: nil).map(\.id) == [f.project.id, f.store.groups[0].id])
     }
@@ -68,7 +70,8 @@ struct AppStateGroupsTests {
         let f = makeFixture()
         let group = f.store.createGroup(name: "work")
         f.store.move(f.project.id, into: group.id)
-        try #require(AppCommand.moveOutOfGroup.action(in: f.ctx))()
+        let run = try #require(AppCommand.moveOutOfGroup.action(in: f.ctx))
+        run()
         #expect(f.store.row(f.project.id)?.parent == nil)
         #expect(f.store.row(group.id) != nil)
     }
@@ -78,7 +81,8 @@ struct AppStateGroupsTests {
         let f = makeFixture()
         let group = f.store.createGroup(name: "work")
         f.store.move(f.project.id, into: group.id)
-        try #require(AppCommand.ungroup.action(in: f.ctx))()
+        let run = try #require(AppCommand.ungroup.action(in: f.ctx))
+        run()
         #expect(f.store.row(group.id) == nil)
         #expect(f.store.row(f.project.id)?.parent == nil)
     }
@@ -88,7 +92,8 @@ struct AppStateGroupsTests {
         let f = makeFixture()
         let group = f.store.createGroup(name: "work")
         f.store.move(f.project.id, into: group.id)
-        try #require(AppCommand.removeGroup.action(in: f.ctx))()
+        let run = try #require(AppCommand.removeGroup.action(in: f.ctx))
+        run()
         #expect(f.store.row(group.id) != nil, "nothing goes before the confirm")
         f.state.confirmPendingDialog()
         #expect(f.store.row(group.id) == nil)
