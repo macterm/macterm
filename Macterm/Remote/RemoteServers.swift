@@ -52,7 +52,7 @@ final class RemoteServers {
             Configuration(
                 scripts: HostCommands.Scripts.bundled,
                 builds: .bundled,
-                askConsent: { await RemoteServerConsent.ask($0) },
+                askConsent: { await SSHConnections.shared.loginUI?.askToInstallServer(on: $0) ?? false },
                 consents: .preferences
             )
         }

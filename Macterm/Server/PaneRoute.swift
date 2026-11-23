@@ -4,7 +4,7 @@ import Foundation
 /// local endpoint, or the driver of a remote pane, which runs a
 /// `PaneSession` on its host's link. `make` picks it from the pane's
 /// place, so the view only hosts the surface.
-struct PaneRoute: Sendable {
+struct PaneRoute {
     /// Where the surface sends keys, sizes and claims.
     let input: any PaneInputRoute
     /// Starts the reading. The surface exists.

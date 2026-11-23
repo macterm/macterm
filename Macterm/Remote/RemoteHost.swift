@@ -506,7 +506,7 @@ final class RemoteHost {
             // One login serves every pane of the host. The sweep owns when a
             // lost pane connects again, so this never loops.
             configuration.hostDidConnect(destination)
-            configuration.linkReady(destination)
+            configuration.linkReady(destination, link)
             adoptRoaming(over: link)
         case let .success(.plain(route)):
             backoff.clear()
@@ -565,7 +565,7 @@ final class RemoteHost {
                 if opening?.token == token {
                     backoff.clear()
                     state = .ready(link)
-                    configuration.linkReady(destination)
+                    configuration.linkReady(destination, link)
                     adoptRoaming(over: link)
                 } else {
                     link.close()

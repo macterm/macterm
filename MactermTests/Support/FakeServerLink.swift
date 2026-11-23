@@ -29,7 +29,12 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
         switch method {
         case MactermProtocol.SessionCreate.name:
             let id = (args as? MactermProtocol.SessionCreate.Args)?.id ?? ""
-            return MactermProtocol.SessionCreate.Result(session: .init(id: id, state: .running, build: "fake", level: MactermProtocol.level))
+            return MactermProtocol.SessionCreate.Result(session: .init(
+                id: id,
+                state: .running,
+                build: "fake",
+                level: MactermProtocol.level
+            ))
         case MactermProtocol.SessionKill.name: return MactermProtocol.SessionKill.Result()
         case MactermProtocol.ChannelClose.name: return MactermProtocol.ChannelClose.Result()
         case MactermProtocol.SessionList.name: return MactermProtocol.SessionList.Result(sessions: [])
@@ -74,7 +79,7 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
     }
 
     func openChannel(session: String) async throws -> PaneChannel {
-        let channel: PaneChannel = try lock.withLock {
+        try lock.withLock {
             guard open else { throw ServerClientError.disconnected }
             methods.append(MactermProtocol.ChannelOpen.name)
             let number = nextChannel
@@ -84,7 +89,6 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
             sessions[session] = number
             return channel
         }
-        return channel
     }
 
     func send(frame: ProtocolFrame) throws {

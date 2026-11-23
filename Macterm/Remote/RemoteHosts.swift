@@ -71,8 +71,8 @@ final class RemoteHosts {
         /// made (`RemoteHost.SessionState.created`).
         var creationGrace: TimeInterval = 30
         /// A host's link to its server is up: its background work starts
-        /// (the terminfo install).
-        var linkReady: @MainActor (String) -> Void = { _ in }
+        /// over it (the terminfo install).
+        var linkReady: @MainActor (String, RemoteServers.Link) -> Void = { _, _ in }
         /// Whether to open a roaming link (design/009) after a connect. Off
         /// by default, so that a test never opens a UDP port.
         var roamingEnabled: @MainActor () -> Bool = { false }
@@ -83,7 +83,7 @@ final class RemoteHosts {
             Configuration(
                 key: ServerBuilds.bundledKey,
                 declines: .preferences,
-                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0) },
+                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0, over: $1) },
                 roamingEnabled: { Preferences.shared.remoteRoamingLink }
             )
         }
@@ -419,7 +419,6 @@ final class RemoteHosts {
         let launch = PaneSession.Launch(cwd: cwd, argv: nil, env: env)
         return (launch, found ? nil : "macterm: cannot cd to \(directory)")
     }
-
 }
 
 /// The lines that a remote pane shows (0057). They stay English, as all

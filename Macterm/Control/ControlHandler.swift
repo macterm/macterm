@@ -1756,7 +1756,7 @@ extension ControlHandler {
             throw ControlError(code: .denied, message: "this askpass was not started by an ssh of Macterm")
         }
         let prompt = args.prompt ?? ""
-        let request = SSHLoginPrompts.Request(
+        let request = SSHPrompt.Request(
             host: owner.host,
             prompt: prompt,
             kind: .of(prompt: prompt, confirm: args.confirm == true),

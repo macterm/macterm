@@ -741,7 +741,7 @@ struct RemoteHostsTests {
             configuration.roamingEnabled = { roaming }
             configuration.scripts = scripts
             configuration.hostDidConnect = { [connections] destination in connections.mutate { $0.append(destination) } }
-            configuration.linkReady = { [readyHosts] destination in readyHosts.mutate { $0.append(destination) } }
+            configuration.linkReady = { [readyHosts] destination, _ in readyHosts.mutate { $0.append(destination) } }
             configuration.hostLost = { [lost] destination in lost.mutate { $0.append(destination) } }
             configuration.hostAnswered = { [answers] destination in answers.mutate { $0.append(destination) } }
             hosts = RemoteHosts(connections: host.connections, servers: host.servers, configuration: configuration)

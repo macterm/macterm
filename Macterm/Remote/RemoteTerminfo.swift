@@ -96,7 +96,8 @@ enum RemoteTerminfo {
 
 /// Drives `RemoteTerminfo` when a host's link is ready (`RemoteHosts`): at
 /// most one install attempt per destination per app run, fired and
-/// forgotten.
+/// forgotten. The install runs over the link that became ready, so the
+/// installer needs no other part of the remote code.
 ///
 /// Every seam is injected so the gate and the dedupe are testable without a
 /// host or a subprocess; `shared` wires the real ones.
@@ -115,14 +116,14 @@ final class RemoteTerminfoInstaller {
             )
         },
         terminfoDirectory: { GhosttyApp.shared.bundledTerminfoDirectory },
-        install: { destination, terminfoDirectory in
-            await RemoteTerminfoInstaller.runInstall(destination: destination, terminfoDirectory: terminfoDirectory)
+        install: { destination, endpoint, terminfoDirectory in
+            await RemoteTerminfoInstaller.runInstall(destination: destination, over: endpoint, terminfoDirectory: terminfoDirectory)
         }
     )
 
     private let isEnabled: () -> Bool
     private let terminfoDirectory: () -> String?
-    private let install: (String, String) async -> Bool
+    private let install: (String, any ServerEndpoint, String) async -> Bool
 
     /// Destinations already attempted this run — the whole reason a cache
     /// exists here. It is NOT a record of what is installed: `remoteTermPreamble`
@@ -134,7 +135,7 @@ final class RemoteTerminfoInstaller {
     init(
         isEnabled: @escaping () -> Bool,
         terminfoDirectory: @escaping () -> String?,
-        install: @escaping (String, String) async -> Bool
+        install: @escaping (String, any ServerEndpoint, String) async -> Bool
     ) {
         self.isEnabled = isEnabled
         self.terminfoDirectory = terminfoDirectory
@@ -149,7 +150,7 @@ final class RemoteTerminfoInstaller {
     /// spawn under any circumstances, because `remoteColorPreamble` already
     /// guarantees truecolor without it. A host with no `tic` or a read-only
     /// terminfo dir simply logs and stays on `xterm-256color`.
-    func ensureInstalled(destination: String) {
+    func ensureInstalled(destination: String, over endpoint: any ServerEndpoint) {
         guard isEnabled() else { return }
         guard let terminfoDirectory = terminfoDirectory() else {
             logger.debug("skipping terminfo install: no bundled terminfo dir resolved")
@@ -161,7 +162,7 @@ final class RemoteTerminfoInstaller {
         // launch tries again.
         guard attempted.insert(destination).inserted else { return }
         Task { [install] in
-            let ok = await install(destination, terminfoDirectory)
+            let ok = await install(destination, endpoint, terminfoDirectory)
             logger.info("terminfo install for \(destination, privacy: .public): \(ok ? "ok" : "failed", privacy: .public)")
         }
     }
@@ -169,19 +170,23 @@ final class RemoteTerminfoInstaller {
     /// `infocmp -x xterm-ghostty` (against our bundled DB), compiled on the
     /// host by its server. nonisolated: process I/O has no business on the
     /// main actor.
-    nonisolated private static func runInstall(destination: String, terminfoDirectory: String) async -> Bool {
+    nonisolated private static func runInstall(
+        destination: String,
+        over endpoint: any ServerEndpoint,
+        terminfoDirectory: String
+    ) async -> Bool {
         guard let data = readSource(terminfoDirectory: terminfoDirectory),
               let source = String(data: data, encoding: .utf8), !source.isEmpty
         else {
             logger.warning("infocmp produced no source for \(RemoteTerminfo.entryName, privacy: .public)")
             return false
         }
-        guard let result = await RemoteHosts.shared.run(
+        guard let result = await endpoint.run(
             // Under the 10 s that the app waits for a reply
             // (`serverRequestTimeout`), so a slow `tic` fails as a
             // time-out on the host and is not logged as a failure that
             // succeeded.
-            RemoteTerminfo.installArgv(source: source), destination: destination, timeout: .seconds(8)
+            RemoteTerminfo.installArgv(source: source), timeout: .seconds(8)
         )
         else { return false }
         guard result.code == 0 else {
