@@ -165,7 +165,7 @@ struct ProjectStoreTests {
         store.add(b)
         store.add(c)
         // Move the last (c) to the front.
-        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        store.reorder(parent: nil, ids: [c.id, a.id, b.id])
         #expect(store.projects.map(\.name) == ["c", "a", "b"])
         #expect(store.projects.map(\.sortOrder) == [0, 1, 2])
     }
@@ -413,21 +413,6 @@ struct ProjectStoreTests {
     }
 
     @Test
-    func reorder_by_offsets_keeps_projects_in_their_groups() {
-        let store = makeStore()
-        let a = store.add(Project(name: "a", path: "/tmp/a"))
-        let group = store.add(.group(name: "group"))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
-        let c = store.add(Project(name: "c", path: "/tmp/c"))
-        // projects: a, b, c. Move c to the front: the group keeps its place
-        // and b stays in it.
-        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 0)
-        #expect(store.children(of: nil).map(\.id) == [c.id, group.id, a.id])
-        #expect(store.children(of: group.id).map(\.id) == [b.id])
-        #expect(store.projects.map(\.id) == [c.id, b.id, a.id])
-    }
-
-    @Test
     func removing_a_group_moves_its_rows_to_the_end_of_the_top_level() {
         let store = makeStore()
         let group = store.add(.group(name: "group"))
@@ -447,19 +432,6 @@ struct ProjectStoreTests {
         let b = store.add(Project(name: "b", path: "/tmp/b"))
         #expect(store.move(a.id, into: nil))
         #expect(store.children(of: nil).map(\.id) == [a.id, b.id])
-    }
-
-    @Test
-    func reorder_by_offsets_across_a_group_does_not_move_a_project() {
-        let store = makeStore()
-        let a = store.add(Project(name: "a", path: "/tmp/a"))
-        let group = store.add(.group(name: "group"))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
-        let c = store.add(Project(name: "c", path: "/tmp/c"))
-        // projects: a, b, c. Moving c above b changes no parent's order.
-        store.reorder(fromOffsets: IndexSet(integer: 2), toOffset: 1)
-        #expect(store.projects.map(\.id) == [a.id, b.id, c.id])
-        #expect(store.children(of: group.id).map(\.id) == [b.id])
     }
 
     @Test
@@ -485,5 +457,84 @@ struct ProjectStoreTests {
         let group = store.add(.group(name: "group"))
         let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
         #expect(saved.map(\.id) == [a.id])
+    }
+
+    @Test
+    func move_out_puts_the_row_after_its_group() {
+        let store = makeStore()
+        let group = store.add(.group(name: "g"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        let b = store.add(Project(name: "b", path: "/tmp/b"))
+        store.moveOut(a.id)
+        #expect(store.children(of: nil).map(\.id) == [group.id, a.id, b.id])
+        store.moveOut(a.id)
+        #expect(store.children(of: nil).map(\.id) == [group.id, a.id, b.id], "a top-level row does not move")
+    }
+
+    @Test
+    func move_among_siblings_stays_in_the_parent() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let group = store.add(.group(name: "g"))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c", parent: group.id))
+        store.moveAmongSiblings(c.id, by: -1)
+        #expect(store.children(of: group.id).map(\.id) == [c.id, b.id])
+        store.moveAmongSiblings(c.id, by: -1)
+        #expect(store.children(of: group.id).map(\.id) == [c.id, b.id], "the first row does not move up")
+        store.moveAmongSiblings(a.id, by: 1)
+        #expect(store.children(of: nil).map(\.id) == [group.id, a.id])
+        #expect(store.siblingPosition(of: a.id)?.index == 1)
+        #expect(store.siblingPosition(of: a.id)?.count == 2)
+    }
+
+    @Test
+    func create_group_beside_a_row_goes_after_it_in_its_parent() {
+        let store = makeStore()
+        let outer = store.add(.group(name: "outer"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: outer.id))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: outer.id))
+        let group = store.createGroup(name: "new", beside: a.id)
+        #expect(store.children(of: outer.id).map(\.id) == [a.id, group.id, b.id])
+        let top = store.createGroup(name: "top")
+        #expect(store.children(of: nil).map(\.id) == [outer.id, top.id])
+    }
+
+    @Test
+    func ungroup_keeps_the_rows_at_the_place_of_the_group() {
+        let store = makeStore()
+        let a = store.add(Project(name: "a", path: "/tmp/a"))
+        let group = store.add(.group(name: "g"))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: group.id))
+        let inner = store.add(.group(name: "inner", parent: group.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+        store.ungroup(group.id)
+        #expect(store.children(of: nil).map(\.id) == [a.id, b.id, inner.id, c.id])
+        #expect(store.row(group.id) == nil)
+        #expect(store.projects.map(\.id) == [a.id, b.id, c.id])
+    }
+
+    @Test
+    func remove_group_removes_every_row_inside_it() {
+        let store = makeStore()
+        let group = store.add(.group(name: "g"))
+        let a = store.add(Project(name: "a", path: "/tmp/a", parent: group.id))
+        let inner = store.add(.group(name: "inner", parent: group.id))
+        let b = store.add(Project(name: "b", path: "/tmp/b", parent: inner.id))
+        let c = store.add(Project(name: "c", path: "/tmp/c"))
+        #expect(Set(store.projects(inGroup: group.id).map(\.id)) == [a.id, b.id])
+        store.removeGroup(group.id)
+        #expect(store.projects.map(\.id) == [c.id])
+        #expect(store.groups.isEmpty)
+        #expect(store.row(inner.id) == nil)
+    }
+
+    @Test
+    func groups_are_in_tree_order() {
+        let store = makeStore()
+        let x = store.add(.group(name: "x"))
+        let y = store.add(.group(name: "y"))
+        let inner = store.add(.group(name: "inner", parent: x.id))
+        #expect(store.groups.map(\.id) == [x.id, inner.id, y.id])
     }
 }

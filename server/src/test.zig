@@ -30,4 +30,5 @@ comptime {
     _ = @import("cli/output.zig");
     _ = @import("cli/client.zig");
     _ = @import("cli/cli.zig");
+    _ = @import("cli/skills.zig");
 }

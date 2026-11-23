@@ -1009,6 +1009,25 @@ struct AppStateTests {
     }
 
     @Test
+    func requestRemoveGroup_asks_only_when_the_group_has_projects() {
+        let state = makeAppState()
+        let group = Project.group(name: "g")
+
+        var ran = false
+        state.requestRemoveGroup(group, projectCount: 0) { ran = true }
+        #expect(ran, "an empty group goes at once")
+        #expect(state.pendingDialog == nil)
+
+        ran = false
+        state.requestRemoveGroup(group, projectCount: 2) { ran = true }
+        #expect(!ran)
+        #expect(state.pendingDialog?.kind == .removeGroup(group.id))
+        #expect(state.pendingDialog?.message.contains("2") == true, "the question says how many")
+        state.confirmPendingDialog()
+        #expect(ran)
+    }
+
+    @Test
     func pendingBulkRemove_confirm_and_cancel() {
         let state = makeAppState()
         // Every pane reads busy, so the selection stages instead of running.

@@ -15,7 +15,7 @@ enum UpdaterAvailability {
 /// Updates are always automatic: Sparkle checks the appcast daily
 /// (`SUScheduledCheckInterval`), downloads a found update in the background
 /// and installs it when the app quits. The toolbar then offers
-/// Restart to Update.
+/// Update to vA.B.C.
 ///
 /// Sparkle keeps both values in the user's defaults (`SUEnableAutomaticChecks`,
 /// `SUAutomaticallyUpdate`), and they win over `Info.plist`. A user who turned
@@ -33,8 +33,8 @@ enum UpdatePolicy {
 
 /// The updater and its own user interface. Macterm drives Sparkle with its own
 /// user driver (`UpdateUserDriver`), so Sparkle shows no dialog. The toolbar
-/// shows the exception: Downloading… with a progress ring, then Restart to
-/// Update. A check that the user started ends in a toast. Release notes are
+/// shows the exception: Downloading… with a progress ring, then Update to
+/// vA.B.C. A check that the user started ends in a toast. Release notes are
 /// not shown in the app: they are on the changelog of the website.
 ///
 /// We ship Sparkle with an EdDSA public key baked into `Info.plist`; updates
@@ -70,9 +70,9 @@ final class Updater {
     private(set) var updateAvailable = false
 
     /// `true` once an update waits to install. Sparkle installs it when the
-    /// app quits; Restart to Update installs it at once. Never cleared: the
+    /// app quits; the install button installs it at once. Never cleared: the
     /// update installs when the app quits, whatever a later check says.
-    var updateReadyToInstall: Bool { machine.status == .readyToRestart }
+    var updateReadyToInstall: Bool { machine.status.isReadyToRestart }
 
     /// Shows a toast in the windows. `MactermApp` sets it. With no window
     /// open, the toast has nowhere to show, and the menu item is the
@@ -80,7 +80,7 @@ final class Updater {
     @ObservationIgnored
     var presentToast: ((String) -> Void)?
 
-    /// What Restart to Update sends: the reply that `UpdateUserDriver` holds,
+    /// What the install button sends: the reply that `UpdateUserDriver` holds,
     /// or the handler of a background download (`willInstallUpdateOnQuit`).
     @ObservationIgnored
     private var heldInstallReply: ((SPUUserUpdateChoice) -> Void)?
@@ -130,13 +130,13 @@ final class Updater {
         userDriver.onFound = { [weak self] found, reply in self?.handleFound(found, reply: reply) }
         userDriver.onReadyToInstall = { [weak self] reply in
             self?.heldInstallReply = reply
-            self?.handle(.readyToInstall(onQuit: false))
+            self?.handle(.readyToInstall(onQuit: false, version: nil))
         }
         userDriver.onInstalling = { [weak self] retry in self?.retryTermination = retry }
         updaterDelegate.onEvent = { [weak self] event in self?.handle(event) }
-        updaterDelegate.onReadyToInstall = { [weak self] handler in
+        updaterDelegate.onReadyToInstall = { [weak self] version, handler in
             self?.installOnQuitHandler = handler
-            self?.handle(.readyToInstall(onQuit: true))
+            self?.handle(.readyToInstall(onQuit: true, version: version))
         }
         updaterDelegate.onWillScheduleCheck = { [sparkle] in
             UpdatePolicy.enforce(on: sparkle)
@@ -241,7 +241,7 @@ let tipUpdateChannel = UpdateChannel.tip.rawValue
 /// background download that is ready to install on quit.
 private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
     var onEvent: ((UpdateEvent) -> Void)?
-    var onReadyToInstall: ((@escaping () -> Void) -> Void)?
+    var onReadyToInstall: ((String, @escaping () -> Void) -> Void)?
     var onWillScheduleCheck: (() -> Void)?
 
     /// Gates the prerelease channels on the user's selection. Sparkle calls
@@ -279,15 +279,15 @@ private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
     /// Called on the main thread when a background download is ready to
     /// install on quit. Returning `true` takes control of the install: Sparkle
     /// still installs on quit, but it stops its own update cycles, so it never
-    /// asks after `SUScheduledImpatientCheckInterval`. The toolbar's Restart to
-    /// Update is the reminder instead. Sparkle 2.3 and later accepts the
+    /// asks after `SUScheduledImpatientCheckInterval`. The toolbar's install
+    /// button is the reminder instead. Sparkle 2.3 and later accepts the
     /// handler again after a cancelled termination.
     func updater(
         _: SPUUpdater,
-        willInstallUpdateOnQuit _: SUAppcastItem,
+        willInstallUpdateOnQuit item: SUAppcastItem,
         immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
     ) -> Bool {
-        onReadyToInstall?(immediateInstallHandler)
+        onReadyToInstall?(item.displayVersionString, immediateInstallHandler)
         return true
     }
 }
@@ -409,7 +409,8 @@ struct CheckForUpdatesMenuItem: View {
 
 /// The update button of the main window's toolbar. It shows only for the
 /// exception: Downloading… with a progress ring (determinate when Sparkle
-/// knows the size), then Restart to Update, which installs and relaunches.
+/// knows the size), then Update to vA.B.C, which installs and relaunches.
+/// The app menu item keeps the title Restart to Update.
 /// No button while idle.
 ///
 /// Both states are toolbar buttons, so the toolbar gives each one the same
@@ -423,6 +424,12 @@ struct UpdateToolbarButton: View {
     /// label with text, in the macOS 26 toolbar capsule. The system amount
     /// fits an icon, and is narrow for a title.
     static let textInset: CGFloat = 4
+
+    /// The install button's symbol. macOS 15 is the first release that has
+    /// it; macOS 14 shows the plain clockwise arrow.
+    static var installSymbol: String {
+        if #available(macOS 15.0, *) { "arrow.trianglehead.2.clockwise.rotate.90" } else { "arrow.clockwise" }
+    }
 
     var body: some View {
         switch updater.status {
@@ -449,7 +456,7 @@ struct UpdateToolbarButton: View {
             Button {
                 updater.installAndRelaunch()
             } label: {
-                inset(Label("Restart to Update", systemImage: "arrow.clockwise"))
+                inset(Label(updater.status.installTitle, systemImage: Self.installSymbol))
             }
         }
     }

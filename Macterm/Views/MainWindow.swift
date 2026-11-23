@@ -380,7 +380,7 @@ struct MainWindow: View {
             // is the handoff's own width again, and changes nothing.
             _ = sidebarWidthHandoff.adoptStoredWidth(CGFloat(width))
         }
-        .onChange(of: windowState.expandedProjects) {
+        .onChange(of: windowState.expandedRows) {
             appState.noteWindowChanged()
         }
         .onChange(of: windowState.projectMemoryPanelVisible) {
@@ -1221,12 +1221,10 @@ struct ModePill: View {
 /// corner as `ModePill`. It takes no clicks.
 struct StatusPill<Icon: View>: View {
     let title: String
-    /// The other titles that this pill can show. See `PanePill.otherTitles`.
-    var otherTitles: [String] = []
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
-        PanePill(title: title, otherTitles: otherTitles, icon: icon)
+        PanePill(title: title, icon: icon)
     }
 }
 
@@ -1249,11 +1247,6 @@ struct PanePill<Icon: View>: View {
     static var contentHeight: CGFloat { 15 }
 
     let title: String
-    /// The other titles that this pill can show. The open pill is as wide
-    /// as the longest of them and `title`. A change of the title (a remote
-    /// pane that tries again every few seconds) then does not change the
-    /// width of a pill under the pointer.
-    var otherTitles: [String] = []
     var action: (() -> Void)?
     @ViewBuilder let icon: () -> Icon
 
@@ -1290,7 +1283,7 @@ struct PanePill<Icon: View>: View {
     }
 
     private var label: some View {
-        PanePillLabel(title: title, otherTitles: otherTitles, reveal: isRevealed ? 1 : 0, icon: icon)
+        PanePillLabel(title: title, reveal: isRevealed ? 1 : 0, icon: icon)
             .frame(minHeight: Self.contentHeight)
     }
 
@@ -1326,22 +1319,17 @@ struct PanePill<Icon: View>: View {
 /// the pill and the fade of the title, with no view that comes and goes.
 struct PanePillLabel<Icon: View>: View {
     let title: String
-    var otherTitles: [String] = []
     let reveal: CGFloat
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
         RevealLayout(reveal: reveal) {
             icon().frame(minWidth: PanePill<Icon>.contentHeight)
-            ZStack(alignment: .leading) {
-                // Hidden, so that the slot has the width of the longest title.
-                ForEach(Array(otherTitles.enumerated()), id: \.offset) { Text($0.element).hidden() }
-                // An animated change of the title morphs the text in place.
-                Text(title).contentTransition(.interpolate)
-            }
-            .lineLimit(1)
-            .fixedSize()
-            .opacity(reveal)
+            // An animated change of the title morphs the text in place.
+            Text(title).contentTransition(.interpolate)
+                .lineLimit(1)
+                .fixedSize()
+                .opacity(reveal)
         }
         .clipped()
         .accessibilityElement(children: .ignore)

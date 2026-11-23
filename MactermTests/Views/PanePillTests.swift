@@ -61,22 +61,23 @@ struct PanePillTests {
         #expect(shown.width > rest.width + 40)
     }
 
-    /// An open pill keeps its width when its title changes to one of its
-    /// other titles: a lost remote pane flips between the two every few
-    /// seconds, and a pill under the pointer must not pulse.
+    /// An open pill is as wide as its own title, with no room for another
+    /// title: the open `Reconnecting` pill is narrower than the open
+    /// `Connection Lost` pill.
     @Test
-    func an_open_pill_keeps_its_width_when_its_title_changes() {
-        let titles = ["Reconnecting", "Connection Lost"]
-        let widths = titles.map { title in
-            Self.size(PanePillLabel(title: title, otherTitles: titles, reveal: 1) {
+    func an_open_pill_is_as_wide_as_its_own_title() {
+        let widths = ["Reconnecting", "Connection Lost"].map { title in
+            Self.size(PanePillLabel(title: title, reveal: 1) {
                 Image(systemName: "network.slash")
             }).width
         }
-        #expect(widths[0] == widths[1], "\(widths)")
-        let alone = Self.size(PanePillLabel(title: "Reconnecting", reveal: 1) {
+        #expect(widths[0] < widths[1], "\(widths)")
+        let icon = Self.size(PanePillLabel(title: "Reconnecting", reveal: 0) {
             Image(systemName: "network.slash")
         }).width
-        #expect(alone < widths[0])
+        let text = Self.size(Text("Reconnecting").fixedSize()).width
+        // The icon, the gap of 4 pt and the title: nothing more.
+        #expect(abs(widths[0] - (icon + 4 + text)) < 1, "\(widths[0]) \(icon) \(text)")
     }
 
     /// Every whole badge at rest (chrome, padding and icon, the spinner too)

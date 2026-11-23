@@ -864,9 +864,9 @@ struct WindowStateTests {
         let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         writer.restoreSelection(projects: [p, q, r])
         let w1 = WindowState(activeProjectID: p.id)
-        w1.expandedProjects = [q.id, r.id]
+        w1.expandedRows = [q.id, r.id]
         let w2 = WindowState(activeProjectID: q.id)
-        w2.expandedProjects = [q.id, p.id]
+        w2.expandedRows = [q.id, p.id]
         writer.registerWindow(w1)
         writer.registerWindow(w2)
         writer.saveWorkspaces()
@@ -880,13 +880,13 @@ struct WindowStateTests {
         reader.registerWindow(second)
 
         #expect(first.activeProjectID == p.id)
-        #expect(first.expandedProjects == [q.id, r.id], "the closed active project stays closed")
-        #expect(second.expandedProjects == [q.id, p.id])
+        #expect(first.expandedRows == [q.id, r.id], "the closed active project stays closed")
+        #expect(second.expandedRows == [q.id, p.id])
 
         // A window the user opens afterwards opens only its active project.
         let opened = WindowState()
         reader.registerWindow(opened)
-        #expect(opened.expandedProjects == Set([opened.activeProjectID].compactMap(\.self)))
+        #expect(opened.expandedRows == Set([opened.activeProjectID].compactMap(\.self)))
     }
 
     @Test
@@ -897,17 +897,17 @@ struct WindowStateTests {
         state.restoreSelection(projects: [p, q])
         let window = WindowState(activeProjectID: p.id)
         state.registerWindow(window)
-        #expect(window.expandedProjects == [p.id])
+        #expect(window.expandedRows == [p.id])
 
-        window.expandedProjects.remove(p.id)
+        window.expandedRows.remove(p.id)
         window.activeProjectID = q.id
-        #expect(window.expandedProjects == [q.id], "only a change of project opens a section")
+        #expect(window.expandedRows == [q.id], "only a change of project opens a section")
 
         window.activeProjectID = PinnedTabs.workspaceID
-        #expect(window.expandedProjects == [q.id], "the pinned workspace has no section")
+        #expect(window.expandedRows == [q.id], "the pinned workspace has no section")
 
         state.removeProject(q.id)
-        #expect(!window.expandedProjects.contains(q.id))
+        #expect(!window.expandedRows.contains(q.id))
     }
 
     @Test

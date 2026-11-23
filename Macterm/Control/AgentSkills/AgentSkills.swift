@@ -36,6 +36,10 @@ struct AgentSkill: Equatable {
 /// `macterm …` command line in the text against the bundled CLI's own
 /// command tree. Keep this free of app-only dependencies.
 ///
+/// The Zig CLI embeds the same text as files, `server/src/cli/skills/`
+/// (design 011 §2). `AgentSkillsTests` checks that the files are this text.
+/// Change both together. The swap (design 011 §3) deletes this copy.
+///
 /// There is deliberately no installer: each agent knows where its own skills
 /// live, so the output is shaped for the agent to install from — one skill
 /// verbatim for redirecting into place, or all of them behind `header`, each

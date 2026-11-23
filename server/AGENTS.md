@@ -50,6 +50,7 @@ The port of the Swift CLI to Zig is in `src/cli/`. The Swift CLI stays `Resource
   - The session encodes the chord of `session.key` with the key modes of its terminal (`chord.zig`, ghostty-vt's key encoder). The grammar is the keybind grammar of the app (`HotkeyRegistry.parseShortcut`).
   - `session.history` holds at most 960 KiB, because a session's frame to the server is at most 1 MiB. Longer text keeps its end, and the CLI says so on stderr.
   - The cell size, the surface size, the content scale and read-only are the GUI's: `pane inspect` prints `-` for them, and `pane run` refuses no read-only pane yet. `session.key` treats Option as Alt, Macterm's default. The pane column of `session list` is `-` until the model.
+- **The agent skills are files** in `src/cli/skills/`, and the binary embeds them (`skills.zig`). `macterm skills` needs no server. Until the swap, the Swift `AgentSkills` holds the same text, and `AgentSkillsTests` checks that the two are equal: change both together. A Zig test parses each `macterm …` line of the skills against `golden/contract.json`, and a command that exists only in Debug builds fails it.
 - **Use a streaming writer for output** (`writerStreaming`). A positional writer writes at the start of a file, also when the shell opened the file to append.
 
 ## The roaming link (design/009, issue 0201)

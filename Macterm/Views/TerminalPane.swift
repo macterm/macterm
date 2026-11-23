@@ -124,10 +124,11 @@ struct TerminalPane: View {
                         ZoomIndicator(onExit: onZoomRequest)
                             .transition(.opacity)
                     }
-                    // A remote pane whose connection stopped or failed: one
-                    // badge for every reason, and a click does nothing. While
-                    // a try runs it says so; the app tries again by itself,
-                    // and a key connects at once.
+                    // A remote pane whose connection stopped or failed, or
+                    // whose first connect after a restart is slow: one badge
+                    // for every reason, and a click does nothing. While a try
+                    // runs it says so; the app tries again by itself, and a
+                    // key connects at once.
                     if let badge = pane.remoteLinkBadge {
                         RemoteLinkPill(badge: badge)
                             .transition(.opacity)
@@ -196,7 +197,7 @@ struct RemoteLinkPill: View {
     let badge: Pane.RemoteLinkBadge
 
     var body: some View {
-        StatusPill(title: title(of: badge), otherTitles: Pane.RemoteLinkBadge.allCases.map(title(of:))) {
+        StatusPill(title: title(of: badge)) {
             switch badge {
             case .reconnecting:
                 ProgressView().controlSize(.mini)

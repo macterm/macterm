@@ -576,9 +576,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: .remoteLinkDidStop,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] note in
+                // The session of a pane whose try failed, else nil.
+                let failedTry = note.object as? String
                 MainActor.assumeIsolated {
-                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped)
+                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped, failedTry: failedTry)
                 }
             },
         ]

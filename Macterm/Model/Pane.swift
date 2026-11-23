@@ -62,21 +62,22 @@ final class Pane: Identifiable {
         didSet { if isRemoteLinkLost { lineMode = nil } }
     }
 
-    /// A lost pane for which a try runs now: its badge says `Reconnecting`.
-    /// Never persisted.
+    /// A try runs now for a lost pane, or a slow first connect runs for a
+    /// pane that came back after a restart (`RemoteHosts.firstConnectIsSlow`):
+    /// its badge says `Reconnecting`. Never persisted.
     var isRemoteReconnecting = false
 
-    /// The badge of a remote pane whose connection is lost, or nil.
-    enum RemoteLinkBadge: Equatable, CaseIterable {
-        /// A try runs now.
+    /// The badge of a remote pane whose connection is lost or slow, or nil.
+    enum RemoteLinkBadge: Equatable {
+        /// A try, or a slow first connect, runs now.
         case reconnecting
         /// No try runs now.
         case lost
     }
 
     var remoteLinkBadge: RemoteLinkBadge? {
-        guard isRemoteLinkLost else { return nil }
-        return isRemoteReconnecting ? .reconnecting : .lost
+        if isRemoteReconnecting { return .reconnecting }
+        return isRemoteLinkLost ? .lost : nil
     }
 
     /// The command the pane runs when its shell starts (`PaneStartCommand`).

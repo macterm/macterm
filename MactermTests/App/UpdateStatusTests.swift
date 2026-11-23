@@ -25,7 +25,7 @@ struct UpdateStatusTests {
     }
 
     @Test
-    func a_found_update_downloads_with_a_ring_then_offers_restart() {
+    func a_found_update_downloads_with_a_ring_then_offers_the_install_button() {
         var machine = UpdateMachine()
         machine.handle(.userCheckStarted)
         #expect(machine.handle(found(.notDownloaded)) == .init(reply: .install))
@@ -45,8 +45,9 @@ struct UpdateStatusTests {
         #expect(machine.status == .extracting)
         #expect(machine.status.fraction == nil)
 
-        machine.handle(.readyToInstall(onQuit: false))
-        #expect(machine.status == .readyToRestart)
+        machine.handle(.readyToInstall(onQuit: false, version: nil))
+        #expect(machine.status == .readyToRestart(version: "2.1.0"))
+        #expect(machine.status.installTitle == "Update to v2.1.0")
     }
 
     /// A machine in a check that the user started.
@@ -77,10 +78,46 @@ struct UpdateStatusTests {
     /// Sparkle downloads a scheduled update by itself. The toolbar shows
     /// nothing until the update is ready.
     @Test
-    func a_scheduled_download_shows_only_restart_when_ready() {
+    func a_scheduled_download_shows_only_the_install_button_when_ready() {
         var machine = UpdateMachine()
-        machine.handle(.readyToInstall(onQuit: true))
-        #expect(machine.status == .readyToRestart)
+        machine.handle(.readyToInstall(onQuit: true, version: "2.2.0"))
+        #expect(machine.status == .readyToRestart(version: "2.2.0"))
+        #expect(machine.status.installTitle == "Update to v2.2.0")
+    }
+
+    /// A Tip build's version is the only name of that build, so it shows in
+    /// full.
+    @Test
+    func a_tip_update_shows_its_whole_version() {
+        let status = UpdateStatus.readyToRestart(version: "2.1.0-tip.57")
+        #expect(status.installTitle == "Update to v2.1.0-tip.57")
+    }
+
+    /// A newer background download replaces the update that waits.
+    @Test
+    func a_newer_update_replaces_the_waiting_version() {
+        var machine = UpdateMachine()
+        machine.handle(.readyToInstall(onQuit: true, version: "2.2.0"))
+        machine.handle(.readyToInstall(onQuit: true, version: "2.3.0"))
+        #expect(machine.status == .readyToRestart(version: "2.3.0"))
+    }
+
+    /// With no version, the title does not guess one.
+    @Test
+    func an_update_with_no_version_keeps_the_plain_title() {
+        #expect(UpdateStatus.readyToRestart(version: nil).installTitle == "Restart to Update")
+        #expect(UpdateStatus.readyToRestart(version: "").installTitle == "Restart to Update")
+    }
+
+    /// A ready callback with no version after the session ended does not
+    /// take the version of an earlier session.
+    @Test
+    func a_found_version_does_not_outlive_its_session() {
+        var machine = UpdateMachine()
+        machine.handle(found(.notDownloaded))
+        machine.handle(.sessionEnded)
+        machine.handle(.readyToInstall(onQuit: false, version: nil))
+        #expect(machine.status == .readyToRestart(version: nil))
     }
 
     /// A scheduled check that goes through the user driver (an update that
@@ -101,8 +138,8 @@ struct UpdateStatusTests {
         var ready = UpdateMachine()
         ready.handle(found(.notDownloaded, userInitiated: false))
         ready.handle(.downloadStarted)
-        ready.handle(.readyToInstall(onQuit: false))
-        #expect(ready.status == .readyToRestart)
+        ready.handle(.readyToInstall(onQuit: false, version: nil))
+        #expect(ready.status == .readyToRestart(version: "2.1.0"))
     }
 
     @Test
@@ -146,7 +183,7 @@ struct UpdateStatusTests {
         var machine = UpdateMachine()
         machine.handle(.downloadStarted)
         machine.handle(.extractionStarted)
-        machine.handle(.readyToInstall(onQuit: false))
+        machine.handle(.readyToInstall(onQuit: false, version: nil))
         machine.handle(.failed)
         #expect(machine.status == .idle)
     }
@@ -163,7 +200,7 @@ struct UpdateStatusTests {
     @Test
     func a_waiting_update_survives_later_events() {
         var machine = UpdateMachine()
-        machine.handle(.readyToInstall(onQuit: true))
+        machine.handle(.readyToInstall(onQuit: true, version: "2.2.0"))
         for event: UpdateEvent in [
             .sessionEnded,
             .failed,
@@ -172,7 +209,7 @@ struct UpdateStatusTests {
             .extractionStarted,
         ] {
             machine.handle(event)
-            #expect(machine.status == .readyToRestart, "after \(event)")
+            #expect(machine.status == .readyToRestart(version: "2.2.0"), "after \(event)")
         }
     }
 
@@ -181,13 +218,13 @@ struct UpdateStatusTests {
         var machine = UpdateMachine()
         let result = machine.handle(found(.installing))
         #expect(result.reply == .holdForRestart)
-        #expect(machine.status == .readyToRestart)
+        #expect(machine.status == .readyToRestart(version: "2.1.0"))
     }
 
     @Test
     func restart_with_no_reply_in_hand_installs_when_the_check_finds_it() {
         var machine = UpdateMachine()
-        machine.handle(.readyToInstall(onQuit: true))
+        machine.handle(.readyToInstall(onQuit: true, version: "2.1.0"))
         machine.handle(.restartRequested)
         #expect(machine.restartPending)
         #expect(machine.handle(found(.installing)).reply == .install)

@@ -215,7 +215,8 @@ fn usageError(arena: std.mem.Allocator, path: []const *const Command, comptime f
 /// The width that help wraps at, as the v1 CLI with `COLUMNS=80`.
 const width = 80;
 /// A line of the discussion or of a subcommand row is one column shorter, as
-/// ArgumentParser wraps them.
+/// ArgumentParser wraps them. In the overview, only a word that is not the
+/// last must end at this column.
 const short_width = width - 1;
 /// The column where the abstract of a row starts.
 const abstract_column = 26;
@@ -255,7 +256,9 @@ pub fn writeUsageError(w: *std.Io.Writer, path: []const *const Command, message:
 /// The `--help` text of the last command of `path`.
 pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
-    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, width);
+    // The last word of the overview may end at column 80, and every other
+    // word at column 79, as in the golden `pane` and `skills` help.
+    try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, short_width, width);
     try w.writeByte('\n');
     if (c.discussion) |d| {
         var lines = std.mem.splitScalar(u8, d, '\n');
@@ -263,7 +266,7 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
             if (line.len == 0 or line[0] == ' ') {
                 try w.writeAll(line);
                 try w.writeByte('\n');
-            } else try writeWrapped(w, "", line, 0, short_width);
+            } else try writeWrapped(w, "", line, 0, short_width, short_width);
         }
         try w.writeByte('\n');
     }
@@ -323,21 +326,23 @@ fn writeRow(w: *std.Io.Writer, label: []const u8, abstract: []const u8, max: usi
     } else {
         try w.splatByteAll(' ', abstract_column - 2 - label.len);
     }
-    try writeWrapped(w, "", abstract, abstract_column, max);
+    try writeWrapped(w, "", abstract, abstract_column, max, max);
 }
 
 /// Writes `prefix` and `text`, wrapped on spaces so that a line holds at
-/// most `max` columns, and a newline.
+/// most `max` columns, and a newline. The last word of `text` may end at
+/// column `last_max`.
 /// A line after the first starts with `indent` spaces; the caller wrote the
 /// first `indent` columns of the first line.
-fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent: usize, max: usize) std.Io.Writer.Error!void {
+fn writeWrapped(w: *std.Io.Writer, prefix: []const u8, text: []const u8, indent: usize, max: usize, last_max: usize) std.Io.Writer.Error!void {
     try w.writeAll(prefix);
     var column = indent + prefix.len;
     var words = std.mem.tokenizeScalar(u8, text, ' ');
     var line_start = true;
     while (words.next()) |word| {
         const cells = std.unicode.utf8CountCodepoints(word) catch word.len;
-        if (!line_start and column + 1 + cells > max) {
+        const limit = if (words.peek() == null) last_max else max;
+        if (!line_start and column + 1 + cells > limit) {
             try w.writeByte('\n');
             try w.splatByteAll(' ', indent);
             column = indent;

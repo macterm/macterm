@@ -30,6 +30,9 @@ struct PaneTests {
         p.isRemoteReconnecting = true
         #expect(p.remoteLinkBadge == .reconnecting)
         p.isRemoteLinkLost = false
+        // A slow first connect of a pane that came back after a restart.
+        #expect(p.remoteLinkBadge == .reconnecting)
+        p.isRemoteReconnecting = false
         #expect(p.remoteLinkBadge == nil)
     }
 

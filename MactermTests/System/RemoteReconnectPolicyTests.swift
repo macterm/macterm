@@ -91,4 +91,33 @@ struct RemoteReconnectPolicyTests {
         policy.recordAttempt(pane, now: epoch)
         #expect(policy.shouldAttempt(other, now: epoch))
     }
+
+    /// The backoff counts from the end of a failed try: a try that lasts
+    /// longer than the backoff does not start the next try at once.
+    @Test
+    func a_failed_try_starts_the_backoff_at_its_end() {
+        var policy = RemoteReconnectPolicy()
+        policy.recordAttempt(pane, now: epoch)
+        // The try runs for 20 s, longer than the 5 s step, and fails.
+        let end = epoch + 20
+        #expect(policy.shouldAttempt(pane, now: end))
+        policy.tryFailed(pane, now: end)
+        #expect(!policy.shouldAttempt(pane, now: end + 4))
+        #expect(policy.shouldAttempt(pane, now: end + 5))
+        // The next try fails too: the step after it is 20 s from its end.
+        policy.recordAttempt(pane, now: end + 5)
+        policy.tryFailed(pane, now: end + 25)
+        #expect(!policy.shouldAttempt(pane, now: end + 44))
+        #expect(policy.shouldAttempt(pane, now: end + 45))
+    }
+
+    /// A failed connect that the sweep did not start (the pane's first
+    /// connect after a restart) counts as one try: the sweep waits 5 s.
+    @Test
+    func a_failed_first_connect_waits_the_first_step() {
+        var policy = RemoteReconnectPolicy()
+        policy.tryFailed(pane, now: epoch)
+        #expect(!policy.shouldAttempt(pane, now: epoch + 4))
+        #expect(policy.shouldAttempt(pane, now: epoch + 5))
+    }
 }
