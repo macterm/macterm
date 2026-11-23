@@ -1,11 +1,11 @@
 import AppKit
 
 /// Palette source for projects. Active search matches the name, then the
-/// name of the project's group, then the path (`Search`), and gives projects
+/// path, then the name of the project's group (`Search`), and gives projects
 /// a small score boost over commands; empty state shows up to 5
 /// recently-visited projects (falling back to the store if recency is empty).
-/// A group is never a row (design 013): a project in a group shows the
-/// group's name as its subtitle, and a project at the top level its path.
+/// A group is never a row (design 013). The subtitle is the group's name, or
+/// the path at the top level.
 @MainActor
 struct ProjectSource: PaletteSource {
     /// Wins a tie with a command: a project matched as well as a command is
@@ -16,7 +16,7 @@ struct ProjectSource: PaletteSource {
         let query = SearchQuery(query)
         return context.projectStore.projects.compactMap { project in
             let group = context.projectStore.group(of: project.id)?.name
-            let fields = [project.name] + (group.map { [$0] } ?? []) + [project.path]
+            let fields = [project.name, project.path] + (group.map { [$0] } ?? [])
             guard let match = Search.match(query, fields: fields) else { return nil }
             return makeItem(
                 project: project,

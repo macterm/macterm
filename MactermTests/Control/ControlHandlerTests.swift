@@ -152,8 +152,8 @@ struct ControlHandlerTests {
         #expect(projectStore.move(api.id, into: work.id))
 
         let projects = await handler.handle(request("project.list")).data?.projects
-        // The group takes no index, and its project comes before the
-        // project that is after the group.
+        // The sidebar order is first, Work (api), last. The group takes no
+        // index.
         #expect(projects?.map(\.name) == ["first", "api", "last"])
         #expect(projects?.map(\.index) == [1, 2, 3])
         #expect(projects?.map(\.group) == ["", "Work", ""])

@@ -53,8 +53,8 @@ before you create:
 macterm project list --json
 ```
 
-Each project has an `id`, a `name`, a `path` and a `group`. The `group` is the name of the sidebar folder
-that holds the project, or empty. A folder is not a project: it has no tabs, and no name or index
+Each project has an `id`, a `name`, a `path` and a `group`. The `group` is the name of the sidebar group
+that holds the project, or empty. A group is not a project: it has no tabs, and no name or index
 selects it. If a project already has your directory, select it. If not, create it one time:
 
 ```sh

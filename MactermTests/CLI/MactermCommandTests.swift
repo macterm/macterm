@@ -114,6 +114,41 @@ struct MactermCommandTests {
     }
 
     @Test
+    func project_list_prints_a_group_column_only_when_a_project_is_in_a_group() throws {
+        func project(_ index: Int, _ name: String, group: String?) -> ControlProjectInfo {
+            ControlProjectInfo(
+                index: index, id: "id-\(index)", name: name, path: "/tmp/\(name)",
+                active: false, loaded: false, tabCount: nil, group: group
+            )
+        }
+        let grouped = RecordingSocket(data: ControlData(projects: [
+            project(1, "notes", group: ""),
+            project(2, "api", group: "Work"),
+        ]))
+        defer { grouped.stop() }
+        let withGroup = try grouped.cli(["project", "list"])
+        #expect(withGroup.status == 0, "\(withGroup.stderr)")
+        #expect(withGroup.stdout == """
+        project:1     notes        not loaded  /tmp/notes
+        project:2     api    Work  not loaded  /tmp/api
+
+        """)
+
+        // No group, or an app from before groups: the columns as before.
+        let flat = RecordingSocket(data: ControlData(projects: [
+            project(1, "notes", group: ""),
+            project(2, "api", group: nil),
+        ]))
+        defer { flat.stop() }
+        let withoutGroup = try flat.cli(["project", "list"])
+        #expect(withoutGroup.stdout == """
+        project:1     notes  not loaded  /tmp/notes
+        project:2     api    not loaded  /tmp/api
+
+        """)
+    }
+
+    @Test
     func pane_run_prints_help_for_a_help_flag_before_the_terminator() throws {
         let socket = RecordingSocket()
         defer { socket.stop() }
@@ -208,14 +243,15 @@ private final class RecordingSocket {
         responseVersion: Int = ControlProtocol.version,
         dropAfterFirstRequest: Bool = false,
         probeFails: Bool = false,
-        path: String? = nil
+        path: String? = nil,
+        data: ControlData? = nil
     ) {
         self.path = path ?? "/tmp/macterm-test-\(UInt32.random(in: 0 ..< UInt32.max)).sock"
         let version = responseVersion
         let dropLater = dropAfterFirstRequest
         server = ControlSocketServer(socketPath: self.path)
         server.start()
-        server.attach { [received, version, dropLater, probeFails] raw, _ in
+        server.attach { [received, version, dropLater, probeFails, data] raw, _ in
             let request = try? ControlProtocol.decodeRequest(raw)
             let drop = dropLater && received.value.count >= 1
             if let request { received.mutate { $0.append(request) } }
@@ -230,7 +266,7 @@ private final class RecordingSocket {
                 v: version,
                 id: request?.id ?? "",
                 ok: true,
-                data: nil,
+                data: data,
                 error: nil
             ))
         }
