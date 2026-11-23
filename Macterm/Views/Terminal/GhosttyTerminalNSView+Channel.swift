@@ -99,7 +99,8 @@ extension GhosttyTerminalNSView {
             let session = PaneSession(
                 name: sessionName,
                 launch: launch,
-                wantsForeground: false,
+                wantsForeground: true,
+                wantsTty: true,
                 host: host,
                 connect: { try await LocalSessions.shared.channelConnection() }
             )
@@ -177,18 +178,52 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         }
     }
 
-    func paneSnapshot(started: Bool) {
-        DispatchQueue.main.async { [weak view] in view?.onSnapshotMark?(started) }
+    func paneState(_ state: MactermProtocol.State) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionState?(state) }
     }
 
     func paneForeground(_ foreground: MactermProtocol.Foreground) {
-        guard let report = RemoteForeground(foreground) else { return }
-        DispatchQueue.main.async { [weak view] in view?.onRemoteForeground?(report) }
+        guard let report = SessionForeground(foreground) else { return }
+        DispatchQueue.main.async { [weak view] in view?.onSessionForeground?(report) }
+    }
+
+    func paneTitle(_ title: Data) {
+        let text = String(decoding: title, as: UTF8.self)
+        DispatchQueue.main.async { [weak view] in view?.onTitleChange?(text) }
+    }
+
+    /// Each surface keeps the folder for itself (`currentPwd`), as
+    /// libghostty's own `pwd` action does for a surface with no session.
+    func paneCwd(_ url: Data) {
+        guard let path = Self.path(ofCwdURL: url) else { return }
+        DispatchQueue.main.async { [weak view] in view?.currentPwd = path }
+    }
+
+    func paneMark(_ mark: MactermProtocol.Mark) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionMark?(mark) }
+    }
+
+    func paneStatus(_ status: MactermProtocol.Status) {
+        DispatchQueue.main.async { [weak view] in view?.onSessionStatus?(status) }
+    }
+
+    /// The path of an OSC 7 URL: what follows the host. A `file://` URL has
+    /// percent escapes, which are decoded. A `kitty-shell-cwd://` URL (the
+    /// shell integration of Ghostty) has the raw path, which can hold `#`,
+    /// `?` and `%`, so it is not parsed as a URL. nil for anything else.
+    static func path(ofCwdURL data: Data) -> String? {
+        let text = String(decoding: data, as: UTF8.self)
+        guard let scheme = text.range(of: "://") else { return nil }
+        let rest = text[scheme.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        let path = String(rest[slash...])
+        guard text.hasPrefix("file://") else { return path }
+        return path.removingPercentEncoding ?? path
     }
 
     func paneTtyMode(_ mode: MactermProtocol.TtyMode) {
         let lineMode = TerminalLineMode(canonical: mode.canonical, echo: mode.echo)
-        DispatchQueue.main.async { [weak view] in view?.onRemoteTtyMode?(lineMode) }
+        DispatchQueue.main.async { [weak view] in view?.onTtyMode?(lineMode) }
     }
 
     func paneAttention(_ flags: MactermProtocol.Attention) {

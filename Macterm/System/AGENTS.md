@@ -5,7 +5,7 @@ This file loads when you work in `Macterm/System/`. The root `AGENTS.md` has the
 - `Macterm/Persistence/`: `WorkspacePersistence` (snapshots, `WorkspaceStore`), `ProjectStore`, `FileStorage`, `ProjectFile` and `ProjectFileStore` (`~/.config/macterm/projects/`), `LayoutFileService`, `LayoutBuilder`, `LayoutSerializer` and `LayoutReconciler`, `LayoutFile` (only in memory), `PinnedLayoutStore`, `WidgetLayoutStore`, and `PasswordStore` (Keychain and `PasswordVault`).
 - `Macterm/System/`
   - `ProcessInspector` (foreground pid → `runningCommand`, `runningShell` and `runningProcessName`).
-  - `SessionClient` (the session paths of the panes, injectable), `ZmxForegroundResolver`.
+  - `SessionClient` (the session paths of the panes, injectable), `ZmxRefreshGate`.
   - `HostCommands` (every command and script that runs on a host), `RemoteReconnectPolicy`, `RemoteTerminfo`.
   - `SSHWrapper` (shared with the CLI target).
   - `ProcessLocale`, `FullDiskAccess`, `SecureInput`.

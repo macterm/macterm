@@ -278,7 +278,7 @@ enum ZmxEnvironment {
 /// policy), and — when the host's `ps` gave it — the foreground's full
 /// command line (`args`, feeds Save Layout's `run:` capture, the remote
 /// analogue of the local KERN_PROCARGS2 argv).
-struct RemoteForeground: Equatable {
+struct SessionForeground: Equatable {
     let comm: String
     /// The host's idle verdict — true when the tty's foreground process
     /// group IS the session leader's (the shell owns its prompt), judged
@@ -292,7 +292,7 @@ struct RemoteForeground: Equatable {
     /// shell only the host has.
     let isShell: Bool?
     /// The full `ps -o args=` command line, nil when the report carried
-    /// none. May describe a shell at its prompt — `Pane.applyRemoteForeground`
+    /// none. May describe a shell at its prompt — `Pane.applyForeground`
     /// decides whether it counts as a running command.
     let command: String?
 

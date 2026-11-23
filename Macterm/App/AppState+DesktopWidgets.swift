@@ -94,8 +94,6 @@ extension AppState {
     /// Whether removing the widget would end a running program.
     func desktopWidgetNeedsConfirmRemove(id: UUID) -> Bool {
         guard let pane = desktopWidget(id: id)?.pane else { return false }
-        // Widget panes are outside the poll, so their sample is read fresh.
-        pane.refreshForegroundProcess()
         return pane.needsConfirmClose
     }
 
