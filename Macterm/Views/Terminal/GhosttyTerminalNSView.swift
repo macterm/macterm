@@ -450,18 +450,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// current total row count. Occlusion-independent — see
     /// `surfaceDidOutputActivity`.
     var onOutputActivity: ((UInt64) -> Void)?
-    /// The session's `state`: its shell's pid and its pty.
-    var onSessionState: ((MactermProtocol.State) -> Void)?
-    /// The session reports the pane's foreground (`PaneChannelEvent`).
-    var onSessionForeground: ((SessionForeground) -> Void)?
-    /// The session reports how the pane's pty reads input.
-    var onTtyMode: ((TerminalLineMode) -> Void)?
-    /// An OSC 133 mark that the session parsed.
-    var onSessionMark: ((MactermProtocol.Mark) -> Void)?
-    /// The session's run status.
-    var onSessionStatus: ((MactermProtocol.Status) -> Void)?
-    /// The session's attention flags (`PaneSessionHost.paneAttention`).
-    var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
     /// when the pointer leaves it. Drives the pane's hover-URL banner.
     var onLinkHover: ((String?) -> Void)?
@@ -841,10 +829,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             return
         }
 
-        if channelLaunch != nil {
-            startChannel(surface: surface)
-            NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
-        } else if remoteChannel {
+        if channelLaunch != nil || remoteChannel {
             startChannel(surface: surface)
         }
 

@@ -10,7 +10,7 @@ struct PaneSessionTests {
     func a_session_is_made_fed_and_ends_with_the_exit_status() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(
                     cwd: NSTemporaryDirectory(),
@@ -36,7 +36,7 @@ struct PaneSessionTests {
     func the_size_goes_to_the_session_when_the_client_claims() async throws {
         try await withServer { server in
             let host = RecordingPaneHost(grid: PaneGrid(cols: 91, rows: 17))
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-size-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "sleep 1; stty size; sleep 30"], env: []),
                 wantsForeground: false,
@@ -55,7 +55,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let name = "ps-lead-\(UInt32.random(in: 0 ... .max))"
             let first = RecordingPaneHost()
-            let a = PaneSession(
+            let a = try await PaneSession.made(
                 name: name,
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
@@ -67,7 +67,7 @@ struct PaneSessionTests {
 
             // A second client of the session does not lead, and hears so.
             let second = RecordingPaneHost()
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, wantsForeground: false, host: second, connect: { try await server.connect() })
             b.start()
             try await second.waitFor { $0.leads == [false] }
 
@@ -84,7 +84,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let host = RecordingPaneHost()
             let connections = ConnectionBox()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-lost-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf before-%s lost; sleep 60"], env: []),
                 wantsForeground: false,
@@ -106,7 +106,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let host = RecordingPaneHost()
             let connections = ConnectionBox()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-keep-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
@@ -134,7 +134,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let host = RecordingPaneHost()
             let connections = ConnectionBox()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-nolead-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
@@ -159,7 +159,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let name = "ps-seen-\(UInt32.random(in: 0 ... .max))"
             let first = RecordingPaneHost()
-            let a = PaneSession(
+            let a = try await PaneSession.made(
                 name: name,
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "read l; printf '\\a'; sleep 60"], env: []),
                 wantsForeground: false,
@@ -169,7 +169,7 @@ struct PaneSessionTests {
             a.start()
             try await first.waitFor { $0.leads == [true] }
             let second = RecordingPaneHost()
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, wantsForeground: false, host: second, connect: { try await server.connect() })
             b.start()
             try await second.waitFor { $0.leads == [false] }
 
@@ -193,7 +193,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let host = RecordingPaneHost()
             let connections = ConnectionBox()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-flags-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf '\\a'; sleep 60"], env: []),
                 wantsForeground: false,
@@ -215,7 +215,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let host = RecordingPaneHost()
             let name = "ps-kill-\(UInt32.random(in: 0 ... .max))"
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: name,
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf alive-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
@@ -243,7 +243,7 @@ struct PaneSessionTests {
             let name = "ps-regrid-\(UInt32.random(in: 0 ... .max))"
             let wide = PaneGrid(cols: 100, rows: 10)
             let first = RecordingPaneHost(grid: wide)
-            let a = PaneSession(
+            let a = try await PaneSession.made(
                 name: name,
                 launch: .init(
                     cwd: NSTemporaryDirectory(),
@@ -264,7 +264,7 @@ struct PaneSessionTests {
                 box.host?.setGrid(narrow)
                 box.session?.sendSize(narrow)
             }
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, wantsForeground: false, host: second, connect: { try await server.connect() })
             box.set(session: b, host: second)
             b.start()
             try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
@@ -288,7 +288,7 @@ struct PaneSessionTests {
     func input_before_the_attach_waits_for_the_prompt_mark() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-mark-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
@@ -316,7 +316,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let name = "ps-atprompt-\(UInt32.random(in: 0 ... .max))"
             let first = RecordingPaneHost()
-            let a = PaneSession(
+            let a = try await PaneSession.made(
                 name: name,
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
@@ -329,7 +329,6 @@ struct PaneSessionTests {
             let second = RecordingPaneHost()
             let b = PaneSession(
                 name: name,
-                launch: nil,
                 wantsForeground: false,
                 startWait: .seconds(30),
                 host: second,
@@ -347,7 +346,7 @@ struct PaneSessionTests {
     func input_for_a_shell_with_no_marks_goes_after_the_wait() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-nomark-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(
                     cwd: NSTemporaryDirectory(),
@@ -372,7 +371,7 @@ struct PaneSessionTests {
         // terminal before its first prompt and wait for the answer.
         try await withServer { server in
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-reply-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(
                     cwd: NSTemporaryDirectory(),
@@ -398,7 +397,7 @@ struct PaneSessionTests {
         // The mark sends the input. The wait that ends later sends nothing.
         try await withServer { server in
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: "ps-once-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
@@ -420,7 +419,7 @@ struct PaneSessionTests {
         try await withServer { server in
             let name = "ps-closed-\(UInt32.random(in: 0 ... .max))"
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: name,
                 launch: .init(
                     cwd: NSTemporaryDirectory(),
@@ -441,7 +440,7 @@ struct PaneSessionTests {
 
             // Another client sees the session's screen: the line never came.
             let viewer = RecordingPaneHost()
-            let other = PaneSession(name: name, launch: nil, wantsForeground: false, host: viewer, connect: { try await server.connect() })
+            let other = PaneSession(name: name, wantsForeground: false, host: viewer, connect: { try await server.connect() })
             other.start()
             try await viewer.waitFor { $0.screen.contains("up-ok") }
             #expect(!viewer.snapshot().screen.contains("hi"))

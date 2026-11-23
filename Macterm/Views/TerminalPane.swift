@@ -400,11 +400,9 @@ private struct TerminalSurface: NSViewRepresentable {
     /// work before any window draws it.
     private func configure(_ view: GhosttyTerminalNSView) {
         view.onFocus = onFocus
-        // Every surface of the pane gets the session's exit. Only the feed's
-        // ends the pane: another window's client that dies alone is a detach.
-        view.onProcessExit = { [weak surface] in
-            if surface?.isFeed ?? true { onProcessExit() }
-        }
+        // The pane's link calls one surface's handler at the session's end
+        // (`Pane.sessionDidEnd`); a surface with no session calls its own.
+        view.onProcessExit = onProcessExit
         view.onSplitRequest = onSplitRequest
         view.onZoomRequest = onZoomRequest
         view.isZoomed = isZoomed

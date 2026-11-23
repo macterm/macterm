@@ -83,8 +83,9 @@ extension PaneSessionHost {
     func paneInputUndelivered(_: Data) {}
 }
 
-/// One pane's session on a server: it makes the session when a `launch` is
-/// given, opens a channel, attaches, and feeds the host from the channel.
+/// One surface's view channel on a pane's session: it opens a channel,
+/// attaches, and feeds the host from the channel. The pane's `PaneLink`
+/// makes the session first (`create`), once for the pane.
 /// Input, claims and sizes go back on the same channel, in order, from a
 /// queue of its own, so a stalled server never blocks the caller.
 ///
@@ -106,8 +107,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// Clears the screen, the scrollback and the cursor.
     static let resetScreen = Data("\u{1B}[0m\u{1B}[3J\u{1B}[2J\u{1B}[H".utf8)
 
-    private static let reconnectTries = 12
-    private static let reconnectWait: Duration = .milliseconds(500)
+    static let reconnectTries = 12
+    static let reconnectWait: Duration = .milliseconds(500)
     /// The limit of new attaches on one channel for a grid that changes
     /// before its snapshot. After the limit, the snapshot is drawn.
     static let attachAgainLimit = 3
@@ -119,7 +120,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     let name: String
     private let host: any PaneSessionHost
     private let connect: Connect
-    private let launch: Launch?
+    /// A session that is not there ended: the link made it before this
+    /// channel opened. False for a remote pane, whose driver asks the host.
+    private let missingIsExit: Bool
     private let wantsForeground: Bool
     private let wantsTty: Bool
     /// A lost link is tried again (a local server that restarted). A remote\n    /// pane's driver connects again itself, with the app's
@@ -152,16 +155,16 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     init(
         name: String,
-        launch: Launch?,
         wantsForeground: Bool,
         wantsTty: Bool = false,
         reconnects: Bool = true,
+        missingIsExit: Bool = true,
         startWait: Duration = PaneSession.shellStartWait,
         host: any PaneSessionHost,
         connect: @escaping Connect
     ) {
         self.name = name
-        self.launch = launch
+        self.missingIsExit = missingIsExit
         self.wantsForeground = wantsForeground
         self.wantsTty = wantsTty
         self.reconnects = reconnects
@@ -294,10 +297,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         while !Task.isCancelled {
             do {
                 let connection = try await connect()
-                // Only the first attach makes the session. A session that is
-                // gone later ended: the app ends a session whose shell exited,
-                // and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: connection, launch) }
                 let channel = try await connection.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()
@@ -328,7 +327,12 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 host.paneLinkLost()
             } catch is CancellationError {
                 return
-            } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
+            } catch let ProtocolControlError.errorResponse(info)
+                where info.errorCode == .notFound && (missingIsExit || !firstAttach)
+            {
+                // The session was made before this channel: one that is gone
+                // ended. The app ends a session whose shell exited, and a new
+                // shell here would hide that.
                 host.paneExited(code: nil, signal: nil)
                 return
             } catch {
@@ -454,10 +458,11 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return Task.isCancelled
     }
 
-    /// Makes the session, or finds it. A session whose shell exited while no
-    /// app was there is ended and made again, as `zmx attach` did in v1.
-    private func createSession(on connection: ServerConnection, _ launch: Launch) async throws {
-        let grid = host.paneGrid()
+    /// Makes the session `name`, or finds it, at the size `grid`. A session
+    /// whose shell exited while no app was there is ended and made again, as
+    /// `zmx attach` did in v1. The pane's link calls it once, before any
+    /// surface opens a channel.
+    static func create(on connection: ServerConnection, name: String, launch: Launch, grid: PaneGrid) async throws {
         let args = MactermProtocol.SessionCreate.Args(
             id: name,
             cwd: launch.cwd.map { ProtocolBin(Data($0.utf8)) },

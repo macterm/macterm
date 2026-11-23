@@ -12,13 +12,13 @@ extension Pane {
     /// `onRunEnded`) stay in `TerminalSurface.configure`.
     ///
     /// The session's own messages (foreground, title, tty mode, marks,
-    /// state, attention) come on every surface's channel and say the same
-    /// thing, so every surface applies them. Every surface of a pane also
-    /// parses the same output with libghostty, so the callbacks that count
-    /// what it reads (runs, notifications, project memory) act only for the
-    /// feed surface (`PaneSurface.isFeed`), which each one asks when it
-    /// fires: when the first surface goes, the next one takes over with no
-    /// handoff. `PaneSurface` sets the search, copy mode, link and read-only
+    /// state, attention) and its end come once, through the pane's
+    /// `PaneLink` (`receiveLinkEvent`), not through the views. Every surface
+    /// of a pane parses the same output with libghostty, so the callbacks
+    /// that count what it reads (runs, notifications, project memory) act
+    /// only for the surface whose client leads the session
+    /// (`PaneSurface.countsOutput`): the session says which one, and when it
+    /// changes. `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
     func connectViewCallbacks(_ view: GhosttyTerminalNSView) {
         view.onInteraction = { [weak self] in
@@ -56,33 +56,23 @@ extension Pane {
             guard let view else { return }
             AdaptiveTerminalChrome.shared.terminalBackgroundDidChange(color, in: view)
         }
-        // Every surface's channel gets the same messages from the session.
-        view.onAttention = { [weak self] flags in self?.receiveAttention(flags) }
+        // A surface with no session reports its own titles.
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
-        view.onSessionState = { [weak self] state in self?.receiveSessionState(state) }
-        view.onSessionForeground = { [weak self] foreground in self?.applyForeground(foreground) }
-        view.onTtyMode = { [weak self] mode in self?.lineMode = mode }
-        view.onSessionMark = { [weak self] mark in
-            // OSC 133;D: the shell owns its prompt again. It feeds the title
-            // gate and the tracker's prompt hold.
-            if mark.kind == .end { self?.notePromptReturned() }
-        }
-        view.onSessionStatus = { [weak self] status in self?.receiveSessionStatus(status) }
-        // libghostty's callbacks: only the feed surface counts what it parses.
-        let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
+        // libghostty's callbacks: only the surface that leads counts what it parses.
+        let counts = { [weak view] in view?.owningSurface?.countsOutput ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
-            guard let self, isFeed() else { return }
+            guard let self, counts() else { return }
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
         view.onProgressStarted = { [weak self] in
-            guard isFeed() else { return }
+            guard counts() else { return }
             self?.markCommandRunning()
         }
         view.onProgressFinished = { [weak self, weak view] in
             // Only a live run can end. Whether it failed is the session's
             // flag (`Pane.attention`).
-            guard let self, isFeed(), executionState == .running else { return }
+            guard let self, counts(), executionState == .running else { return }
             markProgressFinished()
             view?.onRunEnded?()
         }
@@ -93,7 +83,7 @@ extension Pane {
                 // next idle poll, so the bubble is up before the user types.
                 PasswordPromptMonitor.shared.viewDidOutput(view)
             }
-            guard let self, isFeed() else { return }
+            guard let self, counts() else { return }
             // The single activity source. Output heartbeats fire from the pty
             // IO path regardless of occlusion, so they also reach background
             // tabs, and they carry the row total so the tracker can tell
@@ -102,7 +92,7 @@ extension Pane {
             markOutputActivity(totalRows: total)
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
-            guard let self, isFeed() else { return }
+            guard let self, counts() else { return }
             // A surface on a channel gets the shell's 133;D from the session
             // (`onSessionMark`); a surface with no session has only this one.
             if view?.channelRuntime == nil { notePromptReturned() }
@@ -139,6 +129,19 @@ extension Pane {
             let mins = (rounded % 3600) / 60
             return String(localized: "\(hours)h \(mins)m", comment: "A duration in hours and minutes, as in 2h 5m")
         }
+    }
+
+    /// The session ended: the pane closes, once. The handler is the one of
+    /// the window that draws the pane (`TerminalSurface.configure`), or the
+    /// warm's (`AppState.warmPane`): the first surface that has one, from the
+    /// preferred surface on.
+    func sessionDidEnd() {
+        let registry = SurfaceRegistry.shared
+        let all = registry.surfaces(of: self)
+        guard !all.isEmpty else { return }
+        let preferred = registry.preferredSurface(of: self)
+        let ordered = [preferred] + all.filter { $0 !== preferred }
+        ordered.lazy.compactMap(\.nsView).compactMap(\.onProcessExit).first?()
     }
 
     /// Tells the session that the user saw the pane, on the channel of one

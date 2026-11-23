@@ -195,6 +195,41 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private(set) var sessionShell: SessionShell?
 
+    /// The pane's link to its session: made at the first surface that runs
+    /// from a channel, and kept for the pane's life. It makes the session,
+    /// runs a remote pane's driver, and gives the pane the session's
+    /// messages and its end once (`receiveLinkEvent`), however many windows
+    /// show the pane.
+    @ObservationIgnored
+    private var link: PaneLink?
+
+    var sessionLink: PaneLink {
+        if let link { return link }
+        let made = PaneLink.make(for: self)
+        made.onEvent = { [weak self] event in self?.receiveLinkEvent(event) }
+        link = made
+        return made
+    }
+
+    /// The link, when a surface made one. Makes nothing.
+    var existingSessionLink: PaneLink? { link }
+
+    /// A message of the pane's session, once for the pane.
+    func receiveLinkEvent(_ event: PaneLinkEvent) {
+        switch event {
+        case let .state(state): receiveSessionState(state)
+        case let .foreground(foreground): applyForeground(foreground)
+        case let .title(title): receiveReportedTitle(title)
+        case let .ttyMode(mode): lineMode = mode
+        // OSC 133;D: the shell owns its prompt again. It feeds the title
+        // gate and the tracker's prompt hold.
+        case let .mark(mark): if mark.kind == .end { notePromptReturned() }
+        case let .status(status): receiveSessionStatus(status)
+        case let .attention(flags): receiveAttention(flags)
+        case .ended: sessionDidEnd()
+        }
+    }
+
     /// The channel's `state` message. A remote session's pid is on the
     /// host, so it is not kept.
     func receiveSessionState(_ state: MactermProtocol.State) {

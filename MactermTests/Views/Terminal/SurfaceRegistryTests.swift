@@ -30,16 +30,14 @@ struct SurfaceRegistryTests {
     }
 
     @Test
-    func each_window_gets_its_own_surface_and_the_first_is_the_feed() {
+    func each_window_gets_its_own_surface() {
         let pane = makePane()
         let a = UUID(), b = UUID()
         let forA = registry.surface(for: pane, in: .window(a))
         let forB = registry.surface(for: pane, in: .window(b))
         #expect(forA !== forB)
-        #expect(forA.isFeed)
-        #expect(!forB.isFeed)
         #expect(registry.surface(for: pane, in: .window(a)) === forA)
-        #expect(registry.surface(for: pane, in: .incubator) === forA, "the incubator gets the feed")
+        #expect(registry.surface(for: pane, in: .incubator) === forA, "the incubator gets the first surface")
     }
 
     @Test
@@ -63,13 +61,13 @@ struct SurfaceRegistryTests {
     }
 
     @Test
-    func a_retired_feed_hands_the_feed_to_the_next_surface() {
+    func a_retired_surface_leaves_the_next_one() {
         let pane = makePane()
         let forA = registry.surface(for: pane, in: .window(UUID()))
         let forB = registry.surface(for: pane, in: .window(UUID()))
         registry.retire(forA)
         #expect(registry.surfaces(of: pane).count == 1)
-        #expect(forB.isFeed)
+        #expect(registry.surfaces(of: pane).first === forB)
         registry.retire(forB)
         #expect(registry.surfaces(of: pane).count == 1, "a pane keeps its last surface")
     }

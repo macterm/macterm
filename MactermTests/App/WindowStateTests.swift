@@ -328,8 +328,6 @@ struct WindowStateTests {
             #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA, "the same surface for the same window")
             #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
             #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
-            #expect(forA.isFeed, "the first window to draw the pane has its feed")
-            #expect(!forB.isFeed)
         }
         #expect(!state.showsTabOfEarlierWindow(a))
         #expect(state.showsTabOfEarlierWindow(b))
@@ -430,28 +428,6 @@ struct WindowStateTests {
 
         #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1, "b's client goes with its view of the tab")
         #expect(SurfaceRegistry.shared.surfaces(of: pane).first === forA)
-    }
-
-    @Test
-    func the_feed_passes_to_the_next_surface_when_its_window_moves_on() throws {
-        let state = makeAppState()
-        let (project, ws) = try seedProject(state, tabs: 2)
-        let a = WindowState(activeProjectID: project.id)
-        let b = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        state.registerWindow(b)
-        state.noteKeyWindow(a)
-        state.selectTab(ws.tabs[0].id, projectID: project.id)
-        state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
-        let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
-        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
-        #expect(!forB.isFeed)
-
-        state.selectTab(ws.tabs[1].id, projectID: project.id)
-
-        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
-        #expect(forB.isFeed, "the pane keeps a feed while any window draws it")
     }
 
     @Test

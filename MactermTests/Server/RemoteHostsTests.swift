@@ -302,8 +302,8 @@ struct RemoteHostsTests {
             let before = Fixture(host, wakes: true)
             let restored = before.pane()
             before.hosts.pane = { _ in restored }
-            let first = RemotePaneDriver(name: restored.sessionName, surface: RecordingPaneHost(), hosts: before.hosts)
-            first.start()
+            let first = RemotePaneDriver(name: restored.sessionName, hosts: before.hosts)
+            first.start(showing: [RecordingPaneHost()])
             let deadline = Date().addingTimeInterval(30)
             while restored.hostSessionDirectory == nil, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(100))
@@ -319,11 +319,13 @@ struct RemoteHostsTests {
             let fresh = after.pane()
             after.hosts.pane = { $0 == restored.sessionName ? restored : fresh }
             let views = [RecordingPaneHost(), RecordingPaneHost()]
-            let drivers = zip([restored, fresh], views).map { pane, view in
-                RemotePaneDriver(name: pane.sessionName, surface: view, hosts: after.hosts, slowConnectAfter: .seconds(1))
+            let drivers = [restored, fresh].map { pane in
+                RemotePaneDriver(name: pane.sessionName, hosts: after.hosts, slowConnectAfter: .seconds(1))
             }
             defer { drivers.forEach { $0.stop() } }
-            drivers.forEach { $0.start() }
+            for (driver, view) in zip(drivers, views) {
+                driver.start(showing: [view])
+            }
             try await Task.sleep(for: .seconds(2))
             #expect(restored.remoteLinkBadge == .reconnecting)
             #expect(!restored.isRemoteLinkLost)
@@ -372,11 +374,9 @@ struct RemoteHostsTests {
             fixture.hosts.pane = { _ in pane }
             // The login fails after 4 s.
             try host.sshd.addToConfig("ProxyCommand /bin/sh -c 'sleep 4; exit 1'")
-            let driver = RemotePaneDriver(
-                name: pane.sessionName, surface: RecordingPaneHost(), hosts: fixture.hosts, slowConnectAfter: .seconds(1)
-            )
+            let driver = RemotePaneDriver(name: pane.sessionName, hosts: fixture.hosts, slowConnectAfter: .seconds(1))
             defer { driver.stop() }
-            driver.start()
+            driver.start(showing: [RecordingPaneHost()])
             try await Task.sleep(for: .seconds(2))
             #expect(pane.remoteLinkBadge == .reconnecting)
             let deadline = Date().addingTimeInterval(30)
@@ -411,11 +411,12 @@ struct RemoteHostsTests {
         fixture.hosts.pane = { _ in pane }
         let left = RecordingPaneHost()
         let right = RecordingPaneHost()
-        let drivers = [left, right].map { RemotePaneDriver(name: pane.sessionName, surface: $0, hosts: fixture.hosts) }
-        defer { drivers.forEach { $0.stop() } }
-        drivers.forEach { $0.start() }
+        // One driver for the pane, with a view for each window.
+        let driver = RemotePaneDriver(name: pane.sessionName, hosts: fixture.hosts)
+        defer { driver.stop() }
+        let routes = driver.start(showing: [left, right])
         try await left.waitFor { $0.resets > 0 }
-        drivers[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
+        routes[0].sendInput(Data("printf 'before-%s\\n' kill\n".utf8))
         try await left.waitFor { $0.screen.contains("before-kill") }
         try await right.waitFor { $0.screen.contains("before-kill") }
         // The first attach's lead message marks the folder: the session ran.
@@ -447,7 +448,7 @@ struct RemoteHostsTests {
         if byKey || needsLogin {
             // A key starts a try at once, and its bytes are dropped: they
             // were typed at a stale screen.
-            drivers[0].sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
+            routes[0].sendInput(Data("printf 'dropped-%s\\n' key\n".utf8))
         } else {
             // The sweep, with no key.
             if slowTry {
@@ -467,7 +468,7 @@ struct RemoteHostsTests {
         try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
         #expect(!pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
         if needsLogin { #expect(host.askpassQuestions > questions) }
-        drivers[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
+        routes[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
         try await left.waitFor { $0.screen.contains("after-key") }
         #expect(!left.snapshot().screen.contains("dropped-key"))
         #expect(host.sshd.acceptedLogins() == 2)
@@ -795,7 +796,7 @@ struct RemoteHostsTests {
                 launch = try #require(await hosts.createLaunch(link: link, directory: create)).launch
             }
             let host = RecordingPaneHost()
-            let session = PaneSession(
+            let session = try await PaneSession.made(
                 name: pane.sessionName, launch: launch, wantsForeground: true, reconnects: false,
                 host: host, connect: { link.connection }
             )

@@ -87,12 +87,20 @@ final class PaneSurface: Identifiable {
         self.host = host
     }
 
-    /// Whether this surface's libghostty callbacks feed the pane: the first
-    /// surface of the pane. Every surface parses the same output, so only one
-    /// may count runs and notifications. Each callback asks when it fires
-    /// (`Pane.connectViewCallbacks`), so the next surface takes over when the
-    /// first one goes.
-    var isFeed: Bool { SurfaceRegistry.shared.isFeed(self) }
+    /// Whether this surface's libghostty callbacks count what it parses for
+    /// the pane (runs, notifications, project memory). Every surface parses
+    /// the same output, so one counts: the one whose client leads the
+    /// session, as the session's `lead` message says. A surface with no
+    /// session counts its own output. Before the session's first `lead`
+    /// (a host's server of an older build sends none), the link's first
+    /// view counts. A plain ssh shell counts in the view that shows it.
+    /// Each callback asks when it fires (`Pane.connectViewCallbacks`).
+    var countsOutput: Bool {
+        guard let host = nsView?.channelRuntime?.host, let link = host.link else { return true }
+        if let shows = link.showsPlainShell(in: host) { return shows }
+        if let lead { return lead }
+        return link.isFirstView(host)
+    }
 
     /// The live terminal NSView. Created lazily the first time it's requested,
     /// destroyed explicitly with the pane or when its window goes. Owning the
@@ -262,12 +270,6 @@ final class PaneSurface: Identifiable {
         view.onBackgroundColorChange = nil
         view.onAdaptiveBackgroundChange = nil
         view.onOutputActivity = nil
-        view.onSessionState = nil
-        view.onSessionForeground = nil
-        view.onTtyMode = nil
-        view.onSessionMark = nil
-        view.onSessionStatus = nil
-        view.onAttention = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil
         view.onReadOnlyChange = nil
@@ -420,11 +422,6 @@ final class SurfaceRegistry {
         preferredSurface(of: pane).ensureScrollView()
     }
 
-    /// Whether `surface` is its pane's feed.
-    func isFeed(_ surface: PaneSurface) -> Bool {
-        entries[surface.pane.id]?.surfaces.first === surface
-    }
-
     /// A new libghostty view for one of the pane's surfaces.
     func makeView(for pane: Pane) -> GhosttyTerminalNSView {
         _ = surfaces(of: pane)
@@ -469,7 +466,7 @@ final class SurfaceRegistry {
 
     /// Destroy and drop one surface while another remains. A client that goes
     /// ends only its own channel: the session is the pane's, never the
-    /// surface's. When the first surface goes, the next one becomes the feed.
+    /// surface's.
     func retire(_ surface: PaneSurface) {
         let pane = surface.pane
         guard var all = entries[pane.id]?.surfaces, all.count > 1,
