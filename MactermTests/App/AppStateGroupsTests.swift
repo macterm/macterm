@@ -99,4 +99,23 @@ struct AppStateGroupsTests {
         #expect(f.store.row(group.id) == nil)
         #expect(f.store.row(f.project.id) == nil)
     }
+
+    @Test
+    func the_palette_hides_a_group_command_that_does_not_apply() {
+        let f = makeFixture()
+        let titles = CommandSource().emptyItems(context: f.palette)?.map(\.title) ?? []
+        #expect(titles.contains(AppCommand.newGroup.title))
+        #expect(!titles.contains(AppCommand.moveOutOfGroup.title))
+        #expect(!titles.contains(AppCommand.ungroup.title))
+        #expect(!titles.contains(AppCommand.removeGroup.title))
+    }
+
+    @Test
+    func move_to_group_opens_the_group_in_the_window() {
+        let f = makeFixture()
+        let group = f.store.createGroup(name: "work")
+        let window = WindowState()
+        f.state.moveToGroup(f.project.id, group: group.id, store: f.store, in: window)
+        #expect(window.expandedRows.contains(group.id))
+    }
 }

@@ -886,8 +886,7 @@ struct SidebarContent: View {
             Menu("Move to Group") {
                 ForEach(targets) { group in
                     Button(SidebarTree.pathName(of: group, in: projectStore)) {
-                        projectStore.move(row.id, into: group.id)
-                        windowState.expandedRows.insert(group.id)
+                        appState.moveToGroup(row.id, group: group.id, store: projectStore, in: windowState)
                     }
                 }
             }

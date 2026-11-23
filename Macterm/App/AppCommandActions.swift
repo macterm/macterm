@@ -286,6 +286,9 @@ extension AppCommand {
             let beside = current?.id
             return {
                 let group = ctx.projectStore.createGroup(name: AppState.newGroupName, beside: beside)
+                // The project can be in a closed group: open the groups
+                // above the new one, so its row is there to rename.
+                ctx.appState.keyWindow?.expandedRows.formUnion(ctx.projectStore.ancestors(of: group.id))
                 ctx.appState.sidebarVisible = true
                 // See .renameTab: defer so the sidebar row exists first.
                 DispatchQueue.main.async { ctx.appState.renamingProjectID = group.id }

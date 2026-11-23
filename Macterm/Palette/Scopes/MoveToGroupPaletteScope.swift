@@ -12,7 +12,7 @@ final class MoveToGroupPaletteScope: PaletteScope {
         guard let projectID = context.appState.activeProjectID, store.row(projectID) != nil else { return [] }
         let rows = SidebarTree.moveTargets(for: projectID, in: store).map { group in
             PaletteItem(id: "group:\(group.id)", title: SidebarTree.pathName(of: group, in: store)) {
-                context.appState.moveToGroup(projectID, group: group.id, store: store)
+                context.appState.moveToGroup(projectID, group: group.id, store: store, in: context.appState.keyWindow)
             }
         }
         guard !query.isEmpty else {

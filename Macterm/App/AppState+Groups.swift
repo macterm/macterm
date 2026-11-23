@@ -1,7 +1,7 @@
 import Foundation
 
 /// Sidebar groups (design 013): the changes that the sidebar's menus and
-/// the group `AppCommand`s share. `ProjectStore` holds the tree; these add
+/// the group `AppCommand`s both make. `ProjectStore` holds the tree; these add
 /// what a window shows (which groups are open) and the sessions that a
 /// removal ends.
 extension AppState {
@@ -17,11 +17,11 @@ extension AppState {
         return store.row(parent)
     }
 
-    /// Move the row `id` into `group` and open that group in the key window,
-    /// so that the row stays in view.
-    func moveToGroup(_ id: UUID, group: UUID, store: ProjectStore) {
+    /// Move the row `id` into `group` and open that group in `window`, so
+    /// that the row stays in view.
+    func moveToGroup(_ id: UUID, group: UUID, store: ProjectStore, in window: WindowState?) {
         guard store.move(id, into: group) else { return }
-        keyWindow?.expandedRows.insert(group)
+        window?.expandedRows.insert(group)
     }
 
     /// Remove the group `id` and keep its rows (`ProjectStore.ungroup`).
