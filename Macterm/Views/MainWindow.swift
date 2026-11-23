@@ -380,7 +380,7 @@ struct MainWindow: View {
             // is the handoff's own width again, and changes nothing.
             _ = sidebarWidthHandoff.adoptStoredWidth(CGFloat(width))
         }
-        .onChange(of: windowState.expandedProjects) {
+        .onChange(of: windowState.expandedRows) {
             appState.noteWindowChanged()
         }
         .onChange(of: windowState.projectMemoryPanelVisible) {

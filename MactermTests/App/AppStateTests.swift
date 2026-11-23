@@ -1009,6 +1009,25 @@ struct AppStateTests {
     }
 
     @Test
+    func requestRemoveGroup_asks_only_when_the_group_has_projects() {
+        let state = makeAppState()
+        let group = Project.group(name: "g")
+
+        var ran = false
+        state.requestRemoveGroup(group, projectCount: 0) { ran = true }
+        #expect(ran, "an empty group goes at once")
+        #expect(state.pendingDialog == nil)
+
+        ran = false
+        state.requestRemoveGroup(group, projectCount: 2) { ran = true }
+        #expect(!ran)
+        #expect(state.pendingDialog?.kind == .removeGroup(group.id))
+        #expect(state.pendingDialog?.message.contains("2") == true, "the question says how many")
+        state.confirmPendingDialog()
+        #expect(ran)
+    }
+
+    @Test
     func pendingBulkRemove_confirm_and_cancel() {
         let state = makeAppState()
         // Every pane reads busy, so the selection stages instead of running.
@@ -1874,11 +1893,8 @@ struct AppStateTests {
     // The poll calls `pane.settleTerminalActivityIfQuiet()` directly (no
     // occlusion special-casing): the OUTPUT_ACTIVITY heartbeat that sources
     // activity is occlusion-independent, so a quiet pane settles the same
-    // whether or not it is on screen. These drive the settle in isolation —
-    // deterministic (no live surface, no `Preferences` global) and a truer
-    // unit than the full `refreshAllForegroundProcesses` tick, which re-reads
-    // each pane's real foreground process (nil under test, clearing the run
-    // source).
+    // whether or not it is on screen. These drive the settle in isolation:
+    // deterministic (no live surface, no `Preferences` global).
 
     /// A pane whose activity went quiet long ago (past the 3s settle window).
     private func quietRunningPane() -> Pane {
@@ -1911,8 +1927,7 @@ struct AppStateTests {
 
     /// The poll tracks execution whatever the status indicator setting is:
     /// `pane list` reports the state, and the setting only chooses what the
-    /// tab row draws (#705). A remote pane keeps the tick deterministic: the
-    /// poll reads no local process for it.
+    /// tab row draws (#705).
     @Test
     func poll_settles_a_quiet_run_with_the_status_indicator_off() throws {
         let priorIndicator = Preferences.shared.showTabStatusIndicator
@@ -1926,7 +1941,7 @@ struct AppStateTests {
         pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
         #expect(pane.executionState == .running)
 
-        state.refreshAllForegroundProcesses()
+        state.settleAllPanes()
         #expect(pane.executionState == .done)
     }
 

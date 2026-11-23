@@ -61,11 +61,11 @@ struct ProjectsSettings: View {
                     //
                     // The cost is `.onMove`, which exists only on `List`, so
                     // reordering moved into the row menu.
-                    ForEach(Array(projectStore.projects.enumerated()), id: \.element.id) { index, project in
-                        projectRow(project, at: index)
+                    ForEach(topLevelProjects) { project in
+                        projectRow(project)
                     }
                 }
-                Text("Change the order in the menu of a row. The order is the same as in the sidebar.")
+                Text("Change the order in the menu of a row. Each group of the sidebar has a section below.")
                     .settingsSecondaryText()
             } header: {
                 HStack {
@@ -84,6 +84,24 @@ struct ProjectsSettings: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("Add a project")
+                }
+            }
+
+            // Each sidebar group is a section of its own projects (design
+            // 013), in the order of the sidebar.
+            ForEach(projectStore.groups) { group in
+                Section {
+                    let projects = projectStore.children(of: group.id).filter { !$0.isGroup }
+                    if projects.isEmpty {
+                        Text("No projects.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(projects) { project in
+                            projectRow(project)
+                        }
+                    }
+                } header: {
+                    Text(verbatim: SidebarTree.pathName(of: group, in: projectStore))
                 }
             }
 
@@ -173,14 +191,22 @@ struct ProjectsSettings: View {
 
     /// One row. A function, not an inline expression: with the closures
     /// written out in the `ForEach`, the type-checker gave up on the body.
-    private func projectRow(_ project: Project, at index: Int) -> some View {
-        ProjectRow(
+    /// Move Up and Down move a project among the rows of its parent, as
+    /// the sidebar's menu does.
+    private func projectRow(_ project: Project) -> some View {
+        let position = projectStore.siblingPosition(of: project.id)
+        return ProjectRow(
             project: project,
-            canMoveUp: index > 0,
-            canMoveDown: index < projectStore.projects.count - 1,
-            onMoveUp: { projectStore.reorder(fromOffsets: [index], toOffset: index - 1) },
-            onMoveDown: { projectStore.reorder(fromOffsets: [index], toOffset: index + 2) }
+            canMoveUp: (position?.index ?? 0) > 0,
+            canMoveDown: position.map { $0.index < $0.count - 1 } ?? false,
+            onMoveUp: { projectStore.moveAmongSiblings(project.id, by: -1) },
+            onMoveDown: { projectStore.moveAmongSiblings(project.id, by: 1) }
         )
+    }
+
+    /// The projects outside every group. A new project goes here.
+    private var topLevelProjects: [Project] {
+        projectStore.children(of: nil).filter { !$0.isGroup }
     }
 
     /// Folder picker → new project → select it, the same as the sidebar's

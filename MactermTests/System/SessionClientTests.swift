@@ -174,24 +174,24 @@ struct ZmxEnvironmentTests {
 }
 
 @MainActor
-struct RemoteForegroundTests {
+struct SessionForegroundTests {
     @Test
     func a_foreground_message_gives_the_same_shape_as_a_probe_line() {
         let message = MactermProtocol.Foreground(
             idle: false, shell: false, comm: ProtocolBin(Data("/usr/bin/hx".utf8)), args: ProtocolBin(Data("hx a;b.md".utf8))
         )
-        #expect(RemoteForeground(message) == RemoteForeground(comm: "/usr/bin/hx", isIdle: false, isShell: false, command: "hx a;b.md"))
+        #expect(SessionForeground(message) == SessionForeground(comm: "/usr/bin/hx", isIdle: false, isShell: false, command: "hx a;b.md"))
     }
 
     @Test
     func an_idle_shell_with_no_shell_verdict_and_no_command_line() {
         let message = MactermProtocol.Foreground(idle: true, shell: nil, comm: ProtocolBin(Data("-zsh".utf8)), args: ProtocolBin(Data()))
-        #expect(RemoteForeground(message) == RemoteForeground(comm: "-zsh", isIdle: true, isShell: nil, command: nil))
+        #expect(SessionForeground(message) == SessionForeground(comm: "-zsh", isIdle: true, isShell: nil, command: nil))
     }
 
     @Test
     func a_message_with_no_name_is_not_a_sample() {
         let message = MactermProtocol.Foreground(idle: false, shell: false, comm: ProtocolBin(Data()), args: ProtocolBin(Data("hx".utf8)))
-        #expect(RemoteForeground(message) == nil)
+        #expect(SessionForeground(message) == nil)
     }
 }

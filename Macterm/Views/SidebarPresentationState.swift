@@ -4,7 +4,14 @@ import Observation
 
 enum SidebarItem: Hashable {
     case project(UUID)
+    /// A group row (design 013). It is never selected: the tag only gives
+    /// the row its context menu. A click opens or closes it.
+    case group(UUID)
     case tab(projectID: UUID, tabID: UUID)
+
+    var isGroup: Bool {
+        if case .group = self { true } else { false }
+    }
 }
 
 enum SidebarRenameTarget: Equatable {
@@ -20,7 +27,7 @@ enum SidebarRenameTarget: Equatable {
 /// `MainWindow` tells each copy whether it is interactive; this shared state
 /// makes them one logical sidebar without lifecycle arbitration. Which project
 /// sections are open is not here: it is per window and persisted, so it lives
-/// on `WindowState.expandedProjects`, which both copies read.
+/// on `WindowState.expandedRows`, which both copies read.
 @MainActor @Observable
 final class SidebarPresentationState {
     var selection: Set<SidebarItem> = []

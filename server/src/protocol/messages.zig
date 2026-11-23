@@ -6,7 +6,9 @@
 //!
 //! - `name`: the method or message name on the wire;
 //! - `since`: the protocol level that added it;
-//! - `senders`: the trust levels of the connections that may send it.
+//! - `senders`: the trust levels of the connections that may send it;
+//! - `doc`, for a method that a local client may send: one sentence that
+//!   `macterm api` shows (design/011 §4).
 //!
 //! A field added to a type of an older level names its level in the type's
 //! `field_since` declaration: `pub const field_since = .{ .hint = 2 };`.
@@ -196,6 +198,7 @@ pub const EventBatch = struct {
 /// the full state (`session.list`). `seq` is the count of batches now.
 pub const ControlResume = struct {
     pub const name = "control.resume";
+    pub const doc = "Asks for the event batches that this client missed after a lost link.";
     pub const since = 2;
     pub const senders: []const Trust = &.{.local};
 
@@ -217,6 +220,7 @@ pub const ControlResume = struct {
 /// Opens a channel for a session's pane (design/003 §1).
 pub const ChannelOpen = struct {
     pub const name = "channel.open";
+    pub const doc = "Opens a channel for the pane of a session.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -226,6 +230,7 @@ pub const ChannelOpen = struct {
 
 pub const ChannelClose = struct {
     pub const name = "channel.close";
+    pub const doc = "Closes a channel.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -237,6 +242,7 @@ pub const ChannelClose = struct {
 /// messages on the channel (its exit, its state) still come (design/003 §6).
 pub const ChannelPause = struct {
     pub const name = "channel.pause";
+    pub const doc = "Stops the pane output of a channel. The messages of the session still come.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -248,6 +254,7 @@ pub const ChannelPause = struct {
 /// first on the channel.
 pub const ChannelResume = struct {
     pub const name = "channel.resume";
+    pub const doc = "Starts the output of a paused channel again, after a snapshot of the screen.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -259,6 +266,7 @@ pub const ChannelResume = struct {
 /// an answer when nothing else moves (design/005, "Reconnect").
 pub const Ping = struct {
     pub const name = "ping";
+    pub const doc = "Answers when the server is up.";
     pub const since = 1;
     pub const senders = everyone;
 
@@ -320,6 +328,7 @@ pub const SessionState = enum {
 /// session's socket accepts connections and the session sent its state.
 pub const SessionCreate = struct {
     pub const name = "session.create";
+    pub const doc = "Starts a session. The reply comes when the session accepts connections.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -345,6 +354,7 @@ pub const SessionCreate = struct {
 
 pub const SessionList = struct {
     pub const name = "session.list";
+    pub const doc = "Lists the sessions of the server.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -354,6 +364,7 @@ pub const SessionList = struct {
 
 pub const SessionInfo = struct {
     pub const name = "session.info";
+    pub const doc = "Shows one session.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -366,6 +377,7 @@ pub const SessionInfo = struct {
 /// one more and ends. The server answers when the session process is gone.
 pub const SessionKill = struct {
     pub const name = "session.kill";
+    pub const doc = "Ends a session and its shell.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -384,6 +396,7 @@ pub const SessionKill = struct {
 /// sent the flags again, so every client already has the event.
 pub const PaneSeen = struct {
     pub const name = "pane.seen";
+    pub const doc = "Clears the attention flags of a session.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -401,6 +414,7 @@ pub const send_max = 64 * 1024;
 /// gives no new access.
 pub const SessionSend = struct {
     pub const name = "session.send";
+    pub const doc = "Types text into a session as it is. With submit, a newline follows.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -419,6 +433,7 @@ pub const SessionSend = struct {
 /// chord grammar is that of keybinds (`chord.zig`).
 pub const SessionKey = struct {
     pub const name = "session.key";
+    pub const doc = "Sends one key press to a session, for example ctrl+c.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -434,6 +449,7 @@ pub const SessionKey = struct {
 /// the scrollback and the screen. It needs no client that shows the pane.
 pub const SessionHistory = struct {
     pub const name = "session.history";
+    pub const doc = "Gives the text of the screen of a session, or of its scrollback and screen.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -451,6 +467,7 @@ pub const SessionHistory = struct {
 /// The state of a session's terminal (`macterm pane inspect`).
 pub const SessionInspect = struct {
     pub const name = "session.inspect";
+    pub const doc = "Gives the state of the terminal of a session.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -489,6 +506,7 @@ pub const TerminalState = struct {
 /// can start its own server (design/002).
 pub const ServerExit = struct {
     pub const name = "server.exit";
+    pub const doc = "Stops the server. The sessions continue to run.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -504,6 +522,7 @@ pub const ServerExit = struct {
 /// access.
 pub const CommandRun = struct {
     pub const name = "command.run";
+    pub const doc = "Runs a command on the machine of the server to its end, and gives its stdout.";
     pub const since = 1;
     pub const senders: []const Trust = &.{.local};
 
@@ -537,6 +556,7 @@ pub const CommandRun = struct {
 /// and the client stays on this connection.
 pub const LinkOpen = struct {
     pub const name = "link.open";
+    pub const doc = "Opens a roaming link on a UDP port.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -557,6 +577,7 @@ pub const LinkOpen = struct {
 /// too.
 pub const LinkClose = struct {
     pub const name = "link.close";
+    pub const doc = "Ends a roaming link that this connection opened.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -603,6 +624,7 @@ pub const RemovedPane = struct {
 /// request only reads.
 pub const StateSubscribe = struct {
     pub const name = "state.subscribe";
+    pub const doc = "Gives the full state: the model and the sessions.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -628,6 +650,7 @@ pub const StateSubscribe = struct {
 
 pub const ProjectCreate = struct {
     pub const name = "project.create";
+    pub const doc = "Makes a project.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -650,6 +673,7 @@ pub const ProjectCreate = struct {
 /// color. An empty `parent` moves the project to the top level.
 pub const ProjectSet = struct {
     pub const name = "project.set";
+    pub const doc = "Changes the fields of a project that are not null.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -667,6 +691,7 @@ pub const ProjectSet = struct {
 /// `ids` holds each child once.
 pub const ProjectReorder = struct {
     pub const name = "project.reorder";
+    pub const doc = "Sets the order of the children of a group, or of the top level.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -680,6 +705,7 @@ pub const ProjectReorder = struct {
 /// Removes a project and its workspace, or an empty group.
 pub const ProjectRemove = struct {
     pub const name = "project.remove";
+    pub const doc = "Removes a project and its workspace, or an empty group.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -692,6 +718,7 @@ pub const ProjectRemove = struct {
 /// widget. The client gives the id (a fixed id, or a widget's id).
 pub const WorkspaceCreate = struct {
     pub const name = "workspace.create";
+    pub const doc = "Makes a workspace that is not the workspace of a project.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -702,6 +729,7 @@ pub const WorkspaceCreate = struct {
 /// Removes a workspace that is not a project's, with its tabs.
 pub const WorkspaceRemove = struct {
     pub const name = "workspace.remove";
+    pub const doc = "Removes a workspace that is not the workspace of a project, with its tabs.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -714,6 +742,7 @@ pub const WorkspaceRemove = struct {
 /// ids that the client made. The tab's focus is its first pane.
 pub const TabCreate = struct {
     pub const name = "tab.create";
+    pub const doc = "Makes a tab with one pane or a tree of panes.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -732,6 +761,7 @@ pub const TabCreate = struct {
 
 pub const TabClose = struct {
     pub const name = "tab.close";
+    pub const doc = "Closes a tab.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -743,6 +773,7 @@ pub const TabClose = struct {
 /// Sets the tab's title. Null removes it.
 pub const TabSet = struct {
     pub const name = "tab.set";
+    pub const doc = "Sets the title of a tab. Null removes it.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -753,6 +784,7 @@ pub const TabSet = struct {
 /// The active tab of a workspace.
 pub const TabSelect = struct {
     pub const name = "tab.select";
+    pub const doc = "Sets the active tab of a workspace.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -762,6 +794,7 @@ pub const TabSelect = struct {
 
 pub const TabReorder = struct {
     pub const name = "tab.reorder";
+    pub const doc = "Moves a tab to a position in its workspace.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -773,6 +806,7 @@ pub const TabReorder = struct {
 /// it the active tab there. No session moves.
 pub const TabMove = struct {
     pub const name = "tab.move";
+    pub const doc = "Moves a tab to another workspace and makes it the active tab there.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -789,6 +823,7 @@ pub const TabMove = struct {
 /// closes; no pane leaves the model.
 pub const TabMerge = struct {
     pub const name = "tab.merge";
+    pub const doc = "Puts the panes of one tab into another tab, and closes the first tab.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -815,6 +850,7 @@ pub const SplitDir = enum {
 
 pub const PaneSplit = struct {
     pub const name = "pane.split";
+    pub const doc = "Splits a pane and puts a new pane next to it.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -838,6 +874,7 @@ pub const PaneSplit = struct {
 /// comes from the tab's history.
 pub const PaneClose = struct {
     pub const name = "pane.close";
+    pub const doc = "Closes a pane. The last pane of a tab closes the tab.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -849,6 +886,7 @@ pub const PaneClose = struct {
 /// Moves a pane next to pane `dest` on `zone`, in its tab or in another.
 pub const PaneMove = struct {
     pub const name = "pane.move";
+    pub const doc = "Moves a pane next to another pane.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -866,6 +904,7 @@ pub const PaneMove = struct {
 /// pane's own when null).
 pub const PaneSeparate = struct {
     pub const name = "pane.separate";
+    pub const doc = "Moves a pane out of its tab into a new tab.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -879,6 +918,7 @@ pub const PaneSeparate = struct {
 
 pub const PaneFocus = struct {
     pub const name = "pane.focus";
+    pub const doc = "Sets the focused pane of a tab.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -889,6 +929,7 @@ pub const PaneFocus = struct {
 /// Zooms a pane of the tab, or with a null `pane` ends the zoom.
 pub const PaneZoom = struct {
     pub const name = "pane.zoom";
+    pub const doc = "Zooms a pane of a tab. A null pane ends the zoom.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -899,6 +940,7 @@ pub const PaneZoom = struct {
 /// The ratio of a split, kept inside 0.15 to 0.85.
 pub const SplitRatio = struct {
     pub const name = "split.ratio";
+    pub const doc = "Sets the ratio of a split, from 0.15 to 0.85.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -910,6 +952,7 @@ pub const SplitRatio = struct {
 /// project's workspace.
 pub const SelectSet = struct {
     pub const name = "select.set";
+    pub const doc = "Sets the selection of the key window.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -927,6 +970,7 @@ pub const SelectSet = struct {
 /// `imported_v1`.
 pub const ModelImport = struct {
     pub const name = "model.import";
+    pub const doc = "Puts the conversion of the v1 files in place of the model, one time.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -947,6 +991,7 @@ pub const ModelImport = struct {
 /// does not validate as `model.import` does. Step 7 removes it.
 pub const ModelReplace = struct {
     pub const name = "model.replace";
+    pub const doc = "Puts the copy of the model of the client in place of the model of the server.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -958,6 +1003,7 @@ pub const ModelReplace = struct {
 /// them in memory only.
 pub const ModelOptions = struct {
     pub const name = "model.options";
+    pub const doc = "Sets the defaults of this client for requests that do not give them.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 

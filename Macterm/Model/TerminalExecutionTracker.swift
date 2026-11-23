@@ -144,6 +144,20 @@ struct TerminalExecutionTracker {
         shellIsAtPrompt = true
     }
 
+    /// The session says a run goes on in the pane: a pane restored after an
+    /// app restart attaches to a session whose program still runs. That run
+    /// is the user's, so the foreground is trusted as if they typed it. The
+    /// foreground is seen again as new, so the report that came before
+    /// starts the run. Only for a pane with no trusted input yet: true when
+    /// that changed something.
+    mutating func trustSessionRun() -> Bool {
+        guard !hasUserInteraction else { return false }
+        hasUserInteraction = true
+        lastForeground = nil
+        shellIsAtPrompt = false
+        return true
+    }
+
     /// ORDERING CONTRACT: this CLEARS the in-place start arming, so a caller
     /// that reports both an interaction and a submission for the same event
     /// must call this FIRST — `recordCommandSubmission` arms, and an

@@ -248,8 +248,10 @@ struct SidebarContent: View {
                     }
                 }
             }
-            ForEach(projectStore.projects, id: \.id) { project in
-                projectSection(project: project)
+            // The project tree (design 013): a group is a disclosure of
+            // its rows, and a project is a disclosure of its tabs.
+            ForEach(SidebarTree.nodes(in: projectStore)) { node in
+                treeRow(node)
             }
             // Scratch tabs (#665) live below every project as flat rows, the
             // mirror of the pinned rows above: no header, and no separator.
@@ -371,12 +373,21 @@ struct SidebarContent: View {
             // or padding, a title click, or `syncSelection` after a tab switch.
             // Watching the selection rather than writing the anchor at each
             // click site is what keeps ours and AppKit's the same row.
+            // A group row is never selected (design 013). If the List puts
+            // one in the selection all the same, the selection goes back to
+            // the active row.
+            if items.contains(where: \.isGroup) {
+                syncSelection()
+                return
+            }
             if items.count == 1 { presentation.selectionAnchor = items.first }
             // Navigation follows a single selection only. A multi-selection is
             // for bulk actions (delete), so it must not yank the active project
             // or tab around as rows are added to the selection.
             guard isInteractive, items.count == 1, let item = items.first else { return }
             switch item {
+            case .group:
+                return
             case let .project(projectID):
                 guard let project = projectStore.projects.first(where: { $0.id == projectID }) else { return }
                 appState.selectProject(project, in: windowState)
@@ -418,7 +429,7 @@ struct SidebarContent: View {
     /// list, which may be well below the fold.
     private func openDroppedFolders(_ paths: [String]) {
         guard let project = appState.openProjects(atPaths: paths, store: projectStore, in: windowState) else { return }
-        windowState.expandedProjects.insert(project.id)
+        windowState.expandedRows.insert(project.id)
         presentation.scrollPosition = .project(project.id)
     }
 
@@ -488,6 +499,84 @@ struct SidebarContent: View {
         }
     }
 
+    /// One row of the project tree: a group's disclosure of its rows, or a
+    /// project's section. `AnyView`, because the function calls itself for
+    /// the rows inside a group.
+    private func treeRow(_ node: SidebarNode) -> AnyView {
+        switch node {
+        case let .group(group, children):
+            AnyView(
+                DisclosureGroup(isExpanded: expansion(of: group.id)) {
+                    ForEach(children) { child in
+                        treeRow(child)
+                    }
+                } label: {
+                    groupHeader(group: group)
+                }
+                .id(SidebarItem.group(group.id))
+            )
+        case let .project(project):
+            AnyView(projectSection(project: project))
+        }
+    }
+
+    /// Open or closed in this window: a project or a group.
+    private func expansion(of id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { windowState.expandedRows.contains(id) },
+            set: {
+                if $0 {
+                    windowState.expandedRows.insert(id)
+                } else {
+                    windowState.expandedRows.remove(id)
+                }
+            }
+        )
+    }
+
+    /// A group's header. A click opens or closes the group and selects
+    /// nothing. The tag gives the row its context menu only. A project
+    /// dropped here moves into the group, and a group dropped here moves
+    /// into it too. It takes only the project payload: a tab or a pane has
+    /// no place in a group.
+    private func groupHeader(group: Project) -> some View {
+        SidebarGroupRow(
+            group: group,
+            presentation: presentation,
+            isInteractive: isInteractive,
+            onToggle: { toggleGroup(group.id) },
+            onRename: { appState.renameProject(group.id, to: $0, store: projectStore) }
+        )
+        .padding(.trailing, rowTrailingInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // The glyph and the space around the title: the title has its own
+        // gesture (rename on a double click).
+        .onTapGesture {
+            if isInteractive { toggleGroup(group.id) }
+        }
+        .draggable(MovableProject(projectID: group.id))
+        .tag(SidebarItem.group(group.id))
+        .selectionDisabled()
+        .dropDestination(for: MovableProject.self) { items, _ in
+            for item in items {
+                SidebarTree.drop(item.projectID, onto: group, in: projectStore)
+            }
+            return true
+        } isTargeted: { targeted in
+            // Spring-open, as a project header does for a tab.
+            if targeted { windowState.expandedRows.insert(group.id) }
+        }
+    }
+
+    private func toggleGroup(_ id: UUID) {
+        if windowState.expandedRows.contains(id) {
+            windowState.expandedRows.remove(id)
+        } else {
+            windowState.expandedRows.insert(id)
+        }
+    }
+
     /// One project's disclosure section: its tab rows (draggable + a drop
     /// target that reorders/moves at the insertion offset) under a header that
     /// itself accepts drops (the append path for a collapsed/empty project).
@@ -497,16 +586,7 @@ struct SidebarContent: View {
     private func projectSection(project: Project) -> some View {
         let ws = appState.workspaces[project.id]
         let tabs = ws?.tabs ?? []
-        DisclosureGroup(isExpanded: Binding(
-            get: { windowState.expandedProjects.contains(project.id) },
-            set: {
-                if $0 {
-                    windowState.expandedProjects.insert(project.id)
-                } else {
-                    windowState.expandedProjects.remove(project.id)
-                }
-            }
-        )) {
+        DisclosureGroup(isExpanded: expansion(of: project.id)) {
             ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
                 tabRow(tab: tab, index: tabIndex, project: project)
             }
@@ -595,7 +675,7 @@ struct SidebarContent: View {
                 case let .tab(tab):
                     receiveTabDrop([tab], into: project, at: nil)
                 case let .project(dragged):
-                    receiveProjectDrop([dragged], before: project)
+                    SidebarTree.drop(dragged.projectID, onto: project, in: projectStore)
                 case let .pane(pane):
                     receivePaneDrop([pane], into: project, at: nil)
                 }
@@ -607,26 +687,25 @@ struct SidebarContent: View {
             // project drags (the union payload can't be inspected here); the
             // hovered header itself doesn't move when it expands, so the
             // drop stays on target.
-            if targeted { windowState.expandedProjects.insert(project.id) }
+            if targeted { windowState.expandedRows.insert(project.id) }
         }
     }
 
-    /// Every visible row in visual order, mirroring the `List` body: the
-    /// pinned records, then each project's header followed by its tabs while
-    /// that project is expanded. Published to `presentation` so a shift-click
-    /// on a row title can resolve the range between two rows — the List keeps
-    /// its own copy of this order for the clicks it still handles itself.
+    /// Every visible row that can be selected, in visual order, mirroring
+    /// the `List` body: the pinned records, then the project tree
+    /// (`SidebarTree.selectableItems`), then the scratch rows. Published to
+    /// `presentation` so a shift-click on a row title can resolve the range
+    /// between two rows — the List keeps its own copy of this order for the
+    /// clicks it still handles itself.
     private var orderedItems: [SidebarItem] {
         var items: [SidebarItem] = appState.pinnedRecords.map {
             .tab(projectID: PinnedTabs.workspaceID, tabID: $0.id)
         }
-        for project in projectStore.projects {
-            items.append(.project(project.id))
-            guard windowState.expandedProjects.contains(project.id) else { continue }
-            items.append(contentsOf: (appState.workspaces[project.id]?.tabs ?? []).map {
-                .tab(projectID: project.id, tabID: $0.id)
-            })
-        }
+        items += SidebarTree.selectableItems(
+            SidebarTree.nodes(in: projectStore),
+            expanded: windowState.expandedRows,
+            tabs: { appState.workspaces[$0]?.tabs.map(\.id) ?? [] }
+        )
         items.append(contentsOf: scratchTabs.map { .tab(projectID: ScratchTabs.workspaceID, tabID: $0.id) })
         return items
     }
@@ -666,7 +745,7 @@ struct SidebarContent: View {
                 )
             }
         }
-        windowState.expandedProjects.insert(project.id)
+        windowState.expandedRows.insert(project.id)
     }
 
     /// Apply a pane drag-and-drop: the pane leaves its split tree and becomes
@@ -685,30 +764,11 @@ struct SidebarContent: View {
                 at: index
             )
         }
-        windowState.expandedProjects.insert(project.id)
-    }
-
-    /// Apply a project drag-and-drop onto a section (header or tab row): move
-    /// the dragged project to the target project's slot. Uses
-    /// `move(fromOffsets:toOffset:)` semantics — `toOffset` is the index in
-    /// the CURRENT array where the item inserts (SwiftUI's convention), so a
-    /// downward move lands after the target.
-    private func receiveProjectDrop(_ items: [MovableProject], before target: Project) {
-        let projects = projectStore.projects
-        guard let targetIndex = projects.firstIndex(where: { $0.id == target.id }) else { return }
-        for item in items {
-            guard let fromIndex = projects.firstIndex(where: { $0.id == item.projectID }),
-                  fromIndex != targetIndex
-            else { continue }
-            // Dropping onto a project means "land at its slot": inserting above
-            // when dragging up, and (via move's toOffset convention) at the
-            // target's position when dragging down.
-            let toOffset = fromIndex < targetIndex ? targetIndex + 1 : targetIndex
-            projectStore.reorder(fromOffsets: IndexSet(integer: fromIndex), toOffset: toOffset)
-        }
+        windowState.expandedRows.insert(project.id)
     }
 
     private func syncSelection() {
+        openGroupsOfActiveProject()
         guard let pid = windowState.activeProjectID,
               let tabID = activeTabID
         else {
@@ -717,6 +777,15 @@ struct SidebarContent: View {
         }
         let desired: Set<SidebarItem> = [.tab(projectID: pid, tabID: tabID)]
         if presentation.selection != desired { presentation.selection = desired }
+    }
+
+    /// A selected project inside a closed group stays selected, and its
+    /// groups open, so that its row shows.
+    private func openGroupsOfActiveProject() {
+        guard let pid = windowState.activeProjectID else { return }
+        for id in SidebarTree.groupsToOpen(for: pid, in: projectStore) where !windowState.expandedRows.contains(id) {
+            windowState.expandedRows.insert(id)
+        }
     }
 
     // MARK: - Context menu
@@ -730,6 +799,10 @@ struct SidebarContent: View {
             bulkMenu(for: items)
         } else if let item = items.first {
             switch item {
+            case let .group(id):
+                if let group = projectStore.row(id) {
+                    groupMenu(group)
+                }
             case let .project(id):
                 if let project = projectStore.projects.first(where: { $0.id == id }) {
                     projectMenu(project)
@@ -755,6 +828,7 @@ struct SidebarContent: View {
                 Button("Remote Machine…") { windowState.isNewRemoteProjectSheetPresented = true }
             }
             Button("New Scratch Tab") { appState.createScratchTab() }
+            Button("New Group") { createGroup(beside: nil) }
         }
     }
 
@@ -775,20 +849,88 @@ struct SidebarContent: View {
             projectStore.setColor(id: project.id, to: color)
         }
         Divider()
-        // Same reorder calls as Settings → Projects' rows; `toOffset` is in
-        // `move(fromOffsets:toOffset:)` convention, hence `+ 2` for down.
-        let index = projectStore.projects.firstIndex(where: { $0.id == project.id }) ?? 0
-        Button("Move Up") {
-            projectStore.reorder(fromOffsets: [index], toOffset: index - 1)
-        }
-        .disabled(index <= 0)
-        Button("Move Down") {
-            projectStore.reorder(fromOffsets: [index], toOffset: index + 2)
-        }
-        .disabled(index >= projectStore.projects.count - 1)
+        treeMoveItems(project)
         Divider()
         Button("Remove Project", role: .destructive) {
             appState.requestRemoveProject(project.id) { removeProject(project) }
+        }
+    }
+
+    /// A group's menu (design 013). Remove asks first when the group holds
+    /// projects. Ungroup keeps them.
+    @ViewBuilder
+    private func groupMenu(_ group: Project) -> some View {
+        Button("Rename Group") { requestProjectRename(group.id) }
+        ProjectColorMenu(selection: group.color) { color in
+            projectStore.setColor(id: group.id, to: color)
+        }
+        Divider()
+        treeMoveItems(group)
+        Divider()
+        Button("Ungroup") {
+            projectStore.ungroup(group.id)
+            for window in appState.windows {
+                window.expandedRows.remove(group.id)
+            }
+        }
+        Button("Remove Group", role: .destructive) { removeGroup(group) }
+    }
+
+    /// The items that move a project or a group in the tree: New Group
+    /// beside it, Move to Group, Move Out, and Move Up and Down among the
+    /// rows of its parent.
+    @ViewBuilder
+    private func treeMoveItems(_ row: Project) -> some View {
+        Button("New Group") { createGroup(beside: row.id) }
+        let targets = SidebarTree.moveTargets(for: row.id, in: projectStore)
+        if targets.isEmpty {
+            // A disabled item, not a disabled `Menu`: see `worktreesMenu`.
+            Button("Move to Group") {}
+                .disabled(true)
+        } else {
+            Menu("Move to Group") {
+                ForEach(targets) { group in
+                    Button(SidebarTree.pathName(of: group, in: projectStore)) {
+                        projectStore.move(row.id, into: group.id)
+                        windowState.expandedRows.insert(group.id)
+                    }
+                }
+            }
+        }
+        Button("Move Out") { projectStore.moveOut(row.id) }
+            .disabled(row.parent == nil)
+        let position = projectStore.siblingPosition(of: row.id)
+        Button("Move Up") { projectStore.moveAmongSiblings(row.id, by: -1) }
+            .disabled((position?.index ?? 0) <= 0)
+        Button("Move Down") { projectStore.moveAmongSiblings(row.id, by: 1) }
+            .disabled(position.map { $0.index >= $0.count - 1 } ?? true)
+    }
+
+    /// Add a group (beside `row`, or at the end of the top level) and open
+    /// its name for editing.
+    private func createGroup(beside row: UUID?) {
+        let group = projectStore.createGroup(
+            name: String(localized: "sidebar.group.defaultName", defaultValue: "New Group", comment: "Name of a new sidebar group"),
+            beside: row
+        )
+        requestProjectRename(group.id)
+    }
+
+    /// Remove a group and the projects inside it, after the question of
+    /// `AppState.requestRemoveGroup`.
+    private func removeGroup(_ group: Project) {
+        appState.requestRemoveGroup(group, projectCount: projectStore.projects(inGroup: group.id).count) {
+            // Read again at the confirm: a project can move while the
+            // question is up.
+            let inside = projectStore.projects(inGroup: group.id)
+            let groupIDs = [group.id] + projectStore.groups
+                .filter { projectStore.ancestors(of: $0.id).contains(group.id) }
+                .map(\.id)
+            appState.removeProjects(inside.map(\.id))
+            projectStore.removeGroup(group.id)
+            for window in appState.windows {
+                window.expandedRows.subtract(groupIDs)
+            }
         }
     }
 
@@ -821,7 +963,7 @@ struct SidebarContent: View {
     private func createTab(in project: Project) {
         appState.selectProject(project, in: windowState)
         appState.createTab(projectID: project.id, projects: projectStore.projects)
-        windowState.expandedProjects.insert(project.id)
+        windowState.expandedRows.insert(project.id)
     }
 
     /// `createTab(in:)` with the worktree's directory as the working directory
@@ -829,7 +971,7 @@ struct SidebarContent: View {
     private func createTab(in project: Project, worktree: GitWorktree) {
         appState.selectProject(project, in: windowState)
         appState.createTab(projectID: project.id, projects: projectStore.projects, workingDirectory: worktree.path)
-        windowState.expandedProjects.insert(project.id)
+        windowState.expandedRows.insert(project.id)
     }
 
     /// A pinned row's menu — two exits with distinct semantics: Unpin (a
@@ -870,7 +1012,7 @@ struct SidebarContent: View {
                             to: destination.id,
                             destPath: destination.path
                         )
-                        windowState.expandedProjects.insert(destination.id)
+                        windowState.expandedRows.insert(destination.id)
                     }
                 }
             }
@@ -920,7 +1062,7 @@ struct SidebarContent: View {
                 ForEach(moveTargets) { destination in
                     Button(destination.name) {
                         appState.moveTab(tab.id, from: project.id, to: destination.id, destPath: destination.path)
-                        windowState.expandedProjects.insert(destination.id)
+                        windowState.expandedRows.insert(destination.id)
                     }
                 }
             }
@@ -943,14 +1085,15 @@ struct SidebarContent: View {
 
     @ViewBuilder
     private func bulkMenu(for items: Set<SidebarItem>) -> some View {
-        let projectCount = items.count(where: { if case .project = $0 { true } else { false } })
-        let tabCount = items.count - projectCount
+        let rows = items.filter { !$0.isGroup }
+        let projectCount = rows.count(where: { if case .project = $0 { true } else { false } })
+        let tabCount = rows.count - projectCount
         if projectCount == 0 {
             Button("Close \(tabCount) Tabs", role: .destructive) { removeSelection(items) }
         } else if tabCount == 0 {
             Button("Remove \(projectCount) Projects", role: .destructive) { removeSelection(items) }
         } else {
-            Button("Remove \(items.count) Items", role: .destructive) { removeSelection(items) }
+            Button("Remove \(rows.count) Items", role: .destructive) { removeSelection(items) }
         }
     }
 
@@ -971,8 +1114,10 @@ struct SidebarContent: View {
         for item in items {
             switch item {
             case .project(PinnedTabs.workspaceID),
-                 .project(ScratchTabs.workspaceID):
-                // The pinned and the scratch sections can't be removed.
+                 .project(ScratchTabs.workspaceID),
+                 .group:
+                // The pinned and the scratch sections can't be removed. A
+                // group is removed from its own menu only.
                 break
             case let .project(id):
                 projectIDs.append(id)
@@ -998,7 +1143,7 @@ struct SidebarContent: View {
 
     private func openProject() {
         if let project = appState.openProject(store: projectStore) {
-            windowState.expandedProjects.insert(project.id)
+            windowState.expandedRows.insert(project.id)
         }
     }
 
@@ -1303,6 +1448,84 @@ private struct SidebarProjectRow: View {
     private func select(_ modifiers: NSEvent.ModifierFlags) {
         guard isInteractive else { return }
         presentation.selectRow(selectionItem, modifiers: modifiers)
+    }
+
+    private func commit() {
+        guard let draft = presentation.completeRename(renameTarget) else { return }
+        let text = draft.text.trimmingCharacters(in: .whitespaces)
+        if !text.isEmpty { onRename(text) }
+        appState.restoreFocusToActivePane()
+    }
+
+    private func cancelRename() {
+        guard presentation.cancelRename(renameTarget) else { return }
+        appState.restoreFocusToActivePane()
+    }
+}
+
+/// A group's row (design 013): a folder glyph, the name and the inline
+/// rename. A click opens or closes the group and selects nothing. The glyph
+/// goes through `TabRowIcon`, as the project and tab glyphs do, so the three
+/// levels draw one size and follow Settings' icon size.
+private struct SidebarGroupRow: View {
+    let group: Project
+    @Bindable
+    var presentation: SidebarPresentationState
+    let isInteractive: Bool
+    let onToggle: () -> Void
+    let onRename: (String) -> Void
+    @Environment(AppState.self)
+    private var appState
+    @FocusState
+    private var focused: Bool
+
+    /// A group's id is a row id of `ProjectStore`, as a project's is, so the
+    /// rename target and `AppState.renamingProjectID` serve both.
+    private var renameTarget: SidebarRenameTarget { .project(group.id) }
+
+    @ViewBuilder
+    private var titleContent: some View {
+        if isInteractive, presentation.isRenaming(renameTarget) {
+            TextField(String(), text: $presentation.renameText)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit { commit() }
+                .onExitCommand { cancelRename() }
+                .onAppear { focused = true }
+        } else {
+            // The double tap first, so that a double click renames and does
+            // not also open and close the group.
+            FadingText(group.name)
+                .onTapGesture(count: 2) { beginRename() }
+                .onTapGesture { toggle() }
+        }
+    }
+
+    var body: some View {
+        Label {
+            titleContent
+        } icon: {
+            if let color = group.color {
+                TabRowIcon(symbol: "folder", index: 1)
+                    .foregroundStyle(MactermTheme.color(for: color))
+            } else {
+                TabRowIcon(symbol: "folder", index: 1)
+            }
+        }
+        .task(id: appState.renamingProjectID) {
+            if appState.renamingProjectID == group.id { beginRename() }
+        }
+    }
+
+    private func toggle() {
+        guard isInteractive else { return }
+        onToggle()
+    }
+
+    private func beginRename() {
+        guard isInteractive else { return }
+        presentation.beginRename(renameTarget, text: group.name)
+        appState.renamingProjectID = nil
     }
 
     private func commit() {

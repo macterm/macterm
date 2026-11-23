@@ -18,9 +18,23 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneFeed(_ data: Data)
     /// The surface's size now.
     func paneGrid() -> PaneGrid
-    /// A snapshot of the pane starts or ends. Titles inside it are old.
+    /// A snapshot of the pane starts or ends.
     func paneSnapshot(started: Bool)
+    /// The session's pid, its shell's pid and its pty: at each attach.
+    func paneState(_ state: MactermProtocol.State)
+    /// The pty's foreground, when the session was asked for it: at an
+    /// attach, and before the output that follows a change.
     func paneForeground(_ foreground: MactermProtocol.Foreground)
+    /// An OSC 0/2 title. The session coalesces titles, and sends none from
+    /// a snapshot: the current title comes after the foreground at an attach.
+    func paneTitle(_ title: Data)
+    /// The shell's folder (OSC 7), as a URL.
+    func paneCwd(_ url: Data)
+    /// An OSC 133 mark that the session parsed.
+    func paneMark(_ mark: MactermProtocol.Mark)
+    /// The session's run status: at each change, and at `hello` while it is
+    /// not idle.
+    func paneStatus(_ status: MactermProtocol.Status)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
     /// The session's attention flags: at an attach when one is set, and at
@@ -57,6 +71,12 @@ extension PaneInputRoute {
 }
 
 extension PaneSessionHost {
+    func paneSnapshot(started _: Bool) {}
+    func paneState(_: MactermProtocol.State) {}
+    func paneTitle(_: Data) {}
+    func paneCwd(_: Data) {}
+    func paneMark(_: MactermProtocol.Mark) {}
+    func paneStatus(_: MactermProtocol.Status) {}
     func paneAttention(_: MactermProtocol.Attention) {}
     func paneLead(_: Bool?) {}
     func paneLinkLost() {}
@@ -411,17 +431,22 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             case let .exit(exit):
                 host.paneExited(code: exit.code, signal: exit.signal)
                 return true
-            case let .mark(mark) where mark.kind != .prompt:
+            case let .mark(mark):
                 // After the prompt mark the shell may not own the tty yet,
                 // and the pty would echo the input before the prompt.
-                releaseHeldInput()
-            case .status:
+                if mark.kind != .prompt { releaseHeldInput() }
+                host.paneMark(mark)
+            case let .status(status):
                 // A program runs and reads its input.
                 releaseHeldInput()
-            case .mark,
-                 .state,
-                 .resumed,
-                 .title,
+                host.paneStatus(status)
+            case let .state(state):
+                host.paneState(state)
+            case let .title(title):
+                host.paneTitle(title)
+            case let .cwd(url):
+                host.paneCwd(url)
+            case .resumed,
                  .other:
                 break
             }

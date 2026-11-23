@@ -111,12 +111,18 @@ final class ProjectStore {
     /// `parent` is not a group, or is the row or a group inside the row.
     @discardableResult
     func move(_ id: UUID, into parent: UUID?) -> Bool {
+        move(id, into: parent, saving: true)
+    }
+
+    /// `move(_:into:)`. With `saving` false, the caller saves after its own
+    /// next change.
+    private func move(_ id: UUID, into parent: UUID?, saving: Bool) -> Bool {
         guard let index = rows.firstIndex(where: { $0.id == id }), isGroup(parent) else { return false }
         if let parent, parent == id || ancestors(of: parent).contains(id) { return false }
         guard rows[index].parent != parent else { return true }
         rows[index].sortOrder = children(of: parent).count
         rows[index].parent = parent
-        changed()
+        if saving { changed() }
         return true
     }
 
@@ -138,6 +144,113 @@ final class ProjectStore {
         }
     }
 
+    /// The row `id`, a project or a group.
+    func row(_ id: UUID) -> Project? {
+        rows.first { $0.id == id }
+    }
+
+    /// Every group, in tree order (a group before the groups inside it).
+    var groups: [Project] {
+        func walk(_ parent: UUID?) -> [Project] {
+            children(of: parent).filter(\.isGroup).flatMap { [$0] + walk($0.id) }
+        }
+        return walk(nil)
+    }
+
+    /// The projects inside the group `id`, at any depth, in tree order.
+    func projects(inGroup id: UUID) -> [Project] {
+        treeOrder(under: id)
+    }
+
+    /// Put the row `id` beside the row `target`: in the parent of `target`,
+    /// at the place of `target`. In one parent, a row that moves down goes
+    /// after `target` and a row that moves up goes before it. A row from
+    /// another parent goes before `target`. Returns false when the move
+    /// would put a group inside itself.
+    @discardableResult
+    func place(_ id: UUID, beside target: UUID) -> Bool {
+        guard id != target, let targetRow = row(target), let moving = row(id) else { return false }
+        let parent = targetRow.parent
+        let sameParent = moving.parent == parent
+        var siblings = children(of: parent).map(\.id)
+        let wasBefore = sameParent && (siblings.firstIndex(of: id) ?? 0) < (siblings.firstIndex(of: target) ?? 0)
+        guard move(id, into: parent, saving: false) else { return false }
+        siblings = children(of: parent).map(\.id).filter { $0 != id }
+        let index = siblings.firstIndex(of: target) ?? siblings.endIndex
+        siblings.insert(id, at: wasBefore ? index + 1 : index)
+        reorder(parent: parent, ids: siblings)
+        return true
+    }
+
+    /// Move the row `id` out of its group, to the place after that group.
+    /// A row at the top level does not move.
+    func moveOut(_ id: UUID) {
+        guard let parent = row(id)?.parent else { return }
+        let grandparent = row(parent)?.parent
+        _ = move(id, into: grandparent, saving: false)
+        var siblings = children(of: grandparent).map(\.id).filter { $0 != id }
+        let index = siblings.firstIndex(of: parent).map { $0 + 1 } ?? siblings.endIndex
+        siblings.insert(id, at: index)
+        reorder(parent: grandparent, ids: siblings)
+    }
+
+    /// Move the row `id` one place up (`offset` -1) or down (+1) among the
+    /// rows of its parent.
+    func moveAmongSiblings(_ id: UUID, by offset: Int) {
+        guard let parent = row(id).map(\.parent) else { return }
+        var siblings = children(of: parent).map(\.id)
+        guard let index = siblings.firstIndex(of: id), siblings.indices.contains(index + offset) else { return }
+        siblings.swapAt(index, index + offset)
+        reorder(parent: parent, ids: siblings)
+    }
+
+    /// The place of `id` among the rows of its parent, and their count.
+    func siblingPosition(of id: UUID) -> (index: Int, count: Int)? {
+        guard let parent = row(id).map(\.parent) else { return nil }
+        let siblings = children(of: parent)
+        return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
+    }
+
+    /// Add a new group. With `beside`, the group goes after that row, in its
+    /// parent. Without it, the group goes at the end of the top level.
+    @discardableResult
+    func createGroup(name: String, beside: UUID? = nil) -> Project {
+        let parent = beside.flatMap { row($0)?.parent }
+        let group = add(.group(name: name, parent: parent))
+        if let beside {
+            var siblings = children(of: parent).map(\.id).filter { $0 != group.id }
+            let index = siblings.firstIndex(of: beside).map { $0 + 1 } ?? siblings.endIndex
+            siblings.insert(group.id, at: index)
+            reorder(parent: parent, ids: siblings)
+        }
+        return group
+    }
+
+    /// Remove the group `id` and keep its rows: they go to the parent of the
+    /// group, at its place, in their order.
+    func ungroup(_ id: UUID) {
+        guard let group = row(id), group.isGroup else { return }
+        let inside = children(of: id).map(\.id)
+        var siblings = children(of: group.parent).map(\.id)
+        let index = siblings.firstIndex(of: id) ?? siblings.endIndex
+        siblings.replaceSubrange(index ..< min(index + 1, siblings.endIndex), with: inside)
+        for child in inside {
+            if let at = rows.firstIndex(where: { $0.id == child }) { rows[at].parent = group.parent }
+        }
+        rows.removeAll { $0.id == id }
+        setOrder(parent: group.parent, ids: siblings)
+        changed()
+    }
+
+    /// Remove the group `id` and every row inside it, at any depth. The
+    /// caller ends the sessions of `projects(inGroup:)` first.
+    func removeGroup(_ id: UUID) {
+        guard row(id)?.isGroup == true else { return }
+        let removed = Set(rows.map(\.id).filter { $0 == id || ancestors(of: $0).contains(id) })
+        rows.removeAll { removed.contains($0.id) }
+        changed()
+    }
+
     /// Whether `id` is nil (the top level) or a group of this store: the
     /// two places a row can be.
     private func isGroup(_ id: UUID?) -> Bool {
@@ -146,7 +259,7 @@ final class ProjectStore {
     }
 
     /// The groups above `id`, nearest first. Stops at a loop.
-    private func ancestors(of id: UUID) -> [UUID] {
+    func ancestors(of id: UUID) -> [UUID] {
         var result: [UUID] = []
         var next = rows.first { $0.id == id }?.parent
         while let current = next, current != id, !result.contains(current) {
@@ -197,26 +310,6 @@ final class ProjectStore {
         let normalized = ProjectPath.normalizedForStorage(newPath)
         guard rows[index].path != normalized else { return }
         rows[index].path = normalized
-        changed()
-    }
-
-    /// Move projects by their offsets in `projects`. A project stays in its
-    /// parent, and a group does not move. In each parent, the projects get
-    /// the order of the move. A move across a group boundary therefore does
-    /// nothing: use `reorder(parent:ids:)` for a tree.
-    func reorder(fromOffsets source: IndexSet, toOffset destination: Int) {
-        var moved = projects
-        moved.move(fromOffsets: source, toOffset: destination)
-        let rank = Dictionary(uniqueKeysWithValues: moved.enumerated().map { ($0.element.id, $0.offset) })
-        for parent in Set(rows.map(\.parent)) {
-            var siblings = children(of: parent)
-            let places = siblings.indices.filter { !siblings[$0].isGroup }
-            let leaves = places.map { siblings[$0] }.sorted { rank[$0.id, default: 0] < rank[$1.id, default: 0] }
-            for (place, leaf) in zip(places, leaves) {
-                siblings[place] = leaf
-            }
-            setOrder(parent: parent, ids: siblings.map(\.id))
-        }
         changed()
     }
 
