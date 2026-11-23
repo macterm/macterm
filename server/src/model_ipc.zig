@@ -274,12 +274,10 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             .color = args.color,
             .created_at = args.created_at,
             .parent = args.parent,
-            .kind = args.kind,
             .sort_order = nextSortOrder(mo, args.parent),
         }) catch |err| return modelError(err),
         m.ProjectSet => {
             const p = mo.findProject(args.id) orelse return modelError(error.NotFound);
-            if (args.path) |path| if (p.kind == .group and path.len != 0) return modelError(error.BadRequest);
             if (args.parent) |parent| mo.setParent(args.id, parent) catch |err| return modelError(err);
             const al = mo.arena.allocator();
             if (args.name) |n| p.name = try al.dupe(u8, n);
@@ -318,8 +316,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             // Check both before a change: a request changes all or nothing.
             const ws: ?*model.Workspace = if (args.tab) |t| (mo.workspaceOfTab(t) orelse return modelError(error.NotFound)) else null;
             if (args.project) |id| {
-                const p = mo.findProject(id) orelse return modelError(error.NotFound);
-                if (p.kind == .group) return modelError(error.BadRequest);
+                _ = mo.findProject(id) orelse return modelError(error.NotFound);
                 if (ws) |w| if (!w.id.eql(.ofProject(id))) return modelError(error.BadRequest);
                 mo.selectProject(id) catch |err| return modelError(err);
             }
@@ -420,7 +417,7 @@ const Snapshot = struct {
         // The order of each parent's children.
         var parents: std.StringArrayHashMapUnmanaged(void) = .empty;
         try parents.put(a, "", {});
-        for (mo.data.projects) |*p| if (p.kind == .group) try parents.put(a, try a.dupe(u8, p.id.text), {});
+        for (mo.data.projects) |*p| try parents.put(a, try a.dupe(u8, p.id.text), {});
         for (parents.keys()) |parent| {
             const ids = try childOrder(a, mo, parent);
             const value: m.ProjectOrder = .{ .parent = if (parent.len == 0) null else .of(parent), .ids = ids };

@@ -30,7 +30,7 @@ struct ModelConversionTests {
     }
 
     @Test
-    func every_project_gets_a_workspace_and_a_group_gets_none() {
+    func every_project_gets_a_workspace_and_a_group_is_a_project() {
         let group = Project.group(name: "G")
         let a = Project(name: "a", path: "/a", parent: group.id)
         let b = Project(name: "b", path: "/b")
@@ -39,9 +39,9 @@ struct ModelConversionTests {
             workspaces: [.init(id: a.id, kind: .project, tabs: [], activeTabID: nil)],
             activeProjectID: b.id
         )
-        #expect(model.projects.map(\.kind) == [.group, .project, .project])
+        #expect(model.projects.map(\.path) == ["", "/a", "/b"])
         #expect(model.projects[1].parent == group.id.uuidString)
-        #expect(Set(model.workspaces.map(\.id)) == Set([a.id, b.id].map(\.uuidString)))
+        #expect(Set(model.workspaces.map(\.id)) == Set([group.id, a.id, b.id].map(\.uuidString)))
         #expect(model.selection.activeProject == b.id.uuidString)
     }
 

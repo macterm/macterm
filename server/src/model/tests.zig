@@ -608,37 +608,43 @@ test "a project id is not reused, and workspaces other than projects need a kind
     try testing.expectError(error.DuplicateId, m.addWorkspace(.of("p"), .quick));
 }
 
-test "a group has no workspace, holds rows, and is never selected" {
+test "any project has a workspace, can hold projects, and can be selected" {
     var m = try newModel();
     defer m.deinit();
-    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g", .kind = .group }));
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("g")));
-    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("x"), .name = "X", .path = "/x", .parent = .of("p") }));
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "" });
+    try testing.expect(m.findWorkspace(.of("g")) != null);
     try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("x"), .name = "X", .path = "/x", .parent = .of("zz") }));
-    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("g") });
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("p") });
     try m.addProject(.{ .id = .of("r"), .name = "R", .path = "/r", .parent = .of("") });
-    try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("q")).?).?.text);
+    try testing.expect(m.findWorkspace(.of("q")) != null);
+    try testing.expectEqualStrings("p", m.parentOf(m.findProject(.of("q")).?).?.text);
     try testing.expectEqual(@as(?model.ProjectId, null), m.parentOf(m.findProject(.of("r")).?));
-    try testing.expectError(error.BadRequest, m.selectProject(.of("g")));
-    try testing.expectError(error.BadRequest, m.removeProject(.of("g")));
+    try m.selectProject(.of("g"));
+    try m.selectProject(.of("p"));
+    // A project with tabs can hold a project too.
+    try m.createTab(.of("p"), .of("t1"), null, .{ .pane = mkPane("a") }, null, true);
     try expectValid(&m);
+    // A project that holds a project is refused, and nothing changes.
+    try testing.expectError(error.BadRequest, m.removeProject(.of("p")));
+    try testing.expect(m.findTab(.of("t1")) != null);
     _ = try m.removeProject(.of("q"));
-    try testing.expectEqual(@as(usize, 0), (try m.removeProject(.of("g"))).len);
-    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("g")));
+    try testing.expectEqual(@as(usize, 1), (try m.removeProject(.of("p"))).len);
+    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("p")));
+    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("p")));
     try expectValid(&m);
 }
 
-test "set a parent: never into itself or into a group that it holds" {
+test "set a parent: never into itself or into a project that it holds" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try m.addProject(.{ .id = .of("h"), .name = "H", .path = "", .kind = .group, .parent = .of("g") });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g" });
+    try m.addProject(.{ .id = .of("h"), .name = "H", .path = "/h", .parent = .of("g") });
     try m.setParent(.of("p"), .of("h"));
     try testing.expectEqualStrings("h", m.parentOf(m.findProject(.of("p")).?).?.text);
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("g")));
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("h")));
     try testing.expectError(error.BadRequest, m.setParent(.of("h"), .of("p")));
+    try testing.expectError(error.BadRequest, m.setParent(.of("h"), .of("zz")));
     try testing.expectError(error.NotFound, m.setParent(.of("zz"), null));
     try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("h")).?).?.text);
     try m.setParent(.of("p"), .of(""));
@@ -648,7 +654,7 @@ test "set a parent: never into itself or into a group that it holds" {
 test "reorder the children of one parent" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g" });
     try m.addProject(.{ .id = .of("a"), .name = "A", .path = "/a", .parent = .of("g") });
     try m.addProject(.{ .id = .of("b"), .name = "B", .path = "/b", .parent = .of("g") });
     try m.reorderProjects(.of("g"), &.{ .of("b"), .of("a") });
@@ -659,7 +665,9 @@ test "reorder the children of one parent" {
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{.of("a")}));
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{ .of("a"), .of("a") }));
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{ .of("a"), .of("p") }));
-    try testing.expectError(error.BadRequest, m.reorderProjects(.of("p"), &.{}));
+    // Any project is a parent: `p` holds no project.
+    try m.reorderProjects(.of("p"), &.{});
+    try testing.expectError(error.BadRequest, m.reorderProjects(.of("p"), &.{.of("a")}));
     try testing.expectError(error.NotFound, m.reorderProjects(.of("zz"), &.{}));
     try testing.expectEqual(@as(i64, 0), m.findProject(.of("b")).?.sort_order);
     try testing.expectEqual(@as(i64, 1), m.findProject(.of("a")).?.sort_order);
@@ -753,10 +761,8 @@ test "a good file loads" {
     var m = try file.parse(testing.allocator, base_ok, &fault);
     defer m.deinit();
     try expectOrder(&m, "t1", &.{ "a", "b" });
-    // A file from before groups has no `parent` and no `kind`.
-    const p = m.findProject(.of("p")).?;
-    try testing.expectEqual(model.ProjectKind.project, p.kind);
-    try testing.expectEqual(@as(?model.ProjectId, null), p.parent);
+    // A file from before nested projects has no `parent`.
+    try testing.expectEqual(@as(?model.ProjectId, null), m.findProject(.of("p")).?.parent);
 }
 
 test "each fault names its place" {
@@ -772,8 +778,6 @@ test "each fault names its place" {
         .{ .from = "\"kind\":\"project\"", .to = "\"kind\":\"pinned\"", .want = "workspaces[0].id: also a project" },
         .{ .from = "\"workspaces\":[{\"id\":\"p\"", .to = "\"workspaces\":[{\"id\":\"zz\"", .want = "workspaces[0].id: no project" },
         .{ .from = "\"id\":\"t1\"", .to = "\"id\":\"\"", .want = "workspaces[0].tabs[0].id: empty" },
-        .{ .from = "\"path\":\"/p\"", .to = "\"path\":\"/p\",\"kind\":\"group\"", .want = "projects[0].path: a group has no path" },
-        .{ .from = "\"path\":\"/p\"", .to = "\"path\":\"\",\"kind\":\"group\"", .want = "workspaces[0].id: no project" },
     };
     for (cases) |c| {
         const text = try std.mem.replaceOwned(u8, testing.allocator, base_ok, c.from, c.to);
@@ -830,51 +834,81 @@ test "a model writes and reads back the same" {
     try testing.expectEqualStrings(out.written(), again.written());
 }
 
-test "a selected group is a fault" {
-    const text = try std.mem.replaceOwned(u8, testing.allocator, base_ok, "\"active_project\":\"p\"", "\"active_project\":\"g\"");
-    defer testing.allocator.free(text);
-    const with_group = try std.mem.replaceOwned(u8, testing.allocator, text, "\"path\":\"/p\"}", "\"path\":\"/p\"},{\"id\":\"g\",\"name\":\"G\",\"path\":\"\",\"kind\":\"group\"}");
-    defer testing.allocator.free(with_group);
-    try testing.expectEqualStrings("selection.active_project: no such project", try faultOf(with_group));
-}
-
-test "a group and a parent write and read back" {
+test "a project and its parent write and read back" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("g") });
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("p") });
     const text = try written(&m);
     defer testing.allocator.free(text);
     var fault: model.Fault = .{};
     var back = try file.parse(testing.allocator, text, &fault);
     defer back.deinit();
-    try testing.expectEqual(model.ProjectKind.group, back.findProject(.of("g")).?.kind);
-    try testing.expectEqual(model.ProjectKind.project, back.findProject(.of("p")).?.kind);
-    try testing.expectEqualStrings("g", back.parentOf(back.findProject(.of("q")).?).?.text);
+    try testing.expectEqualStrings("p", back.parentOf(back.findProject(.of("q")).?).?.text);
     try testing.expectEqual(@as(?model.ProjectId, null), back.findProject(.of("p")).?.parent);
 }
 
-test "a parent that is not a group, or a loop of parents, reads as the top level" {
+test "a file with kind loads: a former group gets a workspace and the next save drops kind" {
+    // The shape that a build before issue 0480 wrote.
     const text =
         \\{"version":1,"projects":[
-        \\ {"id":"p","name":"P","path":"/p","parent":"gone"},
-        \\ {"id":"q","name":"Q","path":"/q","parent":"p"},
-        \\ {"id":"g","name":"G","path":"","kind":"group","parent":"h"},
-        \\ {"id":"h","name":"H","path":"","kind":"group","parent":"g"},
-        \\ {"id":"r","name":"R","path":"/r","parent":"g"}],
-        \\ "workspaces":[{"id":"p","kind":"project"},{"id":"q","kind":"project"},{"id":"r","kind":"project"}]}
+        \\ {"id":"g","name":"G","path":"","color":"red","kind":"group"},
+        \\ {"id":"p","name":"P","path":"/p","kind":"project","parent":"g"}],
+        \\ "workspaces":[{"id":"p","kind":"project"}]}
     ;
     var fault: model.Fault = .{};
     var m = try file.parse(testing.allocator, text, &fault);
     defer m.deinit();
-    for ([_][]const u8{ "p", "q", "g", "h" }) |id| {
+    try expectValid(&m);
+    const g = m.findProject(.of("g")).?;
+    try testing.expectEqualStrings("G", g.name);
+    try testing.expectEqualStrings("red", g.color.?);
+    try testing.expectEqualStrings("", g.path);
+    try testing.expect(m.findWorkspace(.of("g")) != null);
+    try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("p")).?).?.text);
+    // The former group is a project as any other.
+    try m.selectProject(.of("g"));
+    try m.createTab(.of("g"), .of("t1"), null, .{ .pane = mkPane("a") }, null, true);
+
+    const out = try written(&m);
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.indexOf(u8, out, "\"kind\": \"group\"") == null);
+    var back = try file.parse(testing.allocator, out, &fault);
+    defer back.deinit();
+    const again = try written(&back);
+    defer testing.allocator.free(again);
+    try testing.expectEqualStrings(out, again);
+}
+
+test "only a former group gets a workspace on load" {
+    const text =
+        \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p","kind":"project"}]}
+    ;
+    try testing.expectEqualStrings("workspaces: a project has no workspace", try faultOf(text));
+}
+
+test "an unknown parent, or a loop of parents, reads as the top level" {
+    const text =
+        \\{"version":1,"projects":[
+        \\ {"id":"p","name":"P","path":"/p","parent":"gone"},
+        \\ {"id":"q","name":"Q","path":"/q","parent":"p"},
+        \\ {"id":"g","name":"G","path":"/g","parent":"h"},
+        \\ {"id":"h","name":"H","path":"/h","parent":"g"},
+        \\ {"id":"r","name":"R","path":"/r","parent":"g"}],
+        \\ "workspaces":[{"id":"p","kind":"project"},{"id":"q","kind":"project"},{"id":"g","kind":"project"},
+        \\  {"id":"h","kind":"project"},{"id":"r","kind":"project"}]}
+    ;
+    var fault: model.Fault = .{};
+    var m = try file.parse(testing.allocator, text, &fault);
+    defer m.deinit();
+    for ([_][]const u8{ "p", "g", "h" }) |id| {
         try testing.expectEqual(@as(?model.ProjectId, null), m.parentOf(m.findProject(.of(id)).?));
     }
+    try testing.expectEqualStrings("p", m.parentOf(m.findProject(.of("q")).?).?.text);
     try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("r")).?).?.text);
     // The file keeps what it said.
     try testing.expectEqualStrings("gone", m.findProject(.of("p")).?.parent.?.text);
     // A new parent never makes a loop through the old one.
-    try m.addProject(.{ .id = .of("k"), .name = "K", .path = "", .kind = .group, .parent = .of("h") });
+    try m.addProject(.{ .id = .of("k"), .name = "K", .path = "/k", .parent = .of("h") });
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("k")));
 }
 
@@ -993,7 +1027,7 @@ test "compact frees the memory of old edits and keeps the model" {
 /// Adds to project `p` a project and a pane with every field set, tab `t1`
 /// (H(a, V(b, c))) and tab `t2` (pane `x`), and selects `p`.
 fn addFullModel(m: *Model) !void {
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .color = "red", .kind = .group });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .color = "red" });
     try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "me@box:/q", .color = "blue", .sort_order = 3, .created_at = 1700000000000, .parent = .of("g") });
     try m.addWorkspace(.of("pinned"), .pinned);
     try threePaneTab(m, "t1", "a", "b", "c", "s1", "s2");

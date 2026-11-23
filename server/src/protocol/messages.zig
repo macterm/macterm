@@ -657,12 +657,11 @@ pub const ProjectCreate = struct {
     pub const Args = struct {
         id: ProjectId,
         name: []const u8,
-        /// A local path, or `user@host:dir`. Empty for a group.
+        /// A local path, or `user@host:dir`. Can be empty.
         path: []const u8 = "",
         color: ?[]const u8 = null,
-        /// The group that holds it. Null is the top level.
+        /// The project that holds it. Null is the top level.
         parent: ?ProjectId = null,
-        kind: model.ProjectKind = .project,
         /// Unix time in milliseconds.
         created_at: i64 = 0,
     };
@@ -691,7 +690,7 @@ pub const ProjectSet = struct {
 /// `ids` holds each child once.
 pub const ProjectReorder = struct {
     pub const name = "project.reorder";
-    pub const doc = "Sets the order of the children of a group, or of the top level.";
+    pub const doc = "Sets the order of the child projects of a project, or of the top level.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -702,10 +701,11 @@ pub const ProjectReorder = struct {
     pub const Result = struct {};
 };
 
-/// Removes a project and its workspace, or an empty group.
+/// Removes a project and its workspace. A project that holds projects is
+/// refused (`bad_request`).
 pub const ProjectRemove = struct {
     pub const name = "project.remove";
-    pub const doc = "Removes a project and its workspace, or an empty group.";
+    pub const doc = "Removes a project that holds no projects, and its workspace.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
