@@ -31,7 +31,7 @@ Define a term only when it is Macterm-specific or when it is ambiguous. Do not d
 
 | Term | Meaning |
 |---|---|
-| **project** | A folder, or a folder on a remote host. It has an entry in the sidebar. It holds tabs. |
+| **project** | A folder, or a folder on a remote host. It has an entry in the sidebar. It holds tabs, and it can hold other projects ("inside" a project: New Project Inside, Move Into Project). |
 | **tab** | One row under a project. It holds one or more panes. |
 | **pane** | One terminal. A tab can have several panes. |
 | **split** | The division of a tab into panes. As a verb, "split a pane" makes a new pane. |
@@ -79,7 +79,7 @@ Each row has one word to use. The words in the second column have more than one 
 | command | action | Use "action" only for an App Intent in Shortcuts, and for the `action:` key in a palette file. |
 | grid cell | cell | Use "character cell" for a cell in a terminal. |
 | display | screen, monitor | |
-| folder | directory | Use "directory" only in a file path, a key name or a command. The command **Change Project Directory** its row **Current Pane's Directory** and its refusal "~/… is not a directory" keep the word "directory". |
+| folder | directory | Use "directory" only in a file path, a key name or a command. The command **Change Project Directory**, its row **Current Pane's Directory** and the path notice "~/… is not a directory" (`PathProblem`) keep the word "directory". |
 | setting | option, preference | |
 | Settings | Preferences | |
 | use | utilize, leverage | |

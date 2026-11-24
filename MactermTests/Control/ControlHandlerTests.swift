@@ -282,12 +282,12 @@ struct ControlHandlerTests {
         appState.isAppActive = { false }
         let pane = try #require(appState.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
 
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         var response = await handler.handle(request("pane.list"))
         #expect(response.data?.panes?.first?.state == "running")
 
-        pane.markCommandFinished()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
+        pane.receiveAttention(MactermProtocol.Attention(unseen: true))
         response = await handler.handle(request("pane.list"))
         #expect(response.data?.panes?.first?.state == "done")
     }
@@ -724,6 +724,35 @@ struct ControlHandlerTests {
         #expect(response.ok)
         #expect(projectStore.projects.isEmpty)
         #expect(appState.workspaces[project.id] == nil)
+    }
+
+    @Test
+    func project_remove_also_removes_the_projects_inside() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "alpha")
+        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        _ = projectStore.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+
+        let response = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
+        #expect(response.ok)
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
+    func project_remove_refuses_when_a_project_inside_is_busy() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "alpha", select: false)
+        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        appState.selectProject(child)
+        appState.paneNeedsConfirmClose = { _ in true }
+
+        let refused = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
+        #expect(refused.error?.code == .busy)
+        #expect(projectStore.projects.count == 2)
+
+        let forced = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha", force: true)))
+        #expect(forced.ok)
+        #expect(projectStore.projects.isEmpty)
     }
 
     @Test

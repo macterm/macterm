@@ -296,10 +296,7 @@ extension AppCommand {
         case .removeProject:
             guard let projectID, !Project.isSynthetic(projectID) else { return nil }
             return {
-                ctx.appState.requestRemoveProject(projectID) {
-                    ctx.appState.removeProject(projectID)
-                    ctx.projectStore.remove(id: projectID)
-                }
+                ctx.appState.requestRemoveProject(projectID, store: ctx.projectStore)
             }
         case .changeProjectDirectory:
             // Always there for a local project, also when the pane is in the

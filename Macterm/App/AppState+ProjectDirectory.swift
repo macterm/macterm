@@ -10,10 +10,13 @@ extension AppState {
         PalettePill(title: AppCommand.changeProjectDirectory.title)
     }
 
-    /// The palette screen of Change Project Directory for `project`: a typed
-    /// path with completion, and above it the focused pane's folder while
-    /// the field is empty (`paneDirectoryOffer`). The screen reads the
-    /// pane's folder when it shows, not when the palette builds its row:
+    /// The palette screen of Change Project Directory for `project`. A
+    /// typed path that is a folder gives one action row,
+    /// `Change to "<path>"`, and the rows under it complete the path. At an
+    /// empty field the action row is "Current Pane's Directory", with the
+    /// pane's folder as its subtitle (`paneDirectoryOffer`). The screen
+    /// reads the pane's folder when it shows, not when the palette builds
+    /// its row:
     /// `paneDirectory` (`currentPaneDirectory` by default). Nil for a remote
     /// project: its folder is on the host, and nothing completes or checks
     /// a path there.
@@ -29,18 +32,24 @@ extension AppState {
             id: "changeProjectDirectory:\(projectID.uuidString)",
             pill: Self.changeProjectDirectoryPill,
             prompt: String(localized: "Type a folder path"),
-            completions: { text in
-                if text.isEmpty, let paneDirectory = Self.paneDirectoryOffer(readPaneDirectory(), for: project) {
-                    return [PaletteCompletion(
+            completions: PaletteInput.pathCompletions,
+            check: { [self] text in
+                if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                    guard let paneDirectory = Self.paneDirectoryOffer(readPaneDirectory(), for: project) else {
+                        return .nothing
+                    }
+                    return .action(PaletteInputAction(
                         title: String(localized: "Current Pane's Directory"),
-                        value: paneDirectory,
-                        subtitle: paneDirectory
-                    )]
+                        subtitle: paneDirectory,
+                        run: { [self] in setProjectDirectory(projectID, to: paneDirectory, projectStore: projectStore) }
+                    ))
                 }
-                return PaletteInput.pathCompletions(text)
-            },
-            commit: { [self] text in
-                setProjectDirectory(projectID, to: text, projectStore: projectStore)
+                return PaletteInput.folderCheck(text) { path in
+                    PaletteInputAction(
+                        title: String(localized: "Change to \"\(path)\""),
+                        run: { [self] in setProjectDirectory(projectID, to: path, projectStore: projectStore) }
+                    )
+                }
             }
         )
     }
@@ -77,16 +86,10 @@ extension AppState {
         guard !trimmed.isEmpty else {
             return .refused(String(localized: "Type a folder path"))
         }
+        if let problem = PathProblem.local(atPath: trimmed) {
+            return .refused(problem.notice(for: trimmed))
+        }
         let expanded = (trimmed as NSString).expandingTildeInPath
-        var isDirectory: ObjCBool = false
-        guard expanded.hasPrefix("/"),
-              FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory)
-        else {
-            return .refused(String(localized: "Path \(trimmed) doesn't exist"))
-        }
-        guard isDirectory.boolValue else {
-            return .refused(String(localized: "\(trimmed) is not a directory"))
-        }
         projectStore.setPath(id: projectID, to: expanded)
         return .done
     }

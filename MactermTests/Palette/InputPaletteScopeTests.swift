@@ -3,11 +3,11 @@ import Foundation
 import Testing
 
 /// A screen that asks for one value (`InputPaletteScope`), driven through
-/// one example: a folder name that must not be empty or hold a slash, with
-/// the directories of a parent as its completions.
+/// one example: a folder name that must not be empty or hold a slash, and
+/// that the action refuses when it is `taken`.
 @MainActor
 struct InputPaletteScopeTests {
-    /// What the example's commits did.
+    /// What the example's actions did.
     final class Log {
         var committed: [String] = []
     }
@@ -21,11 +21,18 @@ struct InputPaletteScopeTests {
             completions: completions
         ) { text in
             let name = text.trimmingCharacters(in: .whitespaces)
-            if name.isEmpty { return .refused("Type a name.") }
-            if name.contains("/") { return .refused("A name cannot contain a slash.") }
-            log.committed.append(name)
-            return .done
+            if name.isEmpty { return .nothing }
+            if name.contains("/") { return .notice("A name cannot contain a slash.") }
+            return .action(PaletteInputAction(title: "Make \"\(name)\"") {
+                if name == "taken" { return .refused("The name is taken.") }
+                log.committed.append(name)
+                return .done
+            })
         }
+    }
+
+    private func rows(_ scope: InputPaletteScope, _ text: String) -> [PaletteItem] {
+        scope.sections(for: PaletteQuery(raw: text), context: makeContext()).flatMap(\.items)
     }
 
     private func makeAppState() -> AppState {
@@ -58,47 +65,112 @@ struct InputPaletteScopeTests {
     }
 
     @Test
-    func a_commit_runs_the_action_with_the_text_and_closes() {
+    func a_valid_value_has_one_action_row_first_and_return_on_it_runs_it() throws {
         let log = Log()
-        let scope = InputPaletteScope(input: makeInput(log: log))
-        _ = scope.sections(for: PaletteQuery(raw: "notes"), context: makeContext())
-        #expect(scope.commit("notes"))
-        #expect(log.committed == ["notes"])
+        let scope = InputPaletteScope(input: makeInput(log: log) { _ in
+            [PaletteCompletion(title: "notes-old", value: "notes-old")]
+        })
+        let items = rows(scope, "notes")
+        #expect(items.map(\.title) == ["Make \"notes\"", "notes-old"])
+        let action = try #require(items.first)
+        #expect(scope.isAction(action))
+        #expect(!scope.isAction(items[1]))
         #expect(scope.failure == nil)
+
+        #expect(scope.press(action) == .closed)
+        #expect(log.committed == ["notes"])
     }
 
     @Test
-    func a_refused_commit_keeps_the_screen_with_one_line_until_the_text_changes() throws {
+    func return_with_no_row_selected_does_nothing() {
         let log = Log()
         let scope = InputPaletteScope(input: makeInput(log: log))
-        let context = makeContext()
+        _ = rows(scope, "notes")
+        #expect(scope.press(nil) == .nothing)
+        #expect(log.committed.isEmpty, "no fallback commits the field text")
+    }
 
-        _ = scope.sections(for: PaletteQuery(raw: "a/b"), context: context)
-        #expect(!scope.commit("a/b"))
-        #expect(log.committed.isEmpty)
+    @Test
+    func a_value_that_is_not_valid_has_no_action_row_and_shows_its_notice_until_the_text_changes() throws {
+        let log = Log()
+        let scope = InputPaletteScope(input: makeInput(log: log))
+
+        #expect(rows(scope, "a/b").isEmpty)
         let failure = try #require(scope.failure)
         #expect(failure.title == "A name cannot contain a slash.")
-        #expect(!failure.retryable, "a refusal is one line with no Retry")
+        #expect(!failure.retryable, "a notice is one line with no Retry")
 
-        _ = scope.sections(for: PaletteQuery(raw: "a/b"), context: context)
-        #expect(scope.failure == failure, "a redraw of the same text keeps the reason")
-
-        _ = scope.sections(for: PaletteQuery(raw: "ab"), context: context)
+        #expect(rows(scope, "ab").count == 1)
         #expect(scope.failure == nil, "an edit clears it")
-        #expect(scope.commit("ab"))
-        #expect(log.committed == ["ab"])
+
+        #expect(rows(scope, "").isEmpty, "an empty field has no row")
+        #expect(scope.failure == nil, "and no notice")
+        #expect(log.committed.isEmpty)
     }
 
     @Test
-    func completions_are_rows_that_fill_the_field() throws {
-        let scope = InputPaletteScope(input: makeInput(log: Log()) { text in
+    func an_action_that_refuses_keeps_the_screen_with_one_line_until_the_text_changes() throws {
+        let log = Log()
+        let scope = InputPaletteScope(input: makeInput(log: log))
+
+        let action = try #require(rows(scope, "taken").first)
+        #expect(scope.press(action) == .refused)
+        #expect(scope.failure?.title == "The name is taken.")
+        _ = rows(scope, "taken")
+        #expect(scope.failure?.title == "The name is taken.", "a redraw of the same text keeps the reason")
+
+        let other = try #require(rows(scope, "free").first)
+        #expect(scope.failure == nil, "an edit clears it")
+        #expect(scope.press(other) == .closed)
+        #expect(log.committed == ["free"])
+    }
+
+    @Test
+    func completions_are_rows_that_fill_the_field_and_never_run_the_action() throws {
+        let log = Log()
+        let scope = InputPaletteScope(input: makeInput(log: log) { text in
             ["notes", "novel"].filter { $0.hasPrefix(text) }.map { PaletteCompletion(title: $0, value: $0 + "-1") }
         })
-        let rows = scope.sections(for: PaletteQuery(raw: "no"), context: makeContext()).flatMap(\.items)
-        #expect(rows.map(\.title) == ["notes", "novel"])
-        #expect(try scope.completion(for: #require(rows.last)) == "novel-1")
+        let items = rows(scope, "no")
+        #expect(items.map(\.title) == ["Make \"no\"", "notes", "novel"])
+        let novel = try #require(items.last)
+        #expect(scope.completion(for: novel) == "novel-1")
+        #expect(scope.completion(for: items[0]) == nil, "the action row is no completion")
         #expect(scope.completion(for: PaletteItem(title: "other", action: {})) == nil)
-        #expect(scope.sections(for: PaletteQuery(raw: "x"), context: makeContext()).isEmpty)
+        #expect(scope.press(novel) == .fill("novel-1"))
+        #expect(log.committed.isEmpty)
+
+        let filled = rows(scope, "novel-1")
+        #expect(filled.map(\.title) == ["Make \"novel-1\""])
+    }
+
+    @Test
+    func a_folder_field_has_the_path_notice_or_the_action_row() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-input-folder-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("notes.txt")
+        try Data().write(to: file)
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.folder",
+            pill: PalettePill(title: "Folder", icon: "folder"),
+            prompt: "Folder"
+        ) { text in
+            PaletteInput.folderCheck(text) { path in PaletteInputAction(title: "Change to \"\(path)\"") { .done } }
+        })
+
+        #expect(rows(scope, root.path).map(\.title) == ["Change to \"\(root.path)\""])
+        #expect(scope.failure == nil)
+
+        #expect(rows(scope, file.path).isEmpty)
+        #expect(scope.failure?.title == "\(file.path) is not a directory")
+
+        let missing = root.appendingPathComponent("none").path
+        #expect(rows(scope, missing).isEmpty)
+        #expect(scope.failure?.title == "Path \(missing) doesn't exist")
+
+        #expect(rows(scope, "  ").isEmpty)
+        #expect(scope.failure == nil)
     }
 
     @Test

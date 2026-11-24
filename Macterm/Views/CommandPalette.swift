@@ -15,6 +15,21 @@ enum PaletteMotion {
     static var transition: BlurReplaceTransition { .blurReplace }
 }
 
+// MARK: - Insets
+
+/// The horizontal insets of a result row, and the edge that the text of the
+/// list starts at. A section header and a one-line notice start at `text`,
+/// so the label lines up with the title of a row with no icon. A row with an
+/// icon puts its title after the icon.
+enum PaletteRowInsets {
+    /// From the list's edge to the selection highlight.
+    static let highlight: CGFloat = 6
+    /// From the highlight's edge to the row's content.
+    static let content: CGFloat = 14
+    /// From the list's edge to the row's content.
+    static let text: CGFloat = highlight + content
+}
+
 // MARK: - Mount
 
 /// Puts the palette over a window while it is visible, in one frame, and
@@ -105,11 +120,6 @@ struct CommandPalettePanel: View {
 
     @State
     private var selectedIndex = 0
-    /// An arrow key chose the selected row of an input screen. Only then
-    /// does Return take the row while the field has text: a row that the
-    /// pointer selected is not a choice (`commit`).
-    @State
-    private var inputRowChosen = false
     @State
     private var sections: [PaletteSection] = []
     /// The top screen's listing in flight, read off its scope on every
@@ -171,15 +181,14 @@ struct CommandPalettePanel: View {
     /// instance is the top frame's, kept for as long as the frame is up.
     private var scope: (any PaletteScope)? { windowState.paletteStack.last?.scope }
 
-    /// The screen showing when it asks for a value: Return commits the
-    /// field, and its rows complete it (`InputPaletteScope`).
+    /// The screen showing when it asks for a value: its first row may be
+    /// the action row, and its other rows complete the field
+    /// (`InputPaletteScope`).
     private var inputScope: InputPaletteScope? { scope as? InputPaletteScope }
 
     /// Where the selection rests on a new list: the top row, or no row on
-    /// an input screen with text in its field, whose Return commits the
-    /// field and not a row. An empty field has nothing to commit, so there
-    /// the selection rests on the top row, if there is one.
-    private var restingIndex: Int { inputScope == nil || query.isEmpty ? 0 : -1 }
+    /// an input screen until `refresh` finds its action row.
+    private var restingIndex: Int { inputScope == nil ? 0 : -1 }
 
     private var flatItems: [PaletteItem] { sections.flatMap(\.items) }
 
@@ -269,7 +278,7 @@ struct CommandPalettePanel: View {
                                     Text(header)
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(MactermTheme.fgDim)
-                                        .padding(.horizontal, 14)
+                                        .padding(.horizontal, PaletteRowInsets.text)
                                         .padding(.top, sectionIndex == 0 ? 8 : 12)
                                         .padding(.bottom, 4)
                                 }
@@ -277,8 +286,8 @@ struct CommandPalettePanel: View {
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
                                         selectedIndex = idx
-                                        if inputScope != nil {
-                                            _ = completeQuery()
+                                        if let inputScope {
+                                            runInputRow(inputScope)
                                         } else {
                                             execute(alt: NSEvent.modifierFlags.contains(.option))
                                         }
@@ -328,7 +337,6 @@ struct CommandPalettePanel: View {
                           hoverTracker.noteHover(over: idx, current: selectedIndex)
                     else { return }
                     selectedIndex = idx
-                    inputRowChosen = false
                 }
                 .onChange(of: selectedIndex) { old, idx in
                     // Only follow keyboard navigation; hovering shouldn't scroll.
@@ -383,7 +391,6 @@ struct CommandPalettePanel: View {
         }
         .onChange(of: query) {
             selectedIndex = restingIndex
-            inputRowChosen = false
             refresh()
         }
         .onChange(of: windowState.paletteStack) {
@@ -428,10 +435,11 @@ struct CommandPalettePanel: View {
         }
         // Return runs the selected row — with ⌥, its alt action. Read off
         // the press rather than `optionHeld`, which is display state. On an
-        // input screen it commits the field.
+        // input screen it runs the action row or takes a completion, and
+        // with no row selected it does nothing.
         .onKeyPress(keys: [.return]) { press in
             if let inputScope {
-                commit(inputScope)
+                runInputRow(inputScope)
             } else {
                 execute(alt: press.modifiers.contains(.option))
             }
@@ -477,6 +485,7 @@ struct CommandPalettePanel: View {
     }
 
     private func refresh() {
+        let selectedID = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex].id : nil
         if let scope {
             let context = PaletteContext(appState: appState, projectStore: projectStore)
             sections = scope.sections(for: PaletteQuery(raw: query), context: context)
@@ -491,9 +500,16 @@ struct CommandPalettePanel: View {
         // match after a query change), nor past the end of a list that just
         // got shorter (a screen's redraw, a hover resolved against the old
         // rows) — Return would have nothing to run. An input screen's
-        // selection may rest on no row: its Return commits the field.
-        if inputScope != nil, !flatItems.indices.contains(selectedIndex) {
-            selectedIndex = query.isEmpty && !flatItems.isEmpty ? 0 : -1
+        // selection stays on the row it was on, by its id, so a redraw never
+        // moves it to another row that Return would then take. Else it
+        // rests on the action row, the first row, or on no row when the
+        // text has none.
+        if let inputScope {
+            if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
+                selectedIndex = index
+            } else {
+                selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
+            }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
         {
@@ -511,7 +527,6 @@ struct CommandPalettePanel: View {
         }
         if idx >= 0, idx < flatItems.count {
             selectedIndex = idx
-            inputRowChosen = true
         }
     }
 
@@ -533,12 +548,12 @@ struct CommandPalettePanel: View {
     /// the keypress fall through (`.ignored`) to default focus traversal in
     /// that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's rows are its completions: the selected one, or
-        // the top one when none is selected.
+        // An input screen's completion rows: the selected one, or the top
+        // one when the selection is on no completion (the action row).
         if let inputScope {
-            let index = flatItems.indices.contains(selectedIndex) ? selectedIndex : 0
-            guard flatItems.indices.contains(index),
-                  let completion = inputScope.completion(for: flatItems[index]),
+            let selected = flatItems.indices.contains(selectedIndex)
+                ? inputScope.completion(for: flatItems[selectedIndex]) : nil
+            guard let completion = selected ?? flatItems.lazy.compactMap(inputScope.completion(for:)).first,
                   completion != query
             else { return .ignored }
             query = completion
@@ -561,8 +576,9 @@ struct CommandPalettePanel: View {
 
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
-    /// The list's padding above the first row and below the last.
-    private static let listPadding: CGFloat = 6
+    /// The list's padding above the first row and below the last: the rows'
+    /// side inset, so the gap above the first row equals the side gap.
+    private static let listPadding = PaletteRowInsets.highlight
 
     /// The height of a notice that fills a list with no rows: the viewport
     /// less the list's padding. A notice of the full viewport height made the
@@ -617,25 +633,23 @@ struct CommandPalettePanel: View {
         let itemID: String
     }
 
-    /// Commit an input screen's selected row, or its field: the row when an
-    /// arrow key chose it, or when the field is empty and so has nothing to
-    /// commit. The palette closes when the action ran, and stays with the
-    /// reason when the value was refused. A refused row puts its value in
-    /// the field, so the reason shows with the text it is about.
-    private func commit(_ inputScope: InputPaletteScope) {
-        let takesRow = (inputRowChosen || query.isEmpty) && flatItems.indices.contains(selectedIndex)
-        let row = takesRow ? inputScope.completion(for: flatItems[selectedIndex]) : nil
-        let value = row ?? query
-        guard inputScope.commit(value) else {
-            if value != query {
-                query = value
-            } else {
-                refresh()
-            }
-            return
+    /// Return or a click on an input screen: the action row runs its
+    /// action, a completion row goes into the field, and no row does
+    /// nothing. The palette closes when the action ran, and stays with the
+    /// reason when it refused.
+    private func runInputRow(_ inputScope: InputPaletteScope) {
+        let item = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
+        switch inputScope.press(item) {
+        case .nothing:
+            break
+        case let .fill(text):
+            query = text
+        case .refused:
+            refresh()
+        case .closed:
+            query = ""
+            windowState.isCommandPaletteVisible = false
         }
-        query = ""
-        windowState.isCommandPaletteVisible = false
     }
 
     /// Run the selected row: its alt action when `alt` and it has one, else
@@ -890,7 +904,7 @@ private struct PaletteFailureNotice: View {
         }
         .font(.system(size: 13))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PaletteRowInsets.text)
         .padding(.vertical, 6)
     }
 
@@ -983,13 +997,13 @@ private struct CommandPaletteRow: View {
                     .foregroundStyle(MactermTheme.fgDim)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PaletteRowInsets.content)
         .padding(.vertical, 8)
         .background(isSelected ? MactermTheme.fg.opacity(0.12) : .clear)
         // Radius is concentric with the palette container (16) minus the 6pt
         // inset below, so the highlight's curve aligns with the palette's edge.
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .padding(.horizontal, 6)
+        .padding(.horizontal, PaletteRowInsets.highlight)
     }
 
     /// The title with the characters the query matched in semibold — what

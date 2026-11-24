@@ -358,15 +358,6 @@ enum HotkeyRegistry {
         return upper == token ? token : upper
     }
 
-    /// The hardware key code for a base key token (`"c"` → 8), or nil for a
-    /// token we don't map — the inverse of `baseToken(forKeyCode:)`. Lets code
-    /// that carries its own key codes (`TerminalCommandSubmission`, which stays
-    /// isolation-free and so can't read this `@MainActor` map at runtime) pin
-    /// them to this vocabulary in a test.
-    static func keyCode(forToken token: String) -> UInt16? {
-        keyCodes[token]
-    }
-
     /// Every key token the chord grammar accepts. Lets a test sweep the whole
     /// vocabulary for chords that parse but would deliver nothing.
     static var allKeyTokens: [String] {

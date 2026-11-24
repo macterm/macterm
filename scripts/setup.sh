@@ -92,7 +92,7 @@ XCFRAMEWORK_DIR="GhosttyKit.xcframework"
 # build-2026-11-12-f55ac55: + downstream patch 0023 (macterm/ghostty#50):
 # `ghostty_launch_resolve` and `ghostty_launch_free` return the argv, env and
 # folder that a surface would run, for a manual surface. New C API only.
-GHOSTTYKIT_TAG="${GHOSTTYKIT_TAG:-build-2026-11-24-ec1d477}"
+GHOSTTYKIT_TAG="${GHOSTTYKIT_TAG:-build-2026-11-24-a373b40}"
 # Which tag the on-disk fork artifacts actually came from. Without this the
 # presence checks below would keep a stale copy forever after a pin bump — the
 # same silent-staleness trap that makes symlinking these artifacts a bad idea.
@@ -238,7 +238,7 @@ install_server() {
   # in the middle is never taken as complete.
   rm -rf "$SERVER_DIR"
   mkdir -p "$SERVER_DIR"
-  tar xzf "$dir/macterm-$key-universal-macos.tar.gz" -C "$SERVER_DIR" zmx
+  tar xzf "$(scripts/build-server.sh file "$dir" universal-macos)" -C "$SERVER_DIR" zmx
   chmod +x "$SERVER_DIR/zmx"
   # The other builds go into the bundle as gzip files of the bare binary, for
   # an install on a host with no download. embed-zmx.sh adds the macOS one from
@@ -246,7 +246,7 @@ install_server() {
   local target
   for target in $(scripts/build-server.sh targets); do
     [[ "$target" == universal-macos ]] && continue
-    tar xzf "$dir/macterm-$key-$target.tar.gz" -O zmx | gzip -n -9 > "$SERVER_DIR/macterm-$key-$target.gz"
+    tar xzf "$(scripts/build-server.sh file "$dir" "$target")" -O zmx | gzip -n -9 > "$SERVER_DIR/macterm-$key-$target.gz"
   done
   cp "$dir/macterm-$key-server.json" "$SERVER_MANIFEST"
   rm -f "$OLD_RELEASE_FILE" "$OLD_STAMP"
@@ -284,11 +284,9 @@ ensure_server() {
     return 0
   fi
   fetched="$(mktemp -d "${TMPDIR:-/tmp}/macterm-server.XXXXXX")"
-  if gh release download "$SERVER_RELEASE" --repo "$SERVER_REPO" --dir "$fetched" \
-      --pattern "macterm-$key-*" &&
-    server_dist_complete "$fetched" "$key"; then
+  if scripts/build-server.sh download "$SERVER_REPO" "$SERVER_RELEASE" "$key" "$fetched/build" >/dev/null; then
     echo "Downloaded the prebuilt server $key"
-    install_server "$fetched" "$key"
+    install_server "$fetched/build" "$key"
     rm -rf "$fetched"
     return 0
   fi

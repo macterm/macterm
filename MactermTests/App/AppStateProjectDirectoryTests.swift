@@ -37,6 +37,18 @@ struct AppStateProjectDirectoryTests {
         fixture.store.projects.first { $0.id == fixture.project.id }?.path
     }
 
+    /// The action row that `text` gives, nil for a notice or nothing.
+    private func action(_ input: PaletteInput, _ text: String) -> PaletteInputAction? {
+        if case let .action(row) = input.check(text) { return row }
+        return nil
+    }
+
+    /// The notice that `text` gives, nil for an action row or nothing.
+    private func notice(_ input: PaletteInput, _ text: String) -> String? {
+        if case let .notice(line) = input.check(text) { return line }
+        return nil
+    }
+
     @Test
     func the_pane_row_commits_the_pane_folder() throws {
         let root = try makeFolder()
@@ -49,11 +61,12 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { paneDirectory }
         )
         let input = try #require(made)
-        #expect(input.completions("").isEmpty, "the pane is in the project folder")
+        #expect(action(input, "") == nil, "the pane is in the project folder")
         paneDirectory = sub + "/"
-        let rows = input.completions("")
-        #expect(rows == [PaletteCompletion(title: "Current Pane's Directory", value: sub, subtitle: sub)])
-        #expect(input.commit(rows[0].value) == .done)
+        let row = try #require(action(input, ""))
+        #expect(row.title == "Current Pane's Directory")
+        #expect(row.subtitle == sub)
+        #expect(row.run() == .done)
         #expect(path(of: fixture) == sub)
     }
 
@@ -68,9 +81,12 @@ struct AppStateProjectDirectoryTests {
         )
         let input = try #require(made)
         #expect(input.initialValue.isEmpty)
-        #expect(input.completions("").isEmpty, "no pane folder: only the typed field")
+        #expect(action(input, "") == nil, "no pane folder: only the typed field")
         #expect(input.completions(root + "/").map(\.title) == ["sub"])
-        #expect(input.commit(root + "/sub/") == .done)
+        let row = try #require(action(input, root + "/sub/"))
+        #expect(row.title == "Change to \"\(root)/sub/\"", "one action row names the typed path")
+        #expect(row.subtitle == nil)
+        #expect(row.run() == .done)
         #expect(path(of: fixture) == root + "/sub")
     }
 
@@ -84,14 +100,41 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { nil }
         )
         let input = try #require(made)
-        #expect(input.commit(root + "/missing") == .refused("Path \(root)/missing doesn't exist"))
-        #expect(input.commit("relative/path") == .refused("Path relative/path doesn't exist"))
+        #expect(notice(input, root + "/missing") == "Path \(root)/missing doesn't exist")
+        #expect(action(input, root + "/missing") == nil, "no action row for a bad path")
+        #expect(notice(input, "relative/path") == "Path relative/path doesn't exist")
         let missingUnderHome = "~/macterm-no-such-folder-\(UUID().uuidString)"
-        #expect(input.commit(missingUnderHome) == .refused("Path \(missingUnderHome) doesn't exist"), "the reason keeps ~")
-        #expect(input.commit("  ") == .refused("Type a folder path"))
+        #expect(notice(input, missingUnderHome) == "Path \(missingUnderHome) doesn't exist", "the notice keeps ~")
+        #expect(notice(input, "  ") == nil)
+        #expect(action(input, "  ") == nil)
         let file = root + "/file.txt"
         try "x".write(toFile: file, atomically: true, encoding: .utf8)
-        #expect(input.commit(file) == .refused("\(file) is not a directory"), "a file is refused with its own reason")
+        #expect(notice(input, file) == "\(file) is not a directory", "a file has its own notice")
+        let store = fixture.store
+        #expect(fixture.state
+            .setProjectDirectory(fixture.project.id, to: file, projectStore: store) == .refused("\(file) is not a directory"))
+        #expect(fixture.state.setProjectDirectory(fixture.project.id, to: "  ", projectStore: store) == .refused("Type a folder path"))
+        #expect(path(of: fixture) == root)
+    }
+
+    @Test
+    func return_runs_only_the_action_row() throws {
+        let root = try makeFolder()
+        let fixture = makeFixture(path: "/tmp")
+        let made = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { nil }
+        )
+        let scope = try InputPaletteScope(input: #require(made))
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let typed = root + "/"
+        let items = scope.sections(for: PaletteQuery(raw: typed), context: context).flatMap(\.items)
+        #expect(items.map(\.title) == ["Change to \"\(typed)\"", "sub"])
+        #expect(scope.press(nil) == .nothing, "no selected row: Return does nothing")
+        #expect(scope.press(items[1]) == .fill(root + "/sub/"), "a completion goes into the field")
+        #expect(path(of: fixture) == "/tmp")
+        #expect(scope.press(items[0]) == .closed)
         #expect(path(of: fixture) == root)
     }
 
@@ -120,8 +163,8 @@ struct AppStateProjectDirectoryTests {
         let root = try makeFolder()
         let fixture = makeFixture(path: "")
         let input = try #require(fixture.state.changeProjectDirectoryInput(for: fixture.project, projectStore: fixture.store))
-        #expect(input.completions("").isEmpty)
-        #expect(input.commit(root) == .done)
+        #expect(action(input, "") == nil)
+        #expect(try #require(action(input, root)).run() == .done)
         #expect(path(of: fixture) == root)
     }
 
