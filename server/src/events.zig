@@ -269,6 +269,21 @@ pub const Watch = struct {
         return now - at < submit_window_ms;
     }
 
+    /// The shell's group runs another program at `now`: the shell ran
+    /// `exec` (`exec sh` from zsh). The marks were the old shell's, and the
+    /// new one can send none, so its 133;D never comes. A run that the marks
+    /// started ends, and a submission to the shell arms the foreground rule
+    /// again (`submitted`) until a new prompt mark comes.
+    pub fn shellReplaced(w: *Watch, now: i64) void {
+        w.now_ms = now;
+        w.has_marks = false;
+        w.at_input = false;
+        if (w.status.state != .running or w.run_by != .mark) return;
+        w.setCommand(null);
+        w.setOutputStart(false);
+        w.setStatus(.done, false);
+    }
+
     /// Output from `echo_ms` to `quiet_ms` after a submission to a raw
     /// program starts a run: the program replies.
     fn agentOutput(w: *Watch, now: i64) void {
@@ -1676,6 +1691,41 @@ test "events: with marks, a program that a nested shell starts runs until that s
     // A group that comes with no submission starts nothing.
     f.w.foreground(.{ .idle = false, .pgrp = 40 }, 20_000);
     try testing.expectEqual(.done, f.w.status.state);
+}
+
+test "events: an exec of the shell ends the run of its marks, and the new shell gets the foreground rule" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    // zsh (marks) runs `exec sh`: 133;C, and sh replaces zsh in its group.
+    f.feed("\x1b]133;A\x07$ \x1b]133;C\x07", 0);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.shellReplaced(500);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    try testing.expectEqual(m.Attention{ .unseen = true }, f.w.attention);
+    // At sh's prompt (no marks), `sleep 4`: a new group runs until sh is
+    // back.
+    f.feed("sh$ ", 600);
+    f.w.submitted(1000);
+    try testing.expect(f.w.watchesForeground(1000));
+    f.w.foreground(.{ .idle = false, .pgrp = 30 }, 1050);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.foreground(.{ .pgrp = 10 }, 5050);
+    try testing.expectEqual(.done, f.w.status.state);
+    // A shell that sends marks again owns its runs again.
+    f.feed("\x1b]133;A\x07$ ", 6000);
+    f.w.submitted(7000);
+    try testing.expect(!f.w.watchesForeground(7000));
+}
+
+test "events: an exec of the shell keeps a run that a progress report started" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]9;4;1;5\x07", 0);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.shellReplaced(100);
+    try testing.expectEqual(.running, f.w.status.state);
 }
 
 test "events: a submission to a program that ends arms nothing for the prompt hooks after it" {

@@ -311,6 +311,10 @@ const Session = struct {
     foreground_pgid: ?lib_posix.pid_t = null,
     foreground_read_at: i64 = 0,
     foreground_hash: u64 = 0,
+    /// The program that the shell's group ran at the last read, as a hash of
+    /// its path, and that group (`noteShellProgram`).
+    shell_program_pgid: lib_posix.pid_t = 0,
+    shell_program_hash: u64 = 0,
     /// The last tty mode sent (`ttyModeOf`), or null before the first read.
     tty_mode: ?m.TtyMode = null,
     etc_shells: ?[]const u8 = null,
@@ -775,6 +779,23 @@ const Session = struct {
         return true;
     }
 
+    /// The shell's group runs `comm`. Another program in the same group is
+    /// an `exec` of the shell (`exec sh` from zsh): the watch must not wait
+    /// for the old shell's marks (`Watch.shellReplaced`). A new group (the
+    /// shell under login(1) after login) is no exec. The session reads the
+    /// program only while a client asks for the foreground
+    /// (`checkForeground`): an exec while no such client is attached is
+    /// not seen, and its run goes on until a prompt mark comes.
+    fn noteShellProgram(s: *Session, pgrp: lib_posix.pid_t, comm: []const u8) void {
+        const hash = std.hash.Wyhash.hash(0, comm);
+        const replaced = pgrp == s.shell_program_pgid and hash != s.shell_program_hash;
+        s.shell_program_pgid = pgrp;
+        s.shell_program_hash = hash;
+        if (!replaced) return;
+        std.log.info("session {s}: the shell's group {d} runs {s} now", .{ s.name, pgrp, comm });
+        s.watch.shellReplaced(s.nowMs());
+    }
+
     /// Reads the foreground group and the line mode of the pty for the run
     /// status (`Watch.foreground`), with no client. The session reads it at
     /// each output, at each submission, and on a timer only while
@@ -1099,8 +1120,10 @@ const Session = struct {
             std.log.info("session {s}: foreground pgid={d} has no readable leader", .{ s.name, pgrp });
             return;
         };
+        const idle = s.isShellGroup(pgrp);
+        if (idle) s.noteShellProgram(pgrp, process.comm);
         const msg: m.Foreground = .{
-            .idle = s.isShellGroup(pgrp),
+            .idle = idle,
             .shell = if (s.etc_shells) |shells| foreground.isListedShell(shells, process.comm) else null,
             .comm = .{ .bytes = process.comm },
             .args = .{ .bytes = process.args },
