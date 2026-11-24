@@ -8,12 +8,12 @@ extension PaletteInput {
     /// Rename the tab `tabID` of the workspace `workspaceID`. The field
     /// starts on the name the sidebar shows. An empty commit gives back the
     /// automatic name, as the inline rename does. A commit of the automatic
-    /// name, unchanged, keeps the tab automatic: the name then follows the
-    /// panes as before.
+    /// name, unchanged, keeps the tab automatic, so that the name continues
+    /// to follow the panes.
     @MainActor
     static func renameTab(_ tabID: UUID, in workspaceID: UUID, appState: AppState) -> PaletteInput? {
         guard let tab = appState.workspaces[workspaceID]?.tabs.first(where: { $0.id == tabID }) else { return nil }
-        let original = tab.customTitle
+        let wasAutomatic = tab.customTitle == nil
         let initial = tab.sidebarTitle
         return PaletteInput(
             id: "rename-tab:\(tabID.uuidString)",
@@ -22,12 +22,11 @@ extension PaletteInput {
             initialValue: initial
         ) { text in
             let name = text.trimmingCharacters(in: .whitespaces)
-            let title: String? = name.isEmpty || (original == nil && name == initial) ? nil : name
-            guard title != original,
-                  let tab = appState.workspaces[workspaceID]?.tabs.first(where: { $0.id == tabID })
+            let title: String? = name.isEmpty || (wasAutomatic && name == initial) ? nil : name
+            guard let tab = appState.workspaces[workspaceID]?.tabs.first(where: { $0.id == tabID }),
+                  title != tab.customTitle
             else { return .done }
-            ModelWriter.tabSet(tab, title: title)
-            appState.saveWorkspaces()
+            appState.setTabTitle(tab, title: title)
             return .done
         }
     }
@@ -36,7 +35,7 @@ extension PaletteInput {
     /// empty commit changes nothing, as the inline rename does. A name that
     /// a project may not have is refused, and the screen says why.
     @MainActor
-    static func renameProject(_ projectID: UUID, store: ProjectStore) -> PaletteInput? {
+    static func renameProject(_ projectID: UUID, appState: AppState, store: ProjectStore) -> PaletteInput? {
         guard let project = store.projects.first(where: { $0.id == projectID }) else { return nil }
         return PaletteInput(
             id: "rename-project:\(projectID.uuidString)",
@@ -46,9 +45,7 @@ extension PaletteInput {
         ) { text in
             let name = text.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return .done }
-            // The one check of a project name in this screen.
-            if let refusal = Project.reservedNameMessage(for: name) { return .refused(refusal) }
-            store.rename(id: projectID, to: name)
+            if let refusal = appState.applyProjectRename(projectID, to: name, store: store) { return .refused(refusal) }
             return .done
         }
     }

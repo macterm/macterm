@@ -69,7 +69,7 @@ extension AppCommand {
                 PaletteInput.renameTab(tab.id, in: projectID, appState: ctx.appState)
             }
         case .renameProject:
-            PaletteInput.renameProject(projectID, store: ctx.projectStore)
+            PaletteInput.renameProject(projectID, appState: ctx.appState, store: ctx.projectStore)
         default:
             nil
         }

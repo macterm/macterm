@@ -29,6 +29,17 @@ struct RenameInputsTests {
         return try #require(PaletteFrame(.input(input)).scope as? InputPaletteScope)
     }
 
+    /// Type `text` on the screen of `input` in a window, then press Escape:
+    /// the palette pops the frame, and nothing commits.
+    private func typeThenEscape(_ input: PaletteInput?, text: String, context: PaletteContext) throws {
+        let window = WindowState()
+        try window.showPaletteScope(.input(#require(input)))
+        let screen = try #require(window.paletteStack.last?.scope as? InputPaletteScope)
+        _ = screen.sections(for: PaletteQuery(raw: text), context: context)
+        window.popPaletteFrame()
+        #expect(window.paletteStack.isEmpty)
+    }
+
     // MARK: - Tab
 
     @Test
@@ -38,6 +49,19 @@ struct RenameInputsTests {
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         #expect(screen.placeholder == "Tab name")
         #expect(screen.initialQuery == tab.sidebarTitle)
+    }
+
+    @Test
+    func tab_commit_compares_with_the_live_title() throws {
+        // The screen opened on "build"; another client cleared the title
+        // since. A commit of "build" must set it again.
+        let (state, _, project) = makeState()
+        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        ModelWriter.tabSet(tab, title: "build")
+        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
+        ModelWriter.tabSet(tab, title: nil)
+        #expect(screen.commit("build"))
+        #expect(tab.customTitle == "build")
     }
 
     @Test
@@ -71,16 +95,14 @@ struct RenameInputsTests {
 
     @Test
     func tab_escape_changes_nothing() throws {
-        let (state, _, project) = makeState()
+        let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         ModelWriter.tabSet(tab, title: "build")
-        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        // Typed, then popped (Escape) with no commit.
-        _ = screen.sections(for: PaletteQuery(raw: "other"), context: PaletteContext(
-            appState: state,
-            projectStore: ProjectStore(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json"))
-        ))
+        try typeThenEscape(
+            .renameTab(tab.id, in: project.id, appState: state),
+            text: "other",
+            context: PaletteContext(appState: state, projectStore: store)
+        )
         #expect(tab.customTitle == "build")
     }
 
@@ -100,24 +122,24 @@ struct RenameInputsTests {
 
     @Test
     func project_screen_starts_on_the_name() throws {
-        let (_, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, store: store))
+        let (state, store, project) = makeState()
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
         #expect(screen.placeholder == "Project name")
         #expect(screen.initialQuery == "alpha")
     }
 
     @Test
     func project_commit_renames() throws {
-        let (_, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, store: store))
+        let (state, store, project) = makeState()
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
         #expect(screen.commit(" beta "))
         #expect(store.projects.first { $0.id == project.id }?.name == "beta")
     }
 
     @Test
     func project_empty_commit_changes_nothing() throws {
-        let (_, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, store: store))
+        let (state, store, project) = makeState()
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
         #expect(screen.commit(""))
         #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
     }
@@ -125,7 +147,7 @@ struct RenameInputsTests {
     @Test
     func project_reserved_name_is_refused_on_the_screen() throws {
         let (state, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, store: store))
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
         #expect(!screen.commit("Pinned"))
         #expect(screen.failure?.title == PinnedTabs.reservedNameMessage)
         #expect(screen.failure?.retryable == false)
@@ -136,8 +158,11 @@ struct RenameInputsTests {
     @Test
     func project_escape_changes_nothing() throws {
         let (state, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, store: store))
-        _ = screen.sections(for: PaletteQuery(raw: "beta"), context: PaletteContext(appState: state, projectStore: store))
+        try typeThenEscape(
+            .renameProject(project.id, appState: state, store: store),
+            text: "beta",
+            context: PaletteContext(appState: state, projectStore: store)
+        )
         #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
     }
 }
