@@ -656,7 +656,7 @@ pub const StateSubscribe = struct {
 
 pub const ProjectCreate = struct {
     pub const name = "project.create";
-    pub const doc = "Makes a project.";
+    pub const doc = "Makes a project with capability fields that never change.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -1003,20 +1003,20 @@ pub const ModelOptions = struct {
 
 /// Every request method. A new method goes here.
 pub const methods = .{
-    ControlResume,  ChannelOpen,    ChannelClose,  ChannelPause,    ChannelResume,   Ping,           SessionCreate,
-    SessionList,    SessionInfo,    SessionKill,   PaneSeen,        SessionSend,     SessionKey,     SessionHistory,
-    SessionInspect, ServerExit,     CommandRun,    LinkOpen,        LinkClose,       StateSubscribe, ProjectCreate,
-    ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,       TabClose,        TabSet,         TabSelect,
-    TabReorder,     TabMove,        TabMerge,      PaneSplit,       PaneClose,       PaneMove,       PaneSeparate,
-    PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,       ModelImport,     ModelReplace,   ModelOptions,
+    ControlResume,  ChannelOpen,    ChannelClose,  ChannelPause, ChannelResume, Ping,           SessionCreate,
+    SessionList,    SessionInfo,    SessionKill,   PaneSeen,     SessionSend,   SessionKey,     SessionHistory,
+    SessionInspect, ServerExit,     CommandRun,    LinkOpen,     LinkClose,     StateSubscribe, ProjectCreate,
+    ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,    TabClose,      TabSet,         TabSelect,
+    TabReorder,     TabMove,        TabMerge,      PaneSplit,    PaneClose,     PaneMove,       PaneSeparate,
+    PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,    ModelImport,   ModelReplace,   ModelOptions,
 };
 
 /// The methods that change the model. The server answers one of them sent
 /// again from the ring of request ids, and does it only one time.
 pub const model_writes = .{
-    ProjectCreate, ProjectSet, ProjectReorder, ProjectRemove, TabCreate,    TabClose,  TabSet,
-    TabSelect,     TabReorder, TabMove,        TabMerge,      PaneSplit,    PaneClose, PaneMove,
-    PaneSeparate,  PaneFocus,  PaneZoom,       SplitRatio,    SelectSet,    ModelImport, ModelReplace,
+    ProjectCreate, ProjectSet, ProjectReorder, ProjectRemove, TabCreate, TabClose,    TabSet,
+    TabSelect,     TabReorder, TabMove,        TabMerge,      PaneSplit, PaneClose,   PaneMove,
+    PaneSeparate,  PaneFocus,  PaneZoom,       SplitRatio,    SelectSet, ModelImport, ModelReplace,
     ModelOptions,
 };
 

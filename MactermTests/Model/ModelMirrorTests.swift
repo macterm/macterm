@@ -83,6 +83,21 @@ struct ModelMirrorTests {
     }
 
     @Test
+    func a_tab_event_for_a_project_that_the_mirror_does_not_have_changes_nothing() {
+        let mirror = ModelMirror()
+        var p = project
+        p.tabs = [tab("t1", "a")]
+        p.activeTab = "t1"
+        mirror.install(state(seq: 1, model: .init(projects: [p])))
+        mirror.apply(batch(2, [
+            .tabOrder(.init(project: "zz", ids: ["t1"], activeTab: "t1")),
+            .tabChanged(.init(project: "zz", tab: tab("t1", "a"))),
+        ]))
+        #expect(mirror.data?.projects == [p])
+        #expect(mirror.seq == 2)
+    }
+
+    @Test
     func a_removed_project_takes_its_tabs_and_removed_objects_go() {
         let mirror = ModelMirror()
         var p = project

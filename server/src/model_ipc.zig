@@ -319,6 +319,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         m.SelectSet => {
             // Check both before a change: a request changes all or nothing.
             const holder: ?*model.Project = if (args.tab) |t| (mo.projectOfTab(t) orelse return modelError(error.NotFound)) else null;
+            if (holder) |h| if (h.sidebar == .none) return modelError(error.Refused);
             if (args.project) |id| {
                 const p = mo.findProject(id) orelse return modelError(error.NotFound);
                 if (p.sidebar == .none) return modelError(error.Refused);

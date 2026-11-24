@@ -266,7 +266,7 @@
       ],
       "args": "ProjectCreate.Args",
       "result": "ProjectCreate.Result",
-      "doc": "Makes a project."
+      "doc": "Makes a project with capability fields that never change."
     },
     {
       "name": "project.set",

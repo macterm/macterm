@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os
+
+private let logger = Logger(subsystem: appBundleID, category: "ModelMirror")
 
 /// The GUI's copy of the model on the Mac server (design/010 §4): the state
 /// of `state.subscribe`, then each event batch, applied in one main-actor
@@ -68,14 +71,21 @@ final class ModelMirror {
             case let .projectRemoved(e):
                 model.projects.removeAll { $0.id == e.id }
             case let .tabOrder(e):
-                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else { continue }
+                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else {
+                    logger.error("model mirror: tab.order for a project that the mirror does not have")
+                    continue
+                }
                 model.projects[i].activeTab = e.activeTab
                 orders[e.project] = e.ids
             case let .tabChanged(e):
-                for p in model.projects.indices where model.projects[p].id != e.project {
+                // The server sends a project's `project.set` before its tabs.
+                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else {
+                    logger.error("model mirror: tab.set for a project that the mirror does not have")
+                    continue
+                }
+                for p in model.projects.indices where p != i {
                     model.projects[p].tabs.removeAll { $0.id == e.tab.id }
                 }
-                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else { continue }
                 if let t = model.projects[i].tabs.firstIndex(where: { $0.id == e.tab.id }) {
                     model.projects[i].tabs[t] = e.tab
                 } else {

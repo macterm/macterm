@@ -7,8 +7,8 @@
 //!
 //! **Every operation checks first and changes after.** An operation that
 //! returns an error leaves the model as it was (design/010 §7), so a caller
-//! never sees half of a change (out of memory is the one exception). Inputs are copied into the
-//! model's arena, so a caller keeps its own memory.
+//! never sees half of a change (out of memory is the one exception). Inputs
+//! are copied into the model's arena, so a caller keeps its own memory.
 //!
 //! A changed list or a removed tab leaves its old memory in the arena, so
 //! each edit costs some bytes. `compact` copies the model into a new arena
@@ -1044,6 +1044,9 @@ pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
     var tabs_seen: std.StringHashMapUnmanaged(void) = .empty;
     var nodes_seen: std.StringHashMapUnmanaged(void) = .empty;
     for (data.projects, 0..) |*p, pi| {
+        if (p.sidebar != .tree and topLevelIfEmpty(p.parent) != null) {
+            return Fault.make("projects[{d}].parent: a project with sidebar {t} is at the top level", .{ pi, p.sidebar });
+        }
         if (parentIn(data.projects, p)) |g| {
             if (p.sidebar != .tree) return Fault.make("projects[{d}].parent: a project with sidebar {t} is at the top level", .{ pi, p.sidebar });
             if (findIn(data.projects, g).?.sidebar != .tree) return Fault.make("projects[{d}].parent: not a tree project", .{pi});

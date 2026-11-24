@@ -355,6 +355,7 @@ c.call("tab.create", project="p1", id="t3", root=pane("c"))
 assert c.request("tab.move", id="t3", to_project="w1")["err"]["code"] == "refused"
 # No window selects a project that no window draws.
 assert c.request("select.set", project="w1")["err"]["code"] == "refused"
+assert c.request("select.set", tab="t1")["err"]["code"] == "refused"
 assert c.call("select.set", project="pin") == {}
 # A project that is not removable stays; a widget goes with its tab.
 assert c.request("project.remove", id="pin")["err"]["code"] == "refused"

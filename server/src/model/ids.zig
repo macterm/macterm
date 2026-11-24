@@ -29,7 +29,8 @@ fn Id(comptime kind: IdKind) type {
 
         const Self = @This();
 
-        /// What the id names. Each value makes its own type.
+        /// What the id names. The compiler refuses a parameter that no code
+        /// reads, and each value of `kind` makes a type of its own.
         const id_kind = kind;
 
         /// A str on the wire, as in JSON (`msgpack.isText`).

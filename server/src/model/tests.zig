@@ -603,6 +603,7 @@ test "a hidden project that is not removable is refused, a widget is removed wit
     const gone = try m.removeProject(.of("w"));
     try testing.expectEqual(@as(usize, 1), gone.len);
     try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t2")));
+    try testing.expect(m.tab_history.get(.of("w")) == null);
     try expectValid(&m);
 }
 
@@ -644,9 +645,20 @@ test "a single_tab project holds one tab" {
     try testing.expectError(error.Refused, m.separatePane(.of("c"), .of("t4"), .of("w")));
     try testing.expect(m.findTab(.of("t2")) == null and m.findTab(.of("t4")) == null);
     try testing.expectEqual(@as(usize, 3), tree.paneCount(&m.findTab(.of("t3")).?.root));
+    // A refusal changes nothing: the tab stays in its project, active.
+    try testing.expectEqualStrings("p", m.projectOfTab(.of("t3")).?.id.text);
+    try testing.expectEqualStrings("t3", m.findProject(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findProject(.of("w")).?.active_tab.?.text);
+    // A pane of the one tab cannot go to a new tab in its own project.
+    try addWidget(&m, "w2");
+    try m.moveTab(.of("t3"), .of("w2"), null);
+    try testing.expectError(error.Refused, m.separatePane(.of("c"), .of("t5"), null));
+    try testing.expectEqual(@as(usize, 1), m.findProject(.of("w2")).?.tabs.len);
+    _ = try m.removeProject(.of("w2"));
     // Once it is empty, a tab can go in again.
     _ = try m.closeTab(.of("t1"));
-    try m.moveTab(.of("t3"), .of("w"), null);
+    try m.createTab(.of("p"), .of("t6"), null, pane("f"), null, true);
+    try m.moveTab(.of("t6"), .of("w"), null);
     try expectValid(&m);
 }
 
@@ -834,6 +846,7 @@ test "each fault names its place" {
         .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"alias\":\"\"", .want = "projects[1].alias: empty" },
         .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"parent\":\"p\"", .want = "projects[1].parent: a project with sidebar none is at the top level" },
         .{ .from = "\"parent\":\"p\"", .to = "\"parent\":\"pin\"", .want = "projects[3].parent: not a tree project" },
+        .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"parent\":\"gone\"", .want = "projects[1].parent: a project with sidebar none is at the top level" },
     };
     for (cases) |c| {
         const text = try std.mem.replaceOwned(u8, testing.allocator, base_ok, c.from, c.to);
@@ -1159,6 +1172,7 @@ test "compact frees the memory of old edits and keeps the model" {
 /// (H(a, V(b, c))) and tab `t2` (pane `x`), and selects `p`.
 fn addFullModel(m: *Model) !void {
     try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .color = "red" });
+    try addWidget(m, "w");
     try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "me@box:/q", .color = "blue", .sort_order = 3, .created_at = 1700000000000, .parent = .of("g") });
     try addPinned(m, "pinned");
     try threePaneTab(m, "t1", "a", "b", "c", "s1", "s2");
