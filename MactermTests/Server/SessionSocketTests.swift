@@ -52,6 +52,35 @@ struct SessionSocketTests {
         }
     }
 
+    /// Two windows show one pane: each view has a connection of its own to
+    /// the session, and the session tells each one whether it leads.
+    @Test
+    func two_views_on_the_session_socket_hear_the_lead() async throws {
+        try await withServer { server in
+            let sessions = LocalSessions(server: server)
+            let name = "ss-lead-\(UInt32.random(in: 0 ... .max))"
+            let first = RecordingPaneHost()
+            let a = PaneSession(
+                name: name,
+                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
+                wantsForeground: false,
+                host: first,
+                endpoint: sessions
+            )
+            a.start()
+            try await first.waitFor { $0.leads == [true] && $0.screen.contains("up-ok") }
+            let second = RecordingPaneHost()
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: sessions)
+            b.start()
+            try await second.waitFor { $0.leads == [false] && $0.screen.contains("up-ok") }
+            b.claim(grid: nil)
+            try await first.waitFor { $0.leads == [true, false] }
+            try await second.waitFor { $0.leads == [false, true] }
+            a.stop()
+            b.stop()
+        }
+    }
+
     /// The exit comes on the session's socket, which the server does not
     /// see. The channel tells the server, which then ends the session.
     @Test
