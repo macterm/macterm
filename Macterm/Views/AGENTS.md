@@ -6,11 +6,22 @@ This file loads when you work in `Macterm/Views/`. The root `AGENTS.md` has the 
 
 When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each tab in the cycle (`TabCycler.order`, limited by `Preferences.recentTabCandidates`). Each card is a mosaic of `PanePreview`s.
 
-- The cards are **live**. `beginLivePreviews` sets `GhosttyTerminalNSView.rendersForPreview`. `syncOcclusion` then reports the pane as visible, and libghostty wakes its renderer. Macterm samples at 5 Hz until `commitTabCycle` runs `endLivePreviews`. Every exit from a cycle goes through it, so no renderer stays awake.
+- The cards are **live**. `PanePreviewSampler` is the one owner of `GhosttyTerminalNSView.rendersForPreview`. A cycle begins its client (`.tabSwitcher`), and `syncOcclusion` then reports each offered pane as visible, so libghostty wakes its renderer. Macterm samples at 5 Hz until `TabCycler.finish` ends the client. Every exit from a cycle goes through it, so no renderer stays awake.
 - `PanePreview.frameID` skips a new sample of a pane whose IOSurface did not change. Macterm draws the thumbnail through a provider that does not copy. This keeps a hold at about 7% CPU, in place of 30%.
 - No card and no pane in a card is dimmed or outlined. The selected card has the selection fill behind its preview and a bold title.
 - Hover never scrolls the rows (`HoverSelectionTracker`, shared with the palette).
+- The cards draw a tab with `TabPreviewMosaic`, which the project screen's grid also uses.
 - Do not bring back a foreground copy-poll or a renderer that uses text as a stand-in. We removed both when we could sample panes that are off screen.
+
+## The project screen's grid
+
+`EmptyProjectView` shows the project's name, path and keys on the left, and `ProjectScreenGrid` on the right: one card for each tab, then one card for each child project, in the order of the sidebar (`ProjectScreenGridLayout.cards`). A project with no tabs and no children shows no grid.
+
+- **All cards have one size** (`ProjectScreenGridLayout.cardSize`): half the grid's width, at the aspect of the screen, which is the terminal area that each tab fills. Two columns, filled row by row. The second column starts half a card lower (Ethan's reference image).
+- A tab's card is only the live preview of the tab (`TabPreviewMosaic`, fitted in the card). Its accessibility label is the tab's title. A child's card shows its name and its folder, with no path line for a project with no folder.
+- A click on a tab's card shows the tab. A click on a child's card shows the child's project screen.
+- **The previews are live only while the screen shows and its window is visible** (`WindowVisibilityReader`, the window's occlusion state). The grid is the client `.projectScreen(window id)` of `PanePreviewSampler`: `AppState.showProjectScreenPreviews` and `endProjectScreenPreviews`. `onDisappear`, the occlusion change and `AppState.forgetWindowState` end it.
+- The hover is the tab switcher's selection fill (`RowHoverTracker`). No other state dims or outlines a card.
 
 ## Windows and sidebars, AppKit reach-throughs
 

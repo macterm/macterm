@@ -279,6 +279,7 @@ final class AppState {
 
     func forgetWindowState(for nsWindow: NSWindow) {
         guard let state = windowRegistry.forget(nsWindow) else { return }
+        previewSampler.end(.projectScreen(state.id))
         unregisterWindow(state)
     }
 
@@ -1030,8 +1031,10 @@ final class AppState {
         activeToast = nil
     }
 
+    /// The live pane previews of the tab switcher and the project screen.
+    let previewSampler = PanePreviewSampler()
     /// The Recent Tab cycle and the switcher's previews (#344).
-    let tabCycler = TabCycler()
+    let tabCycler: TabCycler
 
     var isTabCycling: Bool { tabCycler.isCycling }
 
@@ -1040,9 +1043,27 @@ final class AppState {
     /// (#344) renders. Empty when no cycle is in flight.
     var tabCycleTabIDs: [UUID] { tabCycler.order }
     var tabCycleSelection: Int { tabCycler.index }
-    var panePreviews: [UUID: PanePreview] { tabCycler.panePreviews }
+    var panePreviews: [UUID: PanePreview] { previewSampler.previews }
     var paneContainerAspect: CGFloat? { tabCycler.paneContainerAspect }
     var isLivePreviewing: Bool { tabCycler.isLivePreviewing }
+
+    /// The pane IDs of every workspace: the panes whose previews stay.
+    private var livePaneIDs: Set<UUID> {
+        Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
+    }
+
+    /// Keep live previews of `tabs` for the project screen of `window`
+    /// (`ProjectScreenGrid`), in place of the tabs it showed before.
+    func showProjectScreenPreviews(of tabs: [TerminalTab], in window: WindowState) {
+        previewSampler.forget(keeping: livePaneIDs)
+        previewSampler.begin(.projectScreen(window.id), panes: tabs.flatMap { $0.splitRoot.allPanes() })
+    }
+
+    /// Stop the live previews of the project screen of `window`: the screen
+    /// went, or the window is not visible.
+    func endProjectScreenPreviews(in window: WindowState) {
+        previewSampler.end(.projectScreen(window.id))
+    }
 
     private let workspaceStore: WorkspaceStore
 
@@ -1289,6 +1310,7 @@ final class AppState {
     ) {
         self.workspaceStore = workspaceStore
         self.legacyPanelVisible = legacyPanelVisible
+        tabCycler = TabCycler(sampler: previewSampler)
         layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
@@ -2865,9 +2887,7 @@ final class AppState {
             selectTab(current, projectID: projectID)
             return
         }
-        tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) {
-            Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
-        }
+        tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) { livePaneIDs }
         guard tabCycler.advance() else { return }
         // A binding with no modifier has no release to commit on, so there is
         // no hold gesture to preview: switch now and end the cycle.

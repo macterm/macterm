@@ -1006,11 +1006,32 @@ struct StandAsideNotice: View {
     }
 }
 
+/// The project screen: the project's name, path and keys on the left, and
+/// on the right a grid of its tabs and child projects (`ProjectScreenGrid`).
+/// A project with no tabs and no children shows no grid.
 struct EmptyProjectView: View {
     let project: Project
 
+    @Environment(AppState.self)
+    private var appState
+    @Environment(ProjectStore.self)
+    private var projectStore
     @State
     private var preferences = Preferences.shared
+    /// The size of the screen: the terminal area that a tab fills, so its
+    /// aspect is the aspect of every tab's preview.
+    @State
+    private var size: CGSize = .zero
+
+    private var cards: [ProjectScreenCard] {
+        // A sentinel workspace (the scratch tabs) has no project screen of
+        // its own and no children.
+        guard !Project.isSynthetic(project.id) else { return [] }
+        return ProjectScreenGridLayout.cards(
+            tabs: appState.workspaces[project.id]?.tabs ?? [],
+            children: projectStore.children(of: project.id)
+        )
+    }
 
     /// See `WelcomeView.shortcutLabel` — same rebind-observability need.
     private func shortcutLabel(for action: HotkeyAction) -> String {
@@ -1028,6 +1049,18 @@ struct EmptyProjectView: View {
     }
 
     var body: some View {
+        let cards = cards
+        HStack(spacing: 0) {
+            info
+            if !cards.isEmpty, size.width > 0, size.height > 0 {
+                ProjectScreenGrid(project: project, cards: cards, aspect: size.width / size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+    }
+
+    private var info: some View {
         VStack(spacing: 20) {
             Spacer()
 
