@@ -636,31 +636,34 @@ struct PaneSessionEndpointTests {
     @Test
     func output_that_the_channel_skipped_leaves_no_resume_point_until_the_snapshot() async throws {
         // A limit of 0: each output byte that is not in a snapshot skips.
-        let link = FakeServerLink(epoch: 7, buffering: .skipAhead(bytes: 0))
+        let links = (0 ..< 3).map { _ in FakeServerLink(epoch: 7, buffering: .skipAhead(bytes: 0)) }
         let host = RecordingPaneHost()
-        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint(links))
         session.start()
-        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
-        link.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 100), to: "s")
-        link.deliver(output: "one", to: "s")
-        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+
+        // A skip after a drawn snapshot: the next attach does not resume.
+        try await host.waitFor { _ in links[0].sent(on: "s").contains(MactermProtocol.Attach.name) }
+        links[0].deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 100), to: "s")
+        links[0].deliver(output: "one", to: "s")
+        links[0].deliver(MactermProtocol.SnapshotEnd(), to: "s")
         try await host.waitFor { $0.screen == "one" }
-        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 100))
-
-        link.deliver(output: "lost", to: "s")
-        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Refresh.name) }
-        let deadline = ContinuousClock.now + .seconds(10)
-        while await session.resumePoint != nil, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(await session.resumePoint == nil)
+        links[0].deliver(output: "lost", to: "s")
+        try await host.waitFor { _ in links[0].sent(on: "s").contains(MactermProtocol.Refresh.name) }
         #expect(host.snapshot().screen == "one", "the skipped output never reaches the surface")
+        links[0].close()
+        try await host.waitFor { _ in links[1].sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(links[1].attaches(on: "s").first?.resumeEpoch == nil)
 
-        link.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 200), to: "s")
-        link.deliver(output: "two", to: "s")
-        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
-        try await host.waitFor { $0.screen == "onetwo" }
-        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 200))
+        // The snapshot after a skip sets the count again.
+        links[1].deliver(output: "lost", to: "s")
+        try await host.waitFor { _ in links[1].sent(on: "s").contains(MactermProtocol.Refresh.name) }
+        links[1].deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 200), to: "s")
+        links[1].deliver(output: "two", to: "s")
+        links[1].deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        try await host.waitFor { $0.snapshots.last == "two" }
+        links[1].close()
+        try await host.waitFor { _ in links[2].sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(links[2].attaches(on: "s").first?.resumeOffset == 200)
         session.stop()
     }
 
