@@ -44,6 +44,69 @@ struct SidebarDragFeedbackTests {
         #expect(SidebarDragFeedback.ProbeView.outline(at: .zero, in: root) == nil)
     }
 
+    /// A drag across a section, out of the outline view (as onto a project
+    /// header with its own drop destination), back in, and a drop. Without
+    /// `OutlineGapExitGuard`, the exit stops the test process in SwiftUI
+    /// (ui-review 0573).
+    @Test
+    func a_drag_that_leaves_the_gap_outline_and_comes_back_drops_at_its_slot() async throws {
+        let drops = DropLog()
+        let content = List {
+            ForEach(["A", "B"], id: \.self) { key in
+                DisclosureGroup(isExpanded: .constant(true)) {
+                    ForEach(["\(key)0", "\(key)1"], id: \.self) { Text($0) }
+                        .dropDestination(for: String.self) { items, offset in
+                            drops.entries.append("\(key) \(items) \(offset)")
+                        }
+                } label: {
+                    Text(key).dropDestination(for: String.self) { _, _ in true }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .background { SidebarDragFeedback() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 320),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: content)
+        window.layoutIfNeeded()
+
+        let outline = try #require(await poll {
+            window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 6 ? $0 : nil
+            }
+        })
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("A1", forType: .string)
+        func point(row: Int, fraction: CGFloat) -> NSPoint {
+            let rect = outline.rect(ofRow: row)
+            return outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+        }
+        let drag = FakeDrag(location: point(row: 1, fraction: 0.2), pasteboard: pasteboard, window: window)
+
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        // Into the rows of section B (rows: A, A0, A1, B, B0, B1).
+        drag.location = point(row: 4, fraction: 0.8)
+        #expect(!outline.draggingUpdated(drag).isEmpty)
+        outline.draggingExited(drag)
+        // Back in, above A1, and drop.
+        drag.location = point(row: 2, fraction: 0.2)
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        #expect(outline.prepareForDragOperation(drag))
+        #expect(outline.performDragOperation(drag))
+        outline.concludeDragOperation(drag)
+
+        let log = await poll { drops.entries.isEmpty ? nil : drops.entries }
+        #expect(log == ["A [\"A1\"] 1"])
+    }
+
     private func sidebarList() -> some View {
         List {
             Section {
@@ -66,4 +129,46 @@ struct SidebarDragFeedbackTests {
         }
         return nil
     }
+}
+
+@MainActor
+private final class DropLog {
+    var entries: [String] = []
+}
+
+/// A drag that the test moves by hand. AppKit reads only the location, the
+/// pasteboard, the window and the operation mask from it here.
+private final class FakeDrag: NSObject, NSDraggingInfo {
+    var location: NSPoint
+    let pasteboard: NSPasteboard
+    weak var window: NSWindow?
+
+    init(location: NSPoint, pasteboard: NSPasteboard, window: NSWindow) {
+        self.location = location
+        self.pasteboard = pasteboard
+        self.window = window
+    }
+
+    var draggingDestinationWindow: NSWindow? { window }
+    var draggingSourceOperationMask: NSDragOperation { [.move, .copy, .generic] }
+    var draggingLocation: NSPoint { location }
+    var draggedImageLocation: NSPoint { location }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { pasteboard }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to _: NSPoint) {}
+    func resetSpringLoading() {}
+    func enumerateDraggingItems(
+        options _: NSDraggingItemEnumerationOptions = [],
+        for _: NSView?,
+        classes _: [AnyClass],
+        searchOptions _: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using _: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }
