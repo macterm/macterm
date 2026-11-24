@@ -172,6 +172,7 @@ private struct SavedPasswordRow: View {
                         .truncationMode(.middle)
                     if let host = entry.id.host {
                         HostPill(host: host)
+                            .layoutPriority(1)
                     }
                 }
                 Text(verbatim: entry.id.isOnDemandOnly ? String(localized: "Filled from the command palette only") : entry.id.prompt)
@@ -211,8 +212,9 @@ private struct SavedPasswordRow: View {
 }
 
 /// The host of a host's entry (`PasswordEntryID.host`), set apart from the
-/// command, so two hosts' entries for one command look different. Settings →
-/// Password Manager shows it in a row and in Details.
+/// command, so two hosts' entries for one command look different. The help
+/// tag shows a host that the pill truncates. System styles, not
+/// `MactermTheme`: the Settings window follows the system appearance.
 struct HostPill: View {
     let host: String
 

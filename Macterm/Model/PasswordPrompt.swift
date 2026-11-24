@@ -48,8 +48,8 @@ struct PasswordEntryID: Hashable, Codable {
     var isOnDemandOnly: Bool { prompt.isEmpty }
 
     /// What a person reads as "which one": the command, or the prompt when
-    /// the entry is command-independent, with the host in parentheses after it
-    /// for a host's entry. Settings shows the host as a `HostPill` instead.
+    /// the entry is command-independent. A host's entry has its host in
+    /// parentheses after it. Settings shows the host as a `HostPill` instead.
     var title: String {
         let base = displayCommand ?? prompt
         return host.map { "\(base) (\($0))" } ?? base
