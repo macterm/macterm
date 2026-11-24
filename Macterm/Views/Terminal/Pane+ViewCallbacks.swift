@@ -115,9 +115,6 @@ extension Pane {
         }
     }
 
-    /// Hands a finished command to project memory (off unless the user
-    /// turned it on, macOS 26+). The screen is read only for a failure's
-    /// output tail, and not while a password prompt owns its last line.
     /// A mark of the pane's session, once for the pane, from the link's
     /// counting view (`view`): the command's start and its end for project
     /// memory.
@@ -139,6 +136,9 @@ extension Pane {
         }
     }
 
+    /// Hands a finished command to project memory (off unless the user
+    /// turned it on, macOS 26+). The screen is read only for a failure's
+    /// output tail, and not while a password prompt owns its last line.
     private func recordCommandEnd(command: String?, exitCode: Int?, startedAt: Date?, view: GhosttyTerminalNSView?) {
         let end = CommandEnd(
             paneID: id,

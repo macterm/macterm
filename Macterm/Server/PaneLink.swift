@@ -133,7 +133,10 @@ final class PaneLink {
     private func makeDriver(_ hosts: RemoteHosts) -> RemotePaneDriver {
         let driver = RemotePaneDriver(name: name, hosts: hosts)
         driver.onPlainOwner = { [weak self] host in
-            self?.onEvent?(.plainShellRunsIn(host as? SurfaceChannelHost))
+            // A view becomes ready while SwiftUI builds it: the pane's
+            // observable state changes on the next turn.
+            let host = host as? SurfaceChannelHost
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onEvent?(.plainShellRunsIn(host)) } }
         }
         return driver
     }

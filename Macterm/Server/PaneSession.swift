@@ -87,9 +87,9 @@ extension PaneSessionHost {
 /// One surface's view channel on a pane's session, local or on a host: it
 /// makes the session when a `launch` is given, opens a channel, attaches,
 /// and feeds the host from the channel. A pane's `PaneLink` makes the
-/// session once (`create`) and gives its views no launch. Input, claims and sizes go back on the same channel, in
-/// order, from a queue of its own, so a stalled server never blocks the
-/// caller.
+/// session once (`create`) and gives its views no launch. Input, claims
+/// and sizes go back on the same channel, in order, from a queue of its
+/// own, so a stalled server never blocks the caller.
 ///
 /// One rule for a lost link: a channel that ends with no exit reports
 /// `paneLinkLost`, and the session asks its endpoint for a connection again,
