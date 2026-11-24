@@ -166,6 +166,62 @@ c.wait_output(ch, "done-9", timeout=120)
 # The output that waited was dropped, not sent late.
 got = sum(n for k, n in c.frames[ch] if k == "bytes")
 assert got < 600000, got
+
+# The count after the skip is still a prefix of the session's output: a new
+# link resumes from it with no snapshot.
+c.type(ch, "printf 'quiet-%s\\n' 8\r")
+c.wait_output(ch, "quiet-8")
+offset = c.offset(ch)
 c.close()
+d = RelayClient()
+res = d.call("channel.open", session="s")
+d.pane(res["channel"], "attach", cols=80, rows=24, resume_epoch=res["epoch"], resume_offset=offset)
+assert d.wait_msg(res["channel"], "resumed") == {"offset": offset}
+assert not d.messages(res["channel"], "snapshot.start")
+d.close()
+PY
+}
+
+@test "relay: channel.open gives the session's epoch, and a new link resumes a channel by its offset" {
+  python3 - <<'PY'
+from v2client import RelayClient
+c = RelayClient()
+c.call("session.create", id="r", command=[b"/bin/cat"])
+res = c.call("channel.open", session="r")
+ch, epoch = res["channel"], res["epoch"]
+assert isinstance(epoch, int), res
+c.pane(ch, "attach", cols=80, rows=24)
+c.wait_msg(ch, "state")
+c.type(ch, "one\n")
+c.wait_output(ch, "one\r\none")
+offset = c.offset(ch)
+assert offset > 0, offset
+
+# The link goes, and the session's output goes on.
+c.close()
+w = RelayClient()
+wch = w.open("r")
+w.wait_msg(wch, "snapshot.end")
+w.type(wch, "two\n")
+w.wait_output(wch, "two\r\ntwo")
+
+# A new link: the same epoch, and the bytes after the offset, no snapshot.
+d = RelayClient()
+res = d.call("channel.open", session="r")
+assert res["epoch"] == epoch, (res, epoch)
+d.pane(res["channel"], "attach", cols=80, rows=24, resume_epoch=epoch, resume_offset=offset)
+assert d.wait_msg(res["channel"], "resumed") == {"offset": offset}
+d.wait_output(res["channel"], "two\r\ntwo")
+assert d.output[res["channel"]].startswith(b"two"), d.output[res["channel"]]
+assert not d.messages(res["channel"], "snapshot.start")
+
+# An epoch that is not the session's gets a snapshot.
+e = RelayClient()
+res = e.call("channel.open", session="r")
+e.pane(res["channel"], "attach", cols=80, rows=24, resume_epoch=epoch + 1, resume_offset=offset)
+e.wait_msg(res["channel"], "snapshot.start")
+assert not e.messages(res["channel"], "resumed")
+for x in (w, d, e):
+    x.close()
 PY
 }
