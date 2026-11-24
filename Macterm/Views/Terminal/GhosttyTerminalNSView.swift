@@ -414,9 +414,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSplitRequest: ((SplitDirection, SplitPosition) -> Void)?
     var onZoomRequest: (() -> Void)?
     var isZoomed: Bool = false
-    /// The tab shows more than one pane, so a pinch out can zoom this one.
-    var isSplit = false
-    private var pinchZoom = PinchZoomGesture()
     var onSearchStart: ((String?) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int?) -> Void)?
@@ -584,6 +581,10 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     private(set) lazy var copyMode = CopyModeController { [weak self] action in
         self?.sendBindingAction(action)
     }
+
+    /// The zoom of the pane's picture: a pinch scales it, a two-finger
+    /// scroll pans it, and Reset Zoom ends it.
+    private(set) lazy var pictureZoom = PaneZoomController(view: self)
 
     /// The popover of Explain Output (`explainOutput`). Made on first use.
     var explainPopover: ExplainPopover {
@@ -921,6 +922,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         clearCommandSubmissionEvidence()
         // The selection dies with the surface; the mode must not outlive it.
         copyMode.reset()
+        pictureZoom.surfaceDidEnd()
         // A composition in flight has nowhere left to commit — drop it before
         // the surface goes, so a reattached surface starts uncomposed rather
         // than inheriting a preedit that can never be resolved.
@@ -1043,9 +1045,11 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        if newSize != frame.size { pictureZoom.viewWillResize() }
         super.setFrameSize(newSize)
         if pendingSurfaceCreation { createSurface() }
         updateMetalLayerSize()
+        pictureZoom.viewDidResize()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -1079,6 +1083,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             CATransaction.commit()
         }
         ghostty_surface_set_content_scale(surface, scale, scale)
+        pictureZoom.contentScaleDidChange()
         applySurfaceSize(scaledSize)
     }
 
@@ -1692,21 +1697,24 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
     }
 
-    /// A pinch out zooms this pane, and a pinch in unzooms it: the path of
-    /// the context menu's Zoom Pane. The pane under the pointer gets the
-    /// event, so it takes focus first.
+    /// A pinch scales the picture of the pane under the pointer
+    /// (`PaneZoomController`). It never changes the tile zoom (Zoom Pane):
+    /// one gesture has one action. libghostty reads no magnify event.
     override func magnify(with event: NSEvent) {
-        guard let direction = pinchZoom.track(phase: event.phase, magnification: event.magnification),
-              PinchZoomGesture.togglesZoom(direction, isZoomed: isZoomed, isSplit: isSplit)
-        else { return super.magnify(with: event) }
+        guard surface != nil else { return super.magnify(with: event) }
         onInteraction?()
-        if direction == .outward { window?.makeFirstResponder(self) }
-        onZoomRequest?()
+        pictureZoom.pinch(by: event.magnification, at: mousePoint(from: event))
     }
 
+    /// While the picture is zoomed, a two-finger scroll pans it first, and
+    /// scrolls the terminal only with what the pan cannot take at its edge.
+    /// A wheel that is not precise always scrolls.
     override func scrollWheel(with event: NSEvent) {
         onInteraction?()
-        forwardScrollWheel(event)
+        guard pictureZoom.isZoomed, event.hasPreciseScrollingDeltas else { return forwardScrollWheel(event) }
+        let leftover = pictureZoom.pan(by: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+        guard leftover != .zero else { return }
+        forwardScrollWheel(event, deltaX: leftover.width, deltaY: leftover.height)
     }
 
     /// Mirror of the core's scroll accumulator. See `ScrollbarSurface`.
