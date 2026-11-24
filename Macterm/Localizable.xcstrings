@@ -8500,6 +8500,22 @@
         }
       }
     },
+    "Reset Zoom" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "배율 재설정"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置缩放"
+          }
+        }
+      }
+    },
     "Resize Pane Down" : {
       "localizations" : {
         "ko" : {

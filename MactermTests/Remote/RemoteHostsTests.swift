@@ -479,14 +479,23 @@ struct RemoteHostsTests {
                 #expect(pane.remoteLinkBadge == .reconnecting)
             }
         }
-        // Both views attach to the same session and replay its screen.
-        try await left.waitFor { $0.resets > resets[0] && $0.screen.contains("before-kill") }
-        try await right.waitFor { $0.resets > resets[1] && $0.screen.contains("before-kill") }
+        // Both views attach to the same session again.
+        while pane.isRemoteLinkLost || pane.isRemoteReconnecting, Date() < deadline.addingTimeInterval(40) {
+            try await Task.sleep(for: .milliseconds(100))
+        }
         #expect(!pane.isRemoteLinkLost && !pane.isRemoteReconnecting)
         if needsLogin { #expect(host.askpassQuestions > questions) }
         routes[0].sendInput(Data("printf 'after-%s\\n' key\n".utf8))
         try await left.waitFor { $0.screen.contains("after-key") }
+        try await right.waitFor { $0.screen.contains("after-key") }
         #expect(!left.snapshot().screen.contains("dropped-key"))
+        // Both views resumed: the screen and the scrollback stay, and no
+        // byte comes twice.
+        for (view, before) in zip([left, right], resets) {
+            let state = view.snapshot()
+            #expect(state.resets == before)
+            #expect(state.screen.components(separatedBy: "before-kill").count == 2)
+        }
         #expect(host.sshd.acceptedLogins() == 2)
     }
 

@@ -61,6 +61,10 @@ final class RemotePaneDriver {
         /// Read and written on the main actor.
         fileprivate var ready = false
         fileprivate var session: PaneSession?
+        /// Where this view's next session asks to resume: the point of its
+        /// last one (`PaneSession.finish`). Each view has its own screen. A
+        /// new session or a plain shell clears it.
+        fileprivate var resume: PaneSession.ResumePoint?
 
         fileprivate init(host: any PaneSessionHost, driver: RemotePaneDriver) {
             self.host = host
@@ -262,6 +266,9 @@ final class RemotePaneDriver {
                 close()
                 return
             case let .plain(arguments):
+                for view in views {
+                    view.resume = nil
+                }
                 earlyInput = Data()
                 undelivered = Data()
                 end = await runPlain(arguments)
@@ -307,6 +314,9 @@ final class RemotePaneDriver {
                 return Task.isCancelled ? .done : .lost
             }
             guard !Task.isCancelled else { return .done }
+            for view in views {
+                view.resume = nil
+            }
             if let note = made.note { each { $0.paneFeed(Data(Self.paneText(note).utf8)) } }
             // The one create of the pane: every view attaches to it.
             do {
@@ -324,7 +334,17 @@ final class RemotePaneDriver {
         for view in views where view.ready {
             startSession(of: view, on: link)
         }
-        return await withCheckedContinuation { ending = $0 }
+        let end = await withCheckedContinuation { ending = $0 }
+        // A key can end a session while its reading still feeds the view:
+        // each view's point is the offset after the last byte it fed.
+        for view in views {
+            guard let session = view.session else { continue }
+            view.session = nil
+            view.resume = await session.finish()
+            // Input that never reached a channel waits for the next session.
+            undelivered.append(session.takePendingInput())
+        }
+        return end
     }
 
     /// Starts the channel of one view on the host's link. The first session
@@ -334,6 +354,7 @@ final class RemotePaneDriver {
         let forward = Forward(driver: self, view: view)
         let session = PaneSession(
             name: name, launch: nil, wantsForeground: true, wantsTty: true,
+            resume: view.resume,
             host: forward,
             endpoint: OneAttach(link)
         )

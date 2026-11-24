@@ -400,6 +400,24 @@ class RelayClient:
         b = text.encode()
         self.wait(lambda: b in self.output.get(channel, b""), timeout, "output %r on %d" % (text, channel))
 
+    def offset(self, channel):
+        """The output offset after the last byte that came on the channel, as
+        the app counts it: a snapshot's `offset` or a `resumed` offset, plus
+        the output bytes after it. It starts at 0: a session with no output
+        sends no snapshot."""
+        at, snapshot = 0, False
+        for kind, v in self.frames.get(channel, []):
+            if kind == "bytes":
+                if not snapshot and at is not None:
+                    at += v
+            elif v.get("t") == "snapshot.start":
+                at, snapshot = v["a"].get("offset"), True
+            elif v.get("t") == "snapshot.end":
+                snapshot = False
+            elif v.get("t") == "resumed":
+                at = v["a"]["offset"]
+        return at
+
     def open(self, session, cols=80, rows=24):
         ch = self.call("channel.open", session=session)["channel"]
         self.pane(ch, "attach", cols=cols, rows=rows)

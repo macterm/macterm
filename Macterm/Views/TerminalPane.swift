@@ -10,7 +10,6 @@ struct TerminalPane: View {
     let pane: Pane
     let focused: Bool
     let isZoomed: Bool
-    let isSplit: Bool
     /// Dimmed because another pane drives this session's size (#345).
     var isNonLeaderMirror = false
     let onFocus: () -> Void
@@ -62,7 +61,6 @@ struct TerminalPane: View {
                 surface: surface,
                 focused: focused,
                 isZoomed: isZoomed,
-                isSplit: isSplit,
                 isNonLeaderMirror: isNonLeaderMirror,
                 // Read here (not just passed through) so the observation
                 // dependency registers: an orphaned-with-no-host bump must
@@ -271,7 +269,6 @@ private struct TerminalSurface: NSViewRepresentable {
     let surface: PaneSurface
     let focused: Bool
     let isZoomed: Bool
-    let isSplit: Bool
     /// Another pane drives this session's pty size (#345), so this surface's
     /// frame is laid out for foreign geometry.
     let isNonLeaderMirror: Bool
@@ -429,7 +426,6 @@ private struct TerminalSurface: NSViewRepresentable {
         view.onSplitRequest = onSplitRequest
         view.onZoomRequest = onZoomRequest
         view.isZoomed = isZoomed
-        view.isSplit = isSplit
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
         // A run ended: the window marks it seen if the user looks at the pane.

@@ -69,6 +69,35 @@ struct ProjectSourceTests {
         #expect(item.score < 0) // boosted below a bare command's typical positive score
     }
 
+    @Test
+    func a_project_inside_another_shows_the_path_of_parent_names() throws {
+        let work = Project(name: "Work", path: "/tmp/work")
+        let api = Project(name: "api", path: "/tmp/api")
+        let handlers = Project(name: "handlers", path: "/tmp/handlers")
+        let (ctx, _, store) = makeContext([work, api, handlers])
+        #expect(store.move(api.id, into: work.id))
+        #expect(store.move(handlers.id, into: api.id))
+
+        let deep = try #require(ProjectSource().items(query: "handlers", context: ctx).first)
+        #expect(deep.subtitle == "Work / api")
+        let child = try #require(ProjectSource().items(query: "api", context: ctx).first { $0.title == "api" })
+        #expect(child.subtitle == "Work")
+        let top = try #require(ProjectSource().items(query: "Work", context: ctx).first { $0.title == "Work" })
+        #expect(top.subtitle == "/tmp/work")
+    }
+
+    @Test
+    func a_query_finds_a_project_by_the_names_above_it() {
+        let work = Project(name: "Work", path: "/tmp/w")
+        let api = Project(name: "api", path: "/tmp/a")
+        let (ctx, _, store) = makeContext([work, api, Project(name: "app", path: "/tmp/b")])
+        #expect(store.move(api.id, into: work.id))
+
+        #expect(ProjectSource().items(query: "work api", context: ctx).map(\.title) == ["api"])
+        // A parent is a row of its own, and its children match its name.
+        #expect(Set(ProjectSource().items(query: "work", context: ctx).map(\.title)) == ["Work", "api"])
+    }
+
     // MARK: - emptyItems
 
     @Test

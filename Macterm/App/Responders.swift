@@ -152,6 +152,10 @@ final class QuickTerminalResponder: KeyResponder {
             }
             return .handled
         }
+        if HotkeyRegistry.matches(event, action: .resetZoom) {
+            state.tab.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.pictureZoom.reset()
+            return .handled
+        }
         if let (_, dir) = Self.focusActions.first(where: { HotkeyRegistry.matches(event, action: $0.0) }) {
             guard let focusedID = state.focusedPaneID else { return .passThrough }
             if let bestID = state.splitRoot.nearestPane(from: focusedID, direction: dir) {
