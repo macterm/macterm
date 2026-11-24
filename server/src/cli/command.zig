@@ -284,6 +284,18 @@ pub fn writeUsageError(w: *std.Io.Writer, path: []const *const Command, message:
 }
 
 /// The `--help` text of the last command of `path`.
+/// Writes text as the help writes a discussion: a line that starts with a
+/// space as it is, another line wrapped at the width of the help.
+pub fn writeText(w: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0 or line[0] == ' ') {
+            try w.writeAll(line);
+            try w.writeByte('\n');
+        } else try writeWrapped(w, "", line, 0, short_width, short_width);
+    }
+}
+
 pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
     // The last word of the overview may end at column 80, and every other
@@ -291,13 +303,7 @@ pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.
     try writeWrapped(w, "OVERVIEW: ", c.abstract, 0, short_width, width);
     try w.writeByte('\n');
     if (c.discussion) |d| {
-        var lines = std.mem.splitScalar(u8, d, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0 or line[0] == ' ') {
-                try w.writeAll(line);
-                try w.writeByte('\n');
-            } else try writeWrapped(w, "", line, 0, short_width, short_width);
-        }
+        try writeText(w, d);
         try w.writeByte('\n');
     }
     try w.writeAll("USAGE: ");
