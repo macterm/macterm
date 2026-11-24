@@ -129,7 +129,7 @@ final class InputPaletteScope: PaletteScope {
     var placeholder: String { input.prompt }
     var initialQuery: String { text }
 
-    func sections(for query: PaletteQuery, context _: PaletteContext) -> [PaletteSection] {
+    func sections(for query: PaletteQuery, context: PaletteContext) -> [PaletteSection] {
         text = query.raw
         if failure != nil, text != refusedText {
             failure = nil
