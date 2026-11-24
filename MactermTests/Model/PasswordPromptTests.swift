@@ -401,6 +401,12 @@ struct PasswordVaultTests {
         vault.save("d", for: PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@build:22"))
         #expect(vault.entries(matching: "build").map(\.id.host) == ["me@build:22"])
     }
+
+    @Test
+    func a_host_entry_names_its_host() {
+        #expect(PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@build:22").withHost("sudo") == "sudo (me@build:22)")
+        #expect(PasswordEntryID(command: "sudo", prompt: "Password:").withHost("sudo") == "sudo")
+    }
 }
 
 /// Entries added for a command alone, and how a picked password is typed.

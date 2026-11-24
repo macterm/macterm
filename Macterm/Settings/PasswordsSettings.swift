@@ -152,7 +152,7 @@ enum PasswordClipboard {
     }
 }
 
-struct SavedPasswordRow: View {
+private struct SavedPasswordRow: View {
     let entry: SavedPassword
     let onDetails: () -> Void
     let onCopy: () -> Void
@@ -165,7 +165,7 @@ struct SavedPasswordRow: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: Self.heading(entry.id))
+                Text(verbatim: entry.id.withHost(entry.id.displayCommand ?? String(localized: "Any command")))
                     .font(.body.monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -194,13 +194,6 @@ struct SavedPasswordRow: View {
         }
         .padding(.vertical, 2)
         .contextMenu { menuItems }
-    }
-
-    /// The command and, for a host's entry, the host in the form of
-    /// `PasswordEntryID.title`, so two hosts' entries for one command differ.
-    static func heading(_ id: PasswordEntryID) -> String {
-        let base = id.displayCommand ?? String(localized: "Any command")
-        return id.host.map { "\(base) (\($0))" } ?? base
     }
 
     @ViewBuilder
