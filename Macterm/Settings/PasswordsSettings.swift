@@ -165,10 +165,15 @@ private struct SavedPasswordRow: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: entry.id.withHost(entry.id.displayCommand ?? String(localized: "Any command")))
-                    .font(.body.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(verbatim: entry.id.displayCommand ?? String(localized: "Any command"))
+                        .font(.body.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let host = entry.id.host {
+                        HostPill(host: host)
+                    }
+                }
                 Text(verbatim: entry.id.isOnDemandOnly ? String(localized: "Filled from the command palette only") : entry.id.prompt)
                     .font(entry.id.isOnDemandOnly ? .caption : .caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -202,5 +207,28 @@ private struct SavedPasswordRow: View {
         Button("Copy Password") { onCopy() }
         Divider()
         Button("Remove…", role: .destructive) { onRemove() }
+    }
+}
+
+/// The host of a host's entry (`PasswordEntryID.host`), set apart from the
+/// command, so two hosts' entries for one command look different. Settings →
+/// Password Manager shows it in a row and in Details.
+struct HostPill: View {
+    let host: String
+
+    var body: some View {
+        Label {
+            Text(verbatim: host)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } icon: {
+            Image(systemName: "network")
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(.quaternary, in: Capsule())
+        .help(host)
     }
 }

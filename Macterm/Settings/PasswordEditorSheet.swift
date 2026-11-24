@@ -86,9 +86,7 @@ struct PasswordEditorSheet: View {
                 Section {
                     if let host = entry?.id.host {
                         LabeledContent("Host") {
-                            Text(verbatim: host)
-                                .font(.body.monospaced())
-                                .textSelection(.enabled)
+                            HostPill(host: host)
                         }
                     }
                     TextField("Command", text: $command, prompt: Text(isPromptOnly ? "Any command" : "Required"))
