@@ -25,13 +25,13 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     private var state = State()
     private var grid: PaneGrid
     private var inSnapshot = false
-    /// Runs once, at the first `lead` of true: a pane that moves from the
+    /// The grid of every read after the first: a pane that moves from the
     /// incubator into its tile after the attach.
-    private var onFirstLead: (@Sendable () -> Void)?
+    private var laterGrid: PaneGrid?
 
-    init(grid: PaneGrid = PaneGrid(cols: 80, rows: 24), onFirstLead: (@Sendable () -> Void)? = nil) {
+    init(grid: PaneGrid = PaneGrid(cols: 80, rows: 24), afterFirstRead laterGrid: PaneGrid? = nil) {
         self.grid = grid
-        self.onFirstLead = onFirstLead
+        self.laterGrid = laterGrid
     }
 
     func setGrid(_ new: PaneGrid) {
@@ -73,7 +73,12 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     func paneGrid() -> PaneGrid {
         lock.lock()
         defer { lock.unlock() }
-        return grid
+        let now = grid
+        if let laterGrid {
+            grid = laterGrid
+            self.laterGrid = nil
+        }
+        return now
     }
 
     func paneSnapshot(started: Bool) {
@@ -93,10 +98,7 @@ final class RecordingPaneHost: PaneSessionHost, @unchecked Sendable {
     func paneLead(_ leader: Bool?) {
         lock.lock()
         state.leads.append(leader)
-        let hook = leader == true ? onFirstLead : nil
-        if hook != nil { onFirstLead = nil }
         lock.unlock()
-        hook?()
     }
 
     func paneForeground(_ foreground: MactermProtocol.Foreground) {

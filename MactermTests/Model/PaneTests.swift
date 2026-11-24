@@ -107,14 +107,14 @@ struct PaneTests {
     func a_shell_that_runs_minus_c_is_a_run() {
         let p = Pane(projectPath: "/", projectID: UUID())
         p.lineMode = .echoing
-        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: true, isShell: true, command: "-bash"))
         p.recordUserInteraction()
         p.recordCommandSubmission(hasContent: true)
         p.applyForeground(SessionForeground(
             comm: "/bin/sh", isIdle: false, isShell: true, command: "/bin/sh -c sleep 1; printf started; sleep 6"
         ))
         #expect(p.executionState == .running)
-        p.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "-bash"))
+        p.applyForeground(SessionForeground(comm: "bash", isIdle: true, isShell: true, command: "-bash"))
         #expect(p.executionState == .done)
     }
 
@@ -128,7 +128,7 @@ struct PaneTests {
             p.recordUserInteraction()
             p.recordCommandSubmission(hasContent: true)
             let comm = String(command.split(separator: " ")[0])
-            p.applyForeground(SessionForeground(comm: comm, isIdle: false, isShell: true, command: command))
+            p.applyForeground(SessionForeground(comm: comm, isIdle: true, isShell: true, command: command))
             #expect(p.executionState == .idle)
         }
     }
@@ -630,6 +630,17 @@ struct PaneTests {
         #expect(pane.agentIcon == .claude)
         pane.applyForeground(SessionForeground(comm: "zsh", isIdle: true, isShell: true, command: "zsh"))
         #expect(pane.agentIcon == nil)
+    }
+
+    /// The session's idle verdict decides for a local pane too: a shell that
+    /// runs in the session's shell is a running child (issue 0451).
+    @Test
+    func local_pane_takes_the_sessions_idle_verdict() {
+        let pane = Pane(projectPath: "/", projectID: UUID())
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: true, isShell: true, command: "-zsh"))
+        #expect(pane.foregroundSample?.isIdleShell == true)
+        pane.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "bash"))
+        #expect(pane.foregroundSample?.isIdleShell == false)
     }
 
     @Test

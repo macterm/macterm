@@ -102,7 +102,7 @@ struct PaneSessionTests {
             // The new channel asks to resume: the session sends only the
             // bytes after the offset, and draws no snapshot.
             try await host.waitFor { $0.leads.count >= 3 && $0.leads.last == true }
-            #expect(session.resumePoint != nil)
+            #expect(await session.resumePoint != nil)
             session.sendInput(Data("x\n".utf8))
             try await host.waitFor { $0.screen.contains("after-x") }
             let state = host.snapshot()
@@ -266,14 +266,12 @@ struct PaneSessionTests {
             try await first.waitFor { $0.screen.contains("END") }
             a.stop()
 
+            // The attach reads the wide grid. Each later read gets the
+            // narrow one: the pane moved into its tile before the snapshot
+            // ended.
             let narrow = PaneGrid(cols: 30, rows: 10)
-            let box = SessionBox()
-            let second = RecordingPaneHost(grid: wide) { [box] in
-                box.host?.setGrid(narrow)
-                box.session?.sendSize(narrow)
-            }
+            let second = RecordingPaneHost(grid: wide, afterFirstRead: narrow)
             let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: TestServerEndpoint(server))
-            box.set(session: b, host: second)
             b.start()
             try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
             // At 30 columns the line of 60 takes rows 1 and 2, and END is on
@@ -443,8 +441,7 @@ struct PaneSessionTests {
             session.sendInput(Data("hi\n".utf8))
             session.start()
             try await host.waitFor { $0.screen.contains("up-ok") }
-            session.stop()
-            #expect(session.takePendingInput() == Data("hi\n".utf8))
+            #expect(await session.finish().pendingInput == Data("hi\n".utf8))
             try await Task.sleep(for: .seconds(1.5))
 
             // Another client sees the session's screen: the line never came.
@@ -458,29 +455,6 @@ struct PaneSessionTests {
     }
 
     // MARK: - Support
-
-    /// The session and host of a test, for a host's hook.
-    final class SessionBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: (PaneSession, RecordingPaneHost)?
-        var session: PaneSession? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored?.0
-        }
-
-        var host: RecordingPaneHost? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored?.1
-        }
-
-        func set(session: PaneSession, host: RecordingPaneHost) {
-            lock.lock()
-            stored = (session, host)
-            lock.unlock()
-        }
-    }
 
     private func withServer(_ body: (LocalServer) async throws -> Void) async throws {
         let bundled = try #require(LocalServer.bundled, "zmx/zmx missing from the built bundle. Run `mise run setup`.")
@@ -570,7 +544,7 @@ struct PaneSessionEndpointTests {
         let attach = try #require(second.attaches(on: "s").first)
         #expect(attach.resumeEpoch == 7)
         #expect(attach.resumeOffset == 103, "the snapshot's offset and the 3 output bytes after it")
-        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
         second.deliver(MactermProtocol.Resumed(offset: 103), to: "s")
         second.deliver(output: "three", to: "s")
         try await host.waitFor { $0.screen == "onetwothree" }
@@ -585,7 +559,7 @@ struct PaneSessionEndpointTests {
         #expect(host.snapshot().resets == 1, "a skip-ahead snapshot clears its own screen, not the scrollback")
         second.close()
         try await host.waitFor { $0.gone == 1 }
-        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
         session.stop()
     }
 
@@ -655,7 +629,7 @@ struct PaneSessionEndpointTests {
         try await host.waitFor { $0.screen == "abc" }
         // The channel is still open: a key that found the link down ends a
         // remote pane's session while it reads.
-        #expect(await session.finish() == PaneSession.ResumePoint(epoch: 7, offset: 3))
+        #expect(await session.finish().resume == PaneSession.ResumePoint(epoch: 7, offset: 3))
     }
 
     @Test
@@ -807,5 +781,44 @@ struct PaneSessionEndpointTests {
         link.deliver(MactermProtocol.Status(state: .running), to: "s")
         try await host.waitFor { _ in link.input(on: "s") == Data("ls\n".utf8) }
         session.stop()
+    }
+
+    @Test
+    func keys_claims_and_sizes_reach_the_channel_in_the_order_of_the_calls() async throws {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        let grid = PaneGrid(cols: 100, rows: 30)
+        for _ in 0 ..< 50 {
+            session.sendInput(Data("a".utf8))
+            session.claim(grid: grid)
+            session.sendSize(grid)
+            session.seen()
+        }
+        try await host.waitFor { _ in link.sent(on: "s").count(where: { $0 == MactermProtocol.Seen.name }) == 50 }
+        let sent = link.sent(on: "s").drop { $0 != "bytes" }
+        let round = [
+            "bytes",
+            MactermProtocol.Claim.name,
+            MactermProtocol.Resize.name,
+            MactermProtocol.Resize.name,
+            MactermProtocol.Seen.name,
+        ]
+        #expect(Array(sent) == Array(repeating: round, count: 50).flatMap(\.self))
+        session.stop()
+    }
+
+    @Test
+    func finish_comes_after_the_calls_before_it_and_gives_back_their_input() async {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        // No attach yet: the input waits, and `finish` gives it back.
+        session.sendInput(Data("ls\n".utf8))
+        let finished = await session.finish()
+        #expect(finished.pendingInput == Data("ls\n".utf8))
+        #expect(link.sent(on: "s").isEmpty)
     }
 }

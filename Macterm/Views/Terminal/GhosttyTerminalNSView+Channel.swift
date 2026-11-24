@@ -123,8 +123,10 @@ extension GhosttyTerminalNSView {
 
 /// One surface's view of the pane's session. Its bytes, size and lead are the
 /// surface's own; the session's messages go to the pane's `PaneLink`, which
-/// gives the pane each one once. Its callbacks come from the session's
-/// tasks, so each one hops to the main actor. `invalidate` runs before the
+/// gives the pane each one once. Its callbacks come in order on the session's
+/// queue (or a plain shell's read queue), so each one hops to the main actor
+/// where it touches the pane. A feed waits for the terminal, which slows the
+/// reader of a fast program. `invalidate` runs before the
 /// surface is freed: it waits for a feed in flight, and no later one reaches
 /// the surface.
 final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
