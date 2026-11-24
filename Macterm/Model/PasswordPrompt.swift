@@ -48,15 +48,11 @@ struct PasswordEntryID: Hashable, Codable {
     var isOnDemandOnly: Bool { prompt.isEmpty }
 
     /// What a person reads as "which one": the command, or the prompt when
-    /// the entry is command-independent.
+    /// the entry is command-independent. A host's entry has its host in
+    /// parentheses after it.
     var title: String {
-        withHost(displayCommand ?? prompt)
-    }
-
-    /// `base` with the host after it in parentheses, for a host's entry, so
-    /// two hosts' entries for one command read differently.
-    func withHost(_ base: String) -> String {
-        host.map { "\(base) (\($0))" } ?? base
+        let base = displayCommand ?? prompt
+        return host.map { "\(base) (\($0))" } ?? base
     }
 
     /// The command as shown: the process table reports the program the

@@ -120,6 +120,11 @@ struct CommandPalettePanel: View {
 
     @State
     private var selectedIndex = 0
+    /// True when `refresh` put the selection on an input screen's resting
+    /// row: that is not navigation, so the list does not scroll to it (a
+    /// Cancel row under many completions stays out of view).
+    @State
+    private var selectionIsResting = false
     @State
     private var sections: [PaletteSection] = []
     /// The top screen's listing in flight, read off its scope on every
@@ -318,7 +323,7 @@ struct CommandPalettePanel: View {
                         .padding(.vertical, Self.listPadding)
                     }
                 }
-                .frame(maxHeight: 340)
+                .frame(maxHeight: Self.listHeight)
                 .coordinateSpace(name: rowSpace)
                 .background(
                     GeometryReader { geo in
@@ -340,7 +345,7 @@ struct CommandPalettePanel: View {
                 }
                 .onChange(of: selectedIndex) { old, idx in
                     // Only follow keyboard navigation; hovering shouldn't scroll.
-                    guard !hoverTracker.isHoverSelection(idx) else { return }
+                    guard !hoverTracker.isHoverSelection(idx), !selectionIsResting else { return }
                     scrollSelectionIntoView(idx, from: old, proxy: proxy)
                 }
                 // A new screen or a new query is a new list, and it starts at
@@ -508,7 +513,8 @@ struct CommandPalettePanel: View {
             if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
                 selectedIndex = index
             } else {
-                selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
+                selectionIsResting = true
+                selectedIndex = inputScope.restingItemID.flatMap { id in flatItems.firstIndex { $0.id == id } } ?? -1
             }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
@@ -521,6 +527,7 @@ struct CommandPalettePanel: View {
     /// Enter can never land on one. When only disabled rows remain in that
     /// direction, the selection stays put.
     private func moveSelection(_ delta: Int) {
+        selectionIsResting = false
         var idx = min(selectedIndex, flatItems.count) + delta
         while idx >= 0, idx < flatItems.count, !flatItems[idx].isEnabled {
             idx += delta
@@ -573,6 +580,14 @@ struct CommandPalettePanel: View {
         query = completion
         return .handled
     }
+
+    /// The most height of the results under the field. The scroll view
+    /// takes all the height that it gets, so the list has this height on
+    /// every screen and in every state. The panel therefore does not grow or
+    /// shrink while the user types. Do not size the list to its rows: an
+    /// input screen with one row has the height of the root palette. Only a
+    /// window that is too short makes the list shorter.
+    static let listHeight: CGFloat = 340
 
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
@@ -646,6 +661,8 @@ struct CommandPalettePanel: View {
             query = text
         case .refused:
             refresh()
+        case .cancelled:
+            leaveScope()
         case .closed:
             query = ""
             windowState.isCommandPaletteVisible = false

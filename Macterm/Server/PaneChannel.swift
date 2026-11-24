@@ -28,6 +28,10 @@ enum PaneChannelEvent: Equatable {
     /// The run state of the pane. The session sends it only when it changes,
     /// and to a client that greets while it is not `idle`.
     case status(MactermProtocol.Status)
+    /// A desktop notification that a program asked for (OSC 9, OSC 777).
+    case notification(title: Data, body: Data)
+    /// The program rang the bell (BEL).
+    case bell
     /// The app dropped output of a relayed channel that the pane did not
     /// take in time (`PaneChannel.Buffering.skipAhead`). The session's
     /// snapshot follows: the output up to it does not come.
@@ -69,6 +73,8 @@ enum PaneChannelEvent: Equatable {
         case let .attention(flags): .attention(flags)
         case let .mark(mark): .mark(mark)
         case let .status(status): .status(status)
+        case let .desktopNotification(note): .notification(title: note.title.bytes, body: note.body.bytes)
+        case .bell: .bell
         default: .other(name)
         }
     }
@@ -141,6 +147,9 @@ final class PaneChannel: @unchecked Sendable {
     /// The `epoch` of the session's `hello`. Nil from a server that does
     /// not give it: the channel cannot resume.
     let epoch: UInt64?
+    /// The `caps` of the session's `hello`: what the session sends. Empty
+    /// from a server or a session of an older build.
+    let caps: [String]
     let events: Events
 
     private weak var transport: (any PaneChannelTransport)?
@@ -357,10 +366,17 @@ final class PaneChannel: @unchecked Sendable {
 
     /// `buffering` is the limit of what waits for the consumer; nil for no
     /// limit.
-    init(transport: any PaneChannelTransport, number: UInt32, epoch: UInt64? = nil, buffering: Buffering? = nil) {
+    init(
+        transport: any PaneChannelTransport,
+        number: UInt32,
+        epoch: UInt64? = nil,
+        caps: [String] = [],
+        buffering: Buffering? = nil
+    ) {
         self.transport = transport
         self.number = number
         self.epoch = epoch
+        self.caps = caps
         let (stream, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
         var credit: Credit?
         var skip: SkipAhead?

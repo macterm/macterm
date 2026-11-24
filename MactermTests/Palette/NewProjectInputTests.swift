@@ -35,13 +35,13 @@ struct NewProjectInputTests {
     }
 
     @Test
-    func an_empty_field_shows_select_in_finder_alone_and_the_pill_has_no_icon() throws {
+    func an_empty_field_shows_select_in_finder_and_cancel_and_the_pill_has_no_icon() throws {
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
         #expect(PaletteInput.newProject.pill == PalettePill(title: "New Project"))
 
         let empty = rows(scope, "", context)
-        #expect(empty.map(\.title) == ["Select in Finder"])
+        #expect(empty.map(\.title) == ["Select in Finder", "Cancel"], "main's Cancel row comes last")
         let finder = try #require(empty.first)
         #expect(scope.isAction(finder))
         #expect(finder.icon == nil, "no glyph, so that its title lines up with the rows below")
