@@ -268,7 +268,9 @@ struct WindowVisibilityReader: NSViewRepresentable {
 
     final class ReaderView: NSView {
         var onChange: ((Bool) -> Void)?
-        private var observer: NSObjectProtocol?
+        /// The window this view observes. A selector observer: the center
+        /// drops it by itself when the view goes, so no deinit is needed.
+        private weak var observedWindow: NSWindow?
 
         override func hitTest(_: NSPoint) -> NSView? {
             nil
@@ -276,15 +278,22 @@ struct WindowVisibilityReader: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let observer { NotificationCenter.default.removeObserver(observer) }
-            observer = nil
-            if let window {
-                observer = NotificationCenter.default.addObserver(
-                    forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
-                ) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.report() }
-                }
+            let center = NotificationCenter.default
+            if let observedWindow {
+                center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: observedWindow)
             }
+            observedWindow = window
+            if let window {
+                center.addObserver(
+                    self, selector: #selector(occlusionDidChange),
+                    name: NSWindow.didChangeOcclusionStateNotification, object: window
+                )
+            }
+            report()
+        }
+
+        @objc
+        private func occlusionDidChange(_: Notification) {
             report()
         }
 
@@ -293,10 +302,6 @@ struct WindowVisibilityReader: NSViewRepresentable {
         private func report() {
             let isVisible = window?.occlusionState.contains(.visible) ?? false
             DispatchQueue.main.async { [weak self] in self?.onChange?(isVisible) }
-        }
-
-        deinit {
-            if let observer { NotificationCenter.default.removeObserver(observer) }
         }
     }
 }
