@@ -623,7 +623,7 @@ final class ControlHandler {
         } else {
             // `--window` targets a specific one; without it the key window,
             // which is what a person at the keyboard means.
-            try appState.selectProject(project, in: resolveWindow(args))
+            try appState.showProjectScreen(project, in: resolveWindow(args))
         }
         return projectData(project)
     }
@@ -1756,7 +1756,7 @@ extension ControlHandler {
             throw ControlError(code: .denied, message: "this askpass was not started by an ssh of Macterm")
         }
         let prompt = args.prompt ?? ""
-        let request = SSHLoginPrompts.Request(
+        let request = SSHPrompt.Request(
             host: owner.host,
             prompt: prompt,
             kind: .of(prompt: prompt, confirm: args.confirm == true),

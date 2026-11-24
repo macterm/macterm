@@ -3,8 +3,8 @@ import Foundation
 import Testing
 
 struct SessionBuildTests {
-    private func session(_ name: String, key: String?, running: Bool = true) -> LocalSession {
-        LocalSession(name: name, isRunning: running, buildKey: key)
+    private func session(_ name: String, key: String?, running: Bool = true) -> SessionInfo {
+        SessionInfo(name: name, isRunning: running, buildKey: key)
     }
 
     @Test
@@ -31,6 +31,20 @@ struct SessionBuildTests {
             session("gone", key: "aaa111", running: false),
             session("unknown", key: nil),
         ]
-        #expect(SessionBuild.outdatedNames(in: sessions, appKey: "bbb222") == ["old"])
+        #expect(SessionBuild.outdatedNames(in: sessions, appKey: "bbb222", executableIsDeleted: { _ in false }) == ["old"])
+    }
+
+    @Test
+    func a_session_whose_file_an_update_deleted_is_older_with_the_same_key() {
+        let sessions = [
+            SessionInfo(name: "stale", pid: 101, buildKey: "bbb222"),
+            SessionInfo(name: "current", pid: 102, buildKey: "bbb222"),
+            SessionInfo(name: "stale-exited", pid: 103, isRunning: false, buildKey: "bbb222"),
+            SessionInfo(name: "no-pid", buildKey: "bbb222"),
+            SessionInfo(name: "no-key", pid: 104, buildKey: nil),
+        ]
+        let deleted: Set<pid_t> = [101, 103, 104]
+        let names = SessionBuild.outdatedNames(in: sessions, appKey: "bbb222") { deleted.contains($0) }
+        #expect(names == ["stale", "no-key"])
     }
 }

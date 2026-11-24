@@ -164,6 +164,7 @@ pub fn replySubscribe(s: *Server, peer: u64, re: u64) void {
         .sessions = list.items,
         .client = p.client,
     });
+    registry.listRead(s);
 }
 
 // ── Requests ────────────────────────────────────────────────────────────────
@@ -274,12 +275,10 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             .color = args.color,
             .created_at = args.created_at,
             .parent = args.parent,
-            .kind = args.kind,
             .sort_order = nextSortOrder(mo, args.parent),
         }) catch |err| return modelError(err),
         m.ProjectSet => {
             const p = mo.findProject(args.id) orelse return modelError(error.NotFound);
-            if (args.path) |path| if (p.kind == .group and path.len != 0) return modelError(error.BadRequest);
             if (args.parent) |parent| mo.setParent(args.id, parent) catch |err| return modelError(err);
             const al = mo.arena.allocator();
             if (args.name) |n| p.name = try al.dupe(u8, n);
@@ -318,8 +317,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             // Check both before a change: a request changes all or nothing.
             const ws: ?*model.Workspace = if (args.tab) |t| (mo.workspaceOfTab(t) orelse return modelError(error.NotFound)) else null;
             if (args.project) |id| {
-                const p = mo.findProject(id) orelse return modelError(error.NotFound);
-                if (p.kind == .group) return modelError(error.BadRequest);
+                _ = mo.findProject(id) orelse return modelError(error.NotFound);
                 if (ws) |w| if (!w.id.eql(.ofProject(id))) return modelError(error.BadRequest);
                 mo.selectProject(id) catch |err| return modelError(err);
             }
@@ -400,7 +398,10 @@ fn putModel(s: *Server, a: std.mem.Allocator, data: model.ModelData, how: union(
 const Snapshot = struct {
     projects: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     /// Parent id ("" for the top level) to the encoded order of its children.
+    /// Every project is a parent.
     orders: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
+    /// The parents in `orders` that hold no project.
+    empty_orders: std.StringHashMapUnmanaged(void) = .empty,
     /// Workspace id to its encoded `TabOrder`.
     workspaces: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     workspace_kinds: std.StringHashMapUnmanaged(model.Kind) = .empty,
@@ -420,11 +421,12 @@ const Snapshot = struct {
         // The order of each parent's children.
         var parents: std.StringArrayHashMapUnmanaged(void) = .empty;
         try parents.put(a, "", {});
-        for (mo.data.projects) |*p| if (p.kind == .group) try parents.put(a, try a.dupe(u8, p.id.text), {});
+        for (mo.data.projects) |*p| try parents.put(a, try a.dupe(u8, p.id.text), {});
         for (parents.keys()) |parent| {
             const ids = try childOrder(a, mo, parent);
             const value: m.ProjectOrder = .{ .parent = if (parent.len == 0) null else .of(parent), .ids = ids };
             try snap.orders.put(a, parent, try msgpack.encodeAlloc(a, value));
+            if (ids.len == 0) try snap.empty_orders.put(a, parent, {});
         }
         for (mo.data.workspaces) |*w| {
             const ids = try a.alloc(model.TabId, w.tabs.len);
@@ -498,6 +500,8 @@ fn diff(
     }
     for (after.orders.keys(), after.orders.values()) |id, bytes| {
         const old = before.orders.get(id);
+        // A new project holds no project yet: its `project.set` says enough.
+        if (old == null and after.empty_orders.contains(id)) continue;
         if (old == null or !std.mem.eql(u8, old.?, bytes)) try events.append(a, try event(a, m.ProjectOrder, bytes));
     }
     for (after.workspaces.keys(), after.workspaces.values()) |id, bytes| {

@@ -189,6 +189,8 @@ final class AppState {
         if first.activeProjectID == nil { first.activeProjectID = activeProjectID }
         guard !saved.isEmpty else { return }
         first.activeProjectID = saved[0].activeProjectID ?? first.activeProjectID
+        // After the project: a change of project clears the flag.
+        first.showsProjectScreen = saved[0].showsProjectScreen ?? false
         if let width = saved[0].sidebarWidth { first.sidebarWidth = width }
         if let visible = saved[0].sidebarVisible { first.sidebarVisible = visible }
         if let visible = saved[0].projectMemoryPanelVisible { first.projectMemoryPanelVisible = visible }
@@ -377,6 +379,7 @@ final class AppState {
             let restoring = pendingWindowRestores.removeFirst()
             if let project = restoring.activeProjectID {
                 window.activeProjectID = project
+                window.showsProjectScreen = restoring.showsProjectScreen ?? false
                 recordRestoredTab(restoring.activeTabID, in: window)
             }
             if let width = restoring.sidebarWidth { window.sidebarWidth = width }
@@ -396,7 +399,11 @@ final class AppState {
         }
         // A new window opens on whatever the user was last looking at, which
         // is both the useful default and what a single-window build did.
-        if window.activeProjectID == nil { window.activeProjectID = activeProjectID }
+        // The project screen too, when the key window shows it.
+        if window.activeProjectID == nil {
+            window.activeProjectID = activeProjectID
+            window.showsProjectScreen = keyWindow.map { $0.activeProjectID == activeProjectID && $0.showsProjectScreen } ?? false
+        }
         // Listed before the frame moves: `setFrame` lays the window out at
         // once.
         windowRegistry.append(window)
@@ -523,8 +530,11 @@ final class AppState {
     /// tab no matter which pinned tab was active, so Cmd+T on a pinned tab
     /// created a tab the sidebar selected while the window kept showing the
     /// old one.
+    ///
+    /// A window that shows the project screen of `projectID` selects no tab.
     func selectedTab(for projectID: UUID, in window: WindowState) -> TerminalTab? {
         guard let ws = workspaces[projectID] else { return nil }
+        if showsProjectScreen(projectID, in: window, ws: ws) { return nil }
         if ws.kind != .pinned,
            let id = window.activeTabIDs[projectID],
            let tab = ws.tabs.first(where: { $0.id == id })
@@ -532,6 +542,43 @@ final class AppState {
             return tab
         }
         return ws.activeTab
+    }
+
+    /// Whether `window` shows the project screen of `projectID`. Only a
+    /// `.project` workspace has one: a flag restored over a pinned or scratch
+    /// selection is ignored.
+    private func showsProjectScreen(_ projectID: UUID, in window: WindowState, ws: Workspace) -> Bool {
+        window.showsProjectScreen && window.activeProjectID == projectID && ws.kind == .project
+    }
+
+    /// Show the project screen of `project` in `window` (the key window when
+    /// nil), also when the project has tabs: what a click on a project row,
+    /// a palette project row and CLI `project select` do. The project's tabs
+    /// stay; a selection of one of them shows it.
+    func showProjectScreen(_ project: Project, in window: WindowState?) {
+        selectProject(project, in: window)
+        guard let target = window ?? keyWindow, target.activeProjectID == project.id,
+              workspaces[project.id]?.kind == .project, !target.showsProjectScreen
+        else { return }
+        target.showsProjectScreen = true
+        settleWindowSelections()
+        persistWindows()
+    }
+
+    /// Whether the key window shows the project screen. A command that acts on
+    /// the shown tab or pane (`AppCommand.actsOnShownTab`) then does nothing,
+    /// as in a project with no tabs: the workspace's active tab is not on
+    /// screen.
+    var keyWindowShowsProjectScreen: Bool {
+        guard let key = keyWindow, let projectID = key.activeProjectID, let ws = workspaces[projectID] else { return false }
+        return showsProjectScreen(projectID, in: key, ws: ws)
+    }
+
+    /// A tab of the window's project is selected: the window shows it.
+    private func endProjectScreen(in window: WindowState) {
+        guard window.showsProjectScreen else { return }
+        window.showsProjectScreen = false
+        persistWindows()
     }
 
     /// The windows that draw tabs, in creation order: the registered windows,
@@ -624,6 +671,7 @@ final class AppState {
             return
         }
         guard let ws = workspaces[projectID], ws.tabs.contains(where: { $0.id == tabID }) else { return }
+        if window.activeProjectID == projectID { endProjectScreen(in: window) }
         window.activeTabIDs[projectID] = tabID
         settleWindowSelections()
         persistWindows()
@@ -639,6 +687,11 @@ final class AppState {
     /// The settle and the claim run on EVERY key change, also for a key
     /// window on the pinned workspace, which has no selection of its own to
     /// align.
+    ///
+    /// A key window on the project screen keeps its record too: the
+    /// workspace's active tab is then the tab that the screen replaced, which
+    /// Recent Tab and the CLI act on. The window draws no tab
+    /// (`selectedTab(for:in:)`).
     private func alignKeyWindowTab() {
         if let key = keyWindow, let projectID = key.activeProjectID,
            let ws = workspaces[projectID], ws.kind != .pinned
@@ -692,6 +745,8 @@ final class AppState {
         guard let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first else { return }
         if let tab = ws.activeTabID {
             target.activeTabIDs[ws.id] = tab
+            // A selected tab ends the project screen: it is what shows now.
+            endProjectScreen(in: target)
         } else {
             target.activeTabIDs.removeValue(forKey: ws.id)
         }
@@ -991,10 +1046,6 @@ final class AppState {
     /// seed must not mistake an unread snapshot for a fresh install).
     var snapshotLoadFailed: Bool { workspaceStore.loadFailed }
 
-    /// Per-pane attempt gating for the reconnect sweep (#281). Not observed —
-    /// pure bookkeeping, no UI reads it.
-    @ObservationIgnored
-    private var reconnectPolicy = RemoteReconnectPolicy()
     /// A `.retry` sweep is planned (`scheduleReconnectRetry`).
     @ObservationIgnored
     private var reconnectRetryPlanned = false
@@ -1557,11 +1608,15 @@ final class AppState {
                         activeProjectID: window.activeProjectID,
                         sidebarWidth: window.sidebarWidth,
                         isKey: window.id == keyWindowID,
-                        activeTabID: window.activeProjectID.flatMap { selectedTab(for: $0, in: window)?.id },
+                        // On the project screen: the tab that the screen replaced.
+                        activeTabID: window.activeProjectID.flatMap {
+                            selectedTab(for: $0, in: window)?.id ?? window.activeTabIDs[$0]
+                        },
                         sidebarVisible: window.sidebarVisible,
                         projectMemoryPanelVisible: window.projectMemoryPanelVisible,
                         frame: window.frame,
-                        expandedProjectIDs: window.expandedRows.sorted { $0.uuidString < $1.uuidString }
+                        expandedProjectIDs: window.expandedRows.sorted { $0.uuidString < $1.uuidString },
+                        showsProjectScreen: window.showsProjectScreen ? true : nil
                     )
                 },
             quickTerminal: quickTerminalSnapshot(),
@@ -1709,7 +1764,7 @@ final class AppState {
 
     // MARK: - Remote reconnect (#281)
 
-    /// What woke the reconnect sweep. The backoff gates each pane for every
+    /// What woke the reconnect sweep. The host's backoff gates every
     /// trigger, except `.hostAnswered`, which clears it.
     enum ReconnectTrigger: String {
         case wake
@@ -1720,7 +1775,7 @@ final class AppState {
         case hostConnected
         /// A roaming link heard its host after a gap
         /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
-        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        /// backoff (`RemoteReconnectPolicy.clear`).
         case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).
@@ -1730,34 +1785,28 @@ final class AppState {
     }
 
     /// How often the sweep runs again while the active project has a lost
-    /// pane and the app is active. `RemoteReconnectPolicy` gates each pane.
+    /// pane and the app is active. Each host's backoff gates its tries.
     static let reconnectRetryInterval: TimeInterval = 5
 
     /// Let the active project's lost remote panes connect again: panes whose
-    /// connection stopped while their session lives on the host.
-    /// `RemoteHosts` wakes each pane's driver, and the attach replays the
-    /// session's screen. These tries never ask the user anything
-    /// (`RemoteHosts.reconnect`): a login that needs an answer waits for a
-    /// key in the pane.
+    /// connection stopped while their session lives on the host. Each host
+    /// (`RemoteHost.reconnect`) wakes its lost panes after its backoff, and
+    /// the attach replays the session's screen. These tries never ask the
+    /// user anything: a login that needs an answer waits for a key in the
+    /// pane.
     ///
     /// The triggers (system wake, a network change, app activation, project
     /// selection, a pane that became lost) run a sweep, and while a lost pane
     /// remains, the sweep runs again every `reconnectRetryInterval` while the
-    /// app is active. `RemoteReconnectPolicy` gates each pane, so an
-    /// unreachable host is tried at most once a minute. Active project only;
-    /// other projects reconnect via `.projectSelected` when opened. A key in
-    /// a lost pane connects at once, with no backoff. `destination`: only
-    /// the panes of this host (`.hostConnected`, `.hostAnswered`). A host
-    /// that answers again (`.hostAnswered`) clears the backoff of its panes:
-    /// it is one event for each heal, so it adds no load while the host is
-    /// down.
-    ///
-    /// `failedTry`: the session of a pane whose try failed now. Its backoff
-    /// starts at the end of the try (`RemoteReconnectPolicy.tryFailed`).
-    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil, failedTry: String? = nil) {
-        if let failedTry, let pane = remotePane(session: failedTry) {
-            reconnectPolicy.tryFailed(pane.id, now: Date())
-        }
+    /// app is active. The host's backoff (`RemoteReconnectPolicy`, one for
+    /// each host) tries an unreachable host at most once a minute. Active
+    /// project only; other projects reconnect via `.projectSelected` when
+    /// opened. A key in a lost pane connects at once, with no backoff.
+    /// `destination`: only the panes of this host (`.hostConnected`,
+    /// `.hostAnswered`). A host that answers again (`.hostAnswered`) clears
+    /// its backoff: it is one event for each heal, so it adds no load while
+    /// the host is down.
+    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
@@ -1768,46 +1817,22 @@ final class AppState {
         let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
         guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
-        let (sessions, anyLost) = Self.reconnectSessions(
-            ws.tabs.flatMap { $0.splitRoot.allPanes() },
-            trigger: trigger,
-            destination: destination,
-            policy: &reconnectPolicy,
-            now: Date()
-        )
-        if anyLost { scheduleReconnectRetry() }
-        guard !sessions.isEmpty else { return }
-        let count = sessions.count
-        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(count, privacy: .public) lost remote pane(s)")
-        RemoteHosts.shared.reconnect(sessions)
+        let lost = Self.lostDestinations(ws.tabs.flatMap { $0.splitRoot.allPanes() }, destination: destination)
+        guard !lost.isEmpty else { return }
+        scheduleReconnectRetry()
+        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(lost.count, privacy: .public) host(s) with lost panes")
+        RemoteHosts.shared.reconnect(lost, answered: trigger == .hostAnswered)
     }
 
-    /// The sessions of the lost panes that the sweep tries now, and whether
-    /// any pane is lost. `destination`: only the panes of this host. Pure,
-    /// except for the policy.
-    static func reconnectSessions(
-        _ panes: [Pane],
-        trigger: ReconnectTrigger,
-        destination: String?,
-        policy: inout RemoteReconnectPolicy,
-        now: Date
-    ) -> (sessions: Set<String>, anyLost: Bool) {
-        var sessions: Set<String> = []
-        var anyLost = false
-        for pane in panes where pane.isRemote {
-            if let destination, pane.remoteDestination != destination { continue }
-            guard pane.isDisconnected else {
-                policy.observeAlive(pane.id, now: now)
-                continue
-            }
-            anyLost = true
-            if trigger == .hostAnswered { policy.hostAnswered(pane.id) }
-            // A try runs now: the next sweep judges it.
-            guard !pane.isRemoteReconnecting, policy.shouldAttempt(pane.id, now: now) else { continue }
-            policy.recordAttempt(pane.id, now: now)
-            sessions.insert(pane.sessionName)
+    /// The hosts of the lost panes. `destination`: only this host. Pure.
+    static func lostDestinations(_ panes: [Pane], destination: String?) -> Set<String> {
+        var destinations: Set<String> = []
+        for pane in panes where pane.isDisconnected {
+            guard let host = pane.remoteDestination else { continue }
+            if let destination, host != destination { continue }
+            destinations.insert(host)
         }
-        return (sessions, anyLost)
+        return destinations
     }
 
     /// One sweep later, unless one is already planned.
@@ -2457,6 +2482,13 @@ final class AppState {
         ModelWriter.tabSelect(tabID, in: ws)
         if ws.activeTabID != before {
             saveWorkspaces()
+        } else if ws.tabs.contains(where: { $0.id == tabID }) {
+            // The tab that a project screen replaced: no change for the hook
+            // to see, so end the screen of the window that the hook targets.
+            let onProject = windows.filter { $0.activeProjectID == projectID }
+            if let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first {
+                endProjectScreen(in: target)
+            }
         }
     }
 
@@ -2728,6 +2760,14 @@ final class AppState {
 
     func cycleRecentTab(projectID: UUID) {
         guard let ws = workspaces[projectID] else { return }
+        // The project screen has no current tab to cycle away from: Recent
+        // Tab shows the tab that the screen replaced, with no switcher.
+        if let key = keyWindow, key.activeProjectID == projectID, key.showsProjectScreen,
+           let current = ws.activeTabID
+        {
+            selectTab(current, projectID: projectID)
+            return
+        }
         tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) {
             Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
         }
@@ -3025,7 +3065,6 @@ final class AppState {
         if let closing = tab.splitRoot.findPane(id: paneID) {
             releaseSessions([closing])
         }
-        reconnectPolicy.forget(paneID)
         switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:
             closeTab(tab.id, projectID: projectID)
@@ -3434,9 +3473,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it.
+    /// but never leave it. A project with no folder is no slot: the sidebar
+    /// draws it as a group row, with no tabs (`SidebarTree`).
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.map(\.id)
+        var slots = projects.filter(\.hasFolder).map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }

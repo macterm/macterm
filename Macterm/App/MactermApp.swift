@@ -533,7 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // System wake fires a short burst — wifi isn't up at wake, and when
         // the app is already frontmost no activation ever follows — while
         // app activation is a single sweep. Every sweep is additionally gated
-        // per pane by `RemoteReconnectPolicy`, so notification churn here can
+        // per host by `RemoteReconnectPolicy`, so notification churn here can
         // never turn into a retry loop against an unreachable host.
         reconnectObservers = [
             NSWorkspace.shared.notificationCenter.addObserver(
@@ -576,11 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: .remoteLinkDidStop,
                 object: nil,
                 queue: .main
-            ) { [weak self] note in
-                // The session of a pane whose try failed, else nil.
-                let failedTry = note.object as? String
+            ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped, failedTry: failedTry)
+                    self?.appState?.reconnectDroppedRemotePanes(trigger: .linkStopped)
                 }
             },
         ]
@@ -891,9 +889,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let handler = ControlHandler(appState: appState, projectStore: projectStore)
         controlHandler = handler
         controlServer.attach { raw, peer in await handler.handle(raw, peerPID: peer) }
-        // A master that exits takes its login questions with it.
-        SSHConnections.shared.onConnectionExit = { SSHLoginPrompts.shared.cancel(sshPID: $0) }
-        SSHConnections.shared.onLoginNotice = { SSHLoginPrompts.shared.showNotice(host: $0, sshPID: $1, line: $2) }
+        // The sheets of a login, and the question before a server install.
+        SSHConnections.shared.loginUI = SSHLoginPrompts.shared
         // The unit-test host must not end a master of the developer's Debug app.
         if SessionClient.liveBypass != .unitTestHost {
             Task { await SSHConnections.shared.endStaleConnections() }

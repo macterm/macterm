@@ -59,7 +59,7 @@ struct LocalServerTests {
     }
 
     @Test
-    func a_session_is_created_reports_its_exit_and_is_killed() async throws {
+    func a_session_is_created_reports_its_exit_and_ends_after_an_info_reads_it() async throws {
         try await withServer { server in
             let connection = try await server.connect()
             defer { connection.close() }
@@ -78,9 +78,12 @@ struct LocalServerTests {
             #expect(info.state == .exited)
             #expect(info.code == 3)
 
-            _ = try await connection.call(MactermProtocol.SessionKill.self, .init(id: id))
-            let sessions = try await connection.call(MactermProtocol.SessionList.self, .init()).sessions
-            #expect(sessions.isEmpty)
+            // The info read the status: the server ends the session.
+            let deadline = Date().addingTimeInterval(5)
+            while try await !connection.call(MactermProtocol.SessionList.self, .init()).sessions.isEmpty, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(try await connection.call(MactermProtocol.SessionList.self, .init()).sessions.isEmpty)
             await #expect(throws: ProtocolControlError.self) {
                 try await connection.call(MactermProtocol.SessionInfo.self, .init(id: id))
             }

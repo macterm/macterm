@@ -136,6 +136,16 @@ struct OpenFolderTests {
     }
 
     @Test
+    func a_project_with_no_folder_is_never_chosen() {
+        let parent = Project(name: "parent", path: "", sortOrder: 0)
+        let app = Project(name: "app", path: "/Users/me/dev/app", sortOrder: 1)
+
+        #expect(TextFileProject.project(for: "/Users/me/dev/app/x.rs", in: [parent, app], activeProjectID: parent.id) == app)
+        #expect(TextFileProject.project(for: "/tmp/x", in: [parent, app], activeProjectID: parent.id) == app)
+        #expect(TextFileProject.project(for: "/tmp/x", in: [parent], activeProjectID: parent.id) == nil)
+    }
+
+    @Test
     func a_folder_opened_during_launch_waits_for_the_restore() {
         let state = makeAppState()
         let store = makeProjectStore()

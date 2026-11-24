@@ -87,11 +87,11 @@ struct ProjectsSettings: View {
                 }
             }
 
-            // Each sidebar group is a section of its own projects (design
-            // 013), in the order of the sidebar.
-            ForEach(projectStore.groups) { group in
+            // Each sidebar group (a project with no folder) is a section of
+            // its own projects (design 013), in the order of the sidebar.
+            ForEach(projectStore.projects.filter { !$0.hasFolder }) { group in
                 Section {
-                    let projects = projectStore.children(of: group.id).filter { !$0.isGroup }
+                    let projects = projectStore.children(of: group.id).filter(\.hasFolder)
                     if projects.isEmpty {
                         Text("No projects.")
                             .foregroundStyle(.secondary)
@@ -206,7 +206,7 @@ struct ProjectsSettings: View {
 
     /// The projects outside every group. A new project goes here.
     private var topLevelProjects: [Project] {
-        projectStore.children(of: nil).filter { !$0.isGroup }
+        projectStore.children(of: nil).filter(\.hasFolder)
     }
 
     /// Folder picker → new project → select it, the same as the sidebar's

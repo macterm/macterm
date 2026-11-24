@@ -122,6 +122,17 @@ enum ProcessInspector {
         return pid_t(info.pbi_ppid)
     }
 
+    /// True when the process runs and the file it runs from is deleted: an
+    /// update removed the old app bundle. `proc_pidpath` then fails with
+    /// `ENOENT` (measured), and tccd, which makes the same call, denies
+    /// every protected folder to the process and to the programs it is
+    /// responsible for. A process that is gone (`ESRCH`) or that the kernel
+    /// does not show is not marked.
+    nonisolated static func executableIsDeleted(pid: pid_t) -> Bool {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return proc_pidpath(pid, &buffer, UInt32(buffer.count)) <= 0 && errno == ENOENT
+    }
+
     /// The executable's resolved absolute path from the kernel
     /// (`proc_pidpath`), or nil when the process is gone or unreadable.
     static func executablePath(pid: pid_t) -> String? {
@@ -276,6 +287,25 @@ enum ProcessInspector {
     static func isIdleShellInvocation(_ argv: [String]) -> Bool {
         guard let first = argv.first, isShell(first) else { return false }
         return !shellInvocationRunsCommand(argv)
+    }
+
+    /// Whether a shell's command line from a session report runs a command,
+    /// not a prompt: `sh -c "sleep 1"` (a `-c` option) or `/bin/sh
+    /// ./deploy.sh` (a script as the first argument). The report joins the
+    /// arguments with spaces, so a word after an option can be that
+    /// option's value (`bash -o vi`, `nu --execute use ghostty *`). When it
+    /// is not sure, the scan says no run: a run that shows no spinner is
+    /// better than a prompt that shows one. It does not see a `-c` after
+    /// `--execute`.
+    static func shellCommandLineRunsCommand(_ commandLine: String) -> Bool {
+        let words = commandLine.split(separator: " ").dropFirst().map(String.init)
+        for (index, word) in words.enumerated() {
+            if shellOptionConsumesNextArgument(word) { return false }
+            if word == "--" { return index == 0 && words.count > 1 }
+            if !word.hasPrefix("-") || word == "-" { return index == 0 }
+            if !word.hasPrefix("--"), word.dropFirst().contains("c") { return true }
+        }
+        return false
     }
 
     private static func shellInvocationRunsCommand(_ argv: [String]) -> Bool {

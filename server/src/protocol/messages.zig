@@ -314,8 +314,9 @@ pub const Session = struct {
 
 pub const SessionState = enum {
     running,
-    /// The shell ended. The session keeps the status until a client sends
-    /// `session.kill`.
+    /// The shell ended. The session keeps the status until a client reads
+    /// it: the `exit` on a channel, or a `session.list` or `session.info`
+    /// that shows this state. Then the server ends the session.
     exited,
     /// The session and the server have no level in common. The server
     /// cannot read its state or end it.
@@ -333,6 +334,8 @@ pub const SessionCreate = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
+        pub const field_since = .{ .replace_exited = 3 };
+
         /// Made by the client, so that a request sent again finds the session
         /// that the first one started, and starts no second one. Only
         /// letters, digits, `-`, `_` and `.`; not `.` first.
@@ -348,6 +351,10 @@ pub const SessionCreate = struct {
         /// A pane's client sends its own, so that the shell gets the
         /// environment that the terminal made for it.
         env: ?[]const msgpack.Bin = null,
+        /// True: a session of this id whose shell exited is ended, and a
+        /// new one starts. The reply waits until the old session is gone.
+        /// False: the request fails with `exited`.
+        replace_exited: bool = false,
     };
     pub const Result = struct { session: Session };
 };
@@ -657,12 +664,11 @@ pub const ProjectCreate = struct {
     pub const Args = struct {
         id: ProjectId,
         name: []const u8,
-        /// A local path, or `user@host:dir`. Empty for a group.
+        /// A local path, or `user@host:dir`. Can be empty.
         path: []const u8 = "",
         color: ?[]const u8 = null,
-        /// The group that holds it. Null is the top level.
+        /// The project that holds it. Null is the top level.
         parent: ?ProjectId = null,
-        kind: model.ProjectKind = .project,
         /// Unix time in milliseconds.
         created_at: i64 = 0,
     };
@@ -691,7 +697,7 @@ pub const ProjectSet = struct {
 /// `ids` holds each child once.
 pub const ProjectReorder = struct {
     pub const name = "project.reorder";
-    pub const doc = "Sets the order of the children of a group, or of the top level.";
+    pub const doc = "Sets the order of the child projects of a project, or of the top level.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
@@ -702,10 +708,11 @@ pub const ProjectReorder = struct {
     pub const Result = struct {};
 };
 
-/// Removes a project and its workspace, or an empty group.
+/// Removes a project and its workspace. A project that holds projects is
+/// refused (`bad_request`).
 pub const ProjectRemove = struct {
     pub const name = "project.remove";
-    pub const doc = "Removes a project and its workspace, or an empty group.";
+    pub const doc = "Removes a project that holds no projects, and its workspace.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 

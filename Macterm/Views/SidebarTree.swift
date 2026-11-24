@@ -1,7 +1,8 @@
 import Foundation
 
 /// One row of the sidebar's project tree (design 013): a group, which holds
-/// other rows, or a project, which holds its tabs.
+/// other rows, or a project, which holds its tabs. A group is a project with
+/// no folder (`Project.hasFolder`), the row of a dev build that was a group.
 enum SidebarNode: Identifiable, Equatable {
     case group(Project, children: [SidebarNode])
     case project(Project)
@@ -21,10 +22,13 @@ enum SidebarNode: Identifiable, Equatable {
 @MainActor
 enum SidebarTree {
     /// The rows under `parent` (nil: the top level), with the rows inside
-    /// each group.
+    /// each group. The children of a project that has a folder follow it
+    /// at its own level, so that no project is hidden.
     static func nodes(in store: ProjectStore, under parent: UUID? = nil) -> [SidebarNode] {
-        store.children(of: parent).map { row in
-            row.isGroup ? .group(row, children: nodes(in: store, under: row.id)) : .project(row)
+        store.children(of: parent).flatMap { row -> [SidebarNode] in
+            row.hasFolder
+                ? [.project(row)] + nodes(in: store, under: row.id)
+                : [.group(row, children: nodes(in: store, under: row.id))]
         }
     }
 
@@ -62,15 +66,15 @@ enum SidebarTree {
     @discardableResult
     static func drop(_ id: UUID, onto target: Project, in store: ProjectStore) -> Bool {
         guard id != target.id else { return false }
-        return target.isGroup ? store.move(id, into: target.id) : store.place(id, beside: target.id)
+        return target.hasFolder ? store.place(id, beside: target.id) : store.move(id, into: target.id)
     }
 
     /// The groups that `id` can move into with Move to Group: every group
     /// except its own parent, itself, and the groups inside it.
     static func moveTargets(for id: UUID, in store: ProjectStore) -> [Project] {
         let parent = store.row(id)?.parent
-        return store.groups.filter { group in
-            group.id != parent && group.id != id && !store.ancestors(of: group.id).contains(id)
+        return store.projects.filter { group in
+            !group.hasFolder && group.id != parent && group.id != id && !store.ancestors(of: group.id).contains(id)
         }
     }
 

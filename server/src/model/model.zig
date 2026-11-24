@@ -33,26 +33,48 @@ pub const version: u32 = 1;
 
 pub const Kind = enum { project, pinned, scratch, quick, widget };
 
-/// A `group` is a folder row of the sidebar (design/013): it holds
-/// projects and groups, and has no path, no workspace and no tabs. Only a
-/// `project` is a leaf.
-pub const ProjectKind = enum { project, group };
-
 pub const Project = struct {
     id: ProjectId,
     name: []const u8,
-    /// A local path, or `user@host:dir`. Empty for a group.
+    /// A local path, or `user@host:dir`. Can be empty (design/013, "Ethan
+    /// chose B" §1).
     path: []const u8,
     color: ?[]const u8 = null,
     /// Orders the children of one parent.
     sort_order: i64 = 0,
     /// Unix time in milliseconds.
     created_at: i64 = 0,
-    /// The group that holds this row. Null or empty is the top level.
-    /// `Model.parentOf` reads a parent that is not a group as the top
-    /// level. The file stays valid (design/013 §2).
+    /// The project that holds this one. Null or empty is the top level.
+    /// A project can hold tabs and projects at the same time. `Model.parentOf`
+    /// reads an unknown parent as the top level. The file stays valid
+    /// (design/013, "Ethan chose B" §1).
     parent: ?ProjectId = null,
-    kind: ProjectKind = .project,
+
+    /// Reads a project of `model.json`, and drops the `kind` that an older
+    /// build wrote: the parser refuses an unknown key. Only the token
+    /// parsers call it (`parseFromSlice`), not `parseFromValue`.
+    pub fn jsonParse(a: Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!Project {
+        const InFile = struct {
+            id: ProjectId,
+            name: []const u8,
+            path: []const u8,
+            color: ?[]const u8 = null,
+            sort_order: i64 = 0,
+            created_at: i64 = 0,
+            parent: ?ProjectId = null,
+            kind: ?enum { project, group } = null,
+        };
+        const f = try std.json.innerParse(InFile, a, source, options);
+        return .{
+            .id = f.id,
+            .name = f.name,
+            .path = f.path,
+            .color = f.color,
+            .sort_order = f.sort_order,
+            .created_at = f.created_at,
+            .parent = f.parent,
+        };
+    }
 };
 
 pub const Tab = struct {
@@ -294,10 +316,9 @@ pub const Model = struct {
     pub fn addProject(m: *Model, p: Project) Error!void {
         const a = m.alloc();
         if (p.id.isEmpty()) return error.BadRequest;
-        if (p.kind == .group and p.path.len != 0) return error.BadRequest;
         if (m.findProject(p.id) != null or m.findWorkspace(.ofProject(p.id)) != null) return error.DuplicateId;
         const parent = topLevelIfEmpty(p.parent);
-        if (parent) |g| if (!m.isGroup(g)) return error.BadRequest;
+        if (parent) |g| if (m.findProject(g) == null) return error.BadRequest;
         const copy: Project = .{
             .id = try p.id.dupe(a),
             .name = try a.dupe(u8, p.name),
@@ -306,47 +327,39 @@ pub const Model = struct {
             .sort_order = p.sort_order,
             .created_at = p.created_at,
             .parent = try dupeId(a, parent),
-            .kind = p.kind,
         };
         const projects = try appendOne(Project, a, m.data.projects, copy);
-        if (copy.kind == .project) {
-            m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = .ofProject(copy.id), .kind = .project });
-        }
+        m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = .ofProject(copy.id), .kind = .project });
         m.data.projects = projects;
     }
 
-    fn isGroup(m: *const Model, id: ProjectId) bool {
-        const g = m.findProject(id) orelse return false;
-        return g.kind == .group;
-    }
-
-    /// The group that holds `p`, or null for the top level. A parent that is
-    /// not a group reads as the top level. When `p` is on a loop of parents,
-    /// `p` reads as the top level.
+    /// The project that holds `p`, or null for the top level. An unknown
+    /// parent reads as the top level. When `p` is on a loop of parents, `p`
+    /// reads as the top level.
     pub fn parentOf(m: *const Model, p: *const Project) ?ProjectId {
         const first = topLevelIfEmpty(p.parent) orelse return null;
-        if (!m.isGroup(first)) return null;
+        if (m.findProject(first) == null) return null;
         var at = first;
         var steps: usize = 0;
         while (steps <= m.data.projects.len) : (steps += 1) {
             if (at.eql(p.id)) return null;
             const up = m.findProject(at).?;
             at = topLevelIfEmpty(up.parent) orelse return first;
-            if (!m.isGroup(at)) return first;
+            if (m.findProject(at) == null) return first;
         }
         // A loop above the parent that does not hold `p`.
         return first;
     }
 
-    /// Moves a project or a group into the group `parent`, or to the top
-    /// level when null. A group cannot go into itself or into a group that
-    /// it holds.
+    /// Moves a project into the project `parent`, or to the top level when
+    /// null. A project cannot go into itself or into a project that it
+    /// holds.
     pub fn setParent(m: *Model, id: ProjectId, parent: ?ProjectId) Error!void {
         const a = m.alloc();
         const p = m.findProject(id) orelse return error.NotFound;
         const wanted = topLevelIfEmpty(parent);
         if (wanted) |g| {
-            if (!m.isGroup(g)) return error.BadRequest;
+            if (m.findProject(g) == null) return error.BadRequest;
             // The parents as the file has them, so that a loop is seen too.
             var at: ?ProjectId = g;
             var steps: usize = 0;
@@ -366,7 +379,6 @@ pub const Model = struct {
         const wanted = topLevelIfEmpty(parent);
         if (wanted) |g| {
             if (m.findProject(g) == null) return error.NotFound;
-            if (!m.isGroup(g)) return error.BadRequest;
         }
         var children: usize = 0;
         for (m.data.projects) |*p| {
@@ -415,18 +427,15 @@ pub const Model = struct {
         return gone.items;
     }
 
-    /// Removes a project and its workspace. Returns the panes that left the
-    /// model (the caller ends their sessions).
+    /// Removes a project and its workspace. A project that holds projects is
+    /// refused: the caller moves or removes them first. Returns the panes
+    /// that left the model (the caller ends their sessions).
     pub fn removeProject(m: *Model, id: ProjectId) Error![]const Pane {
         const a = m.alloc();
         const ws_id: WorkspaceId = .ofProject(id);
         const pi = indexOf(Project, m.data.projects, id) orelse return error.NotFound;
-        if (m.data.projects[pi].kind == .group) {
-            for (m.data.projects) |*p| {
-                if (m.parentOf(p)) |g| if (g.eql(id)) return error.BadRequest;
-            }
-            m.data.projects = try removeAt(Project, a, m.data.projects, pi);
-            return &.{};
+        for (m.data.projects) |*p| {
+            if (m.parentOf(p)) |g| if (g.eql(id)) return error.BadRequest;
         }
         const wi = indexOf(Workspace, m.data.workspaces, ws_id) orelse return error.NotFound;
         var gone: std.ArrayList(Pane) = .empty;
@@ -444,8 +453,7 @@ pub const Model = struct {
     pub fn selectProject(m: *Model, id: ?ProjectId) Error!void {
         const a = m.alloc();
         if (id) |wanted| {
-            const p = m.findProject(wanted) orelse return error.NotFound;
-            if (p.kind == .group) return error.BadRequest;
+            _ = m.findProject(wanted) orelse return error.NotFound;
             m.data.selection.active_project = try wanted.dupe(a);
         } else {
             m.data.selection.active_project = null;
@@ -865,7 +873,6 @@ fn cloneData(a: Allocator, d: ModelData) Allocator.Error!ModelData {
         .sort_order = p.sort_order,
         .created_at = p.created_at,
         .parent = try dupeId(a, p.parent),
-        .kind = p.kind,
     };
     const workspaces = try a.alloc(Workspace, d.workspaces.len);
     for (d.workspaces, workspaces) |w, *out| {
@@ -952,8 +959,7 @@ pub const Fault = struct {
 /// Checks that `data` is a model: ids that are not empty and are not used
 /// twice, ratios inside 0..1, a `focused` pane that is in its tree, an
 /// `active_tab` that is in its workspace, and project workspaces that match
-/// their projects. A group has no path, no workspace and no selection.
-/// Returns the first fault, or null.
+/// their projects. Returns the first fault, or null.
 pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
@@ -962,14 +968,9 @@ pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
 
     if (data.version == 0 or data.version > version) return Fault.make("version: {d}", .{data.version});
 
-    var leaves: usize = 0;
     for (data.projects, 0..) |p, i| {
         if (p.id.isEmpty()) return Fault.make("projects[{d}].id: empty", .{i});
         if ((try seen.getOrPut(a, p.id.text)).found_existing) return Fault.make("projects[{d}].id: duplicate", .{i});
-        switch (p.kind) {
-            .project => leaves += 1,
-            .group => if (p.path.len != 0) return Fault.make("projects[{d}].path: a group has no path", .{i}),
-        }
     }
     var project_workspaces: usize = 0;
     var tabs_seen: std.StringHashMapUnmanaged(void) = .empty;
@@ -981,7 +982,7 @@ pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
         if (w.kind == .project) {
             project_workspaces += 1;
             var found = false;
-            for (data.projects) |p| found = found or (p.kind == .project and std.mem.eql(u8, p.id.text, w.id.text));
+            for (data.projects) |p| found = found or std.mem.eql(u8, p.id.text, w.id.text);
             if (!found) return Fault.make("workspaces[{d}].id: no project", .{wi});
         } else if ((try seen.getOrPut(a, w.id.text)).found_existing) {
             return Fault.make("workspaces[{d}].id: also a project", .{wi});
@@ -1002,10 +1003,10 @@ pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
             if (!Model.wsHasTab(&w, at)) return Fault.make("workspaces[{d}].active_tab: not in the workspace", .{wi});
         }
     }
-    if (project_workspaces != leaves) return Fault.make("workspaces: a project has no workspace", .{});
+    if (project_workspaces != data.projects.len) return Fault.make("workspaces: a project has no workspace", .{});
     if (data.selection.active_project) |id| {
         var found = false;
-        for (data.projects) |p| found = found or (p.kind == .project and p.id.eql(id));
+        for (data.projects) |p| found = found or p.id.eql(id);
         if (!found) return Fault.make("selection.active_project: no such project", .{});
     }
     return null;

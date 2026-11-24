@@ -1012,6 +1012,7 @@ extension MactermProtocol.SessionCreate {
         var cols: UInt16 = 80
         var rows: UInt16 = 24
         var env: [ProtocolBin]?
+        var replaceExited: Bool = false
     }
 }
 
@@ -1023,6 +1024,7 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
         var cols: UInt16?
         var rows: UInt16?
         var env: [ProtocolBin]?
+        var replaceExited: Bool?
         try reader.readMap { key, reader in
             switch key {
             case "id": id = try String(from: &reader)
@@ -1031,6 +1033,7 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
             case "cols": cols = try UInt16(from: &reader)
             case "rows": rows = try UInt16(from: &reader)
             case "env": env = try reader.readOptional([ProtocolBin].self)
+            case "replace_exited": replaceExited = try Bool(from: &reader)
             default: return false
             }
             return true
@@ -1041,10 +1044,11 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
         self.cols = cols ?? 80
         self.rows = rows ?? 24
         self.env = env
+        self.replaceExited = replaceExited ?? false
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        var keyCount = 3
+        var keyCount = 4
         if cwd != nil { keyCount += 1 }
         if command != nil { keyCount += 1 }
         if env != nil { keyCount += 1 }
@@ -1067,6 +1071,8 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
             writer.writeString("env")
             env.encode(to: &writer)
         }
+        writer.writeString("replace_exited")
+        replaceExited.encode(to: &writer)
     }
 }
 
@@ -2100,7 +2106,6 @@ extension MactermProtocol {
         var sortOrder: Int64 = 0
         var createdAt: Int64 = 0
         var parent: String?
-        var kind: MactermProtocol.ProjectKind = .project
     }
 }
 
@@ -2113,7 +2118,6 @@ extension MactermProtocol.Project: ProtocolValue {
         var sortOrder: Int64?
         var createdAt: Int64?
         var parent: String?
-        var kind: MactermProtocol.ProjectKind?
         try reader.readMap { key, reader in
             switch key {
             case "id": id = try String(from: &reader)
@@ -2123,7 +2127,6 @@ extension MactermProtocol.Project: ProtocolValue {
             case "sort_order": sortOrder = try Int64(from: &reader)
             case "created_at": createdAt = try Int64(from: &reader)
             case "parent": parent = try reader.readOptional(String.self)
-            case "kind": kind = try MactermProtocol.ProjectKind(from: &reader)
             default: return false
             }
             return true
@@ -2135,11 +2138,10 @@ extension MactermProtocol.Project: ProtocolValue {
         self.sortOrder = sortOrder ?? 0
         self.createdAt = createdAt ?? 0
         self.parent = parent
-        self.kind = kind ?? .project
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        var keyCount = 6
+        var keyCount = 5
         if color != nil { keyCount += 1 }
         if parent != nil { keyCount += 1 }
         writer.writeMapHeader(keyCount)
@@ -2161,27 +2163,6 @@ extension MactermProtocol.Project: ProtocolValue {
             writer.writeString("parent")
             parent.encode(to: &writer)
         }
-        writer.writeString("kind")
-        kind.encode(to: &writer)
-    }
-}
-
-extension MactermProtocol {
-    enum ProjectKind: String, Equatable {
-        case project
-        case group
-    }
-}
-
-extension MactermProtocol.ProjectKind: ProtocolValue {
-    init(from reader: inout MessagePackReader) throws {
-        let tag = try reader.readString()
-        guard let value = Self(rawValue: tag) else { throw MessagePackError.unknownEnumTag(tag) }
-        self = value
-    }
-
-    func encode(to writer: inout MessagePackWriter) {
-        writer.writeString(rawValue)
     }
 }
 
@@ -2586,7 +2567,6 @@ extension MactermProtocol.ProjectCreate {
         var path: String = ""
         var color: String?
         var parent: String?
-        var kind: MactermProtocol.ProjectKind = .project
         var createdAt: Int64 = 0
     }
 }
@@ -2598,7 +2578,6 @@ extension MactermProtocol.ProjectCreate.Args: ProtocolValue {
         var path: String?
         var color: String?
         var parent: String?
-        var kind: MactermProtocol.ProjectKind?
         var createdAt: Int64?
         try reader.readMap { key, reader in
             switch key {
@@ -2607,7 +2586,6 @@ extension MactermProtocol.ProjectCreate.Args: ProtocolValue {
             case "path": path = try String(from: &reader)
             case "color": color = try reader.readOptional(String.self)
             case "parent": parent = try reader.readOptional(String.self)
-            case "kind": kind = try MactermProtocol.ProjectKind(from: &reader)
             case "created_at": createdAt = try Int64(from: &reader)
             default: return false
             }
@@ -2618,12 +2596,11 @@ extension MactermProtocol.ProjectCreate.Args: ProtocolValue {
         self.path = path ?? ""
         self.color = color
         self.parent = parent
-        self.kind = kind ?? .project
         self.createdAt = createdAt ?? 0
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        var keyCount = 5
+        var keyCount = 4
         if color != nil { keyCount += 1 }
         if parent != nil { keyCount += 1 }
         writer.writeMapHeader(keyCount)
@@ -2641,8 +2618,6 @@ extension MactermProtocol.ProjectCreate.Args: ProtocolValue {
             writer.writeString("parent")
             parent.encode(to: &writer)
         }
-        writer.writeString("kind")
-        kind.encode(to: &writer)
         writer.writeString("created_at")
         createdAt.encode(to: &writer)
     }

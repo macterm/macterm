@@ -90,15 +90,20 @@ PY
   python3 - <<'PY'
 import os
 from ptyrun import Pty
-from v2client import ServerClient
+from v2client import Client, ServerClient, alive, wait_dead
 first = Pty([os.environ["ZMX"], "connect", "s1", "--", "/bin/sh", "-c", "exit 5"])
 assert first.wait_exit() == 5, first.output
-# No app ended it: the session keeps its exit status.
-c = ServerClient()
-assert c.sessions()["s1"]["state"] == "exited", c.sessions()
+# The client read the status from the session, not through the server: the
+# session keeps it. Its own socket gives its pid, and the server learns
+# nothing from that.
+old = Client("s1").wait_msg("state")["pid"]
+assert alive(old)
+# The connect asks with replace_exited: the server ends the old session.
 again = Pty([os.environ["ZMX"], "connect", "s1", "--", "/bin/sh"])
 again.type("printf 'new-%s\\n' shell\r")
 again.wait_output("new-shell")
+wait_dead(old)
+c = ServerClient()
 assert c.sessions()["s1"]["state"] == "running", c.sessions()
 again.type(b"\x1c")
 assert again.wait_exit() == 0

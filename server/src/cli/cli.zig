@@ -18,6 +18,8 @@ const m = @import("../protocol/messages.zig");
 const chord = @import("../chord.zig");
 const skills = @import("skills.zig");
 const api = @import("api.zig");
+const ssh = @import("ssh.zig");
+const askpass = @import("askpass.zig");
 
 const Command = command.Command;
 const Option = command.Option;
@@ -26,6 +28,8 @@ const Option = command.Option;
 pub const Context = struct {
     /// An arena: the CLI is short-lived.
     arena: std.mem.Allocator,
+    /// For files: the cache of `ssh`.
+    io: std.Io,
     env: *const std.process.Environ.Map,
     out: *std.Io.Writer,
     err: *std.Io.Writer,
@@ -196,6 +200,63 @@ fn skillsRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFail
     return 0;
 }
 
+// ── ssh and askpass (design 011 issue 6) ────────────────────────────────────
+
+const ssh_command: Command = .{
+    .name = "ssh",
+    .abstract = "Run ssh with terminfo install and environment forwarding. It works with no running app.",
+    .discussion =
+    \\Installs the bundled xterm-ghostty terminfo of Macterm on the destination at the first connection (the result is cached). Sets TERM to a value that the host can resolve. Requests SendEnv forwarding for COLORTERM, TERM_PROGRAM and TERM_PROGRAM_VERSION. Then it replaces itself with the real ssh. The flags and the destination of ssh pass through exactly as you wrote them:
+    \\
+    \\  macterm ssh user@example.com
+    \\  macterm ssh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
+    \\  macterm ssh --terminfo=false user@example.com
+    \\
+    \\This is the engine behind the ssh wrapper of the shell integration (the ssh-env and ssh-terminfo features). It mirrors `ghostty +ssh`.
+    ,
+    .options = &.{
+        .{ .names = &.{"--forward-env"}, .value = "forward-env", .default = "true", .abstract = "Set TERM and request SendEnv forwarding." },
+        .{ .names = &.{"--terminfo"}, .value = "terminfo", .default = "true", .abstract = "Install the bundled xterm-ghostty terminfo at the first connection." },
+        .{ .names = &.{"--cache"}, .value = "cache", .default = "true", .abstract = "Use the terminfo install cache." },
+        .{ .names = &.{"--ssh"}, .value = "ssh", .default = "ssh", .abstract = "Path to the ssh binary. The default is the first `ssh` in PATH." },
+        .{ .names = &.{"--verbose"}, .abstract = "Print status lines to stderr." },
+    },
+    .arguments = &.{.{ .name = "ssh-args", .abstract = "Arguments for ssh, exactly as you wrote them (flags, destination, command).", .optional = true, .repeating = true, .passthrough = true }},
+};
+
+/// `ssh`: needs no server. It ends in the exec of ssh.
+fn sshRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const options = (try ssh.readOptions(ctx.err, parsed)) orelse return command.usage_exit;
+    const tmp = ctx.env.get("TMPDIR") orelse "/tmp/";
+    const env: ssh.Env = .{
+        .arena = ctx.arena,
+        .io = ctx.io,
+        .home = ctx.env.get("HOME") orelse home: {
+            // As `NSHomeDirectory`: the user's record.
+            const pw = std.c.getpwuid(std.c.getuid()) orelse break :home null;
+            break :home if (pw.dir) |d| std.mem.span(d) else null;
+        },
+        .tmp = if (std.mem.endsWith(u8, tmp, "/")) tmp else try std.mem.concat(ctx.arena, u8, &.{ tmp, "/" }),
+        .err = ctx.err,
+    };
+    const argv = switch (try ssh.plan(env, options, parsed.positionals)) {
+        .exec => |argv| argv,
+        .exit => |code| return code,
+    };
+    try ctx.out.flush();
+    try ctx.err.flush();
+    const reason = try ssh.exec(ctx.arena, argv);
+    try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "failed to run {s}: {s}", .{ argv[0], reason }), null);
+    return 1;
+}
+
+const askpass_command: Command = .{
+    .name = "askpass",
+    .abstract = "Ask Macterm what an ssh login asks. ssh runs it; you do not.",
+    .hidden = true,
+    .arguments = &.{.{ .name = "prompt", .abstract = "The prompt that ssh gives.", .optional = true }},
+};
+
 // ── api (design 011 §4) ─────────────────────────────────────────────────────
 
 const method_argument: command.Argument = .{ .name = "method", .abstract = "The name of the method, as `macterm api list` prints it." };
@@ -312,7 +373,7 @@ fn apiSend(ctx: Context, parsed: command.Parsed, comptime M: type, value: std.js
 pub const root: Command = .{
     .name = "macterm",
     .abstract = "Control a running Macterm: projects, tabs, panes, zmx sessions.",
-    .subcommands = &.{ &status_command, &pane_command, &session_command, &skills_command, &api_command, &help_command },
+    .subcommands = &.{ &status_command, &pane_command, &session_command, &ssh_command, &skills_command, &askpass_command, &api_command, &help_command },
 };
 
 /// Runs one argument line (without the program name) and returns the exit
@@ -341,6 +402,8 @@ pub fn run(ctx: Context, words: []const []const u8) error{ OutOfMemory, WriteFai
             if (c == &api_list_command) return apiList(ctx, parsed);
             if (c == &api_describe_command) return apiDescribe(ctx, parsed);
             if (c == &api_call_command) return apiCall(ctx, parsed);
+            if (c == &ssh_command) return sshRun(ctx, parsed);
+            if (c == &askpass_command) return askpass.run(ctx.arena, ctx.env, ctx.out, ctx.err, if (parsed.positionals.len > 0) parsed.positionals[0] else "");
             unreachable;
         },
     }
@@ -887,6 +950,8 @@ const golden_help = .{
     .{ [_]*const Command{ &session_command, &session_info_command }, @embedFile("golden/help/session-info.txt") },
     .{ [_]*const Command{ &session_command, &session_kill_command }, @embedFile("golden/help/session-kill.txt") },
     .{ [_]*const Command{&skills_command}, @embedFile("golden/help/skills.txt") },
+    .{ [_]*const Command{&ssh_command}, @embedFile("golden/help/ssh.txt") },
+    .{ [_]*const Command{&askpass_command}, @embedFile("golden/help/askpass.txt") },
 };
 
 fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
@@ -940,6 +1005,7 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
         try testing.expectEqual(g.names.len, o.names.len);
         for (g.names, o.names) |a, b| try testing.expectEqualStrings(a, b);
         try testing.expectEqualStrings(g.value orelse "", o.value orelse "");
+        try testing.expectEqualStrings(g.default orelse "", o.default orelse "");
         try testing.expectEqualStrings(try collapse(arena, g.abstract), try collapse(arena, o.abstract));
     }
     try testing.expectEqual(visible.items.len, n);
@@ -950,6 +1016,7 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
         try testing.expectEqual(g.optional, a.optional);
         try testing.expectEqual(g.repeating, a.repeating);
         try testing.expectEqual(std.mem.eql(u8, g.takes orelse "", "unrecognized"), a.unrecognized);
+        try testing.expectEqual(std.mem.eql(u8, g.takes orelse "", "all"), a.passthrough);
         try testing.expectEqualStrings(try collapse(arena, g.abstract), try collapse(arena, a.abstract));
     }
 
@@ -1016,6 +1083,8 @@ test "the root help lists the ported commands as the golden text does, and api" 
         \\  pane                    List, inspect, split, focus and close panes, and run
         \\                          commands in them.
         \\  session                 Inspect and kill terminal sessions that zmx runs.
+        \\  ssh                     Run ssh with terminfo install and environment
+        \\                          forwarding. It works with no running app.
         \\  skills                  Print skills that teach AI coding agents to use
         \\                          Macterm. It works with no running app.
         \\  api                     List, describe and call the methods of the server's
@@ -1056,7 +1125,7 @@ test "status and usage errors print the golden output" {
     for (inputs, goldens) |input, golden| {
         var out: std.Io.Writer.Allocating = .init(arena);
         var err: std.Io.Writer.Allocating = .init(arena);
-        const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+        const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
         const exit: u8 = switch (try command.parse(arena, &root, input.arguments)) {
             // A word that is not a command: the other verbs are not ported yet.
             .usage_error => if (spec.find(input.arguments[0..1]) == null) try run(ctx, input.arguments) else continue,
@@ -1168,7 +1237,7 @@ test "status with no server exits 2 and names the socket" {
     var env: std.process.Environ.Map = .init(arena);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", "/nonexistent/.server" }));
     try testing.expectEqualStrings("", out.written());
     try testing.expectEqualStrings("macterm: could not reach the Macterm server:\n  /nonexistent/.server: no socket file\n", err.written());
@@ -1313,7 +1382,7 @@ fn runStubWith(arena: std.mem.Allocator, init: Stub, words: []const []const u8, 
     for (env_pairs) |pair| try env.put(pair[0], pair[1]);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer, .in = in };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer, .in = in };
     // Before a `--`, after which every word is typed.
     const at = for (words, 0..) |w, i| {
         if (std.mem.eql(u8, w, "--")) break i;
@@ -1380,7 +1449,7 @@ test "status exits 2 for a path that is not a socket" {
     var env: std.process.Environ.Map = .init(arena);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", path }));
     try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: could not reach the Macterm server:\n  {s}: not a socket\n", .{path}), err.written());
 }
@@ -1428,7 +1497,7 @@ fn runOffline(arena: std.mem.Allocator, words: []const []const u8, env_pairs: []
     for (env_pairs) |pair| try env.put(pair[0], pair[1]);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     const exit = try run(ctx, words);
     return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = "", .args = "", .path = "" };
 }

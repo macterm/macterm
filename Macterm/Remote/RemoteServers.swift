@@ -52,7 +52,7 @@ final class RemoteServers {
             Configuration(
                 scripts: HostCommands.Scripts.bundled,
                 builds: .bundled,
-                askConsent: { await RemoteServerConsent.ask($0) },
+                askConsent: { await SSHConnections.shared.loginUI?.askToInstallServer(on: $0) ?? false },
                 consents: .preferences
             )
         }
@@ -114,9 +114,10 @@ final class RemoteServers {
         }
     }
 
-    /// One connection to a host's server. Call `close()` when done.
-    /// Its parts are thread-safe and never change.
-    final class Link: @unchecked Sendable {
+    /// One connection to a host's server. As a `ServerEndpoint` it gives
+    /// only its own connection, for `list`, `kill` and `run`. Call `close()`
+    /// when done. Its parts are thread-safe and never change.
+    final class Link: ServerEndpoint, @unchecked Sendable {
         let connection: ServerConnection
         /// The ssh process of the proxy. Nil for a roaming link.
         let process: Process?
@@ -167,6 +168,11 @@ final class RemoteServers {
             }
         }
 
+        func connection() async throws -> any ServerLink {
+            guard connection.isOpen else { throw ServerClientError.disconnected }
+            return connection
+        }
+
         func close() {
             watchLock.lock()
             watcher?.cancel()
@@ -192,7 +198,17 @@ final class RemoteServers {
     /// at a time, so that two never install at once. With `login` false it
     /// uses only a connection that is up; with `install` false a host with
     /// no server of this build throws `notInstalled`, and nobody is asked.
-    func connect(_ destination: String, login: Bool = true, install: Bool = true) async throws -> Link {
+    ///
+    /// `step` hears when the connect waits for the user's consent to the
+    /// install, installs, and checks again: the host's state shows it
+    /// (`RemoteHost.State`). A connect that waits for another one hears
+    /// nothing of it.
+    func connect(
+        _ destination: String,
+        login: Bool = true,
+        install: Bool = true,
+        step: (@MainActor (RemoteHost.Step) -> Void)? = nil
+    ) async throws -> Link {
         while let busy = connecting[destination] {
             _ = try? await busy.value
             // A finished task awaits with no suspension, and the owner's
@@ -201,13 +217,18 @@ final class RemoteServers {
             // the finished task first removes it.
             if connecting[destination] == busy { connecting[destination] = nil }
         }
-        let task = Task { try await self.open(destination, login: login, install: install) }
+        let task = Task { try await self.open(destination, login: login, install: install, step: step) }
         connecting[destination] = task
         defer { if connecting[destination] == task { connecting[destination] = nil } }
         return try await task.value
     }
 
-    private func open(_ destination: String, login: Bool, install mayInstall: Bool) async throws -> Link {
+    private func open(
+        _ destination: String,
+        login: Bool,
+        install mayInstall: Bool,
+        step: (@MainActor (RemoteHost.Step) -> Void)?
+    ) async throws -> Link {
         guard let key = configuration.builds.key, let command = configuration.scripts?.attachCommand(key: key)
         else { throw Failure.notBundled }
         var commands = 0
@@ -254,9 +275,10 @@ final class RemoteServers {
                 case let .missing(host):
                     guard !installed else { throw Failure.installFailed("the server is not there after the install") }
                     guard mayInstall else { throw Failure.notInstalled }
-                    try await install(destination, key: key, host: host)
+                    try await install(destination, key: key, host: host, step: step)
                     commands += 1
                     installed = true
+                    step?(.checking)
                 }
             }
         }
@@ -363,7 +385,12 @@ final class RemoteServers {
         }
     }
 
-    private func install(_ destination: String, key: String, host: HostCheck.Missing) async throws {
+    private func install(
+        _ destination: String,
+        key: String,
+        host: HostCheck.Missing,
+        step: (@MainActor (RemoteHost.Step) -> Void)?
+    ) async throws {
         guard let scripts = configuration.scripts else { throw Failure.notBundled }
         guard let target = ZmxHostTarget.detect(system: host.system, machine: host.machine) else {
             throw Failure.unsupported(system: host.system, machine: host.machine)
@@ -371,6 +398,7 @@ final class RemoteServers {
         guard let build = await configuration.builds.build(for: target) else { throw Failure.noBuild(target.rawValue) }
         let resolved = await connections.resolvedDestination(destination)
         if !Self.consented(configuration.consents.read(), destination: resolved, host: host) {
+            step?(.awaitingConsent)
             guard await configuration.askConsent(destination) else {
                 logger.info("server: host=\(destination, privacy: .public) install declined")
                 throw Failure.declined
@@ -387,6 +415,7 @@ final class RemoteServers {
             throw Failure.installFailed(EnglishErrorText.describe(error))
         }
         defer { try? file.close() }
+        step?(.installing)
         let outcome = try await connections.run(destination, command, input: file, timeout: .seconds(120))
         guard outcome.status == 0, let installedID = HostCheck.installedID(in: outcome.stdout) else {
             let reason = HostCheck.clean(HostCheck.reason(in: outcome.stderr) ?? SSHControlPath.lastLine(of: outcome.stderr))

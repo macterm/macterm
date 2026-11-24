@@ -288,7 +288,7 @@
       ],
       "args": "ProjectReorder.Args",
       "result": "ProjectReorder.Result",
-      "doc": "Sets the order of the children of a group, or of the top level."
+      "doc": "Sets the order of the child projects of a project, or of the top level."
     },
     {
       "name": "project.remove",
@@ -299,7 +299,7 @@
       ],
       "args": "ProjectRemove.Args",
       "result": "ProjectRemove.Result",
-      "doc": "Removes a project and its workspace, or an empty group."
+      "doc": "Removes a project that holds no projects, and its workspace."
     },
     {
       "name": "workspace.create",
@@ -1288,6 +1288,13 @@
           "type": "[bin]",
           "optional": true,
           "since": 1
+        },
+        {
+          "name": "replace_exited",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
         }
       ],
       "cases": [],
@@ -2002,26 +2009,9 @@
           "type": "str",
           "optional": true,
           "since": 3
-        },
-        {
-          "name": "kind",
-          "type": "ProjectKind",
-          "optional": false,
-          "default": "project",
-          "since": 3
         }
       ],
       "cases": [],
-      "variants": []
-    },
-    {
-      "name": "ProjectKind",
-      "kind": "enum",
-      "fields": [],
-      "cases": [
-        "project",
-        "group"
-      ],
       "variants": []
     },
     {
@@ -2304,13 +2294,6 @@
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
-        },
-        {
-          "name": "kind",
-          "type": "ProjectKind",
-          "optional": false,
-          "default": "project",
           "since": 3
         },
         {

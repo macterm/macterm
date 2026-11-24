@@ -165,7 +165,7 @@ struct MainWindow: View {
                 // translucent fills and the detail reads as darker than the
                 // strip around the sidebar.
                 if let project = activeProjectWithWorkspace {
-                    if projectHasAnyTab(project) {
+                    if showsTab(of: project) {
                         WorkspaceView(project: project)
                             .id(project.id)
                     } else {
@@ -900,8 +900,11 @@ struct MainWindow: View {
         return project
     }
 
-    private func projectHasAnyTab(_ project: Project) -> Bool {
-        !(appState.workspaces[project.id]?.tabs.isEmpty ?? true)
+    /// Whether this window shows a tab of `project`: false for a project with
+    /// no tabs and for the project screen (`WindowState.showsProjectScreen`),
+    /// which show `EmptyProjectView`.
+    private func showsTab(of project: Project) -> Bool {
+        appState.selectedTab(for: project.id, in: windowState) != nil
     }
 
     private var activeTabTitle: String {
