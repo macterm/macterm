@@ -497,10 +497,9 @@ final class Pane: Identifiable {
     /// only as a fallback when the report has none. The idle verdict
     /// (`foreground.isIdle`) is foreground pgid == the process that the
     /// session started, and the shell verdict (`foreground.isShell`) is the
-    /// host's `/etc/shells`. On a host the session starts the shell, so a
-    /// nested shell is a running child, as libghostty reads it. A local
-    /// session starts login(1), which starts the shell in a group of its own,
-    /// so a local pane uses the shell verdict for both (issue 0448). A
+    /// host's `/etc/shells`. Under login(1) the session takes the shell's
+    /// group as its own (issue 0448), so a nested shell is a running child,
+    /// as libghostty reads it, in a local and a remote pane. A
     /// prompt hook never names the pane (`isPromptHook`). For the run
     /// tracker only, a shell that runs `-c` or a script is a program
     /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
@@ -515,10 +514,7 @@ final class Pane: Identifiable {
         let name = Self.remoteProcessName(comm: foreground.comm, command: foreground.command)
         guard !name.isEmpty else { return }
         let isShell = foreground.isShell ?? ProcessInspector.isShellProcessName(name)
-        // A local session runs the shell under login(1), so the session's own
-        // process group is login's, and `isIdle` is false at an idle prompt.
-        // A local pane judges by the shell verdict.
-        let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
+        let isIdleShell = foreground.isIdle ?? isShell
         // The tracker gets every report: it has its own gate for a prompt
         // hook (`TerminalExecutionTracker.shellIsAtPrompt`). A shell that
         // runs `-c` or a script is a run for the tracker, not a prompt.
