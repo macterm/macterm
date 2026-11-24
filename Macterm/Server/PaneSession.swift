@@ -39,6 +39,10 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneStatus(_ status: MactermProtocol.Status)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
+    /// A desktop notification (OSC 9, OSC 777), once for each message.
+    func paneNotification(title: Data, body: Data)
+    /// The bell (BEL). The session coalesces bells.
+    func paneBell()
     /// The session's attention flags: at an attach when one is set, and at
     /// each change (design/004 §6). All clear when the channel ends.
     func paneAttention(_ flags: MactermProtocol.Attention)
@@ -80,6 +84,8 @@ extension PaneSessionHost {
     func paneCwd(_: Data) {}
     func paneMark(_: MactermProtocol.Mark) {}
     func paneStatus(_: MactermProtocol.Status) {}
+    func paneNotification(title _: Data, body _: Data) {}
+    func paneBell() {}
     func paneAttention(_: MactermProtocol.Attention) {}
     func paneLead(_: Bool?) {}
     func paneLinkLost() {}
@@ -615,6 +621,10 @@ actor PaneSession: PaneInputRoute {
                 deliver { $0.paneTitle(title) }
             case let .cwd(url):
                 deliver { $0.paneCwd(url) }
+            case let .notification(title, body):
+                deliver { $0.paneNotification(title: title, body: body) }
+            case .bell:
+                deliver { $0.paneBell() }
             case let .resumed(resumed):
                 // The bytes after the surface's offset follow: the screen
                 // and the scrollback stay.

@@ -161,6 +161,17 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
     }
 
+    /// Whether the pane's session parses this surface's output and sends its
+    /// facts (marks, folder, notifications, bell). Then libghostty's callbacks
+    /// for those facts do nothing here: every surface of the pane parses the
+    /// same output, and the pane hears the session once (`Pane.receiveLinkEvent`).
+    /// False for a surface with no session, and for a plain ssh shell, which
+    /// has no session and runs in one surface.
+    var sessionSendsFacts: Bool {
+        guard let host = channelRuntime?.host, let link = host.link else { return false }
+        return link.showsPlainShell(in: host) == nil
+    }
+
     /// The pane's session ended (its shell exited, or it is gone). Set on the
     /// main actor before `onProcessExit` runs.
     var sessionEnded = false

@@ -28,6 +28,10 @@ enum PaneChannelEvent: Equatable {
     /// The run state of the pane. The session sends it only when it changes,
     /// and to a client that greets while it is not `idle`.
     case status(MactermProtocol.Status)
+    /// A desktop notification that a program asked for (OSC 9, OSC 777).
+    case notification(title: Data, body: Data)
+    /// The program rang the bell (BEL).
+    case bell
     case other(String)
 
     init?(_ frame: ProtocolFrame) {
@@ -65,6 +69,8 @@ enum PaneChannelEvent: Equatable {
         case let .attention(flags): .attention(flags)
         case let .mark(mark): .mark(mark)
         case let .status(status): .status(status)
+        case let .desktopNotification(note): .notification(title: note.title.bytes, body: note.body.bytes)
+        case .bell: .bell
         default: .other(name)
         }
     }

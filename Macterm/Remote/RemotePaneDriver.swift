@@ -691,6 +691,14 @@ final class RemotePaneDriver {
             surface.paneStatus(status)
         }
 
+        func paneNotification(title: Data, body: Data) {
+            surface.paneNotification(title: title, body: body)
+        }
+
+        func paneBell() {
+            surface.paneBell()
+        }
+
         func paneLead(_ leader: Bool?) {
             surface.paneLead(leader)
             // The session tells each client that attached whether it leads:

@@ -2163,6 +2163,22 @@ pub const Progress = struct {
     };
 };
 
+/// A program asked for a desktop notification (OSC 9 or OSC 777). The
+/// session sends each one once, to every client, and never drops it.
+pub const DesktopNotification = struct {
+    pub const name = "notification";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    title: msgpack.Bin,
+    body: msgpack.Bin,
+
+    pub const field_doc = .{
+        .title = "The title, as the program sent it. Empty for OSC 9, which has a body only.",
+        .body = "The body, as the program sent it. Not UTF-8 from every program.",
+    };
+};
+
 /// The program rang the bell (BEL).
 pub const Bell = struct {
     pub const name = "bell";
@@ -2309,9 +2325,10 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,        Refresh,
-    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention,  Seen,
-    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel, TtyRead,
+    State,               Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,        Refresh,
+    Title,               Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention,  Seen,
+    Resumed,             TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel, TtyRead,
+    DesktopNotification,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

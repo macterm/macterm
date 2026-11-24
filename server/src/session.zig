@@ -1309,6 +1309,10 @@ const Session = struct {
                 .output_tail = if (mk.output_tail) |t| .{ .bytes = t } else null,
             }, false),
             .progress => |p| s.broadcastPane(m.Progress, p, true),
+            .notification => |n| s.broadcastPane(m.DesktopNotification, .{
+                .title = .{ .bytes = n.title },
+                .body = .{ .bytes = n.body },
+            }, false),
             .bell => {
                 for (s.clients.items) |c| c.rang = true;
                 s.broadcastPane(m.Bell, .{}, true);

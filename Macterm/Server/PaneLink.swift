@@ -10,11 +10,15 @@ enum PaneLinkEvent {
     case foreground(SessionForeground)
     case title(String)
     case ttyMode(TerminalLineMode)
-    /// A mark, with the channel host of the view that counts it: project
-    /// memory reads that view's folder and screen.
-    case mark(MactermProtocol.Mark, SurfaceChannelHost?)
+    case mark(MactermProtocol.Mark)
+    /// The shell's folder (OSC 7).
+    case cwd(String)
     case status(MactermProtocol.Status)
     case attention(MactermProtocol.Attention)
+    /// A desktop notification that a program asked for (OSC 9, OSC 777).
+    case notification(title: String, body: String)
+    /// The program rang the bell.
+    case bell
     /// The session ended: its shell exited, it is gone, or the host has none.
     case ended
     /// The surface that runs the pane's plain ssh shell, or nil when no
@@ -240,11 +244,11 @@ final class PaneLink {
 
     // MARK: - The session's messages
 
-    /// A message of the session, from the channel of `host`. Every channel
-    /// gets the same messages, so only the counting view's count: the pane
-    /// hears each one once.
+    /// A message of the session, from the channel of `host`. The link reads
+    /// one channel (`readsMessages(from:)`), so the pane hears each message
+    /// once.
     func receive(_ event: PaneLinkEvent, from host: SurfaceChannelHost) {
-        guard !hasEnded, counts(host) else { return }
+        guard !hasEnded, readsMessages(from: host) else { return }
         if case .ended = event {
             sessionEnded()
         } else {
@@ -258,19 +262,22 @@ final class PaneLink {
         sessionEnded()
     }
 
-    /// Whether the channel of `host` counts for the pane: the first view
-    /// that is ready. It counts the session's messages, and its surface
-    /// counts what libghostty parses (`PaneSurface.countsOutput`). The rule
-    /// changes only when a view comes or goes, never with the lead.
-    func counts(_ host: SurfaceChannelHost) -> Bool {
+    /// Whether the link reads the session's messages from the channel of
+    /// `host`: the first view that is ready. Every channel of the session
+    /// gets the same messages, so the link reads one copy and the pane hears
+    /// each message once. The rule changes only when a view comes or goes,
+    /// never with the lead.
+    func readsMessages(from host: SurfaceChannelHost) -> Bool {
         views.first(where: \.ready)?.host === host
     }
 
-    /// The shell's folder goes to every surface: each keeps it for itself.
+    /// The shell's folder goes to every surface, which keeps it for itself,
+    /// and to the pane once.
     func receiveCwd(_ path: String) {
         for view in views {
             view.host.setCwd(path)
         }
+        onEvent?(.cwd(path))
     }
 
     /// The session ended. Every view stops, and the pane hears it once.

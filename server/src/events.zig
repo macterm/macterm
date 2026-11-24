@@ -30,6 +30,8 @@ pub const Event = union(enum) {
     cwd: []const u8,
     mark: struct { kind: m.MarkKind, command: ?[]const u8 = null, exit_code: ?i32 = null, output_tail: ?[]const u8 = null },
     progress: m.Progress,
+    /// A desktop notification (OSC 9, OSC 777): never coalesced.
+    notification: struct { title: []const u8, body: []const u8 },
     bell,
     activity,
     status: m.Status,
@@ -185,6 +187,7 @@ pub const Watch = struct {
         handler.effects.title_changed = &onTitle;
         handler.effects.pwd_changed = &onPwd;
         handler.effects.bell = &onBell;
+        handler.effects.desktop_notification = &onDesktopNotification;
         handler.effects.progress_report = &onProgress;
         handler.effects.semantic_prompt = &onSemanticPrompt;
         handler.effects.reset = &onReset;
@@ -707,6 +710,16 @@ pub const Watch = struct {
         w.coalesce(.bell);
     }
 
+    fn onDesktopNotification(h: *Handler, n: ghostty_vt.StreamAction.ShowDesktopNotification) void {
+        const w = fromHandler(h);
+        const title = w.gpa.dupe(u8, n.title) catch return;
+        const body = w.gpa.dupe(u8, n.body) catch {
+            w.gpa.free(title);
+            return;
+        };
+        w.push(.{ .notification = .{ .title = title, .body = body } });
+    }
+
     fn onProgress(h: *Handler, r: ProgressReport) void {
         fromHandler(h).report(r);
     }
@@ -757,6 +770,10 @@ pub const Watch = struct {
 fn freeEvent(gpa: std.mem.Allocator, e: Event) void {
     switch (e) {
         .title, .cwd => |s| gpa.free(s),
+        .notification => |n| {
+            gpa.free(n.title);
+            gpa.free(n.body);
+        },
         .mark => |mk| {
             if (mk.command) |c| gpa.free(c);
             if (mk.output_tail) |t| gpa.free(t);
@@ -921,6 +938,23 @@ test "events: a title, a cwd and a bell go out at once" {
     const tags = try f.tags();
     defer testing.allocator.free(tags);
     try testing.expectEqualSlices(std.meta.Tag(Event), &.{ .title, .cwd, .attention, .bell }, tags);
+}
+
+test "events: each desktop notification goes out once, with its title and body" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]9;build done\x07", 0);
+    f.feed("\x1b]777;notify;Deploy;it failed\x07", 10);
+    f.feed("\x1b]9;build done\x07", 20);
+    const notes = try f.only(.notification);
+    defer testing.allocator.free(notes);
+    try testing.expectEqual(3, notes.len);
+    try testing.expectEqualStrings("", notes[0].title);
+    try testing.expectEqualStrings("build done", notes[0].body);
+    try testing.expectEqualStrings("Deploy", notes[1].title);
+    try testing.expectEqualStrings("it failed", notes[1].body);
+    try testing.expectEqualStrings("build done", notes[2].body);
 }
 
 test "events: a title flood coalesces to the first and the newest" {
