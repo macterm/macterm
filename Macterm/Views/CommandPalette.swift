@@ -165,6 +165,10 @@ struct CommandPalettePanel: View {
     /// instance is the top frame's, kept for as long as the frame is up.
     private var scope: (any PaletteScope)? { windowState.paletteStack.last?.scope }
 
+    /// The screen showing when it asks for a value: Return commits the
+    /// field, and its rows complete it (`InputPaletteScope`).
+    private var inputScope: InputPaletteScope? { scope as? InputPaletteScope }
+
     private var flatItems: [PaletteItem] { sections.flatMap(\.items) }
 
     /// `PaletteItem.id → flat index`, built once per body build. Replaces the
@@ -228,14 +232,23 @@ struct CommandPalettePanel: View {
                             // filling them when there are no rows — a compact
                             // strip above rows an earlier listing left.
                             if let failure {
+                                // A refusal is one line under the field, never
+                                // a notice that fills the list.
                                 PaletteFailureNotice(failure: failure) { scope?.retry() }
-                                    .frame(maxWidth: .infinity, minHeight: sections.isEmpty ? noticeHeight : 0)
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        minHeight: sections.isEmpty && failure.retryable ? noticeHeight : 0
+                                    )
                             }
                             if sections.isEmpty, failure == nil, let loading {
                                 PaletteLoadingNotice(loading: loading)
                                     .frame(maxWidth: .infinity, minHeight: noticeHeight)
                             }
-                            if sections.isEmpty, failure == nil, loading == nil, !PaletteQuery(raw: query).isEmpty {
+                            // An input screen's field is a value, not a
+                            // search, so no completion is not "no matches".
+                            if sections.isEmpty, failure == nil, loading == nil, inputScope == nil,
+                               !PaletteQuery(raw: query).isEmpty
+                            {
                                 PaletteNoMatchesNotice()
                                     .frame(maxWidth: .infinity, minHeight: noticeHeight)
                             }
@@ -252,7 +265,11 @@ struct CommandPalettePanel: View {
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
                                         selectedIndex = idx
-                                        execute(alt: NSEvent.modifierFlags.contains(.option))
+                                        if inputScope != nil {
+                                            _ = completeQuery()
+                                        } else {
+                                            execute(alt: NSEvent.modifierFlags.contains(.option))
+                                        }
                                     } label: {
                                         CommandPaletteRow(item: item, isSelected: idx == selectedIndex, optionHeld: optionHeld)
                                     }
@@ -360,6 +377,9 @@ struct CommandPalettePanel: View {
             activateScope()
             checkPaletteAvailability()
             refresh()
+            // An input screen starts on its value, selected, so that a
+            // keystroke replaces it.
+            DispatchQueue.main.async { selectFieldText() }
         }
         .onChange(of: availability.unavailable) {
             refresh()
@@ -388,9 +408,14 @@ struct CommandPalettePanel: View {
             availability.reset()
         }
         // Return runs the selected row — with ⌥, its alt action. Read off
-        // the press rather than `optionHeld`, which is display state.
+        // the press rather than `optionHeld`, which is display state. On an
+        // input screen it commits the field.
         .onKeyPress(keys: [.return]) { press in
-            execute(alt: press.modifiers.contains(.option))
+            if let inputScope {
+                commit(inputScope)
+            } else {
+                execute(alt: press.modifiers.contains(.option))
+            }
             return .handled
         }
         .onKeyPress(.tab) {
@@ -484,13 +509,22 @@ struct CommandPalettePanel: View {
     /// input — letting the keypress fall through (`.ignored`) to default focus
     /// traversal in that case.
     private func completeQuery() -> KeyPress.Result {
-        // A scope's rows aren't completions of what is typed (its add rows
-        // quote the query back), so Tab keeps its focus meaning there.
+        // An input screen's rows are its completions: the selected one.
+        if let inputScope {
+            guard flatItems.indices.contains(selectedIndex),
+                  let completion = inputScope.completion(for: flatItems[selectedIndex]),
+                  completion != query
+            else { return .ignored }
+            query = completion
+            return .handled
+        }
+        // Any other scope's rows aren't completions of what is typed (its
+        // add rows quote the query back), so Tab keeps its focus meaning
+        // there.
         guard scope == nil, !flatItems.isEmpty else { return .ignored }
         let top = flatItems[0]
-        let completion: String = if let path = directoryPath(for: top) {
-            // Re-expand a `~` query to keep the displayed prefix the user typed.
-            query.hasPrefix("~") ? abbreviateTilde(path) : path
+        let completion = if let path = directoryPath(for: top) {
+            PathCompleter.fieldText(for: path, typed: query)
         } else {
             top.title
         }
@@ -503,14 +537,9 @@ struct CommandPalettePanel: View {
     /// (`dir-open:/abs/path` or `dir-switch:/abs/path`). `nil` for non-path items.
     private func directoryPath(for item: PaletteItem) -> String? {
         for prefix in ["dir-open:", "dir-switch:"] where item.id.hasPrefix(prefix) {
-            let path = String(item.id.dropFirst(prefix.count))
-            return path.hasSuffix("/") ? path : path + "/"
+            return String(item.id.dropFirst(prefix.count))
         }
         return nil
-    }
-
-    private func abbreviateTilde(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
     }
 
     /// The id of the zero-height view at the top of the results.
@@ -569,6 +598,17 @@ struct CommandPalettePanel: View {
     /// list, so a search showed rows that did not match.
     private struct RowScrollTarget: Hashable {
         let itemID: String
+    }
+
+    /// Commit an input screen's field: the palette closes when the action
+    /// ran, and stays with the reason when the value was refused.
+    private func commit(_ inputScope: InputPaletteScope) {
+        guard inputScope.commit(query) else {
+            refresh()
+            return
+        }
+        query = ""
+        windowState.isCommandPaletteVisible = false
     }
 
     /// Run the selected row: its alt action when `alt` and it has one, else
@@ -636,15 +676,18 @@ private final class PaletteEventMonitor {
 private extension CommandPalettePanel {
     /// Show `next` over the screen showing, starting from an empty query.
     /// The text isn't kept: it was the search that found the way in.
+    /// An input screen starts from its value instead (`initialQuery`).
     func enterScope(_ next: PaletteScopeID) {
-        query = ""
-        windowState.pushPaletteFrame(PaletteFrame(next))
+        let frame = PaletteFrame(next)
+        query = frame.scope.initialQuery
+        windowState.pushPaletteFrame(frame)
     }
 
-    /// Back one screen, starting its search empty.
+    /// Back one screen, starting its search empty — or, on an input
+    /// screen, from the text its field had.
     func leaveScope() {
-        query = ""
         windowState.popPaletteFrame()
+        query = scope?.initialQuery ?? ""
     }
 }
 
@@ -785,13 +828,40 @@ private struct PaletteNoMatchesNotice: View {
 }
 
 /// A screen's listing that failed: the failure color's warning glyph, what
-/// failed over why, and Retry, centered. Not a result row — it is never
+/// failed over why, and Retry, centered — or a value that an input screen
+/// refused, as one line. Not a result row — it is never
 /// selected and Enter never lands on it — so it is a notice.
 private struct PaletteFailureNotice: View {
     let failure: PaletteFailure
     let retry: () -> Void
 
     var body: some View {
+        if failure.retryable {
+            listingFailure
+        } else {
+            refusal
+        }
+    }
+
+    /// A refused value: one line, the glyph and the reason, and no Retry —
+    /// the user acts on it by changing the text.
+    private var refusal: some View {
+        Label {
+            Text(failure.title)
+                .foregroundStyle(MactermTheme.fg)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(MactermTheme.failure)
+        }
+        .font(.system(size: 13))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+    }
+
+    private var listingFailure: some View {
         VStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 22))
