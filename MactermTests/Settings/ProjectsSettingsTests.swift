@@ -48,6 +48,22 @@ struct ProjectsSettingsTests {
     }
 
     @Test
+    func a_declared_name_with_a_slash_gets_a_hyphen() async {
+        // The `name:` of a layout file is a recorded name, not one the user
+        // typed here: it is changed, not refused (`ProjectStore.allowedName`).
+        let projects = store()
+        let outcome = await ProjectsSettings.createProject(
+            from: listing(path: "box:~/api", name: "Work/api"),
+            in: projects
+        ) { _ in nil }
+        guard case let .created(project) = outcome else {
+            Issue.record("expected a project, got \(outcome)")
+            return
+        }
+        #expect(project.name == "Work-api")
+    }
+
+    @Test
     func a_check_that_stops_adds_nothing() async {
         let projects = store()
         let outcome = await Task {
