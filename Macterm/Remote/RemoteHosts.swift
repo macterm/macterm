@@ -237,6 +237,8 @@ final class RemoteHosts {
     enum FolderCheck: Equatable {
         case exists
         case missing
+        /// The path is there and is a file.
+        case notDirectory
         /// No connection, or the check did not run to its end.
         case unreachable
     }
@@ -307,14 +309,22 @@ final class RemoteHosts {
     /// `checkFolder` for the scp-style path of a new remote project in the
     /// GUI (New Remote Project in the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the
-    /// line that says why nothing is added.
+    /// line that says why nothing is added. A path that is not a folder has
+    /// the notice of a local path (`PathProblem`), with the folder as typed.
     func refusal(forNewProjectPath path: String) async -> String? {
         guard case let .remote(user, host, directory) = ProjectPath.parse(path) else { return nil }
         let destination = HostCommands.destination(user: user, host: host)
-        switch await checkFolder(directory, destination: destination) {
-        case .exists: return nil
-        case .missing: return String(localized: "There is no path \(directory) on \(destination).")
-        case .unreachable: return String(localized: "Macterm cannot connect to \(destination).")
+        return await Self.refusal(checkFolder(directory, destination: destination), directory: directory, destination: destination)
+    }
+
+    /// The line for an answer of `checkFolder`, nil when the folder is
+    /// there. Pure.
+    nonisolated static func refusal(_ check: FolderCheck, directory: String, destination: String) -> String? {
+        switch check {
+        case .exists: nil
+        case .missing: PathProblem.missing.notice(for: directory)
+        case .notDirectory: PathProblem.notDirectory.notice(for: directory)
+        case .unreachable: String(localized: "Macterm cannot connect to \(destination).")
         }
     }
 
@@ -323,6 +333,7 @@ final class RemoteHosts {
         switch status {
         case 0: .exists
         case 3: .missing
+        case 4: .notDirectory
         default: .unreachable
         }
     }

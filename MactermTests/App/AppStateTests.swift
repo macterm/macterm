@@ -29,6 +29,12 @@ struct AppStateTests {
         return ProjectFileStore(directoryURL: dir)
     }
 
+    /// A project store in a temp file.
+    private func makeProjectStore() -> ProjectStore {
+        ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-store-\(UUID().uuidString).json"))
+    }
+
     /// Create a project + workspace inside `state` and return the project.
     private func seedProject(_ state: AppState, name: String = "proj", path: String = "/tmp") -> Project {
         let p = Project(name: name, path: path, sortOrder: 0)
@@ -325,20 +331,23 @@ struct AppStateTests {
     func busy_project_paths_stage_confirmation_through_the_shared_guard() {
         let state = makeAppState()
         state.paneNeedsConfirmClose = { _ in true }
-        let p = seedProject(state)
+        let store = makeProjectStore()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.selectProject(p)
 
-        var removed = false
-        state.requestRemoveProject(p.id) { removed = true }
-        #expect(!removed)
+        state.requestRemoveProject(p.id, store: store)
+        #expect(store.row(p.id) != nil)
         #expect(state.pendingDialog?.kind == .removeProject(p.id))
+        #expect(state.pendingDialog?.confirmTitle == "Remove")
         state.dismissPendingDialog()
 
-        state.requestRemoveSelection(projectIDs: [p.id], tabs: []) { removed = true }
+        var removed = false
+        state.requestRemoveSelection(projectIDs: [p.id], tabs: [], store: store) { removed = true }
         #expect(!removed)
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(projectID: UUID()))
+        #expect(state.panes(inProject: UUID()).isEmpty)
     }
 
     @Test
@@ -1009,36 +1018,123 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveSelection_runs_removal_immediately_when_no_pane_busy() {
+    func requestRemoveSelection_of_tabs_runs_removal_immediately_when_no_pane_busy() throws {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
-        let p2 = seedProject(state, name: "p2", path: "/tmp2")
+        let tab = try #require(state.workspaces[p1.id]?.tabs.first)
         // No pane ever gets an NSView in tests, so nothing is "busy" — the
         // removal must run inline rather than staging a confirmation.
         var ran = false
-        state.requestRemoveSelection(projectIDs: [p1.id, p2.id], tabs: []) { ran = true }
+        state.requestRemoveSelection(projectIDs: [], tabs: [(tab.id, p1.id)], store: makeProjectStore()) { ran = true }
 
         #expect(ran)
         #expect(state.pendingDialog == nil)
     }
 
     @Test
-    func requestRemoveGroup_asks_only_when_the_group_has_projects() {
+    func requestRemoveSelection_of_projects_asks_with_the_counts() {
         let state = makeAppState()
-        let group = Project(name: "g", path: "")
+        let store = makeProjectStore()
+        let a = store.create(name: "a", path: "/tmp/a")
+        let b = store.create(name: "b", path: "/tmp/b")
+        let child = store.create(name: "child", path: "/tmp/child", parent: b.id)
+        _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        state.selectProject(a)
 
+        #expect(Set(state.projectsRemoved(with: [a.id, b.id, child.id], store: store)).count == 4, "each project once")
         var ran = false
-        state.requestRemoveGroup(group, projectCount: 0) { ran = true }
-        #expect(ran, "an empty group goes at once")
-        #expect(state.pendingDialog == nil)
-
-        ran = false
-        state.requestRemoveGroup(group, projectCount: 2) { ran = true }
+        state.requestRemoveSelection(projectIDs: [a.id, b.id], tabs: [], store: store) { ran = true }
         #expect(!ran)
-        #expect(state.pendingDialog?.kind == .removeGroup(group.id))
-        #expect(state.pendingDialog?.message.contains("2") == true, "the question says how many")
+        #expect(state.pendingDialog?.kind == .removeSelection)
+        #expect(state.pendingDialog?.message == "The selected projects contain 1 tab and 2 nested projects.")
         state.confirmPendingDialog()
         #expect(ran)
+    }
+
+    @Test
+    func requestRemoveSelection_of_empty_projects_runs_at_once() {
+        let state = makeAppState()
+        let store = makeProjectStore()
+        let a = store.create(name: "a", path: "/tmp/a")
+        var ran = false
+        state.requestRemoveSelection(projectIDs: [a.id], tabs: [], store: store) { ran = true }
+        #expect(ran)
+        #expect(state.pendingDialog == nil)
+    }
+
+    @Test
+    func a_tab_dropped_after_the_last_tab_of_another_project_becomes_its_last_tab() throws {
+        let state = makeAppState()
+        let source = seedProject(state, name: "source", path: "/tmp/source")
+        let target = seedProject(state, name: "target", path: "/tmp/target")
+        let ws = try #require(state.workspaces[target.id])
+        _ = ModelWriter.tabCreate(in: ws, projectPath: target.path)
+        let moved = try #require(state.workspaces[source.id]?.tabs.first)
+
+        // The sidebar drop at the line above a nested project sends the
+        // target's tab count as the slot.
+        state.moveTab(moved.id, from: source.id, to: target.id, destPath: target.path, toIndex: ws.tabs.count)
+        #expect(ws.tabs.last?.id == moved.id)
+    }
+
+    @Test
+    func remove_a_project_with_projects_inside_asks_with_the_counts() throws {
+        let state = makeAppState()
+        let store = makeProjectStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        state.selectProject(parent)
+        state.selectProject(child)
+        let ws = try #require(state.workspaces[child.id])
+        _ = ModelWriter.tabCreate(in: ws, projectPath: child.path)
+
+        state.requestRemoveProject(parent.id, store: store)
+        let dialog = state.pendingDialog
+        #expect(dialog?.kind == .removeProject(parent.id))
+        #expect(dialog?.message == "This project contains 3 tabs and 2 nested projects.")
+        #expect(dialog?.confirmTitle == "Remove")
+        #expect(store.projects.count == 3, "nothing goes before the answer")
+
+        state.confirmPendingDialog()
+        #expect(store.projects.isEmpty, "Remove removes every project inside")
+        #expect(state.workspaces[parent.id] == nil)
+        #expect(state.workspaces[child.id] == nil)
+    }
+
+    @Test
+    func remove_a_project_with_one_tab_and_one_nested_project_says_so_in_the_singular() {
+        let state = makeAppState()
+        let store = makeProjectStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        _ = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        state.selectProject(parent)
+
+        state.requestRemoveProject(parent.id, store: store)
+        #expect(state.pendingDialog?.message == "This project contains 1 tab and 1 nested project.")
+    }
+
+    @Test
+    func remove_a_project_with_nothing_inside_goes_at_once() {
+        let state = makeAppState()
+        let store = makeProjectStore()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.requestRemoveProject(p.id, store: store)
+        #expect(state.pendingDialog == nil)
+        #expect(store.row(p.id) == nil)
+    }
+
+    @Test
+    func remove_a_busy_project_says_that_a_process_runs() {
+        let state = makeAppState()
+        state.paneNeedsConfirmClose = { _ in true }
+        let store = makeProjectStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        _ = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        state.selectProject(parent)
+
+        state.requestRemoveProject(parent.id, store: store)
+        #expect(state.pendingDialog?.message.hasSuffix("A process is still running.") == true)
     }
 
     @Test
@@ -1049,13 +1145,14 @@ struct AppStateTests {
         let p = seedProject(state)
 
         var ran = false
-        state.requestRemoveSelection(projectIDs: [p.id], tabs: []) { ran = true }
+        let store = makeProjectStore()
+        state.requestRemoveSelection(projectIDs: [p.id], tabs: [], store: store) { ran = true }
         #expect(state.pendingDialog?.kind == .removeSelection)
         state.dismissPendingDialog()
         #expect(state.pendingDialog == nil)
         #expect(!ran)
 
-        state.requestRemoveSelection(projectIDs: [p.id], tabs: []) { ran = true }
+        state.requestRemoveSelection(projectIDs: [p.id], tabs: [], store: store) { ran = true }
         state.confirmPendingDialog()
         #expect(state.pendingDialog == nil)
         #expect(ran)
@@ -1158,8 +1255,9 @@ struct AppStateTests {
         #expect(pane.attention == MactermProtocol.Attention())
     }
 
-    /// A run end in the focused pane of a key quick terminal ends its `.done`
-    /// state. A split pane that is not focused keeps its state and flags.
+    /// The flags of a run end in the focused pane of a key quick terminal
+    /// clear, and its `.done` state with them. A split pane that is not
+    /// focused keeps its state and flags.
     @Test
     func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
         let quick = QuickTerminalSplitState()
@@ -1176,9 +1274,8 @@ struct AppStateTests {
         let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
 
         for pane in [focused, other] {
-            pane.executionState = .done
             pane.receiveAttention(unseenFailure)
-            quick.onRunEnded(pane.id)
+            state.paneAttentionDidChange(paneID: pane.id)
         }
 
         #expect(focused.executionState == .idle)
@@ -1199,7 +1296,7 @@ struct AppStateTests {
         let project = seedProject(state)
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
-        pane.executionState = .done
+        #expect(pane.executionState == .done)
         state.saveWorkspaces()
 
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
@@ -1420,6 +1517,43 @@ struct AppStateTests {
         #expect(!fx.state.closeNeedsConfirmation([plain], plainAnswers: [plain.id: false]))
         #expect(fx.state.closeNeedsConfirmation([plain]))
         #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
+    }
+
+    @Test
+    func the_async_verdict_uses_the_hosts_answer() async throws {
+        let idle = try plainShellTab(answer: false)
+        let idlePane = try #require(idle.tab.splitRoot.findPane(id: idle.target))
+        #expect(await !idle.state.judgeClose([idlePane]))
+        let busy = try plainShellTab(answer: true)
+        let busyPane = try #require(busy.tab.splitRoot.findPane(id: busy.target))
+        #expect(await busy.state.judgeClose([busyPane]))
+    }
+
+    @Test
+    func the_quit_rows_leave_out_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == panes.map(\.id).filter { $0 != fx.target })
+    }
+
+    @Test
+    func the_quit_rows_wait_for_every_host() async throws {
+        let fx = try plainShellTab(answer: true)
+        let panes = fx.tab.splitRoot.allPanes()
+        let slow = try #require(panes.first { $0.id != fx.target })
+        // Both panes run a plain shell. The first answer is busy, and the
+        // second host answers idle later: a stop at the first busy answer
+        // would give the slow pane the surface's busy reading.
+        fx.state.paneRunsPlainShell = { _ in true }
+        fx.state.askPlainShellNeedsConfirmClose = { pane, _ in
+            if pane.id == fx.target { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+            return false
+        }
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == [fx.target])
+        #expect(!rows.contains { $0.id == slow.id })
     }
 
     // MARK: - applyLayout
@@ -2082,16 +2216,18 @@ struct AppStateTests {
     }
 
     @Test
-    func next_project_skips_a_project_with_no_folder() {
+    func next_project_steps_through_a_project_with_no_folder() {
         let state = makeAppState()
         let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
-        let group = Project(name: "g", path: "", sortOrder: 1)
+        let parent = Project(name: "p", path: "", sortOrder: 1)
         let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
         state.selectProject(a)
-        state.selectNextProject(projects: [a, group, b])
+        state.selectNextProject(projects: [a, parent, b])
+        #expect(state.activeProjectID == parent.id)
+        state.selectNextProject(projects: [a, parent, b])
         #expect(state.activeProjectID == b.id)
-        state.selectPreviousProject(projects: [a, group, b])
-        #expect(state.activeProjectID == a.id)
+        state.selectPreviousProject(projects: [a, parent, b])
+        #expect(state.activeProjectID == parent.id)
     }
 
     @Test
@@ -2144,48 +2280,13 @@ struct AppStateTests {
         #expect(AppState.panesToWarm(in: ws).isEmpty)
     }
 
-    // MARK: - Quiet-settle
+    // MARK: - Run state
 
-    // The poll calls `pane.settleTerminalActivityIfQuiet()` directly (no
-    // occlusion special-casing): the OUTPUT_ACTIVITY heartbeat that sources
-    // activity is occlusion-independent, so a quiet pane settles the same
-    // whether or not it is on screen. These drive the settle in isolation:
-    // deterministic (no live surface, no `Preferences` global).
-
-    /// A pane whose activity went quiet long ago (past the 3s settle window).
-    private func quietRunningPane() -> Pane {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
-        #expect(pane.executionState == .running)
-        return pane
-    }
-
+    /// The run state comes from the session whatever the status indicator
+    /// setting is: `pane list` reports it, and the setting only chooses what
+    /// the tab row draws (#705).
     @Test
-    func quiet_activity_run_settles_to_done() {
-        let pane = quietRunningPane()
-        // 10s of silence is past the window — occluded or not, it's done.
-        pane.settleTerminalActivityIfQuiet()
-        #expect(pane.executionState == .done)
-    }
-
-    @Test
-    func activity_run_holds_until_the_quiet_window_elapses() {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        let start = Date()
-        pane.markTerminalActivity(at: start)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(2), quietInterval: 3)
-        #expect(pane.executionState == .running)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
-        #expect(pane.executionState == .done)
-    }
-
-    /// The poll tracks execution whatever the status indicator setting is:
-    /// `pane list` reports the state, and the setting only chooses what the
-    /// tab row draws (#705).
-    @Test
-    func poll_settles_a_quiet_run_with_the_status_indicator_off() throws {
+    func the_run_state_follows_the_session_with_the_status_indicator_off() throws {
         let priorIndicator = Preferences.shared.showTabStatusIndicator
         defer { Preferences.shared.showTabStatusIndicator = priorIndicator }
         Preferences.shared.showTabStatusIndicator = false
@@ -2193,10 +2294,11 @@ struct AppStateTests {
         state.isAppActive = { false }
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        state.settleAllPanes()
         #expect(pane.executionState == .running)
-
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
+        pane.receiveAttention(MactermProtocol.Attention(unseen: true))
         state.settleAllPanes()
         #expect(pane.executionState == .done)
     }
@@ -2502,13 +2604,17 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveProject_idle_runs_removal_immediately() {
+    func requestRemoveProject_idle_with_tabs_asks_before_it_removes() {
         let state = makeAppState()
-        let p = seedProject(state)
-        var removed = false
-        state.requestRemoveProject(p.id) { removed = true }
-        #expect(removed)
-        #expect(state.pendingDialog == nil)
+        let store = makeProjectStore()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.selectProject(p)
+        state.requestRemoveProject(p.id, store: store)
+        #expect(store.row(p.id) != nil)
+        #expect(state.pendingDialog?.kind == .removeProject(p.id))
+        state.confirmPendingDialog()
+        #expect(store.row(p.id) == nil)
+        #expect(state.workspaces[p.id] == nil)
     }
 
     @Test

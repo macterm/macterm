@@ -33,6 +33,16 @@ struct RemoteHostsPaletteScopeTests {
         return scope.sections(for: PaletteQuery(raw: query), context: makeContext().0).flatMap(\.items)
     }
 
+    /// The rows of the folder step for `text`.
+    private func folderRows(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) -> [PaletteItem] {
+        scope.sections(for: PaletteQuery(raw: text), context: context).flatMap(\.items)
+    }
+
+    /// Return on the first row of the folder step for `text`: its action row.
+    private func press(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) -> PaletteInputPress {
+        scope.press(folderRows(scope, text, context).first)
+    }
+
     private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0 ..< 200 where !condition() {
             try await Task.sleep(for: .milliseconds(10))
@@ -145,7 +155,8 @@ struct RemoteHostsPaletteScopeTests {
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(!scope.commit("~/dev/api"))
+        #expect(folderRows(scope, "~/dev/api", context).map(\.title) == ["New Project \"me@devbox:~/dev/api\""])
+        #expect(press(scope, "~/dev/api", context) == .checking)
         #expect(scope.loading?.message == "Connecting to me@devbox…")
         try await waitUntil { scope.isFinished }
 
@@ -156,29 +167,39 @@ struct RemoteHostsPaletteScopeTests {
     }
 
     @Test
-    func an_empty_folder_is_the_home_folder_and_names_the_project_after_the_host() async throws {
+    func the_home_folder_names_the_project_after_the_host_and_an_empty_field_has_no_action() async throws {
         let (context, _, store) = makeContext()
         let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in nil }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(!scope.commit("  "))
+        #expect(folderRows(scope, "  ", context).isEmpty)
+        #expect(scope.failure == nil)
+        #expect(press(scope, "~", context) == .checking)
         try await waitUntil { scope.isFinished }
         #expect(store.projects.map(\.name) == ["devbox"])
         #expect(store.projects.map(\.path) == ["devbox:~"])
     }
 
     @Test
-    func a_refused_folder_adds_nothing_and_shows_why() async throws {
+    func a_missing_folder_or_a_file_adds_nothing_and_shows_the_path_notice() async throws {
         let (context, _, store) = makeContext()
-        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in
-            "There is no path ~/none on devbox."
+        // The host's answers, through the same text as a local path.
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { path in
+            path.hasSuffix("notes.txt")
+                ? RemoteHosts.refusal(.notDirectory, directory: "~/notes.txt", destination: "devbox")
+                : RemoteHosts.refusal(.missing, directory: "~/none", destination: "devbox")
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(!scope.commit("~/none"))
+
+        #expect(press(scope, "~/none", context) == .checking)
         try await waitUntil { scope.loading == nil }
         #expect(!scope.isFinished)
-        #expect(scope.failure?.title == "There is no path ~/none on devbox.")
+        #expect(scope.failure?.title == "Path ~/none doesn't exist")
+
+        #expect(press(scope, "~/notes.txt", context) == .checking)
+        try await waitUntil { scope.loading == nil }
+        #expect(scope.failure?.title == "~/notes.txt is not a directory")
         #expect(store.projects.isEmpty)
     }
 
@@ -188,7 +209,7 @@ struct RemoteHostsPaletteScopeTests {
         let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in nil }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(!scope.commit("~/Pinned"))
+        #expect(press(scope, "~/Pinned", context) == .checking)
         try await waitUntil { scope.isFinished }
         #expect(store.projects.map(\.name) == ["Pinned 2"])
     }
@@ -202,7 +223,7 @@ struct RemoteHostsPaletteScopeTests {
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(!scope.commit("~/api"))
+        #expect(press(scope, "~/api", context) == .checking)
         try await waitUntil { answer != nil }
         scope.deactivate()
         answer?.resume(returning: nil)
@@ -212,14 +233,16 @@ struct RemoteHostsPaletteScopeTests {
     }
 
     @Test
-    func a_destination_that_is_not_a_host_is_refused_before_any_check() {
+    func a_destination_that_is_not_a_host_has_a_notice_and_no_action() {
         let (context, _, _) = makeContext()
         var checks = 0
         let input = RemoteHostsPaletteScope.folderInput(destination: "not a host", context: context) { _ in
             checks += 1
             return nil
         }
-        #expect(input.commit("~") == .refused("not a host is not a host name."))
+        let scope = InputPaletteScope(input: input)
+        #expect(folderRows(scope, "~", context).isEmpty)
+        #expect(scope.failure?.title == "not a host is not a host name.")
         #expect(checks == 0)
     }
 }

@@ -65,6 +65,11 @@ struct HostCommandsTests {
             ["HOME": url.path, "SHELL": shell, "TERM": "dumb", "PATH": "/usr/bin:/bin"]
         }
 
+        /// Make an empty file at `path` under the home folder.
+        func makeFile(_ path: String) throws {
+            try Data().write(to: url.appendingPathComponent(path))
+        }
+
         /// No folder named `pwned` came from a command in a folder name.
         var nothingRan: Bool {
             !FileManager.default.fileExists(atPath: url.deletingLastPathComponent().appendingPathComponent("pwned").path)
@@ -294,6 +299,10 @@ struct HostCommandsTests {
             let command = try #require(HostCommands.folderCheckCommand(directory: sent))
             #expect(try Self.run([loginShell, "-c", command], environment: home.environment, in: home.url).status == 3, "\(sent)")
         }
+        // A file is not a folder (0583).
+        try home.makeFile("a b/notes.txt")
+        let command = try #require(HostCommands.folderCheckCommand(directory: "~/a b/notes.txt"))
+        #expect(try Self.run([loginShell, "-c", command], environment: home.environment, in: home.url).status == 4)
         #expect(home.nothingRan)
     }
 
@@ -313,6 +322,12 @@ struct HostCommandsTests {
                 "\(sent)"
             )
         }
+        // A file is not a folder (0583).
+        try home.makeFile("it's/notes.txt")
+        #expect(
+            try Self.run(HostCommands.folderCheckArgv(directory: "~/it's/notes.txt"), environment: home.environment, in: home.url)
+                .status == 4
+        )
         #expect(home.nothingRan)
     }
 
@@ -320,6 +335,7 @@ struct HostCommandsTests {
     func only_the_scripts_own_answers_count() {
         #expect(RemoteHosts.folderCheck(status: 0) == .exists)
         #expect(RemoteHosts.folderCheck(status: 3) == .missing)
+        #expect(RemoteHosts.folderCheck(status: 4) == .notDirectory)
         // A shell that failed to parse the script, a lost connection, a signal.
         for status: Int32? in [1, 2, 127, 255, nil] {
             #expect(RemoteHosts.folderCheck(status: status) == .unreachable)

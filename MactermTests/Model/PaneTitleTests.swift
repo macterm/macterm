@@ -136,7 +136,7 @@ struct PaneTitleTests {
         let pane = makePane()
         pane.applyForeground(hx)
         pane.receiveReportedTitle("session")
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
         #expect(pane.programTitle == nil)
     }
 
@@ -158,7 +158,7 @@ struct PaneTitleTests {
         let pane = makePane()
         pane.applyForeground(shell("nu"))
         // The shell reports its command finished, so it is now at a prompt.
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
 
         pane.applyForeground(program("starship"))
         #expect(pane.foregroundProcessName == "nu")
@@ -173,15 +173,15 @@ struct PaneTitleTests {
         #expect(pane.foregroundProcessName == "nu")
     }
 
-    /// A submitted command means the shell is no longer at a prompt, so its
-    /// name lands on the first report.
+    /// A command that the shell starts (OSC 133;C) means the shell is no
+    /// longer at a prompt, so its name lands on the first report.
     @Test
     func submittedCommandIsNamedImmediately() {
         let pane = makePane()
         pane.applyForeground(shell("nu"))
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
 
-        pane.recordCommandSubmission(hasContent: true)
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .output))
         pane.applyForeground(program("hx"))
         #expect(pane.foregroundProcessName == "hx")
     }
@@ -256,12 +256,12 @@ struct PaneTitleTests {
         #expect(pane.programTitle == "top - load")
     }
 
-    /// A Claude Code turn: typed, running with a progress title, ended.
+    /// A Claude Code turn: running with a progress title, ended. The
+    /// session says when it starts and ends.
     private func runTurn(_ pane: Pane, title: String = "◐ Terminal session icons") {
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         pane.receiveReportedTitle(title)
-        pane.markProgressFinished()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
     }
 
     @Test
@@ -271,10 +271,7 @@ struct PaneTitleTests {
         pane.receiveReportedTitle("~/dev/api")
         #expect(pane.programTitle == nil)
 
-        // The tracker gates running on a user interaction (typing the
-        // command), same as the real flow.
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         pane.receiveReportedTitle("✳ remote session")
         #expect(pane.programTitle == "✳ remote session")
     }
@@ -284,11 +281,10 @@ struct PaneTitleTests {
         // The shell's report lands before the prompt that ends the run.
         let pane = makeRemotePane()
         pane.applyForeground(claude)
-        pane.recordUserInteraction()
-        pane.markCommandRunning()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         pane.receiveReportedTitle("✳ remote session")
         pane.applyForeground(zsh)
-        pane.markCommandFinished()
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
         #expect(pane.programTitle == nil)
     }
 
@@ -342,7 +338,7 @@ struct PaneTitleTests {
         let pane = makeRemotePane()
         pane.applyForeground(claude)
         runTurn(pane)
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
         #expect(pane.programTitle == nil)
         // A title after it is the prompt's.
         pane.receiveReportedTitle("~/dev")
@@ -356,7 +352,7 @@ struct PaneTitleTests {
         let pane = makeRemotePane()
         pane.applyForeground(claude)
         pane.receiveReportedTitle("~/dev")
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
         #expect(pane.programTitle == nil)
     }
 

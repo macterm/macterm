@@ -1312,12 +1312,6 @@ final class AppState {
         let onEvent: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.notePollEvent() }
         }
-        let onQuietSettleDeadline: @Sendable (Notification) -> Void = { [weak self] _ in
-            // Do not route through notePollEvent: if another poll ran within
-            // 250ms, coalescing plus a fully occluded window would pause with
-            // no timer and never retry this deadline.
-            MainActor.assumeIsolated { self?.pollNow() }
-        }
         let tokens: [(NotificationCenter, NSObjectProtocol)] = [
             (center, center.addObserver(forName: .terminalPollEvent, object: nil, queue: .main, using: onEvent)),
             (center, center.addObserver(forName: .terminalSurfaceSized, object: nil, queue: .main) { [weak self] _ in
@@ -1326,12 +1320,6 @@ final class AppState {
             (center, center.addObserver(forName: .terminalSessionLead, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.claimLeadershipForKeyWindow() }
             }),
-            (center, center.addObserver(
-                forName: .terminalQuietSettleDeadline,
-                object: nil,
-                queue: .main,
-                using: onQuietSettleDeadline
-            )),
             (center, center.addObserver(
                 forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
             ) { [weak self] _ in
@@ -1466,11 +1454,6 @@ final class AppState {
         for (projectID, ws) in workspaces {
             for tab in ws.tabs {
                 for pane in tab.splitRoot.allPanes() {
-                    // An activity-sourced run whose output has been quiet past
-                    // the window settles to `.done`. The output heartbeat is
-                    // occlusion-independent, so silence is meaningful whether or
-                    // not the pane is on screen — no occlusion special-casing.
-                    pane.settleTerminalActivityIfQuiet()
                     if pane.executionState == .running { sawBusyPane = true }
                     markSeenIfActive(paneID: pane.id, projectID: projectID)
                 }
@@ -2080,13 +2063,14 @@ final class AppState {
     ///
     /// This is the ONE busy-close predicate. Every path that ends sessions —
     /// pane close, tab close, project remove, the sidebar's bulk
-    /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
-    /// of the overloads below. The raw `allPanes().contains(where:
-    /// \.needsConfirmClose)` ignores the retention, so it would warn about a
-    /// kill that the close does not do.
+    /// remove, the CLI's `busy` refusal and the Close Tab intent — asks
+    /// `judgeClose`, which gives this predicate the hosts' answers for plain
+    /// shells. The raw `allPanes().contains(where: \.needsConfirmClose)`
+    /// ignores the retention, so it would warn about a kill that the close
+    /// does not do.
     ///
     /// `plainAnswers` holds the verdicts that the hosts of plain shells gave
-    /// (`judgeClose`), by pane id. They replace the surface's reading.
+    /// (`askPlainShells`), by pane id. They replace the surface's reading.
     func closeNeedsConfirmation(_ closing: [Pane], plainAnswers: [UUID: Bool] = [:]) -> Bool {
         let retained = pendingPinnedSessionNames()
         return closing.contains { (plainAnswers[$0.id] ?? paneNeedsConfirmClose($0)) && !retained.contains($0.sessionName) }
@@ -2094,26 +2078,73 @@ final class AppState {
 
     /// Judges the close of `closing` and gives the verdict to `decide`.
     /// With no plain shell (a host with no server, 0494), `decide` runs at
-    /// once. Else the close first asks the host of each plain shell whether
-    /// the shell is idle. The asks run at the same time. `decide` runs at
-    /// the first busy answer, after the last answer, or after
-    /// `plainShellAnswerTimeout`. A pane with no answer then gets the
-    /// surface's reading, which warns. `target` names the request: a second
-    /// request for a target that is still judged does nothing.
+    /// once. Else the verdict waits for the hosts (`askPlainShells`).
+    /// `target` names the request: a second request for a target that is
+    /// still judged does nothing.
     func judgeClose(_ closing: [Pane], target: String, _ decide: @escaping @MainActor (Bool) -> Void) {
-        let plain = closing.filter(paneRunsPlainShell)
+        let plain = plainShellsToAsk(closing)
         guard !plain.isEmpty else {
             decide(closeNeedsConfirmation(closing))
             return
         }
         guard closesBeingJudged.insert(target).inserted else { return }
+        askPlainShells(plain, stopAtBusy: true) { [weak self] answers in
+            guard let self else { return }
+            closesBeingJudged.remove(target)
+            decide(closeNeedsConfirmation(closing, plainAnswers: answers))
+        }
+    }
+
+    /// The verdict of `judgeClose` for a caller that can wait: the CLI and
+    /// the Close Tab intent. It never stores a verdict: each call asks the
+    /// hosts again.
+    func judgeClose(_ closing: [Pane]) async -> Bool {
+        let plain = plainShellsToAsk(closing)
+        guard !plain.isEmpty else { return closeNeedsConfirmation(closing) }
+        let answers = await withCheckedContinuation { continuation in
+            askPlainShells(plain, stopAtBusy: true) { continuation.resume(returning: $0) }
+        }
+        return closeNeedsConfirmation(closing, plainAnswers: answers)
+    }
+
+    /// The panes of `panes` that would end a running program, each by the
+    /// same verdict as `judgeClose`, without the retention of pinned tabs:
+    /// the rows of the quit dialog.
+    func panesThatNeedConfirmClose(_ panes: [Pane]) async -> [Pane] {
+        let plain = panes.filter(paneRunsPlainShell)
+        var answers: [UUID: Bool] = [:]
+        if !plain.isEmpty {
+            answers = await withCheckedContinuation { continuation in
+                askPlainShells(plain, stopAtBusy: false) { continuation.resume(returning: $0) }
+            }
+        }
+        return panes.filter { answers[$0.id] ?? paneNeedsConfirmClose($0) }
+    }
+
+    /// The plain shells of `closing` whose verdict counts. A pane whose
+    /// session the close keeps (`pendingPinnedSessionNames`) is not asked,
+    /// so its busy answer cannot stop the wait for the others.
+    private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
+        let retained = pendingPinnedSessionNames()
+        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
+    }
+
+    /// Asks the host of each plain shell in `plain` whether the shell is
+    /// idle, all at the same time, and gives the answers to `done` once:
+    /// after the last answer, after `plainShellAnswerTimeout`, or, with
+    /// `stopAtBusy`, at the first busy answer. A pane with no answer is not
+    /// in the result, so it gets the surface's reading, which warns.
+    private func askPlainShells(
+        _ plain: [Pane],
+        stopAtBusy: Bool,
+        _ done: @escaping @MainActor ([UUID: Bool]) -> Void
+    ) {
         let judgement = CloseJudgement(waiting: Set(plain.map(\.id)))
-        let finish: @MainActor () -> Void = { [weak self] in
-            guard let self, !judgement.isDone else { return }
+        let finish: @MainActor () -> Void = {
+            guard !judgement.isDone else { return }
             judgement.isDone = true
             judgement.deadline?.cancel()
-            closesBeingJudged.remove(target)
-            decide(closeNeedsConfirmation(closing, plainAnswers: judgement.answers))
+            done(judgement.answers)
         }
         let ask = askPlainShellNeedsConfirmClose
         let timeout = plainShellAnswerTimeout
@@ -2121,7 +2152,7 @@ final class AppState {
             Task { @MainActor in
                 let answer = await ask(pane, timeout)
                 judgement.record(answer, for: pane.id)
-                if answer == true || judgement.waiting.isEmpty { finish() }
+                if (stopAtBusy && answer == true) || judgement.waiting.isEmpty { finish() }
             }
         }
         judgement.deadline = Task { @MainActor in
@@ -2134,23 +2165,6 @@ final class AppState {
     @ObservationIgnored
     private var closesBeingJudged: Set<String> = []
 
-    /// Whether closing (or, for a pinned tab, unloading) `tab` needs
-    /// confirmation. Closing a tab ends every session its panes hold alone.
-    func closeNeedsConfirmation(tab: TerminalTab) -> Bool {
-        closeNeedsConfirmation(tab.splitRoot.allPanes())
-    }
-
-    /// Whether removing the whole of project `projectID` needs
-    /// confirmation. Unknown or empty projects need none.
-    func closeNeedsConfirmation(projectID: UUID) -> Bool {
-        closeNeedsConfirmation(panes(inProject: projectID))
-    }
-
-    /// Every pane of the given projects (removed whole) and tabs.
-    func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
-        closeNeedsConfirmation(panes(inProjects: projectIDs, tabs: tabs))
-    }
-
     private func panes(inProjects projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> [Pane] {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {
@@ -2160,7 +2174,8 @@ final class AppState {
         return closing
     }
 
-    private func panes(inProject projectID: UUID) -> [Pane] {
+    /// Every pane of project `projectID`. Empty for an unknown project.
+    func panes(inProject projectID: UUID) -> [Pane] {
         workspaces[projectID]?.tabs.flatMap { $0.splitRoot.allPanes() } ?? []
     }
 
@@ -2191,20 +2206,27 @@ final class AppState {
     var plainShellAnswerTimeout: Duration = .seconds(2)
 
     /// Shows an open panel, adds or finds the selected directory as a project,
-    /// and selects it. Returns the selected project, nil if cancelled.
+    /// and selects it. Returns the selected project, nil if cancelled. With
+    /// `parent` (New Project Inside), the panel starts in the folder of
+    /// `parent` when it is a local folder, and the new project goes at the
+    /// end of the projects inside `parent`.
     @discardableResult
-    func openProject(store: ProjectStore) -> Project? {
+    func openProject(store: ProjectStore, inside parent: Project? = nil) -> Project? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.message = String(localized: "Select a project folder")
+        if let parent, parent.hasFolder, !parent.isRemote {
+            panel.directoryURL = URL(filePath: parent.path, directoryHint: .isDirectory)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         // Always create: picking a folder that already backs a project makes a
         // second, independent project for it, not a jump to the existing one.
         let project = store.create(
             name: url.lastPathComponent,
-            path: url.path(percentEncoded: false)
+            path: url.path(percentEncoded: false),
+            parent: parent?.id
         )
         selectProject(project)
         return project
@@ -2322,77 +2344,90 @@ final class AppState {
         saveWorkspaces()
     }
 
-    /// Run `removal` (the caller's full remove: workspace + project store)
-    /// immediately when no pane in the project is busy; otherwise stage it
-    /// for the confirmation alert — removal kills every pane's zmx session.
-    func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        judgeClose(panes(inProject: projectID), target: "project:\(projectID)") { [weak self] needsConfirmation in
-            guard let self else { return }
-            guard needsConfirmation else {
-                removal()
-                return
-            }
-            confirmRemoveProject(projectID, host: host, removal: removal)
+    /// Remove the project `projectID`, its tabs and every project inside
+    /// it, at any depth (design 013 §3, Ethan on ui-review 0522). A project
+    /// with no tabs and no projects inside goes at once. Any other project
+    /// asks one question with the count of tabs and of nested projects:
+    /// Cancel or Remove.
+    func requestRemoveProject(_ projectID: UUID, store: ProjectStore, host: DialogHost = .mainWindow) {
+        guard let project = store.row(projectID) else { return }
+        let removed = projectsRemoved(with: [projectID], store: store)
+        let tabs = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let nested = removed.count - 1
+        let removal: @MainActor () -> Void = { [weak self] in
+            self?.removeProject(projectID, store: store)
         }
-    }
-
-    private func confirmRemoveProject(_ projectID: UUID, host: DialogHost, removal: @escaping @MainActor () -> Void) {
-        present(PendingDialog(
-            kind: .removeProject(projectID),
-            title: String(localized: "Remove project with running processes?"),
-            message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
-            confirmTitle: String(localized: "Remove"),
-            host: host,
-            onConfirm: removal
-        ))
-    }
-
-    /// Remove a sidebar group (design 013). An empty group goes at once. A
-    /// group with projects always asks, and says how many: the removal ends
-    /// the sessions of each project inside, at any depth. Ungroup is the
-    /// path that keeps them.
-    func requestRemoveGroup(
-        _ group: Project,
-        projectCount: Int,
-        host: DialogHost = .mainWindow,
-        removal: @escaping @MainActor () -> Void
-    ) {
-        guard projectCount > 0 else {
+        guard tabs > 0 || nested > 0 else {
             removal()
             return
         }
-        present(PendingDialog(
-            kind: .removeGroup(group.id),
-            title: String(localized: "Remove the group “\(group.name)”?"),
-            message: String(localized: """
-            This group contains \(projectCount) projects. Macterm removes them and stops all processes \
-            in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group.
-            """),
-            confirmTitle: String(localized: "Remove"),
-            host: host,
-            onConfirm: removal
-        ))
+        judgeClose(panes(inProjects: removed, tabs: []), target: "project:\(projectID)") { [weak self] busy in
+            guard let self else { return }
+            let message = busy
+                ? String(localized: "This project contains \(tabs) tabs and \(nested) nested projects. A process is still running.")
+                : String(localized: "This project contains \(tabs) tabs and \(nested) nested projects.")
+            present(PendingDialog(
+                kind: .removeProject(projectID),
+                title: String(localized: "Remove the project “\(project.name)”?"),
+                message: message,
+                confirmTitle: String(localized: "Remove"),
+                host: host,
+                onConfirm: removal
+            ))
+        }
     }
 
-    /// A bulk sidebar delete (multi-selection): run `removal` now, or stage
-    /// it when one or more affected panes has a running foreground program —
-    /// a single dialog for the whole selection instead of one per item.
-    /// Run `removal` (the caller's full bulk close/remove) immediately when no
-    /// affected pane is busy; otherwise stage it behind one confirmation alert.
-    /// Mirrors `requestRemoveProject`/`requestCloseTab`, but for a whole
-    /// multi-selection so the user confirms once rather than per item.
+    /// Remove the project `projectID` and every project inside it: their
+    /// workspaces, their sessions and their rows.
+    func removeProject(_ projectID: UUID, store: ProjectStore) {
+        guard store.row(projectID) != nil else { return }
+        removeProjects(projectsRemoved(with: [projectID], store: store))
+        store.removeWithDescendants(projectID)
+    }
+
+    /// The projects that a removal of `selected` removes: each selected
+    /// project and every project inside it, once each.
+    func projectsRemoved(with selected: [UUID], store: ProjectStore) -> [UUID] {
+        var seen = Set<UUID>()
+        return selected.flatMap { [$0] + store.descendants(of: $0).map(\.id) }.filter { seen.insert($0).inserted }
+    }
+
+    /// A bulk sidebar delete (multi-selection): run `removal` (the caller's
+    /// close of `tabs` and removal of the `selected` projects) now, or after
+    /// one question for the whole selection. A selected project goes with
+    /// everything inside it, as a single Remove does, so the question has
+    /// the same counts when a selected project holds tabs or nested
+    /// projects. A selection of tabs alone asks only when a process runs.
     func requestRemoveSelection(
-        projectIDs: [UUID],
+        projectIDs selected: [UUID],
         tabs: [(tabID: UUID, projectID: UUID)],
+        store: ProjectStore,
         removal: @escaping @MainActor () -> Void
     ) {
-        judgeClose(panes(inProjects: projectIDs, tabs: tabs), target: "selection") { [weak self] needsConfirmation in
+        let removed = projectsRemoved(with: selected, store: store)
+        let tabCount = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let selectedSet = Set(selected)
+        let nested = removed.count(where: { !selectedSet.isDisjoint(with: store.ancestors(of: $0)) })
+        judgeClose(panes(inProjects: removed, tabs: tabs), target: "selection") { [weak self] busy in
             guard let self else { return }
-            guard needsConfirmation else {
-                removal()
+            guard tabCount > 0 || nested > 0 else {
+                if busy { confirmRemoveSelection(removal: removal) } else { removal() }
                 return
             }
-            confirmRemoveSelection(removal: removal)
+            let message = busy
+                ? String(localized: """
+                The selected projects contain \(tabCount) tabs and \(nested) nested projects. \
+                A process is still running.
+                """)
+                : String(localized: "The selected projects contain \(tabCount) tabs and \(nested) nested projects.")
+            present(PendingDialog(
+                kind: .removeSelection,
+                title: String(localized: "Remove the selected items?"),
+                message: message,
+                confirmTitle: String(localized: "Remove"),
+                host: .mainWindow,
+                onConfirm: removal
+            ))
         }
     }
 
@@ -3590,10 +3625,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it. A project with no folder is no slot: the sidebar
-    /// draws it as a group row, with no tabs (`SidebarTree`).
+    /// but never leave it. `projects` is in tree order, so every project,
+    /// with a folder or not, is a slot in the order of the sidebar.
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.filter(\.hasFolder).map(\.id)
+        var slots = projects.map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }
@@ -3700,7 +3735,7 @@ final class AppState {
     }
 }
 
-/// The answers of one `AppState.judgeClose` that waits for hosts.
+/// The answers of one `AppState.askPlainShells`.
 @MainActor
 private final class CloseJudgement {
     /// The panes whose host has not answered yet.

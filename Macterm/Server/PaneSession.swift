@@ -67,10 +67,14 @@ protocol PaneInputRoute: AnyObject, Sendable {
     func sendSize(_ grid: PaneGrid?)
     /// The user saw the pane: the session clears its attention flags.
     func seen()
+    /// Whether a window shows the surface. A remote pane's channel pauses
+    /// while no window shows it.
+    func setVisible(_ visible: Bool)
 }
 
 extension PaneInputRoute {
     func seen() {}
+    func setVisible(_: Bool) {}
 }
 
 extension PaneSessionHost {
@@ -143,6 +147,7 @@ actor PaneSession: PaneInputRoute {
         case claim(PaneGrid?)
         case size(PaneGrid?)
         case seen
+        case visible(Bool)
         case finish(CheckedContinuation<Finished, Never>)
     }
 
@@ -157,6 +162,10 @@ actor PaneSession: PaneInputRoute {
     /// The limit of new attaches on one channel for a grid that changes
     /// before its snapshot. After the limit, the snapshot is drawn.
     static let attachAgainLimit = 3
+    /// The most output bytes that wait for the host's feed. Then the reading
+    /// waits for the host, so that the backlog stays in the channel, where
+    /// its limit counts it (`PaneChannel.Buffering`).
+    static let feedAhead = 256 * 1024
     /// The longest time that `heldInput` waits for the shell after an
     /// attach. A shell with no OSC 133 marks (a plain `sh`) gets the input
     /// after this time.
@@ -199,6 +208,12 @@ actor PaneSession: PaneInputRoute {
     private var holdTimer: Task<Void, Never>?
     /// A claim that came before the first attach.
     private var claimPending = false
+    /// No window shows the surface: the channel's output pauses
+    /// (`PaneChannel.setPaused`), and the session's messages still come.
+    private var hidden = false
+    /// The last pause or resume of the channel. The next one waits for it,
+    /// so that they reach the server in order.
+    private var pausing: Task<Void, Never>?
 
     init(
         name: String,
@@ -273,6 +288,10 @@ actor PaneSession: PaneInputRoute {
             resize(grid)
         case .seen:
             write { try $0.send(MactermProtocol.Seen()) }
+        case let .visible(visible):
+            guard hidden == visible else { return }
+            hidden = !visible
+            if let channel, channel.pauses { setPaused(channel, hidden) }
         case let .finish(done):
             shutDown()
             let reading = task
@@ -326,6 +345,14 @@ actor PaneSession: PaneInputRoute {
     /// sends them again to every client.
     nonisolated func seen() {
         commands.yield(.seen)
+    }
+
+    /// Whether a window shows the surface. While none does, the channel's
+    /// output pauses; when one shows it again, the session's snapshot draws
+    /// the screen as it is now (design/003 §6). The title, the marks, the
+    /// run state and the exit still come.
+    nonisolated func setVisible(_ visible: Bool) {
+        commands.yield(.visible(visible))
     }
 
     /// Tells the session the surface's size. Only the leader's size reaches
@@ -385,6 +412,30 @@ actor PaneSession: PaneInputRoute {
         }
     }
 
+    /// Pauses or resumes `channel`, after the request before it. A request
+    /// that fails leaves the channel in a state that is not known: a resume
+    /// that did not arrive would freeze the pane. The channel then closes,
+    /// and the session attaches again as after a lost link.
+    private func setPaused(_ channel: PaneChannel, _ paused: Bool) {
+        let previous = pausing
+        pausing = Task { [weak self, name] in
+            await previous?.value
+            do { try await channel.setPaused(paused) } catch {
+                let reason = String(describing: error)
+                logger.info("pane \(name, privacy: .public): pause=\(paused, privacy: .public) failed: \(reason, privacy: .public)")
+                await self?.requestFailed(on: channel)
+            }
+        }
+    }
+
+    private func requestFailed(on failed: PaneChannel) {
+        guard let channel, channel === failed else { return }
+        // The events end at once: the reading sees the end of the channel.
+        // The close waits for the link.
+        channel.sink.finish()
+        Task { await failed.close() }
+    }
+
     private static func clamp(_ value: UInt32) -> UInt16 {
         UInt16(min(value, UInt32(UInt16.max)))
     }
@@ -430,6 +481,12 @@ actor PaneSession: PaneInputRoute {
                 guard install(channel) else {
                     await channel.close()
                     return
+                }
+                // A hidden surface's channel pauses before its attach: the
+                // attach's snapshot still comes, and no output after it.
+                if hidden, channel.pauses {
+                    setPaused(channel, true)
+                    await pausing?.value
                 }
                 let grid = host.paneGrid()
                 let resuming = matchingResumePoint(channel)
@@ -522,9 +579,10 @@ actor PaneSession: PaneInputRoute {
     /// It counts the output offset that the surface shows: a drawn
     /// snapshot's `offset` or a `resumed` offset, and the output bytes after
     /// it, from `start`, the offset that the screen shows at the attach. The
-    /// relay's skip-ahead drops output and sends a snapshot, which
-    /// sets the count again. When the channel ends, the count is the next
-    /// attach's resume point.
+    /// relay's skip-ahead, the channel's own (`skipped`) and a resume drop
+    /// output and bring a snapshot, which sets the count again. After
+    /// `skipped` there is no count until that snapshot. When the channel
+    /// ends, the count is the next attach's resume point.
     private func read(_ channel: PaneChannel, reconnected: Bool, shows start: UInt64?, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
         // A resume's `resumed` comes before any output, and repeats the
@@ -541,6 +599,8 @@ actor PaneSession: PaneInputRoute {
         // The bytes of the snapshot that is in progress.
         var held: Data?
         var dropsOutput = false
+        // The output bytes given to the host since the host last caught up.
+        var unfed = 0
         for await event in channel.events {
             switch event {
             case let .output(data):
@@ -550,6 +610,7 @@ actor PaneSession: PaneInputRoute {
                     attachGrid = nil
                     offset = offset.map { $0 + UInt64(data.count) }
                     deliver { $0.paneFeed(data) }
+                    unfed = await waitForHost(unfed + data.count)
                 }
             case let .snapshotStart(start):
                 // The first snapshot comes over the cleared screen. One after
@@ -586,6 +647,7 @@ actor PaneSession: PaneInputRoute {
                 if !bytes.isEmpty { deliver { $0.paneFeed(bytes) } }
                 deliver { $0.paneSnapshot(started: false) }
                 offset = snapshotOffset
+                unfed = await waitForHost(unfed + bytes.count)
             case let .lead(leader):
                 leads = leader
                 // A client that starts to lead sends its size.
@@ -615,6 +677,10 @@ actor PaneSession: PaneInputRoute {
                 deliver { $0.paneTitle(title) }
             case let .cwd(url):
                 deliver { $0.paneCwd(url) }
+            case .skipped:
+                // The channel dropped output that the surface did not get.
+                // The screen shows no known offset until the snapshot.
+                offset = nil
             case let .resumed(resumed):
                 // The bytes after the surface's offset follow: the screen
                 // and the scrollback stay.
@@ -625,6 +691,16 @@ actor PaneSession: PaneInputRoute {
             }
         }
         return Task.isCancelled
+    }
+
+    /// With `unfed` bytes given to the host and not fed yet: at
+    /// `feedAhead`, waits until the host got every call before, and gives
+    /// 0. A terminal that feeds slower than the output comes then holds the
+    /// reading, and the output waits in the channel, under its limit.
+    private func waitForHost(_ unfed: Int) async -> Int {
+        guard unfed >= Self.feedAhead else { return unfed }
+        await withCheckedContinuation { caughtUp in deliveries.async { caughtUp.resume() } }
+        return 0
     }
 
     /// Makes the session, or finds it. The server ends a session whose shell
@@ -650,12 +726,14 @@ actor PaneSession: PaneInputRoute {
         _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
     }
 
-    /// The channel ended. The lead and the flags were this channel's: the
-    /// next attach tells them again. The session sends its flags at an
-    /// attach only when one is set, so a copy kept here could stay wrong.
+    /// The channel ended. The lead, the flags and the run status were this
+    /// channel's: the next attach tells them again. The session sends its
+    /// flags and its status at an attach only when they are not clear, so a
+    /// copy kept here could stay wrong.
     private func channelEnded() {
         deliver { $0.paneLead(nil) }
         deliver { $0.paneAttention(MactermProtocol.Attention()) }
+        deliver { $0.paneStatus(MactermProtocol.Status(state: .idle)) }
     }
 
     private func install(_ channel: PaneChannel) -> Bool {

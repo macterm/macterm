@@ -129,10 +129,10 @@ struct CloseMactermTabIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let ctx = try await MactermIntentHost.shared.authorizedContext()
         let (projectID, target) = try IntentTargets.tab(tab.id, in: ctx)
-        // The same predicate `AppState.requestCloseTab` evaluates before it
+        // The same verdict `AppState.requestCloseTab` waits for before it
         // decides to ask, so an intent refuses exactly when the app would have
         // put a dialog up.
-        guard !ctx.appState.closeNeedsConfirmation(tab: target) else {
+        guard await !ctx.appState.judgeClose(target.splitRoot.allPanes()) else {
             throw MactermIntentError.busy
         }
         logger.info("intent: close tab \(target.sidebarTitle, privacy: .public)")

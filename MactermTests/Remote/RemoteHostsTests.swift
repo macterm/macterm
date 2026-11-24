@@ -697,6 +697,9 @@ struct RemoteHostsTests {
             #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
             #expect(await fixture.hosts.checkFolder("~", destination: "box") == .exists)
             #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            // 0583: a file is not a folder, over the host's server.
+            try Data().write(to: host.home.appendingPathComponent("notes.txt"))
+            #expect(await fixture.hosts.checkFolder("~/notes.txt", destination: "box") == .notDirectory)
             #expect(fixture.ready == ["box"])
             // The project's first pane uses the same login.
             _ = try await fixture.attach(fixture.pane())
@@ -710,6 +713,9 @@ struct RemoteHostsTests {
             let fixture = Fixture(host)
             #expect(await fixture.hosts.checkFolder(fixture.directory, destination: "box") == .exists)
             #expect(await fixture.hosts.checkFolder("~/none-\(UUID().uuidString)", destination: "box") == .missing)
+            // 0583: a file is not a folder, over ssh.
+            try Data().write(to: host.home.appendingPathComponent("notes.txt"))
+            #expect(await fixture.hosts.checkFolder("~/notes.txt", destination: "box") == .notDirectory)
             #expect(fixture.hosts.plainDestinations == ["box"])
         }
     }
