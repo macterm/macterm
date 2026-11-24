@@ -1256,12 +1256,10 @@ struct StatusPill<Icon: View>: View {
 /// pane's view gets every hit test under the row, and the status pills get
 /// none.
 ///
-/// A new title shows a short highlight on the pill (Copy Mode to Visual,
-/// Reconnecting to Connection Lost). The highlight shows at rest too. Thus a
-/// pill that shows its icon only also shows the change. The first title of
-/// a pill is not a change. SwiftUI has no API that sets the pressed state of
-/// a glass button. Thus the highlight is a fill of `MactermTheme.pressed` in
-/// the shape of the pill. With Reduce Motion, the highlight has no fade.
+/// A new title opens the pill for `peekDuration` (Copy Mode to Visual,
+/// Reconnecting to Connection Lost). Thus a pill that shows its icon only
+/// also shows the change. The first title of a pill is not a change. The
+/// pill opens and closes on the same curve as a hover.
 ///
 /// An open pill does not get narrower (`heldTitles`). The row is aligned to
 /// the trailing edge. Thus a narrower pill moves out from under the pointer,
@@ -1283,14 +1281,16 @@ struct PanePill<Icon: View>: View {
     /// and close.
     static var closeDelay: Duration { .milliseconds(150) }
 
-    /// The time that the highlight of a change stays at full strength, after
-    /// its fade in and before its fade out: about the length of a click.
-    static var highlightHold: Duration { .milliseconds(150) }
+    /// The time that a new title keeps the pill open: enough to read a
+    /// short title.
+    static var peekDuration: Duration { .milliseconds(1500) }
 
-    @State private var isRevealed = false
+    /// The pointer is on the pill (after `closeDelay` for an exit).
+    @State private var isHovered = false
+    /// A new title keeps the pill open for `peekDuration`.
+    @State private var isPeeking = false
     @State private var closeTask: Task<Void, Never>?
-    @State private var isHighlighted = false
-    @State private var highlightTask: Task<Void, Never>?
+    @State private var peekTask: Task<Void, Never>?
     /// The titles that the open pill showed before its title changed. The
     /// open pill keeps the width of the widest of them until it closes.
     @State private var heldTitles: [String] = []
@@ -1303,7 +1303,6 @@ struct PanePill<Icon: View>: View {
                     .buttonStyle(.glass)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
-                    .overlay { highlight(in: Capsule()) }
             } else {
                 Button(action: action ?? {}) {
                     label
@@ -1311,13 +1310,12 @@ struct PanePill<Icon: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .overlay { highlight(in: RoundedRectangle(cornerRadius: FlatPillChrome.cornerRadius, style: .continuous)) }
             }
         }
         // `onChange` does not run for the first title of the pill.
         .onChange(of: title) { old, _ in
             if isRevealed, !heldTitles.contains(old) { heldTitles.append(old) }
-            showHighlight()
+            peek()
         }
         .allowsHitTesting(action != nil)
         .focusable(action != nil)
@@ -1330,20 +1328,17 @@ struct PanePill<Icon: View>: View {
             .frame(minHeight: Self.contentHeight)
     }
 
-    private func highlight(in shape: some Shape) -> some View {
-        shape.fill(MactermTheme.pressed)
-            .opacity(isHighlighted ? 1 : 0)
-            .allowsHitTesting(false)
+    private var isRevealed: Bool {
+        isHovered || isPeeking
     }
 
-    private func showHighlight() {
-        highlightTask?.cancel()
-        let animation = reduceMotion ? nil : PaletteMotion.animation
-        withAnimation(animation) { isHighlighted = true }
-        highlightTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(reduceMotion ? 0 : PaletteMotion.seconds) + Self.highlightHold)
+    private func peek() {
+        peekTask?.cancel()
+        setReveal { isPeeking = true }
+        peekTask = Task { @MainActor in
+            try? await Task.sleep(for: Self.peekDuration)
             guard !Task.isCancelled else { return }
-            withAnimation(animation) { isHighlighted = false }
+            setReveal { isPeeking = false }
         }
     }
 
@@ -1351,29 +1346,29 @@ struct PanePill<Icon: View>: View {
     /// other badges on the same curve as this pill.
     private var revealBinding: Binding<Bool> {
         Binding(
-            get: { isRevealed },
+            get: { isHovered },
             set: { hovering in
                 closeTask?.cancel()
                 closeTask = nil
                 if hovering {
-                    reveal(true)
+                    setReveal { isHovered = true }
                 } else {
                     closeTask = Task { @MainActor in
                         try? await Task.sleep(for: Self.closeDelay)
                         guard !Task.isCancelled else { return }
-                        reveal(false)
+                        setReveal { isHovered = false }
                     }
                 }
             }
         )
     }
 
-    private func reveal(_ open: Bool) {
-        guard isRevealed != open else { return }
-        // The held titles go after the close. If they went at its start, the
-        // pill would get narrower in one frame.
+    /// Runs a change of the hover or the peek in one animated transaction.
+    /// The held titles go after the close. If they went at its start, the
+    /// pill would get narrower in one frame.
+    private func setReveal(_ change: () -> Void) {
         withAnimation(reduceMotion ? nil : PaletteMotion.animation) {
-            isRevealed = open
+            change()
         } completion: {
             if !isRevealed { heldTitles = [] }
         }
@@ -1453,8 +1448,6 @@ private struct RevealLayout: Layout {
 
 /// The flat chrome of a pill below macOS 26, in the theme colors.
 private struct FlatPillChrome: ViewModifier {
-    static var cornerRadius: CGFloat { 6 }
-
     func body(content: Content) -> some View {
         content
             .font(.system(size: 11, weight: .medium))
@@ -1462,10 +1455,10 @@ private struct FlatPillChrome: ViewModifier {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(MactermTheme.surface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .stroke(MactermTheme.border, lineWidth: 1)
                     )
             )
