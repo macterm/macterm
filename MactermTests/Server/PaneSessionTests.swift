@@ -266,14 +266,12 @@ struct PaneSessionTests {
             try await first.waitFor { $0.screen.contains("END") }
             a.stop()
 
+            // The attach reads the wide grid. Each later read gets the
+            // narrow one: the pane moved into its tile before the snapshot
+            // ended.
             let narrow = PaneGrid(cols: 30, rows: 10)
-            let box = SessionBox()
-            let second = RecordingPaneHost(grid: wide) { [box] in
-                box.host?.setGrid(narrow)
-                box.session?.sendSize(narrow)
-            }
+            let second = RecordingPaneHost(grid: wide, afterFirstRead: narrow)
             let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: TestServerEndpoint(server))
-            box.set(session: b, host: second)
             b.start()
             try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
             // At 30 columns the line of 60 takes rows 1 and 2, and END is on
@@ -457,29 +455,6 @@ struct PaneSessionTests {
     }
 
     // MARK: - Support
-
-    /// The session and host of a test, for a host's hook.
-    final class SessionBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: (PaneSession, RecordingPaneHost)?
-        var session: PaneSession? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored?.0
-        }
-
-        var host: RecordingPaneHost? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored?.1
-        }
-
-        func set(session: PaneSession, host: RecordingPaneHost) {
-            lock.lock()
-            stored = (session, host)
-            lock.unlock()
-        }
-    }
 
     private func withServer(_ body: (LocalServer) async throws -> Void) async throws {
         let bundled = try #require(LocalServer.bundled, "zmx/zmx missing from the built bundle. Run `mise run setup`.")
