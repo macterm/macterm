@@ -65,6 +65,9 @@ final class RemotePaneDriver {
         /// last one (`PaneSession.finish`). Each view has its own screen. A
         /// new session or a plain shell clears it.
         fileprivate var resume: PaneSession.ResumePoint?
+        /// A window shows the view. A session that starts for a hidden view
+        /// pauses its channel. Read and written on the main actor.
+        fileprivate var visible = true
 
         fileprivate init(host: any PaneSessionHost, driver: RemotePaneDriver) {
             self.host = host
@@ -97,6 +100,15 @@ final class RemotePaneDriver {
 
         nonisolated func seen() {
             DispatchQueue.main.async { MainActor.assumeIsolated { self.driver?.inputRoute(of: self)?.seen() } }
+        }
+
+        nonisolated func setVisible(_ visible: Bool) {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.visible = visible
+                    self.session?.setVisible(visible)
+                }
+            }
         }
     }
 
@@ -374,6 +386,7 @@ final class RemotePaneDriver {
         )
         forward.session = session
         view.session = session
+        if !view.visible { session.setVisible(false) }
         session.start()
         let waiting = undelivered + earlyInput
         undelivered = Data()

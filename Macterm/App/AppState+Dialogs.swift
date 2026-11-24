@@ -32,8 +32,6 @@ extension AppState {
             case closeTab(tabID: UUID, projectID: UUID)
             case restartSessions(tabID: UUID, projectID: UUID, paneID: UUID?)
             case removeProject(UUID)
-            /// Remove a sidebar group and the projects inside it.
-            case removeGroup(UUID)
             case removeSelection
             case applyLayout(projectID: UUID)
             /// A notice, not a question: the layout verb that failed.

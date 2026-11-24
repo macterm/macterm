@@ -9,12 +9,11 @@ on:
   pull_request:
     branches: [main]
 
-# A new push to a pull request cancels the runs of its older commit, so they
-# do not keep the macOS runners that the new jobs need. A push to main has a
-# group for each commit and is never cancelled: release-tip.yml needs the Test
-# and Checks results of each commit on main.
+# A push cancels the runs of older commits of the same pull request or of
+# main. A cancelled main commit gets no tip build, and the run of the next
+# commit checks its changes (scripts/changed-areas.sh).
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.sha }}
+  group: checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,6 +21,10 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # actions: read lists the runs of this workflow (scripts/changed-areas.sh).
+    permissions:
+      contents: read
+      actions: read
     outputs:
       style: ${{ steps.changes.outputs.style }}
     steps:
@@ -31,7 +34,7 @@ jobs:
       - name: Find Changes
         id: changes
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: scripts/changed-areas.sh
 
   format:

@@ -43,7 +43,8 @@ extension AgentSkills {
         `--select` makes the new project the active project. The active project is the project that the user
         looks at. In later commands, name projects by `name` or `id` (`--project api`). If two projects have
         the same name, the answer is `ambiguous`, so pass the `id`. `macterm project remove <id>` removes a
-        duplicate. It does not touch any file, but it kills the sessions of that project.
+        duplicate. It does not touch any file, but it kills the sessions of that project and of every project
+        inside it.
 
         ## 2. Open tabs, split panes
 

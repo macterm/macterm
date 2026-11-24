@@ -9,8 +9,9 @@ struct SidebarTreeTests {
             .appendingPathComponent("macterm-sidebar-tree-tests-\(UUID().uuidString).json"))
     }
 
-    /// Top level: `a`, group `g` (holds `b` and group `inner` with `c`), `d`.
-    /// A group is a project with no folder.
+    /// Top level: `a`, `g` (holds `b` and `inner`, which holds `c`), `d`.
+    /// `g` and `inner` have no folder, as a dev build's old group rows; the
+    /// tree treats them as every other project.
     private struct Fixture {
         let store: ProjectStore
         let a: Project
@@ -26,7 +27,7 @@ struct SidebarTreeTests {
         let a = store.create(name: "a", path: "/tmp/a")
         let g = store.add(Project(name: "g", path: ""))
         let b = store.add(Project(name: "b", path: "/tmp/b", parent: g.id))
-        let inner = store.add(Project(name: "inner", path: "", parent: g.id))
+        let inner = store.add(Project(name: "inner", path: "/tmp/inner", parent: g.id))
         let c = store.add(Project(name: "c", path: "/tmp/c", parent: inner.id))
         let d = store.create(name: "d", path: "/tmp/d")
         return Fixture(store: store, a: a, g: g, b: b, inner: inner, c: c, d: d)
@@ -34,97 +35,94 @@ struct SidebarTreeTests {
 
     private func names(_ nodes: [SidebarNode]) -> [String] {
         nodes.map { node in
-            switch node {
-            case let .group(group, children): "\(group.name)(\(names(children).joined(separator: ",")))"
-            case let .project(project): project.name
-            }
+            node.children.isEmpty
+                ? node.project.name
+                : "\(node.project.name)(\(names(node.children).joined(separator: ",")))"
         }
     }
 
     @Test
-    func nodes_nest_groups_in_store_order() {
+    func nodes_nest_projects_in_store_order() {
         let f = makeFixture()
         #expect(names(SidebarTree.nodes(in: f.store)) == ["a", "g(b,inner(c))", "d"])
     }
 
     @Test
-    func selectable_items_skip_groups_and_the_rows_of_closed_groups() {
+    func a_project_with_a_folder_holds_its_children() {
+        let f = makeFixture()
+        _ = f.store.add(Project(name: "child", path: "/tmp/child", parent: f.a.id))
+        #expect(names(SidebarTree.nodes(in: f.store)) == ["a(child)", "g(b,inner(c))", "d"])
+    }
+
+    @Test
+    func selectable_items_list_tabs_then_children_of_open_projects() {
         let f = makeFixture()
         let nodes = SidebarTree.nodes(in: f.store)
-        let tab = UUID()
-        let tabs: (UUID) -> [UUID] = { $0 == f.b.id ? [tab] : [] }
+        let gTab = UUID()
+        let bTab = UUID()
+        let tabs: (UUID) -> [UUID] = { id in
+            switch id {
+            case f.g.id: [gTab]
+            case f.b.id: [bTab]
+            default: []
+            }
+        }
 
         let closed = SidebarTree.selectableItems(nodes, expanded: [], tabs: tabs)
-        #expect(closed == [.project(f.a.id), .project(f.d.id)])
+        #expect(closed == [.project(f.a.id), .project(f.g.id), .project(f.d.id)])
 
         let open = SidebarTree.selectableItems(nodes, expanded: [f.g.id, f.b.id], tabs: tabs)
         #expect(open == [
-            .project(f.a.id), .project(f.b.id), .tab(projectID: f.b.id, tabID: tab), .project(f.d.id),
-        ], "the closed inner group hides c, and no group is an item")
+            .project(f.a.id),
+            .project(f.g.id), .tab(projectID: f.g.id, tabID: gTab),
+            .project(f.b.id), .tab(projectID: f.b.id, tabID: bTab),
+            .project(f.inner.id),
+            .project(f.d.id),
+        ], "a parent's tabs come before its children, and the closed inner hides c")
 
-        let all = SidebarTree.selectableItems(nodes, expanded: [f.g.id, f.inner.id], tabs: tabs)
-        #expect(all == [.project(f.a.id), .project(f.b.id), .project(f.c.id), .project(f.d.id)])
+        let hidden = SidebarTree.selectableItems(nodes, expanded: [f.b.id, f.inner.id], tabs: tabs)
+        #expect(hidden == [.project(f.a.id), .project(f.g.id), .project(f.d.id)], "a closed parent hides every row inside it")
     }
 
     @Test
-    func groups_to_open_are_every_group_above_the_project() {
+    func parents_to_open_are_every_project_above() {
         let f = makeFixture()
-        #expect(Set(SidebarTree.groupsToOpen(for: f.c.id, in: f.store)) == [f.g.id, f.inner.id])
-        #expect(SidebarTree.groupsToOpen(for: f.a.id, in: f.store).isEmpty)
+        #expect(Set(SidebarTree.parentsToOpen(for: f.c.id, in: f.store)) == [f.g.id, f.inner.id])
+        #expect(SidebarTree.parentsToOpen(for: f.a.id, in: f.store).isEmpty)
     }
 
     @Test
-    func drop_on_a_group_header_moves_the_project_in() {
+    func drop_on_a_project_header_moves_the_project_inside() {
         let f = makeFixture()
         #expect(SidebarTree.drop(f.a.id, onto: f.inner, in: f.store))
         #expect(f.store.row(f.a.id)?.parent == f.inner.id)
         #expect(f.store.children(of: f.inner.id).map(\.name) == ["c", "a"])
+
+        #expect(SidebarTree.drop(f.d.id, onto: f.b, in: f.store), "a project with a folder takes a project too")
+        #expect(f.store.row(f.d.id)?.parent == f.b.id)
     }
 
     @Test
-    func drop_on_a_project_header_puts_the_project_beside_it() {
-        let f = makeFixture()
-        // From another parent: before the target, in the target's parent.
-        #expect(SidebarTree.drop(f.d.id, onto: f.b, in: f.store))
-        #expect(f.store.children(of: f.g.id).map(\.name) == ["d", "b", "inner"])
-        // In one parent, downward: after the target.
-        #expect(SidebarTree.drop(f.d.id, onto: f.b, in: f.store))
-        #expect(f.store.children(of: f.g.id).map(\.name) == ["b", "d", "inner"])
-        // Upward: before the target.
-        #expect(SidebarTree.drop(f.inner.id, onto: f.b, in: f.store))
-        #expect(f.store.children(of: f.g.id).map(\.name) == ["inner", "b", "d"])
-    }
-
-    @Test
-    func drop_of_a_group_into_itself_is_refused() {
+    func drop_of_a_project_into_itself_is_refused() {
         let f = makeFixture()
         #expect(!SidebarTree.drop(f.g.id, onto: f.inner, in: f.store))
         #expect(!SidebarTree.drop(f.g.id, onto: f.g, in: f.store))
-        #expect(!SidebarTree.drop(f.g.id, onto: f.c, in: f.store), "beside c is inside g")
+        #expect(!SidebarTree.drop(f.g.id, onto: f.c, in: f.store))
         #expect(f.store.row(f.g.id)?.parent == nil)
     }
 
     @Test
-    func move_targets_leave_out_the_parent_and_the_groups_inside_the_row() {
+    func move_targets_leave_out_the_parent_itself_and_the_projects_inside() {
         let f = makeFixture()
-        #expect(SidebarTree.moveTargets(for: f.b.id, in: f.store).map(\.id) == [f.inner.id])
-        #expect(SidebarTree.moveTargets(for: f.a.id, in: f.store).map(\.id) == [f.g.id, f.inner.id])
-        #expect(SidebarTree.moveTargets(for: f.g.id, in: f.store).isEmpty)
+        #expect(SidebarTree.moveTargets(for: f.b.id, in: f.store).map(\.id) == [f.a.id, f.inner.id, f.c.id, f.d.id])
+        #expect(SidebarTree.moveTargets(for: f.g.id, in: f.store).map(\.id) == [f.a.id, f.d.id])
+        #expect(SidebarTree.moveTargets(for: f.c.id, in: f.store).map(\.id) == [f.a.id, f.g.id, f.b.id, f.d.id])
     }
 
     @Test
-    func path_name_joins_the_groups_above() {
+    func path_name_joins_the_projects_above() {
         let f = makeFixture()
-        #expect(SidebarTree.pathName(of: f.inner, in: f.store) == "g / inner")
+        #expect(SidebarTree.pathName(of: f.c, in: f.store) == "g / inner / c")
         #expect(SidebarTree.pathName(of: f.g, in: f.store) == "g")
-    }
-
-    @Test
-    func the_children_of_a_project_with_a_folder_follow_it() {
-        let f = makeFixture()
-        let child = f.store.add(Project(name: "child", path: "/tmp/child", parent: f.a.id))
-        _ = child
-        #expect(names(SidebarTree.nodes(in: f.store)).first == "a")
-        #expect(Array(names(SidebarTree.nodes(in: f.store)).prefix(2)) == ["a", "child"])
     }
 }
