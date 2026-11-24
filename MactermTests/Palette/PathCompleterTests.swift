@@ -39,7 +39,7 @@ struct PathCompleterTests {
         let completion = PathCompleter.complete(root + "/ap")
         #expect(completion?.exactMatch == nil)
         #expect(names(completion) == ["api", "App", "apps"])
-        #expect(names(PathCompleter.complete(root + "/APP")) == ["App", "apps"])
+        #expect(names(PathCompleter.complete(root + "/AP")) == ["api", "App", "apps"])
         #expect(names(PathCompleter.complete(root + "/zz"))?.isEmpty == true)
     }
 

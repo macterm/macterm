@@ -72,9 +72,10 @@ struct CommandPaletteOverlay: View {
                     PaletteBreadcrumb(frames: windowState.paletteStack) { index in
                         // Back to that screen with its search empty, as
                         // Escape and Backspace leave one: text typed for one
-                        // listing means nothing to another.
-                        appState.commandPaletteQuery = ""
+                        // listing means nothing to another. An input screen
+                        // gets its value back (`initialQuery`).
                         windowState.popPaletteFrames(above: index)
+                        appState.commandPaletteQuery = windowState.paletteStack.last?.scope.initialQuery ?? ""
                     }
                     CommandPalettePanel()
                         .glassPanel(cornerRadius: Self.cornerRadius)
@@ -379,7 +380,9 @@ struct CommandPalettePanel: View {
             refresh()
             // An input screen starts on its value, selected, so that a
             // keystroke replaces it.
-            DispatchQueue.main.async { selectFieldText() }
+            if inputScope != nil {
+                DispatchQueue.main.async { selectFieldText() }
+            }
         }
         .onChange(of: availability.unavailable) {
             refresh()
@@ -523,8 +526,9 @@ struct CommandPalettePanel: View {
         // there.
         guard scope == nil, !flatItems.isEmpty else { return .ignored }
         let top = flatItems[0]
-        let completion = if let path = directoryPath(for: top) {
-            PathCompleter.fieldText(for: path, typed: query)
+        let completion: String = if let path = directoryPath(for: top) {
+            // Re-expand a `~` query to keep the displayed prefix the user typed.
+            query.hasPrefix("~") ? abbreviateTilde(path) : path
         } else {
             top.title
         }
@@ -537,9 +541,14 @@ struct CommandPalettePanel: View {
     /// (`dir-open:/abs/path` or `dir-switch:/abs/path`). `nil` for non-path items.
     private func directoryPath(for item: PaletteItem) -> String? {
         for prefix in ["dir-open:", "dir-switch:"] where item.id.hasPrefix(prefix) {
-            return String(item.id.dropFirst(prefix.count))
+            let path = String(item.id.dropFirst(prefix.count))
+            return path.hasSuffix("/") ? path : path + "/"
         }
         return nil
+    }
+
+    private func abbreviateTilde(_ path: String) -> String {
+        (path as NSString).abbreviatingWithTildeInPath
     }
 
     /// The id of the zero-height view at the top of the results.

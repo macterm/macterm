@@ -67,7 +67,9 @@ enum PathCompleter {
     /// trailing slash, so that the next completion descends into it, and
     /// with `~` again when the user typed it.
     static func fieldText(for path: String, typed: String) -> String {
-        let slashed = path.hasSuffix("/") ? path : path + "/"
-        return typed.hasPrefix("~") ? (slashed as NSString).abbreviatingWithTildeInPath : slashed
+        // Abbreviate first: `abbreviatingWithTildeInPath` drops a trailing
+        // slash.
+        let text = typed.hasPrefix("~") ? (path as NSString).abbreviatingWithTildeInPath : path
+        return text.hasSuffix("/") ? text : text + "/"
     }
 }
