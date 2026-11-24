@@ -2576,6 +2576,27 @@ struct AppStateTests {
         state.commitTabCycle(projectID: project.id)
     }
 
+    /// The project screen keeps its tabs' renderers awake only until it
+    /// ends, and a closed window ends it too.
+    @Test
+    func the_project_screen_wakes_its_tabs_until_it_ends() throws {
+        let state = makeAppState()
+        let project = seedProject(state)
+        let ws = try #require(state.workspaces[project.id])
+        state.createTab(projectID: project.id, projects: [project])
+        let panes = ws.tabs.flatMap { $0.splitRoot.allPanes() }
+        let views = panes.map { SurfaceRegistry.shared.ensureView(of: $0) }
+        let window = WindowState()
+
+        state.showProjectScreenPreviews(of: ws.tabs, in: window)
+        #expect(state.previewSampler.isSampling(for: .projectScreen(window.id)))
+        #expect(views.map(\.rendersForPreview) == [true, true])
+
+        state.endProjectScreenPreviews(in: window)
+        #expect(!state.previewSampler.isSampling)
+        #expect(views.map(\.rendersForPreview) == [false, false])
+    }
+
     // MARK: - Quick terminal persistence
 
     /// A store on disk plus an AppState adopting its own quick terminal, so

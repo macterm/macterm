@@ -40,19 +40,14 @@ enum ProjectScreenGridLayout {
         return CGSize(width: cardWidth, height: cardWidth / max(aspect, 0.2))
     }
 
-    /// How much lower the second column starts.
-    static func stagger(cardSize: CGSize) -> CGFloat {
-        cardSize.height / 2
-    }
-
     /// The top-left corner of card `index`: the first card left, the second
-    /// right, and so on.
+    /// right, and so on. The second column starts half a card lower.
     static func origin(of index: Int, cardSize: CGSize) -> CGPoint {
         let column = index % columns
         let row = index / columns
         return CGPoint(
             x: CGFloat(column) * (cardSize.width + spacing),
-            y: CGFloat(row) * (cardSize.height + spacing) + (column == 0 ? 0 : stagger(cardSize: cardSize))
+            y: CGFloat(row) * (cardSize.height + spacing) + (column == 0 ? 0 : cardSize.height / 2)
         )
     }
 
@@ -180,8 +175,9 @@ private struct ProjectScreenCardView: View {
     private var isHovered = false
 
     private static let cornerRadius: CGFloat = 8
-    /// The space around the card that the hover fill shows in, as in the tab
-    /// switcher (`TabSwitcherCard.selectionHalo`).
+    /// How far the hover fill reaches out of the card, as in the tab
+    /// switcher (`TabSwitcherCard.selectionHalo`). It is drawn in the gap
+    /// between cards, so the card keeps the size of its slot and its aspect.
     private static let halo: CGFloat = 4
 
     var body: some View {
@@ -194,16 +190,17 @@ private struct ProjectScreenCardView: View {
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                         .strokeBorder(MactermTheme.border.opacity(0.6), lineWidth: 1)
                 )
-                .padding(Self.halo)
                 .background(
                     RoundedRectangle(cornerRadius: Self.cornerRadius + Self.halo, style: .continuous)
                         .fill(isHovered ? MactermTheme.fg.opacity(0.14) : .clear)
+                        .padding(-Self.halo)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .overlay(RowHoverTracker(isHovered: $isHovered))
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
     }
 
     @ViewBuilder
@@ -234,13 +231,19 @@ private struct ProjectScreenCardView: View {
         }
     }
 
-    /// The tab's title for a tab's card, which shows no text. A child's
-    /// card reads its name and folder.
+    /// The tab's title for a tab's card, which shows no text. The child's
+    /// name for a child's card.
     private var accessibilityLabel: String {
         switch card {
         case let .tab(tab): tab.sidebarRowTitle
-        case let .project(child): child.hasFolder ? "\(child.name), \(child.path)" : child.name
+        case let .project(child): child.name
         }
+    }
+
+    /// The child's folder, if it has one.
+    private var accessibilityValue: String {
+        if case let .project(child) = card, child.hasFolder { return child.path }
+        return ""
     }
 }
 
@@ -294,13 +297,20 @@ struct WindowVisibilityReader: NSViewRepresentable {
 
         @objc
         private func occlusionDidChange(_: Notification) {
+            // Before the read: the order of two observers of one
+            // notification is not defined (`WindowOcclusionReports`).
+            if let window { WindowOcclusionReports.noteReport(from: window) }
             report()
         }
 
         /// Asynchronous: AppKit can attach the view inside a SwiftUI update
         /// pass, where a state change is not allowed (`WindowAttachmentView`).
         private func report() {
-            let isVisible = window?.occlusionState.contains(.visible) ?? false
+            // A new window's occlusion state is wrong until its first report
+            // (`WindowOcclusionReports`): until then, an ordered-in window counts.
+            let isVisible = window.map {
+                WindowOcclusionReports.hasReported($0) ? $0.occlusionState.contains(.visible) : $0.isVisible
+            } ?? false
             DispatchQueue.main.async { [weak self] in self?.onChange?(isVisible) }
         }
     }

@@ -1,10 +1,10 @@
 import Foundation
 
 /// The Recent Tab cycle (Ctrl+Tab) and the tab switcher's live previews
-/// (#344). It holds the order that a cycle walks; the cards' pictures come
-/// from the shared `PanePreviewSampler`. It holds no tab and changes no model: `AppState` asks it which tab a gesture
-/// picked and selects that tab itself, so the cycle survives the model
-/// cut-over unchanged.
+/// (#344). It holds the order that a cycle walks. The cards' pictures come
+/// from the shared `PanePreviewSampler`. It holds no tab and changes no
+/// model: `AppState` asks it which tab a gesture picked and selects that tab
+/// itself, so the cycle survives the model cut-over unchanged.
 @MainActor @Observable
 final class TabCycler {
     /// The tab IDs the current cycle walks, most-recent-first. Empty when no

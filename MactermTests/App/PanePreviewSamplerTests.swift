@@ -52,4 +52,23 @@ struct PanePreviewSamplerTests {
         #expect(!secondView.rendersForPreview)
         #expect(!sampler.isSampling)
     }
+
+    /// A pane whose view did not exist at `begin` is woken at the next
+    /// sample, when its view exists.
+    @Test
+    func a_pane_whose_view_comes_later_is_woken_at_the_next_sample() {
+        let sampler = PanePreviewSampler()
+        let pane = Pane(projectPath: "/p", projectID: UUID())
+        let window = PanePreviewSampler.Client.projectScreen(UUID())
+
+        sampler.begin(window, panes: [pane])
+        let view = SurfaceRegistry.shared.ensureView(of: pane)
+        #expect(!view.rendersForPreview)
+        // A second `begin` samples at once, as a timer tick does.
+        sampler.begin(window, panes: [pane])
+        #expect(view.rendersForPreview)
+
+        sampler.end(window)
+        #expect(!view.rendersForPreview)
+    }
 }

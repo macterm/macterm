@@ -112,6 +112,10 @@ final class PanePreviewSampler {
     /// the cost, and only the panes that move pay it.
     private func sample() {
         for pane in awakePanes.values {
+            // Again at each tick: a pane whose view did not exist at `begin`
+            // (a tab that the launch warms later) gets its renderer woken
+            // when the view comes. The setter ignores an unchanged value.
+            SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = true
             store(PanePreviewCapture.capture(pane, reusing: previews[pane.id]), for: pane.id)
         }
     }
@@ -119,8 +123,12 @@ final class PanePreviewSampler {
     /// Keep the best preview: a sample that came back frameless must not
     /// erase a frame, so a pane whose woken renderer has not drawn yet keeps
     /// its last picture.
+    /// A sample that is the stored one (nothing drawn since) is not stored
+    /// again, so the cards do not draw again at each tick.
     private func store(_ preview: PanePreview, for paneID: UUID) {
-        if preview.image == nil, previews[paneID]?.image != nil { return }
+        let old = previews[paneID]
+        if preview.image == nil, old?.image != nil { return }
+        if let old, old.image === preview.image, old.background == preview.background { return }
         previews[paneID] = preview
     }
 }
