@@ -511,58 +511,90 @@ struct SidebarContent: View {
     /// function calls itself for the projects inside.
     private func projectSection(_ node: SidebarNode) -> AnyView {
         let project = node.project
-        let tabs = appState.workspaces[project.id]?.tabs ?? []
         return AnyView(
             DisclosureGroup(isExpanded: expansion(of: project.id)) {
-                ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
-                    tabRow(tab: tab, index: tabIndex, project: project)
-                }
-                // Single drop mechanism for every case: SwiftUI reports the
-                // insertion `offset` within THIS project's tab list. A tab drop
-                // from the same project reorders to that slot; one from another
-                // project moves the tab in at that slot; a PANE drop (the grab
-                // handle drag from the workspace) separates that pane into a new
-                // tab landing at the same slot. Replaces the old `.onMove` (which
-                // is per-section and can't express a cross-project move).
-                .dropDestination(for: TabSlotDropItem.self) { items, offset in
-                    for item in items {
-                        switch item {
-                        case let .tab(tab):
-                            receiveTabDrop([tab], into: project, at: offset)
-                        case let .pane(pane):
-                            receivePaneDrop([pane], into: project, at: offset)
-                        }
-                    }
-                }
-                // The outline gives the line between the last tab and the
-                // first project inside to this `ForEach` (its offset 0), not
-                // to the tab `ForEach`. With no destination here, a tab drop
-                // at that line did nothing (ui-review 0522). A tab or a pane
-                // dropped at any line among these rows goes after the last
-                // tab of this project. This destination takes tabs and panes
-                // only; a project drop on the top-level `ForEach` of
-                // disclosures crashes (see the notes in `body`).
-                ForEach(node.children) { child in
-                    projectSection(child)
-                }
-                .dropDestination(for: TabSlotDropItem.self) { items, _ in
-                    // An explicit slot, not nil: nil does not reorder a tab
-                    // of this project (`receiveTabDrop`).
-                    let slot = appState.workspaces[project.id]?.tabs.count ?? 0
-                    for item in items {
-                        switch item {
-                        case let .tab(tab):
-                            receiveTabDrop([tab], into: project, at: slot)
-                        case let .pane(pane):
-                            receivePaneDrop([pane], into: project, at: slot)
-                        }
-                    }
+                // A closed project's rows take no drops. The outline can give
+                // the line below a closed project to a destination inside it,
+                // and its accept then reads a child of the closed item that
+                // the list does not hold: SwiftUI's assertion in
+                // `OutlineListCoordinator` (ui-review 0551). A drop on the
+                // header still lands in a closed project, and a drag that
+                // hovers the header opens it.
+                if windowState.expandedRows.contains(project.id) {
+                    projectContent(node)
+                } else {
+                    projectRows(node)
                 }
             } label: {
                 projectHeader(project: project)
             }
             .id(SidebarItem.project(project.id))
         )
+    }
+
+    /// The rows inside a project, with no drop destination: the content of
+    /// a closed project (see `projectSection`).
+    @ViewBuilder
+    private func projectRows(_ node: SidebarNode) -> some View {
+        let project = node.project
+        let tabs = appState.workspaces[project.id]?.tabs ?? []
+        ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
+            tabRow(tab: tab, index: tabIndex, project: project)
+        }
+        ForEach(node.children) { child in
+            projectSection(child)
+        }
+    }
+
+    /// The rows inside an open project, with their drop destinations.
+    @ViewBuilder
+    private func projectContent(_ node: SidebarNode) -> some View {
+        let project = node.project
+        let tabs = appState.workspaces[project.id]?.tabs ?? []
+        ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
+            tabRow(tab: tab, index: tabIndex, project: project)
+        }
+        // Single drop mechanism for every case: SwiftUI reports the
+        // insertion `offset` within THIS project's tab list. A tab drop
+        // from the same project reorders to that slot; one from another
+        // project moves the tab in at that slot; a PANE drop (the grab
+        // handle drag from the workspace) separates that pane into a new
+        // tab landing at the same slot. Replaces the old `.onMove` (which
+        // is per-section and can't express a cross-project move).
+        .dropDestination(for: TabSlotDropItem.self) { items, offset in
+            for item in items {
+                switch item {
+                case let .tab(tab):
+                    receiveTabDrop([tab], into: project, at: offset)
+                case let .pane(pane):
+                    receivePaneDrop([pane], into: project, at: offset)
+                }
+            }
+        }
+        // The outline gives the line between the last tab and the
+        // first project inside to this `ForEach` (its offset 0), not
+        // to the tab `ForEach`. With no destination here, a tab drop
+        // at that line did nothing (ui-review 0522). A tab or a pane
+        // dropped at any line among these rows goes after the last
+        // tab of this project. This destination takes tabs and panes
+        // only; a project drop on the top-level `ForEach` of
+        // disclosures crashes (see the notes in `body`).
+        ForEach(node.children) { child in
+            projectSection(child)
+        }
+        .dropDestination(for: TabSlotDropItem.self) { items, _ in
+            // An explicit slot, not nil: nil does not reorder a tab
+            // of this project (`receiveTabDrop`).
+            let slot = appState.workspaces[project.id]?.tabs.count ?? 0
+            for item in items {
+                switch item {
+                case let .tab(tab):
+                    receiveTabDrop([tab], into: project, at: slot)
+                case let .pane(pane):
+                    receivePaneDrop([pane], into: project, at: slot)
+                }
+            }
+        }
     }
 
     private func tabRow(tab: TerminalTab, index tabIndex: Int, project: Project) -> some View {
