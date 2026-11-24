@@ -122,8 +122,8 @@ struct GhosttyAppTests {
     func aPairInAnIncludeReadsBothSides() throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         let split = try makeSplit()
-        let included = try write("included.conf", "theme = light:\(split.light),dark:\(split.dark)\n")
-        let user = try write("root", "config-file = \(included)\ntheme = Root Theme\npalette = 1=#abcdef\n")
+        _ = try write("included.conf", "theme = light:\(split.light),dark:\(split.dark)\n")
+        let user = try write("root", "config-file = included.conf\ntheme = Root Theme\npalette = 1=#abcdef\n")
         let sides = try #require(try themeSides([user]))
         #expect(sides == ThemeResolver.Sides(light: split.light, dark: split.dark))
         let colors = try #require(try readSide(sides.dark, over: user))
@@ -136,6 +136,14 @@ struct GhosttyAppTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let user = try write("config", "theme = Builtin Tango Dark\n")
         #expect(try themeSides([user]) == ThemeResolver.Sides(light: "Builtin Tango Dark", dark: "Builtin Tango Dark"))
+    }
+
+    /// libghostty refuses a pair with one side, so it gives no sides.
+    @Test
+    func aPairWithOneSideReadsNoSides() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let user = try write("config", "theme = dark:Builtin Tango Dark\n")
+        #expect(try themeSides([user]) == nil)
     }
 
     @Test

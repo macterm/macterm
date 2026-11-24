@@ -752,10 +752,13 @@ final class GhosttyApp {
     }
 
     private func computeSplitThemeColors() -> SplitSides? {
-        guard let sides = themeSides, sides.areDifferent else { return nil }
+        guard themeHasTwoSides else { return nil }
         var ignored: [String] = []
         guard let baseline = buildConfig(missingPaths: &ignored) else { return nil }
         defer { ghostty_config_free(baseline) }
+        // The sides of the baseline, not of the app's config: the files can
+        // change after the last reload, and the side layers load them now.
+        guard let sides = Keys.theme.read(from: baseline), sides.areDifferent else { return nil }
         guard let light = readSide(sides.light, baseline: baseline) else {
             logger.info("the light side of the theme pair does not read; one icon")
             return nil

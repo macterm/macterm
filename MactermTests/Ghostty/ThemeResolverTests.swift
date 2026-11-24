@@ -3,21 +3,6 @@ import Foundation
 import Testing
 
 struct ThemeResolverTests {
-    // MARK: - Sides
-
-    @Test
-    func sides_give_the_name_for_each_scheme() {
-        let sides = ThemeResolver.Sides(light: "branch", dark: "Builtin Tango Dark")
-        #expect(sides.side(.light) == "branch")
-        #expect(sides.side(.dark) == "Builtin Tango Dark")
-        #expect(sides.areDifferent)
-    }
-
-    @Test
-    func a_plain_theme_has_one_side() {
-        #expect(!ThemeResolver.Sides(light: "Rose Pine", dark: "Rose Pine").areDifferent)
-    }
-
     // MARK: - systemScheme(appHasAppearanceOverride:effectiveAppearanceIsDark:globalInterfaceStyle:)
 
     @Test

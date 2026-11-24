@@ -10,8 +10,8 @@ import GhosttyKit
 /// guessing: an enum read through a `ghostty_string_s` comes back with `len`
 /// 0 (`window-colorspace`, `macos-hidden`), because libghostty writes an
 /// enum's `@tagName` as a bare NUL-terminated pointer. Pairing the shape with
-/// the key *at the declaration* makes the pairing unforgeable at the fourteen
-/// places a key is read; `GhosttyApp.read` is the one generic reader.
+/// the key *at the declaration* makes the pairing unforgeable at every
+/// place that reads a key; `GhosttyApp.read` is the one generic reader.
 ///
 /// The factories below are the shapes Macterm reads today. Add one per new
 /// C shape, not per key — and check `c_get.zig` first: a `ghostty_string_s`

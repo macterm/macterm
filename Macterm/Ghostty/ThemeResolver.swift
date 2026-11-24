@@ -10,9 +10,9 @@ import Foundation
 /// resolve a split to the `light:` side and never consult the OS appearance.
 /// So for the chrome — which derives from those getters — Macterm takes the
 /// two sides from libghostty (`Sides`) and has libghostty load one side as a
-/// plain theme (`sideLayer`). A plain (non-split)
-/// `theme` resolves correctly through libghostty's getters already, so the
-/// chrome falls back to them in that case. (Issue #38.)
+/// plain theme (`sideLayer`). A plain (non-split) `theme` resolves correctly
+/// through libghostty's getters already, so the chrome falls back to them in
+/// that case. (Issue #38.)
 enum ThemeResolver {
     /// The side of a `light:`/`dark:` split to pick.
     enum Scheme {
@@ -44,10 +44,6 @@ enum ThemeResolver {
 
         var areDifferent: Bool {
             light != dark
-        }
-
-        func side(_ scheme: Scheme) -> String {
-            scheme == .light ? light : dark
         }
     }
 
