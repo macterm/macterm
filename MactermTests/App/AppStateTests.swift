@@ -338,7 +338,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(projectID: UUID()))
+        #expect(state.panes(inProject: UUID()).isEmpty)
     }
 
     @Test
@@ -1420,6 +1420,43 @@ struct AppStateTests {
         #expect(!fx.state.closeNeedsConfirmation([plain], plainAnswers: [plain.id: false]))
         #expect(fx.state.closeNeedsConfirmation([plain]))
         #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
+    }
+
+    @Test
+    func the_async_verdict_uses_the_hosts_answer() async throws {
+        let idle = try plainShellTab(answer: false)
+        let idlePane = try #require(idle.tab.splitRoot.findPane(id: idle.target))
+        #expect(await !idle.state.judgeClose([idlePane]))
+        let busy = try plainShellTab(answer: true)
+        let busyPane = try #require(busy.tab.splitRoot.findPane(id: busy.target))
+        #expect(await busy.state.judgeClose([busyPane]))
+    }
+
+    @Test
+    func the_quit_rows_leave_out_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == panes.map(\.id).filter { $0 != fx.target })
+    }
+
+    @Test
+    func the_quit_rows_wait_for_every_host() async throws {
+        let fx = try plainShellTab(answer: true)
+        let panes = fx.tab.splitRoot.allPanes()
+        let slow = try #require(panes.first { $0.id != fx.target })
+        // Both panes run a plain shell. The first answer is busy, and the
+        // second host answers idle later: a stop at the first busy answer
+        // would give the slow pane the surface's busy reading.
+        fx.state.paneRunsPlainShell = { _ in true }
+        fx.state.askPlainShellNeedsConfirmClose = { pane, _ in
+            if pane.id == fx.target { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+            return false
+        }
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == [fx.target])
+        #expect(!rows.contains { $0.id == slow.id })
     }
 
     // MARK: - applyLayout
