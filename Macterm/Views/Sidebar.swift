@@ -556,13 +556,13 @@ struct SidebarContent: View {
         )
     }
 
-    private func tabRows(_ tabs: [TerminalTab], of project: Project) -> some View {
+    private func tabRows(_ tabs: [TerminalTab], of project: Project) -> some DynamicViewContent {
         ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
             tabRow(tab: tab, index: tabIndex, project: project)
         }
     }
 
-    private func childSections(_ node: SidebarNode, open: Bool) -> some View {
+    private func childSections(_ node: SidebarNode, open: Bool) -> some DynamicViewContent {
         ForEach(node.children) { child in
             projectSection(child, parentsOpen: open)
         }
