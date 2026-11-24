@@ -63,8 +63,12 @@ final class RemotePaneDriver: PaneInputRoute {
     private var undelivered = Data()
     /// The session attached at least once in this run.
     private var attached = false
+    /// The running session is ending (`PaneSession.finish`). A key then
+    /// goes to no session: before the first attach it waits in `earlyInput`,
+    /// and after an attach it is dropped, as a key in a lost pane is.
+    private var finishing = false
     /// Where the next session asks to resume: the point of the last one
-    /// (`PaneSession.resumePoint`). A pane that comes back within the
+    /// (`PaneSession.finish`). A pane that comes back within the
     /// session's ring keeps its screen and scrollback. A new session or a
     /// plain shell clears it.
     private var resume: PaneSession.ResumePoint?
@@ -222,7 +226,9 @@ final class RemotePaneDriver: PaneInputRoute {
         let end = await withCheckedContinuation { ending = $0 }
         // A key can end the session while its reading still feeds the
         // surface: the point is the offset after the last byte fed.
+        finishing = true
         let finished = await session.finish()
+        finishing = false
         resume = finished.resume
         // Input that never reached a channel waits for the next session.
         undelivered.append(finished.pendingInput)
@@ -316,6 +322,8 @@ final class RemotePaneDriver: PaneInputRoute {
 
     private func route(_ data: Data) {
         switch state {
+        case .running where finishing:
+            if !attached { keep(data) }
         case let .running(session): session.sendInput(data)
         case let .plain(shell): shell.sendInput(data)
         case .waiting:

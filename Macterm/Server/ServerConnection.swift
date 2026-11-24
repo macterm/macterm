@@ -153,8 +153,8 @@ final class ServerConnection: @unchecked Sendable {
                     continuation.resume(throwing: ServerClientError.disconnected)
                     return
                 }
-                // The cancel handler takes the lock too: a cancel before this
-                // point is seen here, and one after it finds the entry.
+                // The cancel handler takes the same lock. A cancel before
+                // this point is seen here. A cancel after it removes the entry.
                 guard !Task.isCancelled else {
                     lock.unlock()
                     continuation.resume(throwing: CancellationError())

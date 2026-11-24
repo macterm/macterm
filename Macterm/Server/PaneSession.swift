@@ -12,7 +12,9 @@ struct PaneGrid: Equatable {
 }
 
 /// What a `PaneSession` drives: the surface that shows the pane. The
-/// callbacks come from the session's tasks, not from the main actor.
+/// callbacks come in order on the session's own serial queue, never on the
+/// main actor or the cooperative pool: a feed can wait for the terminal's
+/// lock.
 protocol PaneSessionHost: AnyObject, Sendable {
     /// Bytes for the terminal (output, or a snapshot).
     func paneFeed(_ data: Data)
@@ -91,8 +93,10 @@ extension PaneSessionHost {
 /// The session's state is the actor's. The surface's input, claims and
 /// sizes come in from any thread: they go into one ordered stream of
 /// commands, which the actor takes in order, so a caller never waits. The
-/// writes to the channel go out on one serial queue, in order, so a stalled
-/// server never blocks the reading.
+/// writes to the channel go out on one serial queue, so a stalled server
+/// never blocks the reading. The host's callbacks go out on another serial
+/// queue, in the order of the channel, so a feed never holds a thread of the
+/// cooperative pool.
 ///
 /// One rule for a lost link: a channel that ends with no exit reports
 /// `paneLinkLost`, and the session asks its endpoint for a connection again,
@@ -138,6 +142,7 @@ actor PaneSession: PaneInputRoute {
         case claim(PaneGrid?)
         case size(PaneGrid?)
         case seen
+        case finish(CheckedContinuation<Finished, Never>)
     }
 
     /// Clears the screen, the scrollback and the cursor.
@@ -166,6 +171,8 @@ actor PaneSession: PaneInputRoute {
     private let commands: AsyncStream<Command>.Continuation
     /// The writes to the channel, in order.
     private let output = DispatchQueue(label: "PaneSession.output")
+    /// The host's callbacks, in order.
+    private let deliveries = DispatchQueue(label: "PaneSession.host", qos: .userInteractive)
 
     private var channel: PaneChannel?
     /// Where the next attach asks to resume. Nil while the surface shows
@@ -235,18 +242,14 @@ actor PaneSession: PaneInputRoute {
         commands.yield(.stop)
     }
 
-    /// Stops the session and waits until its reading ended. Then no byte
-    /// goes to the host any more. The result has the offset of the last byte
-    /// that it got, and the input that never reached a channel. A driver that
-    /// starts a new session for the same pane takes both from here.
-    func finish() async -> Finished {
-        shutDown()
-        await task?.value
-        defer {
-            heldInput = Data()
-            pendingInput = Data()
-        }
-        return Finished(resume: resume, pendingInput: heldInput + pendingInput)
+    /// Stops the session and waits until its reading ended and the host got
+    /// every callback. Then no byte goes to the host any more. The result has
+    /// the offset of the last byte that it got, and the input that never
+    /// reached a channel, also input that came before this call and was not
+    /// taken yet. A driver that starts a new session for the same pane takes
+    /// both from here.
+    nonisolated func finish() async -> Finished {
+        await withCheckedContinuation { commands.yield(.finish($0)) }
     }
 
     /// Where the surface can resume now.
@@ -269,7 +272,28 @@ actor PaneSession: PaneInputRoute {
             resize(grid)
         case .seen:
             write { try $0.send(MactermProtocol.Seen()) }
+        case let .finish(done):
+            shutDown()
+            let reading = task
+            Task {
+                await reading?.value
+                await withCheckedContinuation { delivered in deliveries.async { delivered.resume() } }
+                done.resume(returning: takeFinished())
+            }
         }
+    }
+
+    private func takeFinished() -> Finished {
+        defer {
+            heldInput = Data()
+            pendingInput = Data()
+        }
+        return Finished(resume: resume, pendingInput: heldInput + pendingInput)
+    }
+
+    /// Calls the host on its queue, after every call that came before.
+    nonisolated private func deliver(_ body: @escaping @Sendable (any PaneSessionHost) -> Void) {
+        deliveries.async { [host] in body(host) }
     }
 
     private func shutDown() {
@@ -315,9 +339,9 @@ actor PaneSession: PaneInputRoute {
             return
         }
         guard let channel else {
-            host.paneInputUndelivered(data)
+            deliver { $0.paneInputUndelivered(data) }
             // A key in a channel that ended reports it again.
-            host.paneLinkLost()
+            deliver { $0.paneLinkLost() }
             return
         }
         output.async { [host, name] in
@@ -377,7 +401,7 @@ actor PaneSession: PaneInputRoute {
             } catch {
                 if !(error is CancellationError), !Task.isCancelled {
                     logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
-                    host.paneGone()
+                    deliver { $0.paneGone() }
                 }
                 return
             }
@@ -405,7 +429,7 @@ actor PaneSession: PaneInputRoute {
                     // A pane that asks to resume keeps its screen. Its
                     // reset waits for a snapshot.
                     if resuming == nil {
-                        host.paneFeed(Self.resetScreen)
+                        deliver { $0.paneFeed(Self.resetScreen) }
                         shown = 0
                     }
                     firstAttach = false
@@ -420,11 +444,11 @@ actor PaneSession: PaneInputRoute {
                 tries = Date().timeIntervalSince(started) < 2 ? tries + 1 : 0
                 uninstall()
                 channelEnded()
-                host.paneLinkLost()
+                deliver { $0.paneLinkLost() }
             } catch is CancellationError {
                 return
             } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
-                host.paneExited(code: nil, signal: nil)
+                deliver { $0.paneExited(code: nil, signal: nil) }
                 return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -432,7 +456,7 @@ actor PaneSession: PaneInputRoute {
                 tries += 1
             }
             if tries > Self.channelTries {
-                host.paneGone()
+                deliver { $0.paneGone() }
                 return
             }
         }
@@ -504,13 +528,13 @@ actor PaneSession: PaneInputRoute {
                 } else if !dropsOutput {
                     attachGrid = nil
                     offset = offset.map { $0 + UInt64(data.count) }
-                    host.paneFeed(data)
+                    deliver { $0.paneFeed(data) }
                 }
             case let .snapshotStart(start):
                 // The first snapshot comes over the cleared screen. One after
                 // a lost link comes over the old screen: clear it first.
                 if needsReset {
-                    host.paneFeed(Self.resetScreen)
+                    deliver { $0.paneFeed(Self.resetScreen) }
                     needsReset = false
                 }
                 dropsOutput = false
@@ -537,39 +561,39 @@ actor PaneSession: PaneInputRoute {
                     continue
                 }
                 attachGrid = nil
-                host.paneSnapshot(started: true)
-                if !bytes.isEmpty { host.paneFeed(bytes) }
-                host.paneSnapshot(started: false)
+                deliver { $0.paneSnapshot(started: true) }
+                if !bytes.isEmpty { deliver { $0.paneFeed(bytes) } }
+                deliver { $0.paneSnapshot(started: false) }
                 offset = snapshotOffset
             case let .lead(leader):
                 leads = leader
                 // A client that starts to lead sends its size.
                 if leader { resize(nil) }
-                host.paneLead(leader)
+                deliver { $0.paneLead(leader) }
             case let .foreground(foreground):
-                host.paneForeground(foreground)
+                deliver { $0.paneForeground(foreground) }
             case let .ttyMode(mode):
-                host.paneTtyMode(mode)
+                deliver { $0.paneTtyMode(mode) }
             case let .attention(flags):
-                host.paneAttention(flags)
+                deliver { $0.paneAttention(flags) }
             case let .exit(exit):
-                host.paneExited(code: exit.code, signal: exit.signal)
+                deliver { $0.paneExited(code: exit.code, signal: exit.signal) }
                 return true
             case let .mark(mark):
                 // After the prompt mark the shell may not own the tty yet,
                 // and the pty would echo the input before the prompt.
                 if mark.kind != .prompt { releaseHeldInput() }
-                host.paneMark(mark)
+                deliver { $0.paneMark(mark) }
             case let .status(status):
                 // A program runs and reads its input.
                 releaseHeldInput()
-                host.paneStatus(status)
+                deliver { $0.paneStatus(status) }
             case let .state(state):
-                host.paneState(state)
+                deliver { $0.paneState(state) }
             case let .title(title):
-                host.paneTitle(title)
+                deliver { $0.paneTitle(title) }
             case let .cwd(url):
-                host.paneCwd(url)
+                deliver { $0.paneCwd(url) }
             case let .resumed(resumed):
                 // The bytes after the surface's offset follow: the screen
                 // and the scrollback stay.
@@ -603,8 +627,8 @@ actor PaneSession: PaneInputRoute {
     /// next attach tells them again. The session sends its flags at an
     /// attach only when one is set, so a copy kept here could stay wrong.
     private func channelEnded() {
-        host.paneLead(nil)
-        host.paneAttention(MactermProtocol.Attention())
+        deliver { $0.paneLead(nil) }
+        deliver { $0.paneAttention(MactermProtocol.Attention()) }
     }
 
     private func install(_ channel: PaneChannel) -> Bool {

@@ -13,8 +13,8 @@ protocol ServerLink: AnyObject, Sendable {
     /// Sends one request and waits for its response. A response with `err`
     /// throws `ProtocolControlError.errorResponse`. With a `timeout`, a
     /// response that does not come in time throws
-    /// `ServerClientError.noAnswer`. A cancelled or timed-out request leaves
-    /// nothing behind.
+    /// `ServerClientError.noAnswer`. A cancelled or timed-out request removes
+    /// its waiting entry: a late response is dropped.
     func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args, timeout: Duration?) async throws -> M.Result
     /// Opens a pane channel to `session` (design/003 §1).
     func openChannel(session: String) async throws -> PaneChannel

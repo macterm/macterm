@@ -807,4 +807,43 @@ struct PaneSessionEndpointTests {
         try await host.waitFor { _ in link.input(on: "s") == Data("ls\n".utf8) }
         session.stop()
     }
+
+    @Test
+    func keys_claims_and_sizes_reach_the_channel_in_the_order_of_the_calls() async throws {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        let grid = PaneGrid(cols: 100, rows: 30)
+        for _ in 0 ..< 50 {
+            session.sendInput(Data("a".utf8))
+            session.claim(grid: grid)
+            session.sendSize(grid)
+            session.seen()
+        }
+        try await host.waitFor { _ in link.sent(on: "s").count(where: { $0 == MactermProtocol.Seen.name }) == 50 }
+        let sent = link.sent(on: "s").drop { $0 != "bytes" }
+        let round = [
+            "bytes",
+            MactermProtocol.Claim.name,
+            MactermProtocol.Resize.name,
+            MactermProtocol.Resize.name,
+            MactermProtocol.Seen.name,
+        ]
+        #expect(Array(sent) == Array(repeating: round, count: 50).flatMap(\.self))
+        session.stop()
+    }
+
+    @Test
+    func finish_comes_after_the_calls_before_it_and_gives_back_their_input() async {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        // No attach yet: the input waits, and `finish` gives it back.
+        session.sendInput(Data("ls\n".utf8))
+        let finished = await session.finish()
+        #expect(finished.pendingInput == Data("ls\n".utf8))
+        #expect(link.sent(on: "s").isEmpty)
+    }
 }

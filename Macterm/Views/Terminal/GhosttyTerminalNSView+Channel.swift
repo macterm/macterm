@@ -100,17 +100,16 @@ extension GhosttyTerminalNSView {
     }
 }
 
-/// What a pane's session drives: the surface. Its callbacks come from the
-/// session's queue, so each one hops to the main actor where it touches the
-/// pane. Bytes go to the surface on a serial queue of its own, in order: a
-/// feed can wait for the terminal's lock, and must never hold a thread of
-/// the cooperative pool. `invalidate` runs before the surface is freed: it
-/// waits for a feed in flight, and no later one reaches the surface.
+/// What a pane's session drives: the surface. Its callbacks come in order on
+/// the session's queue (or a plain shell's read queue), so each one hops to
+/// the main actor where it touches the pane. A feed waits for the terminal,
+/// which slows the reader of a fast program. `invalidate` runs before the
+/// surface is freed: it waits for a feed in flight, and no later one reaches
+/// the surface.
 final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     /// Guards `surface`. Held across a feed, so nothing that libghostty's
     /// callbacks call may take it (`manual_resize` takes `gridLock`).
     private let lock = NSLock()
-    private let feeds = DispatchQueue(label: "SurfaceChannelHost.feed")
     private var surface: ghostty_surface_t?
     private weak var view: GhosttyTerminalNSView?
     private let gridLock = NSLock()
@@ -145,14 +144,12 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneFeed(_ data: Data) {
-        feeds.async { [self] in
-            lock.lock()
-            defer { lock.unlock() }
-            guard let surface else { return }
-            data.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                ghostty_surface_feed(surface, base, UInt(buffer.count))
-            }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let surface else { return }
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            ghostty_surface_feed(surface, base, UInt(buffer.count))
         }
     }
 
