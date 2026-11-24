@@ -284,6 +284,17 @@ struct PaneTests {
         #expect(pane.agentIcon == nil)
     }
 
+    /// The session's idle verdict decides for a local pane too: a shell that
+    /// runs in the session's shell is a running child (issue 0451).
+    @Test
+    func local_pane_takes_the_sessions_idle_verdict() {
+        let pane = Pane(projectPath: "/", projectID: UUID())
+        pane.applyForeground(SessionForeground(comm: "zsh", isIdle: true, isShell: true, command: "-zsh"))
+        #expect(pane.foregroundSample?.isIdleShell == true)
+        pane.applyForeground(SessionForeground(comm: "bash", isIdle: false, isShell: true, command: "bash"))
+        #expect(pane.foregroundSample?.isIdleShell == false)
+    }
+
     @Test
     func pane_has_no_agent_while_the_shell_is_idle() {
         let pane = Pane(projectPath: "/", projectID: UUID())

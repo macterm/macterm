@@ -281,7 +281,8 @@ enum ZmxEnvironment {
 struct SessionForeground: Equatable {
     let comm: String
     /// The host's idle verdict — true when the tty's foreground process
-    /// group IS the session leader's (the shell owns its prompt), judged
+    /// group is the session's shell's (the shell owns its prompt; under
+    /// login(1) that is the shell's own group, not login's), judged
     /// where the processes actually live so no local shell database has to
     /// recognize a remote-only login shell. nil when the host could not say
     /// — consumers fall back to the local shell-database heuristic.

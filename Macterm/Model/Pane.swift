@@ -375,8 +375,7 @@ final class Pane: Identifiable {
     private(set) var remoteForegroundCommand: String?
 
     /// The foreground that the pane's session reports: the tab's name, the
-    /// agent logo, the title gate and the tracker's foreground, for local and
-    /// remote panes. The session reads the pty's foreground process group
+    /// agent logo and the title gate, for local and remote panes. The session reads the pty's foreground process group
     /// before it forwards each chunk of output, and every 500 ms
     /// (`foreground.zig`). macOS reports `comm` as a full executable path:
     /// the name is its basename. A version-shaped `comm` (Claude Code's
@@ -387,13 +386,10 @@ final class Pane: Identifiable {
     /// only as a fallback when the report has none. The idle verdict
     /// (`foreground.isIdle`) is foreground pgid == the process that the
     /// session started, and the shell verdict (`foreground.isShell`) is the
-    /// host's `/etc/shells`. On a host the session starts the shell, so a
-    /// nested shell is a running child, as libghostty reads it. A local
-    /// session starts login(1), which starts the shell in a group of its own,
-    /// so a local pane uses the shell verdict for both (issue 0448). A
-    /// prompt hook never names the pane (`isPromptHook`). For the run
-    /// tracker only, a shell that runs `-c` or a script is a program
-    /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
+    /// host's `/etc/shells`. Under login(1), the session takes the shell's
+    /// group as its own (issue 0448). Therefore, a nested shell is a running
+    /// child in a local and a remote pane, as libghostty reads it. A prompt
+    /// hook never names the pane (`isPromptHook`).
     ///
     /// `remoteForegroundCommand` follows the local `runningCommand` contract:
     /// a shell foreground records no command, anything else records the
@@ -405,10 +401,7 @@ final class Pane: Identifiable {
         let name = Self.remoteProcessName(comm: foreground.comm, command: foreground.command)
         guard !name.isEmpty else { return }
         let isShell = foreground.isShell ?? ProcessInspector.isShellProcessName(name)
-        // A local session runs the shell under login(1), so the session's own
-        // process group is login's, and `isIdle` is false at an idle prompt.
-        // A local pane judges by the shell verdict.
-        let isIdleShell = isRemote ? (foreground.isIdle ?? isShell) : isShell
+        let isIdleShell = foreground.isIdle ?? isShell
         // A prompt hook must not name the tab: see `isPromptHook`.
         guard !isPromptHook(isShell: isShell) else { return }
         foregroundReportIsShell = isShell
