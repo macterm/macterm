@@ -26,6 +26,16 @@ struct ProjectStoreTests {
     }
 
     @Test
+    func create_with_a_parent_goes_at_the_end_of_its_projects() {
+        let store = makeStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let first = store.create(name: "first", path: "/tmp/first", parent: parent.id)
+        let second = store.create(name: "second", path: "/tmp/second", parent: parent.id)
+        #expect(store.children(of: parent.id).map(\.id) == [first.id, second.id])
+        #expect(store.create(name: "lost", path: "/tmp/lost", parent: UUID()).parent == nil, "an unknown parent is the top level")
+    }
+
+    @Test
     func create_tags_a_new_project_only_when_auto_assign_is_on() {
         let store = makeStore()
         // Default (preference off): a new project carries no tag.
@@ -168,7 +178,7 @@ struct ProjectStoreTests {
         let b = Project(name: "b", path: "/tmp/b", sortOrder: 1)
         store.add(a)
         store.add(b)
-        store.remove(id: a.id)
+        store.removeWithDescendants(a.id)
         #expect(store.projects.map(\.id) == [b.id])
     }
 
@@ -496,19 +506,6 @@ struct ProjectStoreTests {
     }
 
     @Test
-    func removing_a_parent_moves_its_children_to_the_end_of_the_top_level() {
-        let store = makeStore()
-        let parent = store.add(Project(name: "parent", path: "/tmp/parent"))
-        let top = store.add(Project(name: "top", path: "/tmp/top"))
-        let x = store.add(Project(name: "x", path: "/tmp/x", parent: parent.id))
-        let y = store.add(Project(name: "y", path: "/tmp/y", parent: parent.id))
-        store.remove(id: parent.id)
-        #expect(store.children(of: nil).map(\.id) == [top.id, x.id, y.id])
-        #expect(store.children(of: nil).map(\.sortOrder) == [0, 1, 2])
-        #expect(store.projects.map(\.id) == [top.id, x.id, y.id])
-    }
-
-    @Test
     func move_into_the_same_parent_keeps_the_place() {
         let store = makeStore()
         let a = store.add(Project(name: "a", path: "/tmp/a"))
@@ -554,33 +551,6 @@ struct ProjectStoreTests {
         #expect(store.children(of: nil).map(\.id) == [parent.id, a.id])
         #expect(store.siblingPosition(of: a.id)?.index == 1)
         #expect(store.siblingPosition(of: a.id)?.count == 2)
-    }
-
-    @Test
-    func add_beside_a_project_goes_after_it_in_its_parent() {
-        let store = makeStore()
-        let outer = store.add(Project(name: "outer", path: "/tmp/outer"))
-        let a = store.add(Project(name: "a", path: "/tmp/a", parent: outer.id))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: outer.id))
-        let new = store.add(Project(name: "new", path: ""), beside: a.id)
-        #expect(store.children(of: outer.id).map(\.id) == [a.id, new.id, b.id])
-        let top = store.add(Project(name: "top", path: ""), beside: nil)
-        #expect(store.children(of: nil).map(\.id) == [outer.id, top.id])
-    }
-
-    @Test
-    func remove_keeping_children_puts_them_at_the_place_of_the_parent() {
-        let store = makeStore()
-        let a = store.add(Project(name: "a", path: "/tmp/a"))
-        let parent = store.add(Project(name: "p", path: "/tmp/p"))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: parent.id))
-        let inner = store.add(Project(name: "inner", path: "", parent: parent.id))
-        let deep = store.add(Project(name: "deep", path: "/tmp/d", parent: inner.id))
-        let c = store.add(Project(name: "c", path: "/tmp/c"))
-        store.removeKeepingChildren(parent.id)
-        #expect(store.children(of: nil).map(\.id) == [a.id, b.id, inner.id, c.id])
-        #expect(store.row(parent.id) == nil)
-        #expect(store.projects.map(\.id) == [a.id, b.id, inner.id, deep.id, c.id])
     }
 
     @Test

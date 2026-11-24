@@ -70,8 +70,8 @@ final class ProjectStore {
     /// way. A caller holding a name someone typed refuses it before calling
     /// this, where it can say why.
     @discardableResult
-    func create(name: String, path: String) -> Project {
-        var project = Project(name: Self.allowedName(name), path: path)
+    func create(name: String, path: String, parent: UUID? = nil) -> Project {
+        var project = Project(name: Self.allowedName(name), path: path, parent: parent)
         if autoAssignsColors() {
             project.colorName = ProjectColor.leastUsed(among: projects.map(\.color)).rawValue
         }
@@ -90,12 +90,6 @@ final class ProjectStore {
         changed()
         onAdd?(project)
         return project
-    }
-
-    /// Remove a project. Its children go to the end of the top level.
-    func remove(id: UUID) {
-        rows.removeAll { $0.id == id }
-        changed()
     }
 
     // MARK: - Tree
@@ -155,26 +149,6 @@ final class ProjectStore {
         treeOrder(under: id)
     }
 
-    /// Put the row `id` beside the row `target`: in the parent of `target`,
-    /// at the place of `target`. In one parent, a row that moves down goes
-    /// after `target` and a row that moves up goes before it. A row from
-    /// another parent goes before `target`. Returns false when the move
-    /// would put a project inside itself.
-    @discardableResult
-    func place(_ id: UUID, beside target: UUID) -> Bool {
-        guard id != target, let targetRow = row(target), let moving = row(id) else { return false }
-        let parent = targetRow.parent
-        let sameParent = moving.parent == parent
-        var siblings = children(of: parent).map(\.id)
-        let wasBefore = sameParent && (siblings.firstIndex(of: id) ?? 0) < (siblings.firstIndex(of: target) ?? 0)
-        guard move(id, into: parent, saving: false) else { return false }
-        siblings = children(of: parent).map(\.id).filter { $0 != id }
-        let index = siblings.firstIndex(of: target) ?? siblings.endIndex
-        siblings.insert(id, at: wasBefore ? index + 1 : index)
-        reorder(parent: parent, ids: siblings)
-        return true
-    }
-
     /// Move the project `id` out of its parent, to the place after that
     /// parent. A project at the top level does not move.
     func moveOut(_ id: UUID) {
@@ -202,39 +176,6 @@ final class ProjectStore {
         guard let parent = row(id).map(\.parent) else { return nil }
         let siblings = children(of: parent)
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
-    }
-
-    /// Add `project`. With `beside`, it goes after that project, in its
-    /// parent. Without it, it goes at the end of the top level.
-    @discardableResult
-    func add(_ project: Project, beside: UUID?) -> Project {
-        var project = project
-        project.parent = beside.flatMap { row($0)?.parent }
-        let added = add(project)
-        if let beside {
-            var siblings = children(of: added.parent).map(\.id).filter { $0 != added.id }
-            let index = siblings.firstIndex(of: beside).map { $0 + 1 } ?? siblings.endIndex
-            siblings.insert(added.id, at: index)
-            reorder(parent: added.parent, ids: siblings)
-        }
-        return added
-    }
-
-    /// Remove the project `id` and keep its children: they go to the parent
-    /// of the project, at its place, in their order. The caller ends the
-    /// sessions of the project first.
-    func removeKeepingChildren(_ id: UUID) {
-        guard let project = row(id) else { return }
-        let inside = children(of: id).map(\.id)
-        var siblings = children(of: project.parent).map(\.id)
-        let index = siblings.firstIndex(of: id) ?? siblings.endIndex
-        siblings.replaceSubrange(index ..< min(index + 1, siblings.endIndex), with: inside)
-        for child in inside {
-            if let at = rows.firstIndex(where: { $0.id == child }) { rows[at].parent = project.parent }
-        }
-        rows.removeAll { $0.id == id }
-        setOrder(parent: project.parent, ids: siblings)
-        changed()
     }
 
     /// Remove the project `id` and every project inside it, at any depth.

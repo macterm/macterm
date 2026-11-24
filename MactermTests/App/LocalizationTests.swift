@@ -44,7 +44,18 @@ struct LocalizationTests {
         /// source value `new`, never `translated`, so its state is not read.
         func english(_ key: String) -> String {
             let localization = (strings[key]?["localizations"] as? [String: Any])?[sourceLanguage] as? [String: Any]
-            return localization.flatMap { LocalizationTests.units($0).first?["value"] as? String } ?? key
+            guard let value = localization.flatMap({ LocalizationTests.units($0).first?["value"] as? String }) else { return key }
+            return Self.resolvingSubstitutions(value, localization?["substitutions"] as? [String: [String: Any]] ?? [:])
+        }
+
+        /// `value` with each `%#@name@` of a substitution (a plural of one
+        /// argument in a string with two) written as the argument's own
+        /// specifier, so its placeholders are the ones that a translation has.
+        private static func resolvingSubstitutions(_ value: String, _ substitutions: [String: [String: Any]]) -> String {
+            substitutions.reduce(value) { text, substitution in
+                let specifier = substitution.value["formatSpecifier"] as? String ?? "@"
+                return text.replacingOccurrences(of: "%#@\(substitution.key)@", with: "%\(specifier)")
+            }
         }
     }
 

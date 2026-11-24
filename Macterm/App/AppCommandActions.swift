@@ -301,10 +301,7 @@ extension AppCommand {
         case .removeProject:
             guard let projectID, !Project.isSynthetic(projectID) else { return nil }
             return {
-                ctx.appState.requestRemoveProject(projectID) {
-                    ctx.appState.removeProject(projectID)
-                    ctx.projectStore.remove(id: projectID)
-                }
+                ctx.appState.requestRemoveProject(projectID, store: ctx.projectStore)
             }
         case .replaceProjectPathWithCurrentDir:
             // Remote projects (#104): OSC 7 reports a directory on the REMOTE

@@ -4,14 +4,7 @@ import Observation
 
 enum SidebarItem: Hashable {
     case project(UUID)
-    /// A group row (design 013). It is never selected: the tag only gives
-    /// the row its context menu. A click opens or closes it.
-    case group(UUID)
     case tab(projectID: UUID, tabID: UUID)
-
-    var isGroup: Bool {
-        if case .group = self { true } else { false }
-    }
 }
 
 enum SidebarRenameTarget: Equatable {
