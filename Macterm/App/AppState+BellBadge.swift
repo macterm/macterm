@@ -31,12 +31,12 @@ extension AppState {
     }
 
     /// The quick terminal and the desktop widgets keep their tabs outside
-    /// `workspaces` (until the model cut-over, design 010), so
-    /// `markSeenIfActive` does not find their panes. Such a pane is seen
-    /// while its panel is key: the focused pane of the quick terminal, or
-    /// the one pane of a widget. The app need not be active, because both
-    /// panels are non-activating. A run end (`onRunEnded`) and a change of
-    /// the session's flags both come here, because either can arrive first.
+    /// `workspaces` until the model cut-over (design 010), so
+    /// `markSeenIfActive` does not find their panes. The focused pane of the
+    /// quick terminal, or the pane of a widget, is seen while its panel is
+    /// key. The app does not have to be active. The run end calls this to
+    /// end a `.done` state; a change of the flags calls it to clear flags
+    /// that arrive after the run end.
     func markSeenIfInKeyPanel(paneID: UUID) {
         if let quick = adoptedQuickTerminal,
            quick.focusedPaneID == paneID,
