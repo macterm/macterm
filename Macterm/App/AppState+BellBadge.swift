@@ -26,7 +26,29 @@ extension AppState {
         if let projectID = activeProjectID {
             markSeenIfActive(paneID: paneID, projectID: projectID)
         }
+        markSeenIfInKeyPanel(paneID: paneID)
         syncDockBadge()
+    }
+
+    /// The quick terminal and the desktop widgets keep their tabs outside
+    /// `workspaces` (until the model cut-over, design 010), so
+    /// `markSeenIfActive` does not find their panes. Such a pane is seen
+    /// while its panel is key: the focused pane of the quick terminal, or
+    /// the one pane of a widget. The app need not be active, because both
+    /// panels are non-activating. A run end (`onRunEnded`) and a change of
+    /// the session's flags both come here, because either can arrive first.
+    func markSeenIfInKeyPanel(paneID: UUID) {
+        if let quick = adoptedQuickTerminal,
+           quick.focusedPaneID == paneID,
+           let pane = quick.splitRoot.findPane(id: paneID)
+        {
+            if paneIsInKeyWindow(pane) { pane.markSeen() }
+            return
+        }
+        guard let pane = desktopWidgets.lazy.compactMap(\.pane).first(where: { $0.id == paneID }),
+              paneIsInKeyWindow(pane)
+        else { return }
+        pane.markSeen()
     }
 
     /// The app came to the front: whatever tab it shows is now being looked

@@ -1118,6 +1118,32 @@ struct AppStateTests {
         #expect(pane.attention == unseenFailure)
     }
 
+    /// The quick terminal's tab is not in `workspaces`. Its focused pane is
+    /// seen when the flags arrive while the panel is key, and the app need
+    /// not be active (the panel is non-activating).
+    @Test
+    func the_focused_pane_of_a_key_quick_terminal_is_seen_when_its_flags_arrive() throws {
+        let quick = QuickTerminalSplitState()
+        let state = AppState(
+            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+            projectFiles: makeProjectFileStore(),
+            quickTerminal: quick
+        )
+        state.isAppActive = { false }
+        var keyPaneIDs: Set<UUID> = []
+        state.paneIsInKeyWindow = { keyPaneIDs.contains($0.id) }
+        let pane = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+
+        pane.receiveAttention(unseenFailure)
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == unseenFailure)
+
+        keyPaneIDs = [pane.id]
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
     /// The session keeps the flags across a quit: the saved file has none.
     @Test
     func saved_workspaces_hold_no_attention() throws {
