@@ -116,7 +116,7 @@ struct InputPaletteScopeTests {
         let action = try #require(rows(scope, "taken").first)
         #expect(scope.press(action) == .refused)
         #expect(scope.failure?.title == "The name is taken.")
-        _ = rows(scope, "taken")
+        #expect(rows(scope, "taken").isEmpty, "a refused text has no action row: the notice is alone")
         #expect(scope.failure?.title == "The name is taken.", "a redraw of the same text keeps the reason")
 
         let other = try #require(rows(scope, "free").first)
@@ -166,7 +166,11 @@ struct InputPaletteScopeTests {
         #expect(pressAction(scope, "~/api") == .checking, "a check keeps the screen")
         #expect(scope.loading == PaletteLoading(message: "Checking ~/api…"))
         try await waitUntil { gate.continuation != nil }
-        #expect(pressAction(scope, "~/api") == .nothing, "Return does nothing while the check runs")
+        #expect(rows(scope, "~/api").isEmpty, "no action row while the check runs: its notice is alone")
+        #expect(
+            scope.press(PaletteItem(id: InputPaletteScope.actionItemID, title: "", action: {})) == .nothing,
+            "Return does nothing while the check runs"
+        )
         #expect(scope.loading != nil, "a redraw of the same text keeps the check")
 
         gate.continuation?.resume(returning: .done)
@@ -188,7 +192,7 @@ struct InputPaletteScopeTests {
         try await waitUntil { scope.loading == nil }
         #expect(!scope.isFinished)
         #expect(scope.failure == PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
-        _ = rows(scope, "~/none")
+        #expect(rows(scope, "~/none").isEmpty, "the refusal is alone and centered")
         #expect(scope.failure != nil, "a redraw of the same text keeps the reason")
     }
 

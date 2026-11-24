@@ -273,7 +273,8 @@ final class RemoteHosts {
             return .unreachable
         }
         guard found == .exists else { return found }
-        // A dialog that closed adds nothing: no install question for it.
+        // A check that the palette cancelled adds nothing: no install
+        // question for it.
         guard !Task.isCancelled else { return .unreachable }
         let host = host(destination)
         await host.connectAsking()

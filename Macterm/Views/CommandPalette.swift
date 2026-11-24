@@ -465,7 +465,7 @@ struct CommandPalettePanel: View {
         guard let scope else { return }
         let context = PaletteContext(appState: appState, projectStore: projectStore)
         scope.activate(context: context) {
-            // A checked commit of an input screen ran its action.
+            // A checked action of an input screen ran.
             if let inputScope = scope as? InputPaletteScope, inputScope.isFinished {
                 query = ""
                 windowState.isCommandPaletteVisible = false

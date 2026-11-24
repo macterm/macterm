@@ -96,15 +96,13 @@ final class RemoteHostsPaletteScope: PaletteScope {
         return isDestination(text) ? (text, nil) : nil
     }
 
-    /// Whether `text` is `[user@]host`: a user with no `/` or `:`, and a
-    /// host of letters, digits, `.`, `-` and `_`.
+    /// Whether `text` is `[user@]host`: a destination that ssh takes
+    /// (`SSHConnections.isValidDestination`), with no `:` or `/` (they
+    /// would read as the folder of a spec), and no empty user or host.
     static func isDestination(_ text: String) -> Bool {
+        guard SSHConnections.isValidDestination(text), !text.contains(":"), !text.contains("/") else { return false }
         let parts = text.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
-        let host = parts.last ?? ""
-        if parts.count == 2, parts[0].isEmpty || parts[0].contains(where: { "/:@".contains($0) || $0.isWhitespace }) {
-            return false
-        }
-        return !host.isEmpty && host.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_" }
+        return parts.allSatisfy { !$0.isEmpty }
     }
 
     /// New Remote Project, step 2: the folder on `destination`. It starts

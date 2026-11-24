@@ -124,8 +124,8 @@ struct DirectorySource: PaletteSource {
 
     /// A new remote project goes through step 2 of New Remote Project, the
     /// folder on the host, filled in (`RemoteHostsPaletteScope.folderInput`):
-    /// Return checks the folder on the host (0358), and the user can
-    /// correct it there.
+    /// its action row checks the folder on the host (0358), and the user
+    /// can correct it there.
     private static func remoteFolderScope(_ spec: String, context: PaletteContext) -> PaletteScopeID? {
         guard case let .remote(user, host, directory) = ProjectPath.parse(spec) else { return nil }
         return .input(RemoteHostsPaletteScope.folderInput(

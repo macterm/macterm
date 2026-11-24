@@ -183,11 +183,11 @@ struct RemoteHostsPaletteScopeTests {
     @Test
     func a_missing_folder_or_a_file_adds_nothing_and_shows_the_path_notice() async throws {
         let (context, _, store) = makeContext()
-        // The host's answers, through the same text as a local path.
+        // The host's answers, with the folder of the path that the step
+        // sends, through the same text as a local path.
         let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { path in
-            path.hasSuffix("notes.txt")
-                ? RemoteHosts.refusal(.notDirectory, directory: "~/notes.txt", destination: "devbox")
-                : RemoteHosts.refusal(.missing, directory: "~/none", destination: "devbox")
+            guard case let .remote(_, _, directory) = ProjectPath.parse(path) else { return "not a remote path" }
+            return RemoteHosts.refusal(directory.hasSuffix(".txt") ? .notDirectory : .missing, directory: directory, destination: "devbox")
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
@@ -196,6 +196,7 @@ struct RemoteHostsPaletteScopeTests {
         try await waitUntil { scope.loading == nil }
         #expect(!scope.isFinished)
         #expect(scope.failure?.title == "Path ~/none doesn't exist")
+        #expect(folderRows(scope, "~/none", context).isEmpty, "the notice is alone, as for a local path")
 
         #expect(press(scope, "~/notes.txt", context) == .checking)
         try await waitUntil { scope.loading == nil }

@@ -140,7 +140,7 @@ enum PaletteCommit: Equatable {
     /// The action cannot run; the screen stays and shows the reason.
     case refused(String)
     /// The action needs a check that takes time (a host to ask): the
-    /// screen stays, shows the check's message, and acts on the commit
+    /// screen stays, shows the check's message, and acts on the result
     /// that the check returns.
     case check(PaletteCheck)
 }
@@ -210,6 +210,10 @@ final class InputPaletteScope: PaletteScope {
         case let .notice(text): notice = text
         case .nothing: break
         }
+        // While a check runs, and while a refusal stands for this text, the
+        // action row is not offered: the notice is then alone and fills the
+        // results, as for a value that the check refused at once.
+        if loading != nil || refusal != nil { action = nil }
         if loading != nil {
             failure = nil
         } else if let reason = refusal?.reason ?? notice {

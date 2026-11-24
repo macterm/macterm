@@ -5,7 +5,7 @@ import Testing
 /// message shows, and that two never show together.
 struct PaletteNoticeTests {
     private let failure = PaletteFailure(title: "Cannot list Pods", detail: "kubectl: not found")
-    private let refusal = PaletteFailure(title: "There is no path ~/none on devbox.", retryable: false)
+    private let refusal = PaletteFailure(title: "Path ~/none doesn't exist", retryable: false)
     private let loading = PaletteLoading(message: "Connecting to devbox…")
 
     private func notice(
