@@ -8517,6 +8517,23 @@
         }
       }
     },
+    "Rename to \"%@\"" : {
+      "comment" : "The action row of the Rename Tab and Rename Project fields in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\"(으)로 이름 변경"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名为\"%@\""
+          }
+        }
+      }
+    },
     "Replace Project Path with Current Directory" : {
       "localizations" : {
         "ko" : {
@@ -11994,6 +12011,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用已存储的密码"
+          }
+        }
+      }
+    },
+    "Use the automatic name \"%@\"" : {
+      "comment" : "The action row of the Rename Tab field in the palette when the field is empty",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동 이름 \"%@\" 사용"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用自动名称\"%@\""
           }
         }
       }

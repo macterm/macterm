@@ -4,7 +4,8 @@ import Testing
 
 /// The input screens of Rename Current Tab and Rename Current Project
 /// (`PaletteInput.renameTab`, `.renameProject`), driven as the palette
-/// drives them: through `InputPaletteScope`.
+/// drives them: through `InputPaletteScope`, where Return runs only the
+/// selected action row.
 @MainActor
 struct RenameInputsTests {
     private func makeState() -> (AppState, ProjectStore, Project) {
@@ -29,8 +30,14 @@ struct RenameInputsTests {
         return try #require(PaletteFrame(.input(input)).scope as? InputPaletteScope)
     }
 
+    /// The rows of `screen` for the text `text`.
+    private func rows(_ screen: InputPaletteScope, _ text: String, _ state: AppState, _ store: ProjectStore) -> [PaletteItem] {
+        screen.sections(for: PaletteQuery(raw: text), context: PaletteContext(appState: state, projectStore: store))
+            .flatMap(\.items)
+    }
+
     /// Type `text` on the screen of `input` in a window, then press Escape:
-    /// the palette pops the frame, and nothing commits.
+    /// the palette pops the frame, and nothing runs.
     private func typeThenEscape(_ input: PaletteInput?, text: String, context: PaletteContext) throws {
         let window = WindowState()
         try window.showPaletteScope(.input(#require(input)))
@@ -43,59 +50,66 @@ struct RenameInputsTests {
     // MARK: - Tab
 
     @Test
-    func tab_screen_starts_on_the_shown_name() throws {
-        let (state, _, project) = makeState()
+    func tab_screen_starts_on_the_shown_name_with_no_action_row() throws {
+        let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
-        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
+        let input = try #require(PaletteInput.renameTab(tab.id, in: project.id, appState: state))
+        let screen = try scope(input)
         #expect(screen.placeholder == "Tab name")
-        #expect(
-            try PaletteScopeID.input(#require(PaletteInput.renameTab(tab.id, in: project.id, appState: state))).pill
-                == PalettePill(title: AppCommand.renameTab.title),
-            "an input pill has no glyph"
-        )
+        #expect(PaletteScopeID.input(input).pill == PalettePill(title: AppCommand.renameTab.title), "an input pill has no glyph")
         #expect(screen.initialQuery == tab.sidebarTitle)
+        #expect(rows(screen, screen.initialQuery, state, store).isEmpty, "the name the tab has gives no row")
+        #expect(screen.press(nil) == .nothing, "Return with no row does nothing")
+        #expect(tab.customTitle == nil, "the tab stays automatic")
     }
 
     @Test
-    func tab_commit_compares_with_the_live_title() throws {
-        // The screen opened on "build"; another client cleared the title
-        // since. A commit of "build" must set it again.
-        let (state, _, project) = makeState()
+    func tab_action_row_renames() throws {
+        let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
-        ModelWriter.tabSet(tab, title: "build")
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        ModelWriter.tabSet(tab, title: nil)
-        #expect(screen.commit("build"))
+        let items = rows(screen, "  build  ", state, store)
+        #expect(items.map(\.title) == ["Rename to \"build\""])
+        let action = try #require(items.first)
+        #expect(action.icon == nil, "an action row has no glyph")
+        #expect(screen.press(action) == .closed)
         #expect(tab.customTitle == "build")
     }
 
     @Test
-    func tab_commit_renames() throws {
-        let (state, _, project) = makeState()
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
-        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        #expect(screen.commit("  build  "))
-        #expect(tab.customTitle == "build")
-    }
-
-    @Test
-    func tab_empty_commit_gives_back_the_automatic_name() throws {
-        let (state, _, project) = makeState()
+    func tab_empty_field_gives_back_the_automatic_name() throws {
+        let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         ModelWriter.tabSet(tab, title: "build")
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         #expect(screen.initialQuery == "build")
-        #expect(screen.commit(" "))
+        let action = try #require(rows(screen, " ", state, store).first)
+        #expect(action.title == "Use the automatic name \"\(tab.autoTitle)\"")
+        #expect(screen.press(action) == .closed)
         #expect(tab.customTitle == nil)
     }
 
     @Test
-    func tab_commit_of_the_unchanged_automatic_name_keeps_it_automatic() throws {
-        let (state, _, project) = makeState()
+    func tab_empty_field_of_an_automatic_name_gives_no_row() throws {
+        let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        #expect(screen.commit(screen.initialQuery))
-        #expect(tab.customTitle == nil)
+        #expect(rows(screen, "", state, store).isEmpty)
+        #expect(screen.failure == nil)
+    }
+
+    @Test
+    func tab_check_reads_the_live_title() throws {
+        // The screen opened on "build"; another client cleared the title
+        // since. "build" is a new name again, so it has its action row.
+        let (state, store, project) = makeState()
+        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        ModelWriter.tabSet(tab, title: "build")
+        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
+        ModelWriter.tabSet(tab, title: nil)
+        let action = try #require(rows(screen, "build", state, store).first)
+        #expect(screen.press(action) == .closed)
+        #expect(tab.customTitle == "build")
     }
 
     @Test
@@ -126,50 +140,50 @@ struct RenameInputsTests {
     // MARK: - Project
 
     @Test
-    func project_screen_starts_on_the_name() throws {
+    func project_screen_starts_on_the_name_with_no_action_row() throws {
         let (state, store, project) = makeState()
-        let screen = try scope(.renameProject(project.id, appState: state, store: store))
+        let input = try #require(PaletteInput.renameProject(project.id, appState: state, store: store))
+        let screen = try scope(input)
         #expect(screen.placeholder == "Project name")
-        #expect(
-            try PaletteScopeID.input(#require(PaletteInput.renameProject(project.id, appState: state, store: store))).pill
-                == PalettePill(title: AppCommand.renameProject.title),
-            "an input pill has no glyph"
-        )
+        #expect(PaletteScopeID.input(input).pill == PalettePill(title: AppCommand.renameProject.title), "an input pill has no glyph")
         #expect(screen.initialQuery == "alpha")
+        #expect(rows(screen, "alpha", state, store).isEmpty)
     }
 
     @Test
-    func project_commit_renames() throws {
+    func project_action_row_renames() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        #expect(screen.commit(" beta "))
+        let items = rows(screen, " beta ", state, store)
+        #expect(items.map(\.title) == ["Rename to \"beta\""])
+        #expect(try screen.press(#require(items.first)) == .closed)
         #expect(store.projects.first { $0.id == project.id }?.name == "beta")
     }
 
     @Test
-    func project_empty_commit_changes_nothing() throws {
+    func project_empty_field_gives_no_row() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        #expect(screen.commit(""))
+        #expect(rows(screen, "", state, store).isEmpty)
+        #expect(screen.failure == nil)
         #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
     }
 
     @Test
-    func project_reserved_name_is_refused_on_the_screen() throws {
+    func project_reserved_name_shows_the_reason_and_no_row() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        #expect(!screen.commit("Pinned"))
+        #expect(rows(screen, "Pinned", state, store).isEmpty)
         #expect(screen.failure?.title == PinnedTabs.reservedNameMessage)
         #expect(screen.failure?.retryable == false)
-        #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
         #expect(state.pendingDialog == nil, "the screen says why, so no notice")
     }
 
     @Test
-    func project_name_with_a_slash_is_refused_on_the_screen() throws {
+    func project_name_with_a_slash_shows_the_reason_and_no_row() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        #expect(!screen.commit("work/api"))
+        #expect(rows(screen, "work/api", state, store).isEmpty)
         #expect(screen.failure?.title == Project.nameRefusal(for: "work/api"))
         #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
     }

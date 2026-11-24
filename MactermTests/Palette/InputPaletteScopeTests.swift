@@ -153,7 +153,7 @@ struct InputPaletteScopeTests {
         try Data().write(to: file)
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.folder",
-            pill: PalettePill(title: "Folder", icon: "folder"),
+            title: "Folder",
             prompt: "Folder"
         ) { text in
             PaletteInput.folderCheck(text) { path in PaletteInputAction(title: "Change to \"\(path)\"") { .done } }
