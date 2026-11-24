@@ -19,8 +19,8 @@ enum PaletteMotion {
 
 /// The horizontal insets of a result row, and the edge that the text of the
 /// list starts at. A section header and a one-line notice start at `text`,
-/// so the label lines up with the title of a row with no icon, as in native
-/// lists. A row with an icon puts its title after the icon.
+/// so the label lines up with the title of a row with no icon. A row with an
+/// icon puts its title after the icon.
 enum PaletteRowInsets {
     /// From the list's edge to the selection highlight.
     static let highlight: CGFloat = 6
