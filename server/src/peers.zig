@@ -548,7 +548,7 @@ pub fn handleChannelFrame(s: *Server, p: *Peer, ch: *Channel, t: i64, f: frame.F
             .hello => |h| if (!ch.conn.greeted) switch (m.negotiate(s.hello(), h)) {
                 .speak => {
                     ch.conn.greeted = true;
-                    if (ch.open_re) |re| reply(s, p.id, re, m.ChannelOpen, .{ .channel = ch.id, .epoch = h.epoch });
+                    if (ch.open_re) |re| reply(s, p.id, re, m.ChannelOpen, .{ .channel = ch.id, .epoch = h.epoch, .caps = h.caps });
                     ch.open_re = null;
                 },
                 .refuse => |r| {

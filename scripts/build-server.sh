@@ -11,6 +11,15 @@
 #   scripts/build-server.sh verify <dir> [key]
 #                                          exit 0 when <dir> holds the build
 #                                          of its manifest, of key <key>
+#   scripts/build-server.sh file <dir> <target>
+#                                          print the path of the tarball of
+#                                          <target>, from the manifest
+#   scripts/build-server.sh stage <dir> <tag> <out>
+#                                          copy the build of <dir> to <out>,
+#                                          with the tag in each file name
+#   scripts/build-server.sh download <repo> <release> <key> <dir>
+#                                          download the build of <key> into
+#                                          <dir> and verify it
 #
 # The key is the git object hashes of the sources (SOURCES below) from the
 # working tree (committed or not), hashed together: the server's code and
@@ -19,12 +28,23 @@
 # schemas of assets/, so they are sources too. Tests, the protocol schema and
 # host scripts are not sources: a change to them is not a new build. A
 # prebuilt named for a key is therefore the build of exactly that source
-# (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
+# (`macterm-<key>-<target>.tar.gz`; in the `server-prebuilt` release, see
+# below).
 #
 # A build writes its manifest next to the tarballs: `macterm-<key>-server.json`
 # with the key, the targets and the SHA-256 of each tarball. The other
 # scripts and the workflows read the targets and check a build with
 # `targets` and `verify`, and do not repeat the list or the check.
+#
+# In the `server-prebuilt` release, every file of a build has the tag of the
+# run that uploaded it (`stage`): `macterm-<key>-<target>-<tag>.tar.gz` and
+# `macterm-<key>-server-<tag>.json`. CI uses its run as the tag, so two runs
+# never write an asset of the same name. A run uploads its manifest last.
+# A run that stops before then leaves tarballs that no manifest names, and
+# they do not change any build. `download` takes the first complete build of
+# the key that verifies, in the order in which the uploads ended. It writes it as `macterm-<key>-server.json`, so a
+# downloaded build reads as a local build. Get a tarball's name from the
+# manifest (`file`). Do not make the name.
 #
 # The build needs macOS (lipo makes the universal binary) and Zig
 # $ZIG_VERSION. Zig cannot link with Xcode 26.4 or later (zig#31658), so CI
@@ -135,6 +155,102 @@ print(manifest["key"])
 PY
 }
 
+# The path of the tarball of `target` in `dir`, from its one manifest.
+tarball() {
+  local dir="$1" target="$2"
+  python3 -I - "$dir" "$target" <<'PY'
+import glob, json, os, sys
+folder, target = sys.argv[1], sys.argv[2]
+found = glob.glob(os.path.join(folder, "macterm-*-server.json"))
+if len(found) != 1:
+    sys.exit(f"error: {folder} has {len(found)} server manifests, not 1")
+with open(found[0]) as f:
+    print(os.path.join(folder, json.load(f)["files"][target]["file"]))
+PY
+}
+
+# Copy the build in `dir` to `out`, with `tag` in the name of each file,
+# and a manifest that names the copies.
+stage() {
+  local dir="$1" tag="$2" out="$3"
+  verify "$dir" >/dev/null
+  mkdir -p "$out"
+  python3 -I - "$dir" "$tag" "$out" <<'PY'
+import glob, json, os, shutil, sys
+folder, tag, out = sys.argv[1], sys.argv[2], sys.argv[3]
+path = glob.glob(os.path.join(folder, "macterm-*-server.json"))[0]
+with open(path) as f:
+    manifest = json.load(f)
+key = manifest["key"]
+for target, entry in manifest["files"].items():
+    name = f"macterm-{key}-{target}-{tag}.tar.gz"
+    shutil.copyfile(os.path.join(folder, entry["file"]), os.path.join(out, name))
+    entry["file"] = name
+with open(os.path.join(out, f"macterm-{key}-server-{tag}.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+PY
+}
+
+# Download the manifest `name` and the tarballs that it names into `dir`.
+# `uploaded` lists the names of the complete assets of the release. Exit 0
+# when the build verifies, 2 when the build is not complete or does not
+# verify, and 1 when a download fails.
+download_manifest() {
+  local repo="$1" release="$2" key="$3" name="$4" dir="$5" uploaded="$6" target path
+  gh release download "$release" --repo "$repo" --dir "$dir" --pattern "$name" || return 1
+  if [[ "$name" != "macterm-$key-server.json" ]]; then
+    mv "$dir/$name" "$dir/macterm-$key-server.json" || return 1
+  fi
+  for target in "${TARGETS[@]}"; do
+    path="$(tarball "$dir" "$target")" || return 2
+    grep -qxF "$(basename "$path")" <<<"$uploaded" || return 2
+    gh release download "$release" --repo "$repo" --dir "$dir" \
+      --pattern "$(basename "$path")" || return 1
+  done
+  verify "$dir" "$key" >/dev/null || return 2
+}
+
+# Download the build of `key` from a release into `dir`, which must not
+# exist. It tries the manifests of the key that are complete, in the order
+# in which their uploads ended, and takes the first build that is complete
+# and verifies. Prints the name of the manifest that it took. A failed
+# download stops it: it never takes a newer build because of a network
+# error.
+download() {
+  local repo="$1" release="$2" key="$3" dir="$4"
+  local id uploaded manifests name try status
+  [[ ! -e "$dir" ]] || { echo "error: $dir exists" >&2; return 1; }
+  id="$(gh api "repos/$repo/releases/tags/$release" --jq .id)" || return 1
+  # One line for each complete asset of the key: the end of its upload, its
+  # name.
+  uploaded="$(gh api --paginate "repos/$repo/releases/$id/assets?per_page=100" \
+    --jq ".[] | select(.state == \"uploaded\")
+      | select(.name | startswith(\"macterm-$key-\"))
+      | \"\\(.updated_at) \\(.name)\"" | sort)" || return 1
+  # The manifest without a tag is the form before tags.
+  manifests="$(awk -v k="$key" '$2 ~ ("^macterm-" k "-server(-[^ ]+)?\\.json$") { print $2 }' <<<"$uploaded")"
+  [[ -n "$manifests" ]] || { echo "No build of $key in $release" >&2; return 1; }
+  while read -r name; do
+    try="$(mktemp -d "${TMPDIR:-/tmp}/macterm-server-download.XXXXXX")"
+    status=0
+    download_manifest "$repo" "$release" "$key" "$name" "$try" "$(awk '{ print $2 }' <<<"$uploaded")" || status=$?
+    if [[ "$status" == 0 ]]; then
+      mkdir -p "$(dirname "$dir")"
+      mv "$try" "$dir"
+      echo "$name"
+      return 0
+    fi
+    rm -rf "$try"
+    if [[ "$status" == 1 ]]; then
+      echo "error: cannot download the build of $name" >&2
+      return 1
+    fi
+    echo "warning: the build of $name is not complete or does not verify" >&2
+  done <<<"$manifests"
+  return 1
+}
+
 # Global, not local: the EXIT trap runs after build() returns, and under
 # `set -u` bash 3.2 then stops on a local that is gone.
 WORK=""
@@ -211,9 +327,21 @@ case "${1:-}" in
     [[ -n "${2:-}" ]] || { echo "usage: $0 build <dir>" >&2; exit 2; }
     build "$2"
     ;;
+  file)
+    [[ -n "${3:-}" ]] || { echo "usage: $0 file <dir> <target>" >&2; exit 2; }
+    tarball "$2" "$3"
+    ;;
+  stage)
+    [[ -n "${4:-}" ]] || { echo "usage: $0 stage <dir> <tag> <out>" >&2; exit 2; }
+    stage "$2" "$3" "$4"
+    ;;
+  download)
+    [[ -n "${5:-}" ]] || { echo "usage: $0 download <repo> <release> <key> <dir>" >&2; exit 2; }
+    download "$2" "$3" "$4" "$5"
+    ;;
   zig-version) echo "$ZIG_VERSION" ;;
   *)
-    echo "usage: $0 key | key-of <commit> | dirty | targets | build <dir> | verify <dir> [key] | zig-version" >&2
+    echo "usage: $0 key | key-of <commit> | dirty | targets | build <dir> | verify <dir> [key] | file <dir> <target> | stage <dir> <tag> <out> | download <repo> <release> <key> <dir> | zig-version" >&2
     exit 2
     ;;
 esac

@@ -12,17 +12,27 @@ struct PaneLinkTests {
         try await withServer { server in
             let link = PaneLink(name: "pl-\(UInt32.random(in: 0 ... .max))", transport: .local(TestServerEndpoint(server)))
             var titles = 0
+            var notifications: [String] = []
+            var bells = 0
             var ends = 0
             link.onEvent = { event in
                 switch event {
                 case .title: titles += 1
+                case let .notification(_, body): notifications.append(body)
+                case .bell: bells += 1
                 case .ended: ends += 1
                 default: break
                 }
             }
+            // The title, then an OSC 9 notification and a bell after the
+            // input, when both channels attached.
             let launch = PaneSession.Launch(
                 cwd: NSTemporaryDirectory(),
-                argv: ["/bin/sh", "-c", "printf '\\033]2;pl-title\\007'; read l; exit 3"],
+                argv: [
+                    "/bin/sh",
+                    "-c",
+                    "printf '\\033]2;pl-title\\007'; read l; printf '\\033]9;pl-done\\007\\007'; read l; exit 3",
+                ],
                 env: []
             )
             let first = SurfaceChannelHost(view: nil)
@@ -35,9 +45,19 @@ struct PaneLinkTests {
             link.viewReady(second)
 
             try await waitFor { titles > 0 }
+            // The session says that it sends `notification`: libghostty's
+            // OSC 9 does not post for the pane too.
+            try await waitFor { first.sessionSendsNotifications && second.sessionSendsNotifications }
             // Both channels got the title; the pane hears it once.
             try await Task.sleep(for: .milliseconds(300))
             #expect(titles == 1)
+
+            route.sendInput(Data("go\n".utf8))
+            try await waitFor { !notifications.isEmpty && bells > 0 }
+            // Both channels got them; the pane hears each once.
+            try await Task.sleep(for: .milliseconds(300))
+            #expect(notifications == ["pl-done"])
+            #expect(bells == 1)
 
             route.sendInput(Data("bye\n".utf8))
             try await waitFor { ends > 0 }
@@ -74,7 +94,8 @@ struct PaneLinkTests {
             firstRoute.sendInput(Data("one\n".utf8))
             try await waitFor { titles.contains("one") }
 
-            // The first window closes: the second view's channel now counts.
+            // The first window closes: the link now reads the second view's
+            // channel.
             link.detach(first)
             secondRoute.sendInput(Data("two\n".utf8))
             try await waitFor { titles.contains("two") }
@@ -84,10 +105,10 @@ struct PaneLinkTests {
         }
     }
 
-    /// One view counts for the pane: the first that is ready. It changes
-    /// only when a view comes or goes.
+    /// The link reads the session's messages from one channel: the first
+    /// view that is ready. It changes only when a view comes or goes.
     @Test
-    func the_first_ready_view_counts_until_it_goes() {
+    func the_link_reads_the_first_ready_view_until_it_goes() {
         // An endpoint with no server: the rule needs no session.
         let link = PaneLink(name: "pl-count", transport: .local(FakeEndpoint([])))
         let launch = PaneSession.Launch(cwd: nil, argv: nil, env: [])
@@ -95,18 +116,30 @@ struct PaneLinkTests {
         let second = SurfaceChannelHost(view: nil)
         _ = link.attach(first, launch: launch)
         _ = link.attach(second, launch: launch)
-        #expect(!link.counts(first) && !link.counts(second), "no view is ready")
+        #expect(!link.readsMessages(from: first) && !link.readsMessages(from: second), "no view is ready")
 
         link.viewReady(second)
-        #expect(link.counts(second))
+        #expect(link.readsMessages(from: second))
         link.viewReady(first)
-        #expect(link.counts(first), "the first ready view in the order the views came")
-        #expect(!link.counts(second))
+        #expect(link.readsMessages(from: first), "the first ready view in the order the views came")
+        #expect(!link.readsMessages(from: second))
 
         link.detach(first)
-        #expect(link.counts(second))
+        #expect(link.readsMessages(from: second))
         link.detach(second)
-        #expect(!link.counts(second))
+        #expect(!link.readsMessages(from: second))
+    }
+
+    /// A session of an older build has no `notification` cap. Its pane then
+    /// takes notifications from libghostty (`postsOwnNotifications`).
+    @Test
+    func the_host_reads_the_notification_cap_of_the_session() async throws {
+        let host = SurfaceChannelHost(view: nil)
+        host.paneChannelOpened(caps: ["tty-read"])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!host.sessionSendsNotifications)
+        host.paneChannelOpened(caps: ["tty-read", "notification"])
+        try await waitFor { host.sessionSendsNotifications }
     }
 
     // MARK: - Support

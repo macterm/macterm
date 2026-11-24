@@ -44,10 +44,10 @@ final class GhosttyCallbacks: @unchecked Sendable {
         case GHOSTTY_ACTION_PWD:
             guard let view = surfaceView(from: target) else { return true }
             let pwd = String(cString: action.action.pwd.pwd)
-            // A surface on a channel takes the session's folder
-            // (`SurfaceChannelHost.paneCwd`).
+            // A surface whose session sends the folder takes the session's
+            // (`SurfaceChannelHost.paneCwd`). A plain ssh shell has none.
             DispatchQueue.main.async {
-                guard view.channelRuntime == nil else { return }
+                guard !view.sessionSendsFacts else { return }
                 view.currentPwd = pwd
             }
             return true
@@ -286,11 +286,16 @@ final class GhosttyCallbacks: @unchecked Sendable {
         case GHOSTTY_ACTION_RING_BELL:
             // BEL. The `title`/`border` bell-features are per-tab UI Macterm
             // doesn't implement; the app-level features (beep, custom sound,
-            // dock bounce) are handled here for any surface. The Dock badge,
-            // the `attention` feature's other half, reads the session's bell
-            // flag (`Pane.attention`).
+            // dock bounce) ring once for the pane: from the session's `bell`
+            // message (`Pane.ringBell`), or here for a surface whose session
+            // does not send it. The Dock badge, the `attention` feature's other
+            // half, reads the session's bell flag (`Pane.attention`).
             guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
-            DispatchQueue.main.async { Self.ringBell() }
+            guard let view = surfaceView(from: target) else { return true }
+            DispatchQueue.main.async {
+                guard !view.sessionSendsFacts else { return }
+                Self.ringBell()
+            }
             return true
         case GHOSTTY_ACTION_OPEN_CONFIG:
             // The `open_config` keybind. Macterm's source of truth is the
@@ -407,7 +412,7 @@ final class GhosttyCallbacks: @unchecked Sendable {
     /// badge is not rung from here — it is derived state, kept current by
     /// `AppState.syncDockBadge` from the panes' bell flags.
     @MainActor
-    private static func ringBell() {
+    static func ringBell() {
         let features = GhosttyApp.shared.bellFeatures
         if features.contains(.system) {
             NSSound.beep()
