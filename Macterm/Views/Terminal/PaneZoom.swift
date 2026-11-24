@@ -49,13 +49,11 @@ struct PaneZoom: Equatable {
     /// the pan could not take because the picture is at its edge in that
     /// direction. That part scrolls the terminal.
     mutating func pan(by delta: CGSize, in size: CGSize) -> CGSize {
-        let before = offset
-        offset = CGPoint(x: offset.x + delta.width, y: offset.y + delta.height)
+        let target = CGPoint(x: offset.x + delta.width, y: offset.y + delta.height)
+        offset = target
         self = clamped(to: size)
-        return CGSize(
-            width: delta.width - (offset.x - before.x),
-            height: delta.height - (offset.y - before.y)
-        )
+        // What the clamp cut off. Inside the edges this is exactly zero.
+        return CGSize(width: target.x - offset.x, height: target.y - offset.y)
     }
 
     /// The zoom with its offset clamped so that the picture covers the pane
@@ -79,17 +77,15 @@ struct PaneZoom: Equatable {
 
     // MARK: - As drawn
 
-    /// The zoom as libghostty draws it (`renderer.Zoom.view`): a zoomed cell
-    /// is a whole number of pixels, `round(scale x cell)` on each axis, so
-    /// the scale of each axis is that cell over the base cell. A layer that
-    /// shows the zoom while the pinch moves takes the same steps, so the
-    /// picture does not move when the sharp frame replaces it (design/012,
-    /// E4).
+    /// The zoom as libghostty draws it (`renderer.Zoom.view`). A zoomed cell
+    /// is `round(scale x cell)` pixels on each axis. The scale of an axis is
+    /// that cell over the base cell. The layer takes the same steps, so the
+    /// picture does not move when the sharp frame comes (design/012, E4).
     ///
-    /// libghostty also moves the grid by less than a pixel so that its first
-    /// cell draws on a whole pixel. The C API does not give the padding, so
-    /// this leaves that part out: the sharp frame can land up to one pixel
-    /// from the layer's picture.
+    /// libghostty also moves the grid by less than one pixel, so that its
+    /// first cell is on a whole pixel. The C API does not give the padding.
+    /// The sharp frame can therefore land up to one pixel from the layer's
+    /// picture.
     struct Drawn: Equatable {
         var scaleX: CGFloat = 1
         var scaleY: CGFloat = 1

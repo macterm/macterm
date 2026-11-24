@@ -85,11 +85,15 @@ Read-only is a mode of libghostty. The control is the **Read-Only Mode** `AppCom
 A pinch scales the picture of the pane under the pointer, up to 3x (`PaneZoom`, `PaneZoomController`). The font size, the grid and the pty size do not change: libghostty draws the zoom (`ghostty_surface_set_zoom`, fork patches 0025 and 0026) and applies its inverse where a pointer becomes a cell, so Macterm maps no mouse point.
 
 - **A pinch never changes the tile zoom.** One gesture has one action (Ethan, 2026-11-16, option A). Zoom Pane is a keybind, a palette row and a menu item only. The pinch that toggled the tile (#767) is gone.
-- **While the pinch moves, the layer scales the last frame.** `settleDelay` after the last magnify event, libghostty gets the zoom and draws it sharp. The layer transform always maps the zoom of the frame that the layer shows to the zoom that the user asked for, and it is set again at each new frame, inside libghostty's main-thread set of the layer's `contents` (a key-value observer). The sharp frame and the identity transform therefore land in one Core Animation transaction.
-- **The layer takes the whole-pixel steps that libghostty draws** (`PaneZoom.drawn`: `round(scale x cell)` on each axis). Without them the picture jumps when the sharp frame comes (design/012, E4).
+- **While the pinch moves, the layer scales the last frame.** The picture is soft. `settleDelay` after the last magnify event, libghostty gets the zoom and draws it sharp.
+- **The layer transform maps the zoom of the frame on the layer to the zoom that the user asked for.** A key-value observer on the layer's `contents` sets it again at each new frame. libghostty sets the contents on the main thread, so the frame and its transform change in one Core Animation transaction, with no jump.
+- **Only one send waits for its frame at a time.** The C API does not say which zoom a frame has, so the first frame after a send counts as that zoom.
+- **The layer takes the whole-pixel steps that libghostty draws** (`PaneZoom.drawn`: `round(scale x cell)` on each axis). Without them, the picture jumps when the sharp frame comes (design/012, E4).
+- **`convertToLayer` gives the layer's axes.** Do not read the y direction from a flipped flag.
+- While a transform is on, the pane's scroll view clips (`clipsToBounds`). A scaled layer is larger than the pane.
 - **A two-finger scroll pans first.** Only the part that the pan cannot take at its edge goes to the terminal (`forwardScrollWheel(_:deltaX:deltaY:)`). A wheel that is not precise always scrolls.
-- The zoom is not in the model and is not persisted, as read-only is not. `destroySurface` sets it back to 1x. After a change of the content scale, libghostty must get the zoom again (it keeps pixels).
-- **Reset Zoom** is an `AppCommand` (`HotkeyAction.resetZoom`, no default chord: ghostty binds ⌘0 to `reset_font_size`). Its action is nil at 1x.
+- The zoom is not in the model and is not persisted, as read-only is not. `destroySurface` sets it back to 1x. libghostty keeps the zoom in pixels, so it gets the zoom again after a change of the content scale.
+- **Reset Zoom** is an `AppCommand` (`HotkeyAction.resetZoom`, no default chord: ghostty binds ⌘0 to `reset_font_size`). Its action is nil at 1x. The right-click menu of a zoomed pane has it too. A pinch focuses its pane, so the command acts on the pane that the user zoomed.
 - No CLI verb drives the zoom yet: `control.sock` is frozen, so `pane pinch` waits for the relayed app actions (issue 0235).
 
 ## Animations (Settings → Animations)
@@ -112,7 +116,7 @@ This is the motion pane. It is directly under Appearance in the sidebar of Setti
     2. It captures the rows that scrolling reveals as the `RenderState` overscan of upstream (ghostty-org/ghostty#14400, the first step of the own smooth scrolling of upstream). The `beginShiftedUpdate` of the fork sets the request: `overscan.above` rows at the top, or one row below (fork PR 16).
     3. It shifts the grid by a `scroll_offset` uniform. It clips to the visible grid, which it sizes from `grid_size × cell_size`. **It never sizes it from the bottom and right of `grid_padding`**. They hold the leftover that Macterm measured at the last resize, and they go stale after the growth from the incubator to the pane.
   - Any move of the viewport by rows goes through `Screen.scroll`, which zeroes the remainder.
-  - Macterm has no part in the routing of a *wheel* event. Every event reaches libghostty untouched (#393). This is exactly why the gate is a ghostty key and not a read of `Preferences`.
+  - Macterm has no part in the routing of a *wheel* event. Every event reaches libghostty untouched (#393). This is exactly why the gate is a ghostty key and not a read of `Preferences`. The one exception is a zoomed picture: its pan takes a precise scroll first (see Picture zoom).
   - The alternate screen has no scrollback. There, the key animates a program that scrolls a region of its screen by rows. The cases are DECSTBM or DECSLRM with SU or SD, or IND or RI at the margin, which is what `less` does. The renderer draws the new content of the region, shifted by the scrolled distance, and eases it home in about a quarter of a second. The rows that scrolled out slide away as ghost rows (fork PR 11). It is in 0005 since fork PR 14, because a sync dropped it. A program that repaints every row still moves by rows.
   - **A resize moves the viewport by pixels too** (fork PR 9).
     - A grid comes only in whole rows. The leftover height of a viewport grows while you resize a pane, until it is a full row and the viewport takes one. At that instant everything on the screen jumps by one cell, because the new row comes from the scrollback at the top.

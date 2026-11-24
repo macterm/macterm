@@ -88,6 +88,15 @@ struct PaneZoomTests {
     }
 
     @Test
+    func a_fractional_pan_inside_the_edges_leaves_no_scroll() {
+        var zoom = PaneZoom()
+        zoom.pinch(by: 0.73, at: CGPoint(x: 123.456, y: 77.7), in: size)
+        for delta in [CGSize(width: 0.3, height: -0.1), CGSize(width: -1.7, height: 2.9)] {
+            #expect(zoom.pan(by: delta, in: size) == .zero)
+        }
+    }
+
+    @Test
     func at_1x_every_pan_is_scroll() {
         var zoom = PaneZoom()
         let delta = CGSize(width: 12, height: -7)

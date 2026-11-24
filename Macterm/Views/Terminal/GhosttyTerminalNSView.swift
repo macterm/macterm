@@ -1083,7 +1083,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             CATransaction.commit()
         }
         ghostty_surface_set_content_scale(surface, scale, scale)
-        pictureZoom.contentScaleDidChange()
+        pictureZoom.contentScaleDidChange(to: CGFloat(scale))
         applySurfaceSize(scaledSize)
     }
 
@@ -1699,10 +1699,13 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
 
     /// A pinch scales the picture of the pane under the pointer
     /// (`PaneZoomController`). It never changes the tile zoom (Zoom Pane):
-    /// one gesture has one action. libghostty reads no magnify event.
+    /// one gesture has one action. libghostty reads no magnify event. The
+    /// pane takes focus at the start of the pinch, so that Reset Zoom acts
+    /// on it.
     override func magnify(with event: NSEvent) {
         guard surface != nil else { return super.magnify(with: event) }
         onInteraction?()
+        if event.phase.contains(.began) || event.phase.isEmpty { window?.makeFirstResponder(self) }
         pictureZoom.pinch(by: event.magnification, at: mousePoint(from: event))
     }
 
@@ -1811,7 +1814,18 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             zoom.target = self
             menu.addItem(zoom)
         }
+        if pictureZoom.isZoomed {
+            if onZoomRequest == nil { menu.addItem(.separator()) }
+            let reset = NSMenuItem(title: String(localized: "Reset Zoom"), action: #selector(handleResetZoom), keyEquivalent: "")
+            reset.target = self
+            menu.addItem(reset)
+        }
         return menu
+    }
+
+    @objc
+    private func handleResetZoom() {
+        pictureZoom.reset()
     }
 
     @objc
