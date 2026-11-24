@@ -1422,6 +1422,31 @@ struct AppStateTests {
         #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
     }
 
+    @Test
+    func the_async_verdict_uses_the_hosts_answer() async throws {
+        let idle = try plainShellTab(answer: false)
+        #expect(await !idle.state.judgeClose([#require(idle.tab.splitRoot.findPane(id: idle.target))]))
+        let busy = try plainShellTab(answer: true)
+        #expect(await busy.state.judgeClose([#require(busy.tab.splitRoot.findPane(id: busy.target))]))
+    }
+
+    @Test
+    func the_quit_rows_leave_out_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == panes.map(\.id).filter { $0 != fx.target })
+    }
+
+    @Test
+    func the_quit_rows_wait_for_every_host() async throws {
+        let fx = try plainShellTab(answer: true)
+        let panes = fx.tab.splitRoot.allPanes()
+        fx.state.paneNeedsConfirmClose = { _ in false }
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == [fx.target])
+    }
+
     // MARK: - applyLayout
 
     /// Create a temp project directory and seed a workspace rooted there.

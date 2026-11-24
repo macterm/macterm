@@ -86,13 +86,13 @@ final class ControlHandler {
         case "project.create": return try await projectCreate(args)
         case "project.select": return try projectSelect(args)
         case "project.rename": return try projectRename(args)
-        case "project.remove": return try projectRemove(args)
+        case "project.remove": return try await projectRemove(args)
         case "tab.list": return try tabList(args)
         case "tab.new": return try tabNew(args)
         case "tab.select": return try tabSelect(args)
         case "tab.move": return try tabMove(args)
         case "tab.rename": return try tabRename(args)
-        case "tab.close": return try tabClose(args)
+        case "tab.close": return try await tabClose(args)
         case "window.list": return windowList()
         case "window.new": return windowNew()
         case "window.close": return try windowClose(args)
@@ -102,7 +102,7 @@ final class ControlHandler {
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
         case "pane.focus": return try paneFocus(args)
-        case "pane.close": return try paneClose(args)
+        case "pane.close": return try await paneClose(args)
         case "pane.run": return try paneRun(args)
         case "pane.key": return try paneKey(args)
         case "pane.zoom": return try paneZoom(args)
@@ -703,7 +703,7 @@ final class ControlHandler {
     /// are untouched. Those paths stage a confirmation dialog for a busy
     /// project; a headless caller gets a typed `busy` error instead — never a
     /// dialog the CLI can't answer. Same contract as `tab.close`.
-    private func projectRemove(_ args: ControlArgs) throws -> ControlData {
+    private func projectRemove(_ args: ControlArgs) async throws -> ControlData {
         guard let selector = args.project, !selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ControlError(
                 code: .badRequest,
@@ -718,10 +718,10 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "the \(project.name) section cannot be removed")
         }
 
-        // The same predicate `AppState.requestRemoveProject` evaluates before
+        // The same verdict `AppState.requestRemoveProject` waits for before
         // it decides to stage its dialog, so the CLI refuses exactly when the
         // app would have asked.
-        if appState.closeNeedsConfirmation(projectID: project.id), args.force != true {
+        if args.force != true, await appState.judgeClose(appState.panes(inProject: project.id)) {
             throw ControlError(
                 code: .busy,
                 message: "a pane in that project has a running program (removing kills its sessions)",
@@ -833,7 +833,7 @@ final class ControlHandler {
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
     }
 
-    private func tabClose(_ args: ControlArgs) throws -> ControlData {
+    private func tabClose(_ args: ControlArgs) async throws -> ControlData {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.close requires a tab selector")
         }
@@ -845,7 +845,7 @@ final class ControlHandler {
         // removal path.) The UI stages a confirmation dialog for busy tabs; a
         // headless caller gets a typed `busy` error instead — never a dialog
         // the CLI can't answer. Mirror-aware, like the app's own guard.
-        if appState.closeNeedsConfirmation(tab: tab), args.force != true {
+        if args.force != true, await appState.judgeClose(tab.splitRoot.allPanes()) {
             throw ControlError(
                 code: .busy,
                 message: "a pane in that tab has a running program (closing kills its session)",
@@ -936,14 +936,14 @@ final class ControlHandler {
         return ControlData(panes: [paneInfo(pane, in: target.tab, workspace: workspace)])
     }
 
-    private func paneClose(_ args: ControlArgs) throws -> ControlData {
+    private func paneClose(_ args: ControlArgs) async throws -> ControlData {
         let (project, workspace) = try resolveWorkspace(args)
         guard args.pane != nil || args.session != nil else {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
         let target = try resolvePane(args, in: workspace)
-        // The app's own guard (AppState.closeNeedsConfirmation).
-        if appState.closeNeedsConfirmation([target.pane]), args.force != true {
+        // The app's own verdict (AppState.judgeClose).
+        if args.force != true, await appState.judgeClose([target.pane]) {
             throw ControlError(
                 code: .busy,
                 message: "that pane has a running program (closing kills its session)",

@@ -968,24 +968,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
 
-        let rows = collectRunningProcessRows()
-        if rows.isEmpty {
-            AppTerminationState.isTerminating = true
-            return .terminateNow
+        // A plain ssh shell's verdict comes from its host (`AppState.judgeClose`),
+        // so the rows wait for the hosts, and the reply to AppKit waits for
+        // the rows.
+        Task { @MainActor in
+            let rows = await collectRunningProcessRows()
+            let quits = rows.isEmpty || QuitConfirmation.runModal(rows: rows)
+            if quits { AppTerminationState.isTerminating = true }
+            NSApp.reply(toApplicationShouldTerminate: quits)
         }
-
-        if QuitConfirmation.runModal(rows: rows) {
-            AppTerminationState.isTerminating = true
-            return .terminateNow
-        }
-        return .terminateCancel
+        return .terminateLater
     }
 
-    /// Walk every workspace, the quick terminal and the desktop widgets, and
-    /// emit one row per pane whose ghostty surface still has a foreground
-    /// process running.
-    private func collectRunningProcessRows() -> [RunningProcessRow] {
-        var rows: [RunningProcessRow] = []
+    /// One row for each pane of the workspaces, the quick terminal and the
+    /// desktop widgets that would end a running program, by the verdict of
+    /// `AppState.panesThatNeedConfirmClose`. The quick terminal's tab lives
+    /// outside `workspaces`, so it is walked on its own.
+    private func collectRunningProcessRows() async -> [RunningProcessRow] {
+        var candidates: [(projectName: String, pane: Pane)] = []
         let projectsByID = Dictionary(
             uniqueKeysWithValues: (projectStore?.projects ?? []).map { ($0.id, $0) }
         )
@@ -996,37 +996,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ?? project?.name
                 ?? String(localized: "Project")
             for tab in ws.tabs {
-                for pane in tab.splitRoot.allPanes() where pane.needsConfirmClose {
-                    rows.append(RunningProcessRow(
-                        projectName: projectName,
-                        processName: pane.processTitle
-                    ))
-                }
+                candidates += tab.splitRoot.allPanes().map { (projectName, $0) }
             }
         }
-
-        rows += collectQuickTerminalRows()
-        for widget in appState?.desktopWidgets ?? [] {
-            for pane in widget.tab.splitRoot.allPanes() where pane.needsConfirmClose {
-                rows.append(RunningProcessRow(projectName: String(localized: "Desktop Widget"), processName: pane.processTitle))
-            }
+        let quickTerminal = String(localized: "Quick Terminal")
+        candidates += QuickTerminalService.shared.splitState.tab.splitRoot.allPanes().map { (quickTerminal, $0) }
+        let widget = String(localized: "Desktop Widget")
+        for desktopWidget in appState?.desktopWidgets ?? [] {
+            candidates += desktopWidget.tab.splitRoot.allPanes().map { (widget, $0) }
         }
-        return rows
-    }
 
-    /// Quick-terminal panes with a running foreground process, for the
-    /// no-persistence prompt above (the panel's tab lives outside
-    /// `workspaces`, so the workspace walk never sees it).
-    private func collectQuickTerminalRows() -> [RunningProcessRow] {
-        var rows: [RunningProcessRow] = []
-        let qtTab = QuickTerminalService.shared.splitState.tab
-        for pane in qtTab.splitRoot.allPanes() where pane.needsConfirmClose {
-            rows.append(RunningProcessRow(
-                projectName: String(localized: "Quick Terminal"),
-                processName: pane.processTitle
-            ))
+        let panes = candidates.map(\.pane)
+        let busy = await Set((appState?.panesThatNeedConfirmClose(panes) ?? panes.filter(\.needsConfirmClose)).map(\.id))
+        return candidates.filter { busy.contains($0.pane.id) }.map {
+            RunningProcessRow(projectName: $0.projectName, processName: $0.pane.processTitle)
         }
-        return rows
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
