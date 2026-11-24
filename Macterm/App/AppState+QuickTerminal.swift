@@ -41,9 +41,6 @@ extension AppState {
             guard let self, self.hasRestoredSelection else { return }
             self.saveWorkspaces()
         }
-        state.onRunEnded = { [weak self] paneID in
-            self?.markSeenIfInKeyPanel(paneID: paneID)
-        }
     }
 
     /// Hand the persisted tab back to the panel. A nil snapshot (a file from

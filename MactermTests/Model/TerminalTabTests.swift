@@ -222,20 +222,11 @@ struct TerminalTabTests {
         let b = try paneNamed("b", in: tab, ids)
         let c = try paneNamed("c", in: tab, ids)
         b.receiveAttention(MactermProtocol.Attention(unseen: true))
-        c.executionState = .running
+        c.receiveSessionStatus(MactermProtocol.Status(state: .running))
         #expect(tab.executionState == .running)
-        c.executionState = .idle
+        c.receiveSessionStatus(MactermProtocol.Status(state: .done))
         #expect(tab.executionState == .done)
         b.receiveAttention(MactermProtocol.Attention())
-        #expect(tab.executionState == .idle)
-    }
-
-    /// The run state's own `.done` no longer draws a dot: only the session's
-    /// `unseen` flag does.
-    @Test
-    func executionState_ignores_a_done_run_state() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        try paneNamed("a", in: tab, ids).executionState = .done
         #expect(tab.executionState == .idle)
     }
 
@@ -256,10 +247,10 @@ struct TerminalTabTests {
         #expect(tab.executionState == .done)
         #expect(tab.completionFailed)
         // Work still under way outranks both.
-        a.executionState = .running
+        a.receiveSessionStatus(MactermProtocol.Status(state: .running))
         #expect(tab.executionState == .running)
         #expect(!tab.completionFailed)
-        a.executionState = .idle
+        a.receiveSessionStatus(MactermProtocol.Status(state: .done))
         #expect(tab.completionFailed)
         // Seeing the failed pane leaves the passing one's green dot.
         c.markSeen()

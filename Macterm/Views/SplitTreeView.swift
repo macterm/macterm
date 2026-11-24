@@ -16,7 +16,6 @@ struct SplitTreeView: View {
     let onFocusPane: (UUID) -> Void
     let onSplit: (UUID, SplitDirection, SplitPosition) -> Void
     let onClosePane: (UUID) -> Void
-    let onCommandFinished: (UUID) -> Void
     let onAdaptiveBackgroundChange: (UUID, CGColor?) -> Void
     let onToggleZoom: (UUID) -> Void
     /// When present, each leaf (except the dragged pane's own) becomes a drop
@@ -35,7 +34,6 @@ struct SplitTreeView: View {
         onFocusPane: @escaping (UUID) -> Void,
         onSplit: @escaping (UUID, SplitDirection, SplitPosition) -> Void,
         onClosePane: @escaping (UUID) -> Void,
-        onCommandFinished: @escaping (UUID) -> Void = { _ in },
         onAdaptiveBackgroundChange: @escaping (UUID, CGColor?) -> Void = { _, _ in },
         onToggleZoom: @escaping (UUID) -> Void = { _ in },
         paneDrop: PaneDropContext? = nil
@@ -50,7 +48,6 @@ struct SplitTreeView: View {
         self.onFocusPane = onFocusPane
         self.onSplit = onSplit
         self.onClosePane = onClosePane
-        self.onCommandFinished = onCommandFinished
         self.onAdaptiveBackgroundChange = onAdaptiveBackgroundChange
         self.onToggleZoom = onToggleZoom
         self.paneDrop = paneDrop
@@ -67,7 +64,6 @@ struct SplitTreeView: View {
                 isNonLeaderMirror: nonLeaderPaneIDs.contains(pane.id),
                 onFocus: { onFocusPane(pane.id) },
                 onProcessExit: { onClosePane(pane.id) },
-                onCommandFinished: { onCommandFinished(pane.id) },
                 onAdaptiveBackgroundChange: { onAdaptiveBackgroundChange(pane.id, $0) },
                 onSplitRequest: { dir, position in onSplit(pane.id, dir, position) },
                 onZoomRequest: { onToggleZoom(pane.id) },
@@ -87,7 +83,6 @@ struct SplitTreeView: View {
                     onFocusPane: onFocusPane,
                     onSplit: onSplit,
                     onClosePane: onClosePane,
-                    onCommandFinished: onCommandFinished,
                     onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
                     onToggleZoom: onToggleZoom,
                     paneDrop: paneDrop
@@ -105,7 +100,6 @@ struct SplitTreeView: View {
                     onFocusPane: onFocusPane,
                     onSplit: onSplit,
                     onClosePane: onClosePane,
-                    onCommandFinished: onCommandFinished,
                     onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
                     onToggleZoom: onToggleZoom,
                     paneDrop: paneDrop
@@ -128,7 +122,6 @@ struct SplitLeafView: View {
     let isNonLeaderMirror: Bool
     let onFocus: () -> Void
     let onProcessExit: () -> Void
-    let onCommandFinished: () -> Void
     let onAdaptiveBackgroundChange: (CGColor?) -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
     let onZoomRequest: () -> Void
@@ -153,7 +146,6 @@ struct SplitLeafView: View {
             isNonLeaderMirror: isNonLeaderMirror,
             onFocus: onFocus,
             onProcessExit: onProcessExit,
-            onCommandFinished: onCommandFinished,
             onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
             onSplitRequest: onSplitRequest,
             onZoomRequest: onZoomRequest
