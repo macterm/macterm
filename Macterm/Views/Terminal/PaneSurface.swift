@@ -254,14 +254,10 @@ final class PaneSurface: Identifiable {
         view.onSearchSelected = nil
         view.onFocus = nil
         view.onInteraction = nil
-        view.onCommandSubmitted = nil
         view.onSplitRequest = nil
         view.onOpenLink = nil
         view.onDesktopNotification = nil
         view.onCommandFinished = nil
-        view.onProgressStarted = nil
-        view.onProgressFinished = nil
-        view.onRunEnded = nil
         view.onTerminalRender = nil
         view.onBackgroundColorChange = nil
         view.onAdaptiveBackgroundChange = nil
@@ -520,10 +516,10 @@ final class SurfaceRegistry {
 
 extension Pane {
     /// Whether closing this pane must be confirmed first because a foreground
-    /// program is running. Every busy-close guard reads it (pane/tab close,
-    /// project removal, the CLI's `busy` error, the quit dialog rows). For a
-    /// plain shell (a host with no server), the GUI's close asks the host
-    /// first (`AppState.judgeClose`), and the host's answer replaces it.
+    /// program is running. Every busy-close guard reads it, through
+    /// `AppState.judgeClose` for a pane in a workspace. For a plain shell (a
+    /// host with no server), `judgeClose` asks the host first, and the host's
+    /// answer replaces it.
     ///
     /// The verdict itself is `ForegroundPolicy.needsConfirmClose` — a pure
     /// function over the pane's sample, so the local/remote asymmetry lives

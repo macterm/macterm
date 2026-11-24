@@ -338,7 +338,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(projectID: UUID()))
+        #expect(state.panes(inProject: UUID()).isEmpty)
     }
 
     @Test
@@ -1158,8 +1158,9 @@ struct AppStateTests {
         #expect(pane.attention == MactermProtocol.Attention())
     }
 
-    /// A run end in the focused pane of a key quick terminal ends its `.done`
-    /// state. A split pane that is not focused keeps its state and flags.
+    /// The flags of a run end in the focused pane of a key quick terminal
+    /// clear, and its `.done` state with them. A split pane that is not
+    /// focused keeps its state and flags.
     @Test
     func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
         let quick = QuickTerminalSplitState()
@@ -1176,9 +1177,8 @@ struct AppStateTests {
         let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
 
         for pane in [focused, other] {
-            pane.executionState = .done
             pane.receiveAttention(unseenFailure)
-            quick.onRunEnded(pane.id)
+            state.paneAttentionDidChange(paneID: pane.id)
         }
 
         #expect(focused.executionState == .idle)
@@ -1199,7 +1199,7 @@ struct AppStateTests {
         let project = seedProject(state)
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
-        pane.executionState = .done
+        #expect(pane.executionState == .done)
         state.saveWorkspaces()
 
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
@@ -1420,6 +1420,43 @@ struct AppStateTests {
         #expect(!fx.state.closeNeedsConfirmation([plain], plainAnswers: [plain.id: false]))
         #expect(fx.state.closeNeedsConfirmation([plain]))
         #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
+    }
+
+    @Test
+    func the_async_verdict_uses_the_hosts_answer() async throws {
+        let idle = try plainShellTab(answer: false)
+        let idlePane = try #require(idle.tab.splitRoot.findPane(id: idle.target))
+        #expect(await !idle.state.judgeClose([idlePane]))
+        let busy = try plainShellTab(answer: true)
+        let busyPane = try #require(busy.tab.splitRoot.findPane(id: busy.target))
+        #expect(await busy.state.judgeClose([busyPane]))
+    }
+
+    @Test
+    func the_quit_rows_leave_out_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == panes.map(\.id).filter { $0 != fx.target })
+    }
+
+    @Test
+    func the_quit_rows_wait_for_every_host() async throws {
+        let fx = try plainShellTab(answer: true)
+        let panes = fx.tab.splitRoot.allPanes()
+        let slow = try #require(panes.first { $0.id != fx.target })
+        // Both panes run a plain shell. The first answer is busy, and the
+        // second host answers idle later: a stop at the first busy answer
+        // would give the slow pane the surface's busy reading.
+        fx.state.paneRunsPlainShell = { _ in true }
+        fx.state.askPlainShellNeedsConfirmClose = { pane, _ in
+            if pane.id == fx.target { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+            return false
+        }
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == [fx.target])
+        #expect(!rows.contains { $0.id == slow.id })
     }
 
     // MARK: - applyLayout
@@ -1923,6 +1960,50 @@ struct AppStateTests {
     }
 
     @Test
+    func restore_gives_a_never_opened_project_its_first_tab_and_a_group_none() throws {
+        // A project holds its tabs from the start (design 010 section 11): a
+        // project with no snapshot that no window selects still gets its
+        // first tab at the restore. A group (no folder) holds no tabs.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-neveropened-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let project = Project(name: "never", path: dir.path, sortOrder: 0)
+        let group = Project(name: "Work", path: "", sortOrder: 1)
+        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
+
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+
+        let state = makeAppState(store: store)
+        state.restoreSelection(projects: [project, group])
+
+        #expect(state.activeProjectID == nil)
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+    }
+
+    @Test
+    func an_added_project_gets_its_first_tab_at_once() {
+        let state = makeAppState()
+        let projects = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-added-\(UUID().uuidString).json"))
+        projects.onAdd = { [weak state] in state?.projectAdded($0) }
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+        state.restoreSelection(projects: projects.projects)
+
+        let project = projects.create(name: "fresh", path: "/tmp")
+        let group = projects.add(Project(name: "Work", path: ""))
+
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+        #expect(state.activeProjectID == nil)
+    }
+
+    @Test
     func a_project_with_every_tab_closed_stays_empty_after_a_relaunch() throws {
         // Closing the last tab leaves the project empty. A relaunch must keep
         // it empty: selecting it does not create a default tab.
@@ -2100,48 +2181,13 @@ struct AppStateTests {
         #expect(AppState.panesToWarm(in: ws).isEmpty)
     }
 
-    // MARK: - Quiet-settle
+    // MARK: - Run state
 
-    // The poll calls `pane.settleTerminalActivityIfQuiet()` directly (no
-    // occlusion special-casing): the OUTPUT_ACTIVITY heartbeat that sources
-    // activity is occlusion-independent, so a quiet pane settles the same
-    // whether or not it is on screen. These drive the settle in isolation:
-    // deterministic (no live surface, no `Preferences` global).
-
-    /// A pane whose activity went quiet long ago (past the 3s settle window).
-    private func quietRunningPane() -> Pane {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
-        #expect(pane.executionState == .running)
-        return pane
-    }
-
+    /// The run state comes from the session whatever the status indicator
+    /// setting is: `pane list` reports it, and the setting only chooses what
+    /// the tab row draws (#705).
     @Test
-    func quiet_activity_run_settles_to_done() {
-        let pane = quietRunningPane()
-        // 10s of silence is past the window — occluded or not, it's done.
-        pane.settleTerminalActivityIfQuiet()
-        #expect(pane.executionState == .done)
-    }
-
-    @Test
-    func activity_run_holds_until_the_quiet_window_elapses() {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        let start = Date()
-        pane.markTerminalActivity(at: start)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(2), quietInterval: 3)
-        #expect(pane.executionState == .running)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
-        #expect(pane.executionState == .done)
-    }
-
-    /// The poll tracks execution whatever the status indicator setting is:
-    /// `pane list` reports the state, and the setting only chooses what the
-    /// tab row draws (#705).
-    @Test
-    func poll_settles_a_quiet_run_with_the_status_indicator_off() throws {
+    func the_run_state_follows_the_session_with_the_status_indicator_off() throws {
         let priorIndicator = Preferences.shared.showTabStatusIndicator
         defer { Preferences.shared.showTabStatusIndicator = priorIndicator }
         Preferences.shared.showTabStatusIndicator = false
@@ -2149,10 +2195,11 @@ struct AppStateTests {
         state.isAppActive = { false }
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        state.settleAllPanes()
         #expect(pane.executionState == .running)
-
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
+        pane.receiveAttention(MactermProtocol.Attention(unseen: true))
         state.settleAllPanes()
         #expect(pane.executionState == .done)
     }

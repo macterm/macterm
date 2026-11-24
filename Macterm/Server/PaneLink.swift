@@ -260,9 +260,8 @@ final class PaneLink {
 
     /// Whether the channel of `host` counts for the pane: the first view
     /// that is ready. It counts the session's messages, and its surface
-    /// counts what libghostty parses (`PaneSurface.countsOutput`), until the
-    /// session sends those facts too (issue 0260). The rule changes only
-    /// when a view comes or goes, never with the lead.
+    /// counts what libghostty parses (`PaneSurface.countsOutput`). The rule
+    /// changes only when a view comes or goes, never with the lead.
     func counts(_ host: SurfaceChannelHost) -> Bool {
         views.first(where: \.ready)?.host === host
     }
