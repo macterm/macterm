@@ -552,9 +552,10 @@ final class AppState {
     }
 
     /// Show the project screen of `project` in `window` (the key window when
-    /// nil), also when the project has tabs: what a click on a project row,
-    /// a palette project row and CLI `project select` do. The project's tabs
-    /// stay; a selection of one of them shows it.
+    /// nil), also when the project has tabs: what a click on a sidebar
+    /// project row and CLI `project select` do. The project's tabs stay; a
+    /// selection of one of them shows it. A palette project row shows the
+    /// last tab (`showLastTab(of:)`).
     func showProjectScreen(_ project: Project, in window: WindowState?) {
         selectProject(project, in: window)
         guard let target = window ?? keyWindow, target.activeProjectID == project.id,
@@ -563,6 +564,20 @@ final class AppState {
         target.showsProjectScreen = true
         settleWindowSelections()
         persistWindows()
+    }
+
+    /// Show `project` in the key window at the tab that the window last
+    /// showed there (`WindowState.activeTabIDs`), else the workspace's active
+    /// tab: what a palette project row does. A project with no tabs shows
+    /// `EmptyProjectView`. This is a function of its own and not a Bool
+    /// parameter of `showProjectScreen`, because the sidebar row and CLI
+    /// `project select` show the project screen.
+    func showLastTab(of project: Project) {
+        selectProject(project)
+        guard let key = keyWindow, key.activeProjectID == project.id else { return }
+        endProjectScreen(in: key)
+        settleWindowSelections()
+        claimLeadershipForKeyWindow()
     }
 
     /// Whether the key window shows the project screen. A command that acts on
@@ -1526,6 +1541,12 @@ final class AppState {
         // Layout; a project with no snapshot gets the default workspace.
         for ws in WorkspaceSerializer.restore(from: loaded.workspaces, validIDs: valid) {
             workspaces[ws.id] = ws
+        }
+        // A project holds its tabs from the start (design 010 section 11):
+        // one with no snapshot gets its first tab now, not when a window
+        // first shows it.
+        for project in projects {
+            giveFirstTab(to: project)
         }
         // Pinned tabs: records first, then the launch reconcile against
         // `pinned.yaml` (the file is authoritative for membership — see
@@ -3670,7 +3691,25 @@ final class AppState {
         tab.markSeen()
     }
 
+    /// A project that was just added gets its first tab at once, so that
+    /// no project is without tabs (design 010 section 11). `ProjectStore.onAdd`
+    /// calls it for every path that adds a project (`MactermApp` connects
+    /// the two). Before the restore it saves nothing: a save then would
+    /// write over the snapshot that the restore has not read yet.
+    func projectAdded(_ project: Project) {
+        guard workspaces[project.id] == nil, project.hasFolder else { return }
+        giveFirstTab(to: project)
+        if hasRestoredSelection { saveWorkspaces() }
+    }
+
     // MARK: - Private
+
+    /// The first tab of a project with a folder that has no tabs yet. A
+    /// project with no folder is a sidebar group, which holds no tabs.
+    private func giveFirstTab(to project: Project) {
+        guard project.hasFolder else { return }
+        ensureWorkspace(projectID: project.id, path: project.path)
+    }
 
     private func ensureWorkspace(projectID: UUID, path: String) {
         // The pinned workspace starts EMPTY — the path-taking init spawns an

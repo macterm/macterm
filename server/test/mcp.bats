@@ -111,3 +111,19 @@ call() {
   run "$ZMX" session info mcp2
   [ "$status" -eq 0 ]
 }
+
+@test "resources/list gives the two formats, and resources/read gives each schema of assets/" {
+  run mcp '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq_py '[x["uri"] for x in r["result"]["resources"]]')" = "['macterm://formats/palette', 'macterm://formats/layout']" ]
+  for pair in palette:palette layout:project; do
+    uri="macterm://formats/${pair%%:*}"
+    file="$REPO_DIR/../assets/${pair#*:}.schema.json"
+    run mcp "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/read\",\"params\":{\"uri\":\"$uri\"}}"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["contents"][0]["text"] == open("'"$file"'").read()')" = "True" ]
+    [ "$(printf '%s\n' "$output" | jq_py 'len(json.loads(r["result"]["contents"][0]["text"])["examples"])')" = "1" ]
+  done
+  run mcp '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"macterm://formats/nope"}}'
+  [ "$(printf '%s\n' "$output" | jq_py 'r["error"]["code"]')" = "-32002" ]
+}

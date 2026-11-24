@@ -119,7 +119,7 @@ enum Output {
                 project.active ? "*" : " ",
                 tree ? String(repeating: "  ", count: depth) + project.name : project.name,
             ] + (tree ? [] : [parent]) + [
-                project.loaded ? tabs : "not loaded",
+                tabs,
                 project.path,
             ]
         }

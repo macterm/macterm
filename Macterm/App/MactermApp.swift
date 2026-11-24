@@ -67,6 +67,7 @@ struct MactermApp: App {
                         delegate?.openInitialWindow()
                     }
                     appDelegate.projectStore = projectStore
+                    projectStore.onAdd = { [weak appState] project in appState?.projectAdded(project) }
                     if ModelShadow.isEnabled, appState.modelShadow == nil {
                         let shadow = ModelShadow(projectStore: projectStore)
                         appState.modelShadow = shadow

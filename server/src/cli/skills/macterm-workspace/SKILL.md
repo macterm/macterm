@@ -104,8 +104,7 @@ selection, the focus history or the zoom. If the app is too old for `--no-focus`
 (exit 1) before it creates anything. It does not switch the focus in silence. The shell starts also in
 a hidden tab or project. Wait for its shell prompt before you use `pane run`. Without that flag, a tab
 in another project that nobody viewed can have no terminal yet. Its `--run` command waits, and
-`pane run` answers `no_surface` until someone views the tab. The target project must already be
-loaded. A project that was not opened since the start has no workspace to add tabs to.
+`pane run` answers `no_surface` until someone views the tab.
 
 ## 3. Save the layout, apply it later
 

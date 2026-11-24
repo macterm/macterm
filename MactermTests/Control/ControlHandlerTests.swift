@@ -25,6 +25,8 @@ struct ControlHandlerTests {
         let appState = state ?? makeAppState()
         let projectStore = store ?? ProjectStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        // As `MactermApp` connects them: an added project gets its first tab.
+        projectStore.onAdd = { [weak appState] in appState?.projectAdded($0) }
         let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in remoteFolder }
         return (handler, appState, projectStore)
     }
@@ -123,7 +125,7 @@ struct ControlHandlerTests {
     // MARK: - project.list
 
     @Test
-    func project_list_marks_active_and_loaded() async {
+    func project_list_marks_active_and_counts_tabs_of_a_project_never_selected() async {
         let (handler, appState, projectStore) = makeHandler()
         let selected = seedProject(appState, projectStore, name: "one")
         _ = seedProject(appState, projectStore, name: "two", select: false)
@@ -134,12 +136,10 @@ struct ControlHandlerTests {
         let one = projects?.first { $0.name == "one" }
         let two = projects?.first { $0.name == "two" }
         #expect(one?.active == true)
-        #expect(one?.loaded == true)
         #expect(one?.id == selected.id.uuidString)
         #expect(one?.tabCount == 1)
         #expect(two?.active == false)
-        #expect(two?.loaded == false)
-        #expect(two?.tabCount == nil)
+        #expect(two?.tabCount == 1)
     }
 
     @Test
@@ -221,13 +221,22 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func tab_list_unloaded_project_is_not_found_with_hint() async {
+    func tab_list_lists_the_first_tab_of_a_project_never_selected() async {
         let (handler, appState, projectStore) = makeHandler()
-        _ = seedProject(appState, projectStore, name: "loaded")
+        _ = seedProject(appState, projectStore, name: "open")
         _ = seedProject(appState, projectStore, name: "cold", select: false)
         let response = await handler.handle(request("tab.list", args: ControlArgs(project: "cold")))
+        #expect(response.ok)
+        #expect(response.data?.tabs?.count == 1)
+    }
+
+    @Test
+    func tab_list_of_a_group_is_not_found() async {
+        let (handler, _, projectStore) = makeHandler()
+        projectStore.add(Project(name: "Work", path: ""))
+        let response = await handler.handle(request("tab.list", args: ControlArgs(project: "Work")))
         #expect(response.error?.code == .notFound)
-        #expect(response.error?.action?.contains("project select") == true)
+        #expect(response.error?.message.contains("has no tabs") == true)
     }
 
     @Test
@@ -383,7 +392,7 @@ struct ControlHandlerTests {
         let info = created.data?.projects?.first
         #expect(info?.name == "fresh")
         #expect(info?.active == true)
-        #expect(info?.loaded == true)
+        #expect(info?.tabCount == 1)
         #expect(projectStore.projects.count == 1)
         #expect(appState.activeProjectID?.uuidString == info?.id)
 
@@ -747,7 +756,7 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func project_remove_unloaded_project_succeeds() async {
+    func project_remove_of_a_project_never_selected_succeeds() async {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "alpha", select: false)
         #expect(projectStore.projects.count == 1)

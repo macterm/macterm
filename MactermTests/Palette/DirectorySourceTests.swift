@@ -62,6 +62,29 @@ struct DirectorySourceTests {
     }
 
     @Test
+    func local_directory_switch_ends_the_project_screen_of_the_same_project() throws {
+        let (ctx, state, store) = makeContext()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-dir-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let existing = Project(name: "existing", path: dir.path, sortOrder: 0)
+        store.add(existing)
+        state.incubatePane = { _ in }
+        let window = WindowState(activeProjectID: existing.id)
+        state.registerWindow(window)
+        state.noteKeyWindow(window)
+        state.showProjectScreen(existing, in: window)
+        #expect(window.showsProjectScreen)
+
+        let item = try #require(DirectorySource().items(query: dir.path, context: ctx).first)
+        #expect(item.subtitle?.contains("Switch to project") == true)
+        item.action()
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: existing.id, in: window) != nil)
+    }
+
+    @Test
     func local_directory_backing_a_project_also_offers_adding_another() throws {
         // A directory is not an identity — below "Switch to project" the
         // exact match offers creating a second, independent project there.
