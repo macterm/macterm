@@ -291,13 +291,13 @@ struct ProjectCommand: ParsableCommand {
 
     struct Remove: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Remove a project. This kills the zmx sessions of its panes."
+            abstract: "Remove a project and every project inside it. This kills the zmx sessions of their panes."
         )
 
         @Argument(help: "Project name, UUID, or index.")
         var project: String
 
-        @Flag(help: "Remove even if a pane has a running program.")
+        @Flag(help: "Remove even if a pane of one of them has a running program.")
         var force = false
 
         @OptionGroup var options: ConnectionOptions

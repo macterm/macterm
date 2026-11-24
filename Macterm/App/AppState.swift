@@ -2088,12 +2088,6 @@ final class AppState {
         closeNeedsConfirmation(tab.splitRoot.allPanes())
     }
 
-    /// Whether removing the whole of project `projectID` needs
-    /// confirmation. Unknown or empty projects need none.
-    func closeNeedsConfirmation(projectID: UUID) -> Bool {
-        closeNeedsConfirmation(panes(inProject: projectID))
-    }
-
     /// Every pane of the given projects (removed whole) and tabs.
     func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
         var closing = projectIDs.flatMap(panes(inProject:))
@@ -2292,19 +2286,48 @@ final class AppState {
         store.removeWithDescendants(projectID)
     }
 
-    /// A bulk sidebar delete (multi-selection): run `removal` now, or stage
-    /// it when one or more affected panes has a running foreground program —
-    /// a single dialog for the whole selection instead of one per item.
-    /// Run `removal` (the caller's full bulk close/remove) immediately when no
-    /// affected pane is busy; otherwise stage it behind one confirmation alert.
-    /// Mirrors `requestRemoveProject`/`requestCloseTab`, but for a whole
-    /// multi-selection so the user confirms once rather than per item.
+    /// The projects that a removal of `selected` removes: each selected
+    /// project and every project inside it, once each.
+    func projectsRemoved(with selected: [UUID], store: ProjectStore) -> [UUID] {
+        var seen = Set<UUID>()
+        return selected.flatMap { [$0] + store.descendants(of: $0).map(\.id) }.filter { seen.insert($0).inserted }
+    }
+
+    /// A bulk sidebar delete (multi-selection): run `removal` (the caller's
+    /// close of `tabs` and removal of the `selected` projects) now, or after
+    /// one question for the whole selection. A selected project goes with
+    /// everything inside it, as a single Remove does, so the question has
+    /// the same counts when a selected project holds tabs or nested
+    /// projects. A selection of tabs alone asks only when a process runs.
     func requestRemoveSelection(
-        projectIDs: [UUID],
+        projectIDs selected: [UUID],
         tabs: [(tabID: UUID, projectID: UUID)],
+        store: ProjectStore,
         removal: @escaping @MainActor () -> Void
     ) {
-        guard closeNeedsConfirmation(projectIDs: projectIDs, tabs: tabs) else {
+        let removed = projectsRemoved(with: selected, store: store)
+        let tabCount = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let selectedSet = Set(selected)
+        let nested = removed.count(where: { !selectedSet.isDisjoint(with: store.ancestors(of: $0)) })
+        let busy = closeNeedsConfirmation(projectIDs: removed, tabs: tabs)
+        if tabCount > 0 || nested > 0 {
+            let message = busy
+                ? String(localized: """
+                The selected projects contain \(tabCount) tabs and \(nested) nested projects. \
+                A process is still running.
+                """)
+                : String(localized: "The selected projects contain \(tabCount) tabs and \(nested) nested projects.")
+            present(PendingDialog(
+                kind: .removeSelection,
+                title: String(localized: "Remove the selected items?"),
+                message: message,
+                confirmTitle: String(localized: "Remove"),
+                host: .mainWindow,
+                onConfirm: removal
+            ))
+            return
+        }
+        guard busy else {
             removal()
             return
         }

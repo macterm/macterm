@@ -396,7 +396,7 @@
       "usage" : "macterm project rename <project> <name> [--socket <socket>] [--json]"
     },
     {
-      "abstract" : "Remove a project. This kills the zmx sessions of its panes.",
+      "abstract" : "Remove a project and every project inside it. This kills the zmx sessions of their panes.",
       "arguments" : [
         {
           "abstract" : "Project name, UUID, or index.",
@@ -410,7 +410,7 @@
       "hidden" : false,
       "options" : [
         {
-          "abstract" : "Remove even if a pane has a running program.",
+          "abstract" : "Remove even if a pane of one of them has a running program.",
           "debug" : false,
           "hidden" : false,
           "names" : [

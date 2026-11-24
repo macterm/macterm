@@ -141,7 +141,7 @@ struct ProjectStoreTests {
         let b = Project(name: "b", path: "/tmp/b", sortOrder: 1)
         store.add(a)
         store.add(b)
-        store.remove(id: a.id)
+        store.removeWithDescendants(a.id)
         #expect(store.projects.map(\.id) == [b.id])
     }
 
@@ -466,19 +466,6 @@ struct ProjectStoreTests {
         #expect(store.children(of: parent.id).map(\.sortOrder) == [0, 1, 2])
         #expect(store.children(of: nil).map(\.id) == [parent.id, top.id])
         #expect(store.projects.map(\.id) == [parent.id, c.id, a.id, b.id, top.id])
-    }
-
-    @Test
-    func removing_a_parent_moves_its_children_to_the_end_of_the_top_level() {
-        let store = makeStore()
-        let parent = store.add(Project(name: "parent", path: "/tmp/parent"))
-        let top = store.add(Project(name: "top", path: "/tmp/top"))
-        let x = store.add(Project(name: "x", path: "/tmp/x", parent: parent.id))
-        let y = store.add(Project(name: "y", path: "/tmp/y", parent: parent.id))
-        store.remove(id: parent.id)
-        #expect(store.children(of: nil).map(\.id) == [top.id, x.id, y.id])
-        #expect(store.children(of: nil).map(\.sortOrder) == [0, 1, 2])
-        #expect(store.projects.map(\.id) == [top.id, x.id, y.id])
     }
 
     @Test

@@ -54,15 +54,6 @@ enum SidebarTree {
         return store.move(id, into: target.id)
     }
 
-    /// The tab slot of a drop at `row` among the rows of a project: its
-    /// `tabCount` tab rows, then the projects inside it. A drop at a tab
-    /// row's line goes to that slot. A drop at the line between the last tab
-    /// and the first project inside (`row == tabCount`), or lower among those
-    /// projects, goes after the last tab.
-    static func tabSlot(atRow row: Int, tabCount: Int) -> Int {
-        min(max(row, 0), tabCount)
-    }
-
     /// The projects that `id` can move into with Move Into Project: every
     /// project except its own parent, itself, and the projects inside it.
     static func moveTargets(for id: UUID, in store: ProjectStore) -> [Project] {

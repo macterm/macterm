@@ -8254,6 +8254,22 @@
         }
       }
     },
+    "Remove the selected items?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 항목을 제거하시겠습니까?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除所选项吗？"
+          }
+        }
+      }
+    },
     "Remove widget?" : {
       "localizations" : {
         "ko" : {
@@ -10877,6 +10893,134 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "该截图不是 Macterm 可以读取的图像。"
+          }
+        }
+      }
+    },
+    "The selected projects contain %lld tabs and %lld nested projects." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected projects contain %#@tabs@ and %#@projects@."
+          },
+          "substitutions" : {
+            "projects" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested project"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested projects"
+                    }
+                  }
+                }
+              }
+            },
+            "tabs" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tab"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tabs"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。"
+          }
+        }
+      }
+    },
+    "The selected projects contain %lld tabs and %lld nested projects. A process is still running." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected projects contain %#@tabs@ and %#@projects@. A process is still running."
+          },
+          "substitutions" : {
+            "projects" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested project"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested projects"
+                    }
+                  }
+                }
+              }
+            },
+            "tabs" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tab"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tabs"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다. 프로세스가 아직 실행 중입니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
           }
         }
       }

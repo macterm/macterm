@@ -295,7 +295,9 @@ struct SidebarContent: View {
             //   The insertion LINE renders fine during the hover — it is the
             //   accept that dies, so it can't even be risked as a cosmetic.
             //   The tab ForEach below can use the same API because its rows
-            //   are one level down in the outline.
+            //   are one level down in the outline. The nested ForEach of
+            //   child projects in `projectSection` takes tab and pane drops
+            //   only (issue 0482; its ui-review checks for this crash).
             // - A List-level catch-all never fires: the outline view claims
             //   every drag over the sidebar, so unhandled drops don't bubble
             //   to enclosing views.
@@ -537,12 +539,16 @@ struct SidebarContent: View {
                 // to the tab `ForEach`. With no destination here, a tab drop
                 // at that line did nothing (ui-review 0522). A tab or a pane
                 // dropped at any line among these rows goes after the last
-                // tab of this project.
+                // tab of this project. This destination takes tabs and panes
+                // only; a project drop on the top-level `ForEach` of
+                // disclosures crashes (see the notes in `body`).
                 ForEach(node.children) { child in
                     projectSection(child)
                 }
-                .dropDestination(for: TabSlotDropItem.self) { items, offset in
-                    let slot = SidebarTree.tabSlot(atRow: tabs.count + offset, tabCount: tabs.count)
+                .dropDestination(for: TabSlotDropItem.self) { items, _ in
+                    // An explicit slot, not nil: nil does not reorder a tab
+                    // of this project (`receiveTabDrop`).
+                    let slot = appState.workspaces[project.id]?.tabs.count ?? 0
                     for item in items {
                         switch item {
                         case let .tab(tab):
@@ -1024,10 +1030,10 @@ struct SidebarContent: View {
             }
         }
 
-        let removedProjects = Set(projectIDs + projectIDs.flatMap { projectStore.descendants(of: $0).map(\.id) })
+        let removedProjects = Set(appState.projectsRemoved(with: projectIDs, store: projectStore))
         let tabsToClose = tabRefs.filter { !removedProjects.contains($0.projectID) }
 
-        appState.requestRemoveSelection(projectIDs: Array(removedProjects), tabs: tabsToClose) {
+        appState.requestRemoveSelection(projectIDs: projectIDs, tabs: tabsToClose, store: projectStore) {
             appState.closeTabs(tabsToClose)
             for id in projectIDs {
                 appState.removeProject(id, store: projectStore)

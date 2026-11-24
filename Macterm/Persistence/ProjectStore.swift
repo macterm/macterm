@@ -85,12 +85,6 @@ final class ProjectStore {
         return project
     }
 
-    /// Remove a project. Its children go to the end of the top level.
-    func remove(id: UUID) {
-        rows.removeAll { $0.id == id }
-        changed()
-    }
-
     // MARK: - Tree
 
     /// The projects whose parent is `parent` (nil: the top level), in
