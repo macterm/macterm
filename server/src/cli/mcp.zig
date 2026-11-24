@@ -319,7 +319,7 @@ fn callMethod(arena: std.mem.Allocator, options: Options, comptime M: type, argu
         error.Invalid => return toolError(arena, try std.fmt.allocPrint(arena, "arguments{s}: {s}", .{ fault.path.items, fault.message })),
     };
     const paths = try client.candidates(arena, options.env, options.socket);
-    var conn = switch (try client.connect(arena, paths)) {
+    var conn = switch (try client.connectAs(arena, paths, .mcp)) {
         .ok => |c| c,
         .no_server => return toolError(arena, not_running),
         .failed => |message| return toolError(arena, message),

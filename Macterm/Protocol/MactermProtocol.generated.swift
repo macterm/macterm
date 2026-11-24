@@ -424,6 +424,7 @@ extension MactermProtocol {
         case cli
         case server
         case session
+        case mcp
         case unknown
     }
 }
@@ -5436,6 +5437,20 @@ extension MactermProtocol.Inspect: ProtocolValue {
     }
 }
 
+extension MactermProtocol {
+    struct TtyRead: Equatable {}
+}
+
+extension MactermProtocol.TtyRead: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
+    }
+}
+
 extension MactermProtocol.Hello: ProtocolMessage {
     static let name = "hello"
     static let since: UInt32 = 1
@@ -5682,6 +5697,12 @@ extension MactermProtocol.Inspect: ProtocolMessage {
     static let senders: [MactermProtocol.Trust] = [.session]
 }
 
+extension MactermProtocol.TtyRead: ProtocolMessage {
+    static let name = "tty_read"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
 extension MactermProtocol {
     /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
     enum ErrorCode: Equatable {
@@ -5759,6 +5780,7 @@ extension MactermProtocol {
         case history(History)
         case inspectRead(InspectRead)
         case inspect(Inspect)
+        case ttyRead(TtyRead)
         case unknown(String)
     }
 }
@@ -5796,6 +5818,7 @@ extension MactermProtocol.PaneMessage {
         case MactermProtocol.History.name: try .history(message(of: MactermProtocol.History.self))
         case MactermProtocol.InspectRead.name: try .inspectRead(message(of: MactermProtocol.InspectRead.self))
         case MactermProtocol.Inspect.name: try .inspect(message(of: MactermProtocol.Inspect.self))
+        case MactermProtocol.TtyRead.name: try .ttyRead(message(of: MactermProtocol.TtyRead.self))
         default: .unknown(t)
         }
     }
