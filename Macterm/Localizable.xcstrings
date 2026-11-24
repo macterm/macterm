@@ -188,6 +188,22 @@
         }
       }
     },
+    "%@ is not a directory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 디렉토리가 아닙니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是目录"
+          }
+        }
+      }
+    },
     "%@ is not a project, so it has no insights." : {
       "localizations" : {
         "ko" : {
@@ -7316,6 +7332,22 @@
         }
       }
     },
+    "Path %@ doesn't exist" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 경로가 존재하지 않습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路径 %@ 不存在"
+          }
+        }
+      }
+    },
     "Peek sidebar when hidden" : {
       "localizations" : {
         "ko" : {
@@ -11091,28 +11123,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可解释的输出。"
-          }
-        }
-      }
-    },
-    "There is no path %@ on %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "There is no path %1$@ on %2$@."
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@에 %1$@ 경로가 없습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@ 上没有路径 %1$@。"
           }
         }
       }
