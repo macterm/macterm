@@ -11,7 +11,8 @@ import SwiftUI
 /// drawn in its place read as a slower fade, so it has none.
 @MainActor
 enum PaletteMotion {
-    static var animation: Animation { .easeOut(duration: 0.12) }
+    static var seconds: TimeInterval { 0.12 }
+    static var animation: Animation { .easeOut(duration: seconds) }
     static var transition: BlurReplaceTransition { .blurReplace }
 }
 

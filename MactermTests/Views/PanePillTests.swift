@@ -101,21 +101,6 @@ struct PanePillTests {
         #expect(rest(held: ["Visual Block"]) == rest(held: []))
     }
 
-    /// A pill highlights when its title changes in place: not at its first
-    /// title, and not when the same title comes again.
-    @Test
-    func a_change_of_the_title_highlights_the_pill() {
-        var change = PanePillChange()
-        #expect(change.record("Copy Mode") == false)
-        #expect(change.record("Copy Mode") == false)
-        #expect(change.record("Visual") == true)
-        #expect(change.record("Visual") == false)
-        #expect(change.record("Copy Mode") == true)
-        var remote = PanePillChange()
-        #expect(remote.record("Reconnecting") == false)
-        #expect(remote.record("Connection Lost") == true)
-    }
-
     /// Every whole badge at rest (chrome, padding and icon, the spinner too)
     /// is near round: much narrower than a badge that shows its title.
     @Test

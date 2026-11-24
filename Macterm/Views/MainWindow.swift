@@ -1259,14 +1259,16 @@ struct StatusPill<Icon: View>: View {
 /// pane's view gets every hit test under the row, and the status pills get
 /// none.
 ///
-/// A pill that changes in place (a new title: Copy Mode to Visual,
-/// Reconnecting to Connection Lost) shows a short highlight, at rest too, so
-/// the change shows on a pill that shows its icon only. SwiftUI has no API
-/// that sets the pressed state of a glass button, so the highlight is a fill
-/// of `MactermTheme.pressed` in the pill's shape. With Reduce Motion, the
-/// highlight comes and goes with no fade. An open pill does not get narrower
-/// while it is open (`heldTitles`): the row is aligned to the trailing edge,
-/// so a narrower pill would move out from under the pointer and close.
+/// A new title shows a short highlight on the pill (Copy Mode to Visual,
+/// Reconnecting to Connection Lost). The highlight shows at rest too. Thus a
+/// pill that shows its icon only also shows the change. The first title of
+/// a pill is not a change. SwiftUI has no API that sets the pressed state of
+/// a glass button. Thus the highlight is a fill of `MactermTheme.pressed` in
+/// the shape of the pill. With Reduce Motion, the highlight has no fade.
+///
+/// An open pill does not get narrower (`heldTitles`). The row is aligned to
+/// the trailing edge. Thus a narrower pill moves out from under the pointer,
+/// and then it closes.
 struct PanePill<Icon: View>: View {
     /// The least height of every pill's content: the tallest icon. The
     /// glass button sizes to its label, and the icons have different heights.
@@ -1284,13 +1286,12 @@ struct PanePill<Icon: View>: View {
     /// and close.
     static var closeDelay: Duration { .milliseconds(150) }
 
-    /// The time that the highlight of a change stays before it fades: about
-    /// the length of a click.
+    /// The time that the highlight of a change stays at full strength, after
+    /// its fade in and before its fade out: about the length of a click.
     static var highlightHold: Duration { .milliseconds(150) }
 
     @State private var isRevealed = false
     @State private var closeTask: Task<Void, Never>?
-    @State private var changes = PanePillChange()
     @State private var isHighlighted = false
     @State private var highlightTask: Task<Void, Never>?
     /// The titles that the open pill showed before its title changed. The
@@ -1316,8 +1317,8 @@ struct PanePill<Icon: View>: View {
                 .overlay { highlight(in: RoundedRectangle(cornerRadius: FlatPillChrome.cornerRadius, style: .continuous)) }
             }
         }
-        .onChange(of: title, initial: true) { old, new in
-            guard changes.record(new) else { return }
+        // `onChange` does not run for the first title of the pill.
+        .onChange(of: title) { old, _ in
             if isRevealed, !heldTitles.contains(old) { heldTitles.append(old) }
             showHighlight()
         }
@@ -1343,7 +1344,7 @@ struct PanePill<Icon: View>: View {
         let animation = reduceMotion ? nil : PaletteMotion.animation
         withAnimation(animation) { isHighlighted = true }
         highlightTask = Task { @MainActor in
-            try? await Task.sleep(for: Self.highlightHold)
+            try? await Task.sleep(for: .seconds(reduceMotion ? 0 : PaletteMotion.seconds) + Self.highlightHold)
             guard !Task.isCancelled else { return }
             withAnimation(animation) { isHighlighted = false }
         }
@@ -1372,23 +1373,13 @@ struct PanePill<Icon: View>: View {
 
     private func reveal(_ open: Bool) {
         guard isRevealed != open else { return }
+        // The held titles go after the close. If they went at its start, the
+        // pill would get narrower in one frame.
         withAnimation(reduceMotion ? nil : PaletteMotion.animation) {
             isRevealed = open
-            if !open { heldTitles = [] }
+        } completion: {
+            if !isRevealed { heldTitles = [] }
         }
-    }
-}
-
-/// The rule of the highlight of a `PanePill`: a pill highlights when its
-/// title changes in place. Its first title is not a change.
-struct PanePillChange {
-    private var title: String?
-
-    /// Records the title that the pill shows now. True when it replaces a
-    /// different title that the pill showed before.
-    mutating func record(_ next: String) -> Bool {
-        defer { title = next }
-        return title.map { $0 != next } ?? false
     }
 }
 
