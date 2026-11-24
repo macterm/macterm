@@ -143,14 +143,11 @@ struct AdaptiveIconRendererTests {
     /// The real helper, against the test host's own compiled icon. Runs only
     /// where the helper can: macOS 26 or later, in a bundle that has it.
     ///
-    /// The test waits for the helper to exit, not for the app's timeout,
-    /// which is a bound for a hung helper on a real Mac. The tests above
-    /// check that timeout with stand-in helpers. On a CI runner, a virtual
-    /// Mac, a render is 7 to 9 times slower: the first one took 2.0 s and
-    /// the next ones 0.65 s, where a Mac takes 0.3 s and 0.07 s. The first
-    /// render runs while all the suites start, and on a loaded runner it
-    /// took more than 10 s (PR 961). The time limit stops a helper that hangs.
-    @Test(.timeLimit(.minutes(1)))
+    /// The test does not use the app's timeout of 10 s. On a CI runner the
+    /// helper is 7 to 9 times slower than on a Mac (PR 978), and one first
+    /// render took more than 10 s. A bound of 45 s still kills a helper that
+    /// hangs.
+    @Test
     func theBundledHelperRendersTheIconOnTheSystemGrid() async throws {
         guard #available(macOS 26, *) else { return }
         try #require(
@@ -175,7 +172,7 @@ struct AdaptiveIconRendererTests {
             element: AdaptiveIcon.crossElement,
             color: .init(red: 0, green: 1, blue: 0)
         )]
-        let result = await AdaptiveIconRenderer.render(request, timeout: .infinity)
+        let result = await AdaptiveIconRenderer.render(request, timeout: 45)
         let png = try result.get()
         let image = try #require(NSBitmapImageRep(data: png))
         // The body fills 824/1024 of the canvas: the corner is empty, and the

@@ -59,8 +59,6 @@ enum AdaptiveIconRenderer {
 
     /// Render off the main thread. The PNG is checked to decode, so a
     /// success is always an image the presenter can install.
-    /// A `timeout` of `.infinity` waits for the helper to exit (a test of the
-    /// real helper, which has its own time limit).
     static func render(
         _ request: AdaptiveIconRequest,
         helper: URL = bundledHelperURL,
