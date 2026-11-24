@@ -347,9 +347,11 @@ c.type("sh\r")
 c.wait_output("$ sh", timeout=5)
 [c._read(0.05) for _ in range(30)]
 start = len(c.messages("status"))
-c.type("sleep 1\r")
+# Longer than quiet_ms: with bash 3.2 as sh, the prompt after the run
+# then comes after the window of the agent rule.
+c.type("sleep 4\r")
 c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")[start:]), what="the run")
-c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", what="the end of the run")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", timeout=15, what="the end of the run")
 assert c.messages("attention")[-1]["a"]["unseen"] is True
 # The nested shell's prompt after the run starts no second run.
 [c._read(0.05) for _ in range(80)]

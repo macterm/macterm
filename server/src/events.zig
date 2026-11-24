@@ -47,8 +47,9 @@ const RunSource = enum {
     mark,
     /// An OSC 9;4 report. Its end ends it.
     progress,
-    /// A program that took the foreground after a submission, in a shell
-    /// with no marks. The shell's return ends it.
+    /// A process group that took the foreground after a submission to a
+    /// shell with no marks or to a program (a nested shell). The return of
+    /// the shell, or of the group that took the submission, ends it.
     foreground,
     /// A submission to a program in raw mode, with output after it.
     agent,
@@ -126,7 +127,7 @@ pub const Watch = struct {
     attention: m.Attention = .{},
     run_by: RunSource = .mark,
     /// A primary prompt mark came: the marks own the runs of the shell's
-    /// commands, and the foreground does not start a run.
+    /// commands, and a submission to the shell arms no foreground run.
     has_marks: bool = false,
     fg: Foreground = .{},
     /// A submission to the group in front (`fg_armed_pgrp`): the shell with
@@ -227,6 +228,9 @@ pub const Watch = struct {
         w.fg = next;
         if (next.idle) {
             w.agent_armed_at = null;
+            // The program that took the submission ended: a prompt hook
+            // that takes the foreground next is not its command.
+            if (!was.idle) w.fg_armed_at = null;
             if (!was.idle and w.status.state == .running and (w.run_by == .foreground or w.run_by == .agent))
                 w.setStatus(.done, false);
             return;
@@ -1539,6 +1543,20 @@ test "events: with marks, a program that a nested shell starts runs until that s
     // A group that comes with no submission starts nothing.
     f.w.foreground(.{ .idle = false, .pgrp = 40 }, 20_000);
     try testing.expectEqual(.done, f.w.status.state);
+}
+
+test "events: a submission to a program that ends arms nothing for the prompt hooks after it" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]133;A\x07$ ", 0);
+    // `:q` and Return in vim (group 20), then nu (group 10) is back, and
+    // its prompt hook takes a group of its own.
+    f.w.foreground(.{ .idle = false, .raw = true, .pgrp = 20 }, 100);
+    f.w.submitted(1000);
+    f.w.foreground(.{ .pgrp = 10 }, 1100);
+    f.w.foreground(.{ .idle = false, .pgrp = 30 }, 1200);
+    try testing.expectEqual(.idle, f.w.status.state);
 }
 
 test "events: a command that becomes a raw program ends for quiet output, and progress does not" {
