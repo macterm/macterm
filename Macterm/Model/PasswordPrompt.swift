@@ -50,8 +50,13 @@ struct PasswordEntryID: Hashable, Codable {
     /// What a person reads as "which one": the command, or the prompt when
     /// the entry is command-independent.
     var title: String {
-        let base = displayCommand ?? prompt
-        return host.map { "\(base) (\($0))" } ?? base
+        withHost(displayCommand ?? prompt)
+    }
+
+    /// `base` with the host after it in parentheses, for a host's entry, so
+    /// two hosts' entries for one command read differently.
+    func withHost(_ base: String) -> String {
+        host.map { "\(base) (\($0))" } ?? base
     }
 
     /// The command as shown: the process table reports the program the
@@ -150,7 +155,14 @@ enum PasswordPromptIdentity {
     /// user wrote it — `sudo apt update` files as `sudo`, a passphrase prompt
     /// drops its command, an empty command matches the prompt alone, and an
     /// empty prompt makes an on-demand entry (`PasswordEntryID.isOnDemandOnly`).
-    static func declaredEntryID(prompt: String, command: String?) -> PasswordEntryID {
+    ///
+    /// A host's entry (`host` not nil) follows the host's rules in `entryID`:
+    /// nothing collapses, so the command is filed as typed.
+    static func declaredEntryID(prompt: String, command: String?, host: String? = nil) -> PasswordEntryID {
+        if let host {
+            let command = command.map(normalize)
+            return PasswordEntryID(command: command?.isEmpty == false ? command : nil, prompt: prompt, host: host)
+        }
         if isKeyPassphrase(prompt) {
             return PasswordEntryID(command: nil, prompt: prompt)
         }

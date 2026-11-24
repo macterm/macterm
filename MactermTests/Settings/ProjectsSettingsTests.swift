@@ -27,9 +27,9 @@ struct ProjectsSettingsTests {
         var asked: [String] = []
         let outcome = await ProjectsSettings.createProject(from: listing(path: "box:~/gone"), in: projects) {
             asked.append($0)
-            return "There is no path ~/gone on box."
+            return "Path ~/gone doesn't exist"
         }
-        #expect(outcome == .refused("There is no path ~/gone on box."))
+        #expect(outcome == .refused("Path ~/gone doesn't exist"))
         #expect(asked == ["box:~/gone"])
         #expect(projects.projects.isEmpty)
     }

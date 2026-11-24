@@ -251,6 +251,6 @@ final class PasswordVault {
     /// Entries `query` matches in their command or prompt, best first
     /// (`Search.rank`) — the Settings search field.
     func entries(matching query: String) -> [SavedPassword] {
-        Search.rank(entries, by: query) { [$0.id.command ?? "", $0.id.prompt] }
+        Search.rank(entries, by: query) { [$0.id.command ?? "", $0.id.prompt, $0.id.host ?? ""] }
     }
 }

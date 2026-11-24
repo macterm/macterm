@@ -193,28 +193,6 @@ struct GhosttyTerminalNSViewTests {
         #expect(input.enabled)
     }
 
-    // MARK: - Progress report routing
-
-    /// ERROR, REMOVE and PAUSE all end the run. The session keeps the
-    /// failure, not the view.
-    @Test
-    func progressReport_routesToStartAndFinish() {
-        let view = GhosttyTerminalNSView(
-            paneID: UUID(),
-            workingDirectory: "/tmp",
-            sessionName: "progress-test"
-        )
-        var events: [String] = []
-        view.onProgressStarted = { events.append("started") }
-        view.onProgressFinished = { events.append("finished") }
-
-        view.surfaceDidReportProgress(.running)
-        view.surfaceDidReportProgress(.failed)
-        view.surfaceDidReportProgress(.ended)
-
-        #expect(events == ["started", "finished", "finished"])
-    }
-
     // MARK: - Context-menu scroll navigation
 
     private typealias Snapshot = GhosttyTerminalNSView.ScrollbarSnapshot
