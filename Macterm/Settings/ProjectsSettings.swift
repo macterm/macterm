@@ -61,11 +61,13 @@ struct ProjectsSettings: View {
                     //
                     // The cost is `.onMove`, which exists only on `List`, so
                     // reordering moved into the row menu.
-                    ForEach(topLevelProjects) { project in
+                    // The tree of the sidebar (design 013): every project in
+                    // tree order, indented one step for each parent above it.
+                    ForEach(projectStore.projects) { project in
                         projectRow(project)
                     }
                 }
-                Text("Change the order in the menu of a row. Each group of the sidebar has a section below.")
+                Text("Change the order in the menu of a row.")
                     .settingsSecondaryText()
             } header: {
                 HStack {
@@ -84,24 +86,6 @@ struct ProjectsSettings: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("Add a project")
-                }
-            }
-
-            // Each sidebar group (a project with no folder) is a section of
-            // its own projects (design 013), in the order of the sidebar.
-            ForEach(projectStore.projects.filter { !$0.hasFolder }) { group in
-                Section {
-                    let projects = projectStore.children(of: group.id).filter(\.hasFolder)
-                    if projects.isEmpty {
-                        Text("No projects.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(projects) { project in
-                            projectRow(project)
-                        }
-                    }
-                } header: {
-                    Text(verbatim: SidebarTree.pathName(of: group, in: projectStore))
                 }
             }
 
@@ -202,12 +186,13 @@ struct ProjectsSettings: View {
             onMoveUp: { projectStore.moveAmongSiblings(project.id, by: -1) },
             onMoveDown: { projectStore.moveAmongSiblings(project.id, by: 1) }
         )
+        .padding(.leading, CGFloat(projectStore.ancestors(of: project.id).count) * Self.indent)
     }
 
-    /// The projects outside every group. A new project goes here.
-    private var topLevelProjects: [Project] {
-        projectStore.children(of: nil).filter(\.hasFolder)
-    }
+    /// The indent of a project row for each parent above it: the width of
+    /// the row's glyph and the gap after it, so a child's glyph is under
+    /// its parent's name.
+    private static let indent: CGFloat = 24
 
     /// Folder picker → new project → select it, the same as the sidebar's
     /// "Local Folder…". Picking a directory that already backs a project makes
@@ -365,10 +350,12 @@ private struct ProjectRow: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(project.name)
-                Text(project.path)
-                    .settingsSecondaryText()
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if project.hasFolder {
+                    Text(project.path)
+                        .settingsSecondaryText()
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
 
             Spacer(minLength: 8)
@@ -391,6 +378,13 @@ private struct ProjectRow: View {
                     appState.noteLayoutFilesChanged()
                 }
                 .disabled(appState.workspaces[project.id] == nil)
+
+                // A project from a dev build's group row has no folder
+                // (design 013 §1): its shells start in the home folder
+                // until the user chooses one here.
+                if !project.hasFolder {
+                    Button("Choose Folder…") { chooseFolder() }
+                }
 
                 // Only after the user declined the server on this host: its
                 // panes are plain ssh shells until then (0057).
@@ -419,10 +413,7 @@ private struct ProjectRow: View {
                 Divider()
 
                 Button("Remove", role: .destructive) {
-                    appState.requestRemoveProject(project.id, host: .settings) {
-                        appState.removeProject(project.id)
-                        projectStore.remove(id: project.id)
-                    }
+                    appState.requestRemoveProject(project.id, store: projectStore, host: .settings)
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -432,6 +423,17 @@ private struct ProjectRow: View {
             .fixedSize()
         }
         .padding(.vertical, 2)
+    }
+
+    /// Give a project with no folder the folder that the user selects.
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = String(localized: "Select a project folder")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        projectStore.setPath(id: project.id, to: url.path(percentEncoded: false))
     }
 
     /// Mirrors the palette's muted state: a file that declares no tabs has

@@ -64,8 +64,8 @@ final class ProjectStore {
     /// impossible to add. A caller holding a name someone typed refuses it
     /// before calling this, where it can say why.
     @discardableResult
-    func create(name: String, path: String) -> Project {
-        var project = Project(name: Self.unreservedName(name), path: path)
+    func create(name: String, path: String, parent: UUID? = nil) -> Project {
+        var project = Project(name: Self.unreservedName(name), path: path, parent: parent)
         if autoAssignsColors() {
             project.colorName = ProjectColor.leastUsed(among: projects.map(\.color)).rawValue
         }

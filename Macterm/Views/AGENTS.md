@@ -25,6 +25,10 @@ When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each
   - `disownFrameAutosave` clears the autosave name of the window at attach (one owner). `pruneChurnedAutosaveKeys` sweeps both families of stale keys.
   - Macterm centers a restored frame on the main screen at its saved size when it has less than 60 pt on any screen. An example is the corner of a hidden workspace of a window manager.
 - **Never leave persistent window state to an autosave of SwiftUI**. We measured every one of them (sidebar column, window frame). Each one uses a key with a runtime address, so it resets in silence at every launch and update. A stable key in `WindowSnapshot` is the rule.
+- **The sidebar has one kind of project row** (design 013, `SidebarTree`). A project is one `DisclosureGroup`: its tab rows first, then the projects inside it, each again a disclosure. The word "group" is not in the app.
+  - A click on a project row selects the project and shows its project screen. Only the chevron opens and closes the row. A selected project inside a closed parent opens the parents above it (`SidebarTree.parentsToOpen`).
+  - A project dropped on a project header goes inside that project, at the end (`SidebarTree.drop`). Move Up and Move Down change the order. The child project rows take no insertion drop: a `.dropDestination` on a `ForEach` of disclosure rows crashes the outline accept.
+  - Remove of a project with projects inside always asks, in one dialog that also covers running processes: Remove All, Keep Inside Projects, Cancel (`AppState.requestRemoveProject`). A bulk remove keeps the projects inside that are not selected.
 - **The overlay sidebar peek is a side panel, the same as the Project Insights panel** (`SidebarOverlayPanel`). It has the same surface (`glassPanel`) and the same corner and inset (`GlassPanelMetrics.sidePanelCornerRadius` and `sidePanelInset`), and it starts below the toolbar. Its hover exit edge counts the inset (`SidebarOverlayMetrics.exitEdge`).
 
   - `Sidebar` (with `SidebarOverlay`, `SidebarPresentationState` and `SidebarFolderDrop`).

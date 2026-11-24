@@ -29,6 +29,12 @@ struct AppStateTests {
         return ProjectFileStore(directoryURL: dir)
     }
 
+    /// A project store in a temp file.
+    private func makeProjectStore() -> ProjectStore {
+        ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-store-\(UUID().uuidString).json"))
+    }
+
     /// Create a project + workspace inside `state` and return the project.
     private func seedProject(_ state: AppState, name: String = "proj", path: String = "/tmp") -> Project {
         let p = Project(name: name, path: path, sortOrder: 0)
@@ -325,14 +331,17 @@ struct AppStateTests {
     func busy_project_paths_stage_confirmation_through_the_shared_guard() {
         let state = makeAppState()
         state.paneNeedsConfirmClose = { _ in true }
-        let p = seedProject(state)
+        let store = makeProjectStore()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.selectProject(p)
 
-        var removed = false
-        state.requestRemoveProject(p.id) { removed = true }
-        #expect(!removed)
+        state.requestRemoveProject(p.id, store: store)
+        #expect(store.row(p.id) != nil)
         #expect(state.pendingDialog?.kind == .removeProject(p.id))
+        #expect(state.pendingDialog?.alternative == nil, "a project with no projects inside has one choice")
         state.dismissPendingDialog()
 
+        var removed = false
         state.requestRemoveSelection(projectIDs: [p.id], tabs: []) { removed = true }
         #expect(!removed)
         #expect(state.pendingDialog?.kind == .removeSelection)
@@ -1009,22 +1018,56 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveGroup_asks_only_when_the_group_has_projects() {
+    func remove_a_project_with_projects_inside_always_asks() {
         let state = makeAppState()
-        let group = Project(name: "g", path: "")
+        let store = makeProjectStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
 
-        var ran = false
-        state.requestRemoveGroup(group, projectCount: 0) { ran = true }
-        #expect(ran, "an empty group goes at once")
-        #expect(state.pendingDialog == nil)
+        state.requestRemoveProject(parent.id, store: store)
+        let dialog = state.pendingDialog
+        #expect(dialog?.kind == .removeProject(parent.id))
+        #expect(dialog?.message.contains("2") == true, "the question says how many projects are inside")
+        #expect(dialog?.confirmTitle == "Remove All")
+        #expect(dialog?.alternative?.title == "Keep Inside Projects")
+        #expect(store.projects.count == 3, "nothing goes before the answer")
 
-        ran = false
-        state.requestRemoveGroup(group, projectCount: 2) { ran = true }
-        #expect(!ran)
-        #expect(state.pendingDialog?.kind == .removeGroup(group.id))
-        #expect(state.pendingDialog?.message.contains("2") == true, "the question says how many")
         state.confirmPendingDialog()
-        #expect(ran)
+        #expect(store.projects.isEmpty, "Remove All removes every project inside")
+    }
+
+    @Test
+    func keep_inside_projects_moves_them_to_the_place_of_the_removed_project() {
+        let state = makeAppState()
+        let store = makeProjectStore()
+        let a = store.create(name: "a", path: "/tmp/a")
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        let grandchild = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        let b = store.create(name: "b", path: "/tmp/b")
+        state.selectProject(parent)
+
+        state.requestRemoveProject(parent.id, store: store)
+        state.confirmPendingDialogAlternative()
+        #expect(state.pendingDialog == nil)
+        #expect(store.children(of: nil).map(\.id) == [a.id, child.id, b.id])
+        #expect(store.row(grandchild.id)?.parent == child.id, "the tree below the child stays")
+        #expect(state.workspaces[parent.id] == nil)
+    }
+
+    @Test
+    func remove_a_busy_project_with_projects_inside_asks_once() {
+        let state = makeAppState()
+        state.paneNeedsConfirmClose = { _ in true }
+        let store = makeProjectStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        _ = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        state.selectProject(parent)
+
+        state.requestRemoveProject(parent.id, store: store)
+        #expect(state.pendingDialog?.alternative != nil, "one dialog, with the choices for the projects inside")
+        #expect(state.pendingDialog?.message.contains("running") == true)
     }
 
     @Test
@@ -1870,16 +1913,18 @@ struct AppStateTests {
     }
 
     @Test
-    func next_project_skips_a_project_with_no_folder() {
+    func next_project_steps_through_a_project_with_no_folder() {
         let state = makeAppState()
         let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
-        let group = Project(name: "g", path: "", sortOrder: 1)
+        let parent = Project(name: "p", path: "", sortOrder: 1)
         let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
         state.selectProject(a)
-        state.selectNextProject(projects: [a, group, b])
+        state.selectNextProject(projects: [a, parent, b])
+        #expect(state.activeProjectID == parent.id)
+        state.selectNextProject(projects: [a, parent, b])
         #expect(state.activeProjectID == b.id)
-        state.selectPreviousProject(projects: [a, group, b])
-        #expect(state.activeProjectID == a.id)
+        state.selectPreviousProject(projects: [a, parent, b])
+        #expect(state.activeProjectID == parent.id)
     }
 
     @Test
@@ -2292,10 +2337,12 @@ struct AppStateTests {
     @Test
     func requestRemoveProject_idle_runs_removal_immediately() {
         let state = makeAppState()
-        let p = seedProject(state)
-        var removed = false
-        state.requestRemoveProject(p.id) { removed = true }
-        #expect(removed)
+        let store = makeProjectStore()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.selectProject(p)
+        state.requestRemoveProject(p.id, store: store)
+        #expect(store.row(p.id) == nil)
+        #expect(state.workspaces[p.id] == nil)
         #expect(state.pendingDialog == nil)
     }
 

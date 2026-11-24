@@ -2113,20 +2113,27 @@ final class AppState {
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
 
     /// Shows an open panel, adds or finds the selected directory as a project,
-    /// and selects it. Returns the selected project, nil if cancelled.
+    /// and selects it. Returns the selected project, nil if cancelled. With
+    /// `parent` (New Project Inside), the panel starts in the folder of
+    /// `parent` when it is a local folder, and the new project goes at the
+    /// end of the projects inside `parent`.
     @discardableResult
-    func openProject(store: ProjectStore) -> Project? {
+    func openProject(store: ProjectStore, inside parent: Project? = nil) -> Project? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.message = String(localized: "Select a project folder")
+        if let parent, parent.hasFolder, !parent.isRemote {
+            panel.directoryURL = URL(filePath: parent.path, directoryHint: .isDirectory)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         // Always create: picking a folder that already backs a project makes a
         // second, independent project for it, not a jump to the existing one.
         let project = store.create(
             name: url.lastPathComponent,
-            path: url.path(percentEncoded: false)
+            path: url.path(percentEncoded: false),
+            parent: parent?.id
         )
         selectProject(project)
         return project
@@ -2243,49 +2250,68 @@ final class AppState {
         saveWorkspaces()
     }
 
-    /// Run `removal` (the caller's full remove: workspace + project store)
-    /// immediately when no pane in the project is busy; otherwise stage it
-    /// for the confirmation alert — removal kills every pane's zmx session.
-    func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        guard closeNeedsConfirmation(projectID: projectID) else {
-            removal()
+    /// Remove the project `projectID` (design 013 §3). A project with no
+    /// projects inside goes at once, unless a process runs in it: then one
+    /// question. A project with projects inside always asks, in one dialog
+    /// that also covers running processes: Remove All removes it and every
+    /// project inside it, and Keep Inside Projects removes only it and moves
+    /// the projects inside to its place. Each choice reads the tree again,
+    /// because a project can move while the question is up.
+    func requestRemoveProject(_ projectID: UUID, store: ProjectStore, host: DialogHost = .mainWindow) {
+        guard let project = store.row(projectID) else { return }
+        let inside = store.descendants(of: projectID).map(\.id)
+        guard !inside.isEmpty else {
+            let removal = { [weak self] in self?.removeProject(projectID, keepingInside: true, store: store) }
+            guard closeNeedsConfirmation(projectID: projectID) else {
+                removal()
+                return
+            }
+            present(PendingDialog(
+                kind: .removeProject(projectID),
+                title: String(localized: "Remove project with running processes?"),
+                message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
+                confirmTitle: String(localized: "Remove"),
+                host: host,
+                onConfirm: removal
+            ))
             return
         }
+        let count = inside.count
+        let message = closeNeedsConfirmation(projectIDs: [projectID] + inside, tabs: [])
+            ? String(localized: """
+            This project contains \(count) projects, and a process is still running. Remove All removes them \
+            and ends every process in their tabs. Keep Inside Projects removes only this project and moves \
+            the projects inside to its place.
+            """)
+            : String(localized: """
+            This project contains \(count) projects. Remove All removes them and ends every process in their \
+            tabs. Keep Inside Projects removes only this project and moves the projects inside to its place.
+            """)
         present(PendingDialog(
             kind: .removeProject(projectID),
-            title: String(localized: "Remove project with running processes?"),
-            message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
-            confirmTitle: String(localized: "Remove"),
+            title: String(localized: "Remove the project “\(project.name)”?"),
+            message: message,
+            confirmTitle: String(localized: "Remove All"),
             host: host,
-            onConfirm: removal
+            onConfirm: { [weak self] in self?.removeProject(projectID, keepingInside: false, store: store) },
+            alternative: PendingDialog.Alternative(
+                title: String(localized: "Keep Inside Projects"),
+                action: { [weak self] in self?.removeProject(projectID, keepingInside: true, store: store) }
+            )
         ))
     }
 
-    /// Remove a sidebar group (design 013). An empty group goes at once. A
-    /// group with projects always asks, and says how many: the removal ends
-    /// the sessions of each project inside, at any depth. Ungroup is the
-    /// path that keeps them.
-    func requestRemoveGroup(
-        _ group: Project,
-        projectCount: Int,
-        host: DialogHost = .mainWindow,
-        removal: @escaping @MainActor () -> Void
-    ) {
-        guard projectCount > 0 else {
-            removal()
-            return
+    /// Remove the project `projectID`: its workspace, its sessions and its
+    /// row. With `keepingInside`, the projects inside it move to its place
+    /// in its parent; without it, they are removed too.
+    func removeProject(_ projectID: UUID, keepingInside: Bool, store: ProjectStore) {
+        let removed = keepingInside ? [projectID] : [projectID] + store.descendants(of: projectID).map(\.id)
+        removeProjects(removed)
+        if keepingInside {
+            store.removeKeepingChildren(projectID)
+        } else {
+            store.removeWithDescendants(projectID)
         }
-        present(PendingDialog(
-            kind: .removeGroup(group.id),
-            title: String(localized: "Remove the group “\(group.name)”?"),
-            message: String(localized: """
-            This group contains \(projectCount) projects. Macterm removes them and stops all processes \
-            in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group.
-            """),
-            confirmTitle: String(localized: "Remove"),
-            host: host,
-            onConfirm: removal
-        ))
     }
 
     /// A bulk sidebar delete (multi-selection): run `removal` now, or stage
@@ -3473,10 +3499,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it. A project with no folder is no slot: the sidebar
-    /// draws it as a group row, with no tabs (`SidebarTree`).
+    /// but never leave it. `projects` is in tree order, so every project,
+    /// with a folder or not, is a slot in the order of the sidebar.
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.filter(\.hasFolder).map(\.id)
+        var slots = projects.map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }

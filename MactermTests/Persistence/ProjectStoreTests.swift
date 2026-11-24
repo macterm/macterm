@@ -26,6 +26,16 @@ struct ProjectStoreTests {
     }
 
     @Test
+    func create_with_a_parent_goes_at_the_end_of_its_projects() {
+        let store = makeStore()
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let first = store.create(name: "first", path: "/tmp/first", parent: parent.id)
+        let second = store.create(name: "second", path: "/tmp/second", parent: parent.id)
+        #expect(store.children(of: parent.id).map(\.id) == [first.id, second.id])
+        #expect(store.create(name: "lost", path: "/tmp/lost", parent: UUID()).parent == nil, "an unknown parent is the top level")
+    }
+
+    @Test
     func create_tags_a_new_project_only_when_auto_assign_is_on() {
         let store = makeStore()
         // Default (preference off): a new project carries no tag.
