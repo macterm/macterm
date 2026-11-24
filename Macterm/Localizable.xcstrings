@@ -5414,18 +5414,18 @@
         }
       }
     },
-    "More than one project has this path." : {
+    "More than one project has this path. Rename one of them." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 경로를 가진 프로젝트가 둘 이상입니다."
+            "value" : "이 경로를 가진 프로젝트가 둘 이상입니다. 그중 하나의 이름을 변경하십시오."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "有多个项目使用此路径。"
+            "value" : "有多个项目使用此路径。请重新命名其中一个。"
           }
         }
       }
@@ -11010,18 +11010,18 @@
         }
       }
     },
-    "The project is already in this project." : {
+    "The project is already inside “%@”." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "프로젝트가 이미 이 프로젝트 안에 있습니다."
+            "value" : "프로젝트가 이미 “%@” 안에 있습니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "该项目已在此项目中。"
+            "value" : "该项目已在“%@”中。"
           }
         }
       }

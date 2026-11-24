@@ -288,14 +288,7 @@ extension AppCommand {
         // as the items of its sidebar menu do.
         case .newProjectInside:
             guard let current else { return nil }
-            return {
-                guard let project = ctx.appState.openProject(store: ctx.projectStore, inside: current) else { return }
-                // Open the parent and the projects above it, so that the
-                // new row shows.
-                ctx.appState.keyWindow?.expandedRows.formUnion(
-                    [project.id, current.id] + SidebarTree.parentsToOpen(for: current.id, in: ctx.projectStore)
-                )
-            }
+            return { ctx.appState.openProject(inside: current, store: ctx.projectStore, in: ctx.appState.keyWindow) }
         case .moveIntoProject:
             guard let scope = paletteScope(in: ctx) else { return nil }
             return { ctx.appState.toggleCommandPalette(scope: scope) }

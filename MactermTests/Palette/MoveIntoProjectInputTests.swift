@@ -88,13 +88,39 @@ struct MoveIntoProjectInputTests {
             Issue.record("the parent is no target")
             return
         }
-        #expect(parent == "The project is already in this project.")
+        #expect(parent == "The project is already inside “Work”.")
         let outer = MoveIntoProjectInput.make(projectID: f.work.id, appState: f.state, store: f.store)
         guard case let .notice(own) = outer.check("Work/api") else {
             Issue.record("a project inside it is no target")
             return
         }
         #expect(own == "A project cannot move into itself or into a project inside it.")
+    }
+
+    @Test
+    func the_path_matches_in_any_letter_case() {
+        let f = makeFixture()
+        guard case let .action(row) = f.input().check("work/API") else {
+            Issue.record("a path in other letter case gives the action row")
+            return
+        }
+        #expect(row.title == "Move into “Work/api”")
+    }
+
+    @Test
+    func a_project_of_the_same_path_that_is_no_target_does_not_block_the_target() {
+        let f = makeFixture()
+        // Two top-level projects named "Twin": the moving one is no target
+        // of its own move, so "Twin" names one target.
+        let moving = f.store.create(name: "Twin", path: "/tmp")
+        let other = f.store.create(name: "Twin", path: "/tmp")
+        let input = MoveIntoProjectInput.make(projectID: moving.id, appState: f.state, store: f.store)
+        guard case let .action(row) = input.check("Twin") else {
+            Issue.record("the one target gives the action row")
+            return
+        }
+        #expect(row.run() == .done)
+        #expect(f.store.row(moving.id)?.parent == other.id)
     }
 
     @Test
@@ -105,7 +131,7 @@ struct MoveIntoProjectInputTests {
             Issue.record("an ambiguous path gives a notice")
             return
         }
-        #expect(text == "More than one project has this path.")
+        #expect(text == "More than one project has this path. Rename one of them.")
     }
 
     // MARK: - The commands

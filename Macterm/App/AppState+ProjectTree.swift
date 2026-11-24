@@ -13,4 +13,14 @@ extension AppState {
         window?.expandedRows.formUnion([target] + SidebarTree.parentsToOpen(for: target, in: store))
         return true
     }
+
+    /// New Project Inside: Open Folder, starting in the folder of `parent`.
+    /// The new project is a child of `parent`. The new row, `parent` and the
+    /// projects above it open in `window`, so that the new row shows.
+    @discardableResult
+    func openProject(inside parent: Project, store: ProjectStore, in window: WindowState?) -> Project? {
+        guard let project = openProject(store: store, inside: parent) else { return nil }
+        window?.expandedRows.formUnion([project.id, parent.id] + SidebarTree.parentsToOpen(for: parent.id, in: store))
+        return project
+    }
 }

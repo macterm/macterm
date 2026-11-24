@@ -1054,9 +1054,10 @@ struct SidebarContent: View {
     /// Open Folder. With `parent` (New Project Inside), the new project is
     /// a child of `parent`, which opens so that the new row shows.
     private func openProject(inside parent: Project? = nil) {
-        if let project = appState.openProject(store: projectStore, inside: parent) {
+        if let parent {
+            appState.openProject(inside: parent, store: projectStore, in: windowState)
+        } else if let project = appState.openProject(store: projectStore) {
             windowState.expandedRows.insert(project.id)
-            if let parent { windowState.expandedRows.insert(parent.id) }
         }
     }
 
