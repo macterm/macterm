@@ -888,43 +888,50 @@
           "name": "level",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The highest protocol level that the sender speaks."
         },
         {
           "name": "min_level",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The lowest protocol level that the sender accepts."
         },
         {
           "name": "build",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The build of the sender, as text for people."
         },
         {
           "name": "role",
           "type": "Role",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "What the sender is: gui, cli, server or session."
         },
         {
           "name": "epoch",
           "type": "u64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "A random id for each start of the sender. A new epoch tells a client that the server started again."
         },
         {
           "name": "caps",
           "type": "[str]",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "What the build or its platform can do apart from its level (tcc, password-tty). A peer ignores a cap that it does not know."
         },
         {
           "name": "build_key",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The build key, in lowercase hex. Two builds are the same build only when their keys are equal. Null for a build with no key (a development build)."
         }
       ],
       "cases": [],
@@ -952,13 +959,15 @@
           "name": "reason",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "Why the sender refuses, as a code and not text for people: level_too_low or build_mismatch."
         },
         {
           "name": "needs_level",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "For level_too_low: the lowest protocol level that the sender accepts. For build_mismatch: the protocol level of the sender."
         }
       ],
       "cases": [],
@@ -972,19 +981,22 @@
           "name": "id",
           "type": "u64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the request. It is unique for the connection epoch of the client."
         },
         {
           "name": "m",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The name of the method."
         },
         {
           "name": "a",
           "type": "raw",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The arguments of the method. Null for an empty argument map."
         }
       ],
       "cases": [],
@@ -998,19 +1010,22 @@
           "name": "re",
           "type": "u64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the request that this response answers."
         },
         {
           "name": "ok",
           "type": "raw",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The result of the method. Null when the request failed."
         },
         {
           "name": "err",
           "type": "ErrorInfo",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The error. Null when the request worked."
         }
       ],
       "cases": [],
@@ -1024,19 +1039,22 @@
           "name": "code",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The error code: one of error_codes. A receiver reads a code that it does not know as an error with no special handling."
         },
         {
           "name": "message",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The error, as text for people."
         },
         {
           "name": "level",
           "type": "u32",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The protocol level that the request needs, when the peer speaks a lower one."
         }
       ],
       "cases": [],
@@ -1050,19 +1068,22 @@
           "name": "seq",
           "type": "u64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The number of the batch in the epoch of the server."
         },
         {
           "name": "ev",
           "type": "[Event]",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The events of the batch. The receiver applies them all at once."
         },
         {
           "name": "cause",
           "type": "u64",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the request that caused the batch, only on the connection that sent the request. Null on every other connection, and in a batch that control.resume sends again."
         }
       ],
       "cases": [],
@@ -1076,13 +1097,15 @@
           "name": "e",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The name of the event."
         },
         {
           "name": "a",
           "type": "raw",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The fields of the event. Null when the event has none."
         }
       ],
       "cases": [],
@@ -1096,13 +1119,15 @@
           "name": "t",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The name of the pane message. A receiver ignores a name that it does not know."
         },
         {
           "name": "a",
           "type": "raw",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The fields of the message. Null when the message has none."
         }
       ],
       "cases": [],
@@ -3421,19 +3446,22 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session."
         },
         {
           "name": "code",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The exit code, when the shell exited."
         },
         {
           "name": "signal",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The signal number, when a signal ended the shell."
         }
       ],
       "cases": [],
@@ -3447,25 +3475,29 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session of the pane."
         },
         {
           "name": "unseen",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True: a run ended, or the bell rang, and no client showed the pane since."
         },
         {
           "name": "failed",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True with unseen: the run that ended failed."
         },
         {
           "name": "bell",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True: the bell rang and no client showed the pane since."
         }
       ],
       "cases": [],
@@ -3479,7 +3511,8 @@
           "name": "project",
           "type": "ProjectInfo",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project, without its tabs."
         }
       ],
       "cases": [],
@@ -3493,72 +3526,83 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the project."
         },
         {
           "name": "name",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The name of the project."
         },
         {
           "name": "path",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "A local path, or user@host:dir. Can be empty."
         },
         {
           "name": "color",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The color tag of the project. Null when the project has none."
         },
         {
           "name": "sort_order",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "Orders the projects that have the same parent."
         },
         {
           "name": "created_at",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "When the project was made, in Unix time in milliseconds."
         },
         {
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that holds it. Null or empty is the top level."
         },
         {
           "name": "sidebar",
           "type": "ProjectSidebar",
           "optional": false,
           "default": "tree",
-          "since": 3
+          "since": 3,
+          "doc": "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes."
         },
         {
           "name": "single_tab",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: the project holds at most one tab. project.create sets it, and it never changes."
         },
         {
           "name": "removable",
           "type": "bool",
           "optional": false,
           "default": "true",
-          "since": 3
+          "since": 3,
+          "doc": "True: project.remove can remove the project. project.create sets it, and it never changes."
         },
         {
           "name": "alias",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes."
         }
       ],
       "cases": [],
@@ -3572,7 +3616,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the project that was removed."
         }
       ],
       "cases": [],
@@ -3586,13 +3631,15 @@
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project whose children are in ids. Null is the top level."
         },
         {
           "name": "ids",
           "type": "[str]",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Each child project, in its order."
         }
       ],
       "cases": [],
@@ -3606,19 +3653,22 @@
           "name": "project",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project of the tab."
         },
         {
           "name": "tab",
           "type": "Tab",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The whole tab, with its split tree."
         },
         {
           "name": "zoomed",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The zoomed pane of the tab. Null when no pane is zoomed."
         }
       ],
       "cases": [],
@@ -3632,13 +3682,15 @@
           "name": "project",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project of the tab."
         },
         {
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the tab that was removed."
         }
       ],
       "cases": [],
@@ -3652,19 +3704,22 @@
           "name": "project",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project of the tabs."
         },
         {
           "name": "ids",
           "type": "[str]",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Each tab of the project, in its order."
         },
         {
           "name": "active_tab",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The tab that the project shows. Null when it shows no tab."
         }
       ],
       "cases": [],
@@ -3678,7 +3733,8 @@
           "name": "active_project",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that is selected. Null when no project is selected."
         }
       ],
       "cases": [],
@@ -3692,19 +3748,22 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the pane."
         },
         {
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session of the pane."
         },
         {
           "name": "host",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The host of the session. Null for a pane of this Mac."
         }
       ],
       "cases": [],
@@ -3718,37 +3777,43 @@
           "name": "pid",
           "type": "i64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The pid of the session process."
         },
         {
           "name": "shell_pid",
           "type": "i64",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The pid of the shell, or of the command, that the session started."
         },
         {
           "name": "pty",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The path of the slave side of the pty. Not UTF-8 on every system."
         },
         {
           "name": "cols",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in cells."
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in cells."
         },
         {
           "name": "clients",
           "type": "u16",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The number of clients that sent attach."
         }
       ],
       "cases": [],
@@ -3762,53 +3827,61 @@
           "name": "cols",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in cells."
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in cells."
         },
         {
           "name": "xpixel",
           "type": "u16",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in pixels. 0 when the client does not know it."
         },
         {
           "name": "ypixel",
           "type": "u16",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in pixels. 0 when the client does not know it."
         },
         {
           "name": "foreground",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "True: the client wants foreground messages. The session reads the foreground of the pty only while a client that asked for them is connected."
         },
         {
           "name": "tty",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: the client wants tty_mode messages. The session reads the line modes of the pty only while a client that asked for them is connected."
         },
         {
           "name": "resume_epoch",
           "type": "u64",
           "optional": true,
-          "since": 2
+          "since": 2,
+          "doc": "To resume after a lost link: the epoch of the hello of the session. Send both resume fields or none."
         },
         {
           "name": "resume_offset",
           "type": "u64",
           "optional": true,
-          "since": 2
+          "since": 2,
+          "doc": "To resume after a lost link: the offset after the last output byte that the client got. Send both resume fields or none."
         }
       ],
       "cases": [],
@@ -3822,27 +3895,31 @@
           "name": "cols",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in cells."
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in cells."
         },
         {
           "name": "xpixel",
           "type": "u16",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in pixels. 0 when the client does not know it."
         },
         {
           "name": "ypixel",
           "type": "u16",
           "optional": false,
           "default": "0",
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in pixels. 0 when the client does not know it."
         }
       ],
       "cases": [],
@@ -3863,7 +3940,8 @@
           "name": "leader",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True: the client leads, and its size is the size of the pty."
         }
       ],
       "cases": [],
@@ -3877,13 +3955,15 @@
           "name": "scrollback",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True: the snapshot holds the scrollback. False after dropped output: it holds the screen only, and clears the old screen first."
         },
         {
           "name": "offset",
           "type": "u64",
           "optional": true,
-          "since": 2
+          "since": 2,
+          "doc": "The output offset that the screen in this snapshot shows: the output bytes that follow start here. A client that counts its output bytes takes this as its offset."
         }
       ],
       "cases": [],
@@ -3904,13 +3984,15 @@
           "name": "code",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The exit code, when the shell exited."
         },
         {
           "name": "signal",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The signal number, when a signal ended the shell."
         }
       ],
       "cases": [],
@@ -3945,7 +4027,8 @@
           "name": "title",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The title, as the program sent it. Not UTF-8 from every program."
         }
       ],
       "cases": [],
@@ -3959,7 +4042,8 @@
           "name": "url",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The OSC 7 payload, as the shell sent it: usually a percent-encoded file:// URL. The receiver decodes it."
         }
       ],
       "cases": [],
@@ -3973,25 +4057,29 @@
           "name": "idle",
           "type": "bool",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "True: the foreground group is the own shell of the session."
         },
         {
           "name": "shell",
           "type": "bool",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "True: comm is in /etc/shells of the host. Null when the host has no /etc/shells."
         },
         {
           "name": "comm",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The name of the process: the executable path on macOS, the kernel comm on Linux."
         },
         {
           "name": "args",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The command line, with its arguments joined by spaces."
         }
       ],
       "cases": [],
@@ -4005,25 +4093,29 @@
           "name": "kind",
           "type": "MarkKind",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The step: prompt, input, output or end."
         },
         {
           "name": "command",
           "type": "bin",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "For output and end: the command line. It is the text of the shell when the shell sent one, else the input cells of the prompt. Null when there is neither."
         },
         {
           "name": "exit_code",
           "type": "i32",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "For end: the exit code, when the shell sent one."
         },
         {
           "name": "output_tail",
           "type": "bin",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "For end with a nonzero exit code: the last rows of the output of the command, as text. Null when there is no output."
         }
       ],
       "cases": [],
@@ -4050,13 +4142,15 @@
           "name": "state",
           "type": "ProgressState",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The state of the progress report: remove, set, error, indeterminate or pause."
         },
         {
           "name": "percent",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The progress, from 0 to 100. Null when the program sent none."
         }
       ],
       "cases": [],
@@ -4098,14 +4192,16 @@
           "name": "state",
           "type": "RunState",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The run state of the pane: idle (no command ran yet), running or done."
         },
         {
           "name": "failed",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "True with done: a progress report said error."
         }
       ],
       "cases": [],
@@ -4131,7 +4227,8 @@
           "name": "records",
           "type": "[ProgramRecord]",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "Every record that the pane holds now, oldest first. An empty list clears them all."
         }
       ],
       "cases": [],
@@ -4146,43 +4243,50 @@
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 1
+          "since": 1,
+          "doc": "The id of the record: names joined by /, where a/b is a child of a. Empty for the root record, which is the program itself."
         },
         {
           "name": "state",
           "type": "ProgramState",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The state of the record: idle, working, done, blocked or error."
         },
         {
           "name": "kind",
           "type": "ProgramNeed",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "With blocked: what the program needs: permission, question or auth."
         },
         {
           "name": "progress",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "With working or blocked: the progress, from 0 to 100. Null when the program gave none."
         },
         {
           "name": "app",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one, the root record included."
         },
         {
           "name": "title",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "A short label for the record, decoded: UTF-8 with no control characters. It is still the text of the program."
         },
         {
           "name": "msg",
           "type": "str",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "One line that says what the record does or waits for, decoded as title."
         }
       ],
       "cases": [],
@@ -4223,21 +4327,24 @@
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "True: a run ended, or the bell rang, and no client showed the pane since."
         },
         {
           "name": "failed",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "True with unseen: the run that ended failed."
         },
         {
           "name": "bell",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "True: the bell rang and no client showed the pane since."
         }
       ],
       "cases": [],
@@ -4258,7 +4365,8 @@
           "name": "offset",
           "type": "u64",
           "optional": false,
-          "since": 2
+          "since": 2,
+          "doc": "The offset of the first output byte that follows. It is the offset of the client."
         }
       ],
       "cases": [],
@@ -4272,13 +4380,15 @@
           "name": "canonical",
           "type": "bool",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "True: the pty reads input one line at a time (ICANON)."
         },
         {
           "name": "echo",
           "type": "bool",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "True: the pty echoes input (ECHO)."
         }
       ],
       "cases": [],
@@ -4292,7 +4402,8 @@
           "name": "chord",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The key press, in the keybind grammar of the app: ctrl+c, for example."
         }
       ],
       "cases": [],
@@ -4307,7 +4418,8 @@
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: the text includes the scrollback. False: the screen only."
         }
       ],
       "cases": [],
@@ -4321,14 +4433,16 @@
           "name": "text",
           "type": "bin",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The text of the terminal."
         },
         {
           "name": "truncated",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: the text was too long, and only its end is here."
         }
       ],
       "cases": [],
@@ -4349,7 +4463,8 @@
           "name": "terminal",
           "type": "TerminalState",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The state of the terminal of the session."
         }
       ],
       "cases": [],
@@ -4363,19 +4478,22 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the wait. Waited carries the same tag."
         },
         {
           "name": "text",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The marker. The wait ends when a line starts with it. Null: the wait ends when no command runs and the pane is quiet."
         },
         {
           "name": "timeout_ms",
           "type": "u32",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The longest time to wait, in milliseconds."
         }
       ],
       "cases": [],
@@ -4389,19 +4507,22 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tag of the wait that ended."
         },
         {
           "name": "end",
           "type": "WaitEnd",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Why the wait ended: matched, done, exited or timeout."
         },
         {
           "name": "line",
           "type": "bin",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "With matched: the newest line that starts with the marker, cut at 4 KiB."
         }
       ],
       "cases": [],
@@ -4415,7 +4536,8 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tag of the wait to stop."
         }
       ],
       "cases": [],
