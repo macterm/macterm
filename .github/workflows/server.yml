@@ -25,14 +25,23 @@ on:
 permissions:
   contents: read
 
+# A new push cancels the runs of the older commit of the same ref: of a pull
+# request, and of main too. Only the newest commit of main matters, so the
+# runs of older main commits do not keep the macOS runners that it needs. A
+# cancelled main commit gets no tip build (release-tip.yml), and its changes
+# get their checks in the run of the next commit (scripts/changed-areas.sh).
 concurrency:
-  group: server-${{ github.event.pull_request.number || github.sha }}
+  group: server-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   changes:
     name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # actions: read lists the runs of this workflow (scripts/changed-areas.sh).
+    permissions:
+      contents: read
+      actions: read
     outputs:
       server: ${{ steps.changes.outputs.server }}
     steps:
@@ -43,7 +52,7 @@ jobs:
       - name: Find Server Changes
         id: changes
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: scripts/changed-areas.sh
 
   test:

@@ -1,8 +1,10 @@
 name: Release Tip
 
-# The `tip` channel: a universal Release build of every CI-passing commit on
-# main, published to a rolling `tip` prerelease and offered by Sparkle to anyone
-# who set Settings → Updates → Channel to Tip.
+# The `tip` channel: a universal Release build of the newest CI-passing commit
+# on main, published to a rolling `tip` prerelease and offered by Sparkle to
+# anyone who set Settings → Updates → Channel to Tip. A push to main cancels
+# the Test and Checks runs of the older main commits (their concurrency
+# groups), so only the newest commit of a burst of merges gets a tip build.
 #
 # Modelled on ghostty's release-tip.yml (workflow_run after Test, a force-moved
 # `tip` tag, one permanent prerelease whose assets are overwritten in place), with
@@ -93,7 +95,12 @@ jobs:
       # `skipped` counts as passing: both workflows' paths filters skip their
       # jobs for a change touching no Swift, and the workflow conclusion is then
       # `success` with nothing having run. That is a legitimately green commit.
+      #
+      # `cancelled`: a push of a newer commit to main cancelled this Checks run
+      # (the concurrency group of checks.yml). This commit gets no tip build;
+      # the newer commit's Checks run decides for it.
       - name: Require Checks green for this commit
+        id: checks
         env:
           SHA: ${{ steps.target.outputs.sha }}
         run: |
@@ -104,6 +111,11 @@ jobs:
             case "$CONCLUSION" in
               success|skipped)
                 echo "Checks: $CONCLUSION"
+                exit 0
+                ;;
+              cancelled)
+                echo "Checks of $SHA was cancelled by a newer commit on main."
+                echo "superseded=true" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
               "" | null)
@@ -123,9 +135,12 @@ jobs:
         id: decide
         env:
           SHA: ${{ steps.target.outputs.sha }}
+          SUPERSEDED: ${{ steps.checks.outputs.superseded }}
         run: |
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           skip() { echo "build=false" >> "$GITHUB_OUTPUT"; echo "SKIP: $1"; exit 0; }
+
+          [[ "$SUPERSEDED" != "true" ]] || skip "a newer commit on main cancelled the Checks run of $SHA"
 
           # Already built? The `tip` tag IS the ledger — the publish job moves it
           # only after the release itself lands, so it points at the commit of
