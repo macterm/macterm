@@ -167,7 +167,7 @@ struct MactermIntentsTests {
 
     @Test
     func new_project_refuses_a_typed_name_with_a_slash() async throws {
-        let (_, projectStore) = makeHost()
+        let (appState, projectStore) = makeHost()
         defer { teardown() }
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intent-slash-\(UUID().uuidString)", isDirectory: true)
@@ -184,6 +184,7 @@ struct MactermIntentsTests {
             Issue.record("expected badInput, got \(String(describing: refusal))")
         }
         #expect(projectStore.projects.isEmpty)
+        #expect(appState.activeProjectID == nil)
     }
 
     @Test
