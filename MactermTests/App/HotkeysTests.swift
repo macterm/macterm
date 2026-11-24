@@ -389,16 +389,29 @@ struct HotkeysTests {
     }
 
     @Test
-    func move_tab_and_move_pane_ship_on_the_arrow_keys() {
-        #expect(HotkeyAction.moveTabUp.defaultShortcut == "ctrl+left")
-        #expect(HotkeyAction.moveTabDown.defaultShortcut == "ctrl+right")
+    func move_tab_ships_on_control_shift_brackets() throws {
+        #expect(HotkeyAction.moveTabUp.defaultShortcut == "ctrl+shift+[")
+        #expect(HotkeyAction.moveTabDown.defaultShortcut == "ctrl+shift+]")
+        #expect(HotkeyRegistry.displayString(for: HotkeyAction.moveTabUp.defaultShortcut) == "⌃⇧[")
+        #expect(HotkeyRegistry.displayString(for: HotkeyAction.moveTabDown.defaultShortcut) == "⌃⇧]")
+        let up = try #require(HotkeyRegistry.parseShortcut(HotkeyAction.moveTabUp.defaultShortcut))
+        #expect(up.keyToken == "[")
+        #expect(up.modifiers == [.control, .shift])
+        // ⇧ makes the key type { and }, which are not key tokens: the event
+        // names the key by its position, so the chord reaches the binding.
+        #expect(HotkeyRegistry.eventToken(charactersIgnoringModifiers: "{", keyCode: 33, commandCharacter: nil) == "[")
+        #expect(HotkeyRegistry.eventToken(charactersIgnoringModifiers: "}", keyCode: 30, commandCharacter: nil) == "]")
+        #expect(AppCommand.moveTabUp.category == .tabs)
+        #expect(HotkeyAction.moveTabUp.title == "Move Tab Up")
+    }
+
+    @Test
+    func move_pane_ships_on_the_arrow_keys() {
         #expect(HotkeyAction.movePaneLeft.defaultShortcut == "cmd+ctrl+left")
         #expect(HotkeyAction.movePaneRight.defaultShortcut == "cmd+ctrl+right")
         #expect(HotkeyAction.movePaneUp.defaultShortcut == "cmd+ctrl+up")
         #expect(HotkeyAction.movePaneDown.defaultShortcut == "cmd+ctrl+down")
-        #expect(AppCommand.moveTabUp.category == .tabs)
         #expect(AppCommand.movePaneLeft.category == .panes)
-        #expect(HotkeyAction.moveTabUp.title == "Move Tab Up")
         #expect(HotkeyAction.movePaneRight.title == "Move Pane Right")
     }
 

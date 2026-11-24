@@ -34,9 +34,8 @@ extension AppState {
     /// `workspaces` until the model cut-over (design 010), so
     /// `markSeenIfActive` does not find their panes. The focused pane of the
     /// quick terminal, or the pane of a widget, is seen while its panel is
-    /// key. The app does not have to be active. The run end calls this to
-    /// end a `.done` state; a change of the flags calls it to clear flags
-    /// that arrive after the run end.
+    /// key. The app does not have to be active. A change of the flags calls
+    /// it: a `.done` state is the `unseen` flag, so the clear ends it too.
     func markSeenIfInKeyPanel(paneID: UUID) {
         if let quick = adoptedQuickTerminal,
            quick.focusedPaneID == paneID,

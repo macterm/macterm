@@ -3,8 +3,7 @@ import Foundation
 /// Pure cadence policy for the foreground-process poll. Owns no timers:
 /// `AppState` feeds it events plus a `Context` snapshot and re-arms a single
 /// non-repeating timer from `nextDelay`. Value type with an injected clock,
-/// in the `TerminalExecutionTracker` style, so the whole state machine is
-/// unit-testable without AppKit.
+/// so the whole state machine is unit-testable without AppKit.
 ///
 /// The cadence exists because a fixed 250ms poll is the app's last
 /// structural idle cost (~0.9% of a core, scaling with pane count, #110).

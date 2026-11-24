@@ -45,8 +45,37 @@ pub const Replace = struct {
 pub const Waiter = struct {
     peer: u64,
     re: u64,
-    kind: enum { create, info, kill, list, seen, history, inspect, subscribe },
+    kind: enum { create, info, kill, list, seen, history, inspect, subscribe, wait, typing },
+    /// `history`: the `tail_lines` of the request.
+    tail_lines: ?u32 = null,
+    /// `wait`: the tag of the session's `wait`, and when the server stops
+    /// to wait for its `waited` (`wait_grace_ms` after the timeout).
+    tag: u64 = 0,
+    deadline: i64 = 0,
+    /// `typing`: the input that waits for the session's `tty_mode`. The
+    /// server owns it.
+    input: ?Input = null,
 };
+
+/// Input of an `mcp` client that waits for the password check.
+pub const Input = union(enum) {
+    /// `session.send`: the text, and if a newline follows.
+    text: struct { bytes: []u8, submit: bool },
+    /// `session.key`: the chord.
+    key: []u8,
+
+    pub fn deinit(i: Input, gpa: std.mem.Allocator) void {
+        switch (i) {
+            .text => |t| gpa.free(t.bytes),
+            .key => |k| gpa.free(k),
+        }
+    }
+};
+
+/// The time after a wait's timeout that the server gives the session to
+/// answer. A session of an older build does not know `wait`: its waiter gets
+/// an error when this time ends.
+pub const wait_grace_ms = 2000;
 
 /// The server's connection to one session process.
 pub const Entry = struct {
@@ -62,6 +91,8 @@ pub const Entry = struct {
     /// one that is not a key.
     build_key: ?[]u8 = null,
     level: u32 = 0,
+    /// Its `hello` has the `tty-read` cap: it answers `tty_read`.
+    tty_read: bool = false,
     refused: bool = false,
     state: ?State = null,
     /// The session's attention flags, from its last `attention` message.
@@ -204,6 +235,9 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
                 e.build = s.gpa.dupe(u8, buildName(h.build)) catch return entryGone(s, e);
                 if (keyOf(h.build_key)) |k| e.build_key = s.gpa.dupe(u8, k) catch return entryGone(s, e);
                 e.level = h.level;
+                for (h.caps) |cap| if (std.mem.eql(u8, cap, m.tty_read_cap)) {
+                    e.tty_read = true;
+                };
                 switch (m.negotiate(s.hello(), h)) {
                     .speak => e.conn.greeted = true,
                     .refuse => |r| {
@@ -263,11 +297,42 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
     } else if (std.mem.eql(u8, msg.t, m.History.name)) {
         const h = m.decodePane(m.History, arena, msg) catch return brokenEntry(s, e, "a bad history");
         const w = takeWaiter(e, .history) orelse return;
-        peers.reply(s, w.peer, w.re, m.SessionHistory, .{ .text = h.text, .truncated = h.truncated });
+        const tail = if (w.tail_lines) |n| tailLines(h.text.bytes, n) else Tail{ .text = h.text.bytes, .cut = 0 };
+        peers.reply(s, w.peer, w.re, m.SessionHistory, .{
+            .text = .{ .bytes = tail.text },
+            .truncated = h.truncated or tail.cut > 0,
+            .lines_cut = tail.cut,
+        });
+    } else if (std.mem.eql(u8, msg.t, m.Waited.name)) {
+        const d = m.decodePane(m.Waited, arena, msg) catch return brokenEntry(s, e, "a bad waited");
+        for (e.waiters.items, 0..) |w, i| if (w.kind == .wait and w.tag == d.tag) {
+            _ = e.waiters.orderedRemove(i);
+            peers.reply(s, w.peer, w.re, m.SessionWait, .{ .end = d.end, .line = d.line });
+            break;
+        };
     } else if (std.mem.eql(u8, msg.t, m.Inspect.name)) {
         const i = m.decodePane(m.Inspect, arena, msg) catch return brokenEntry(s, e, "a bad inspect");
         const w = takeWaiter(e, .inspect) orelse return;
         peers.reply(s, w.peer, w.re, m.SessionInspect, .{ .terminal = i.terminal });
+    } else if (std.mem.eql(u8, msg.t, m.TtyMode.name)) {
+        // The server never asks for `tty_mode` in an `attach`, so each one
+        // is the answer to a `tty_read`.
+        const mode = m.decodePane(m.TtyMode, arena, msg) catch return brokenEntry(s, e, "a bad tty mode");
+        const w = takeWaiter(e, .typing) orelse return;
+        const input = w.input.?;
+        defer input.deinit(s.gpa);
+        // A client that left gets no input typed: it may have read its
+        // call as failed.
+        if (peers.findPeer(s, w.peer) == null) return;
+        if (readsPassword(mode)) {
+            std.log.info("server: input from mcp to session {s} refused: the pane reads a password", .{e.id});
+            return peers.replyError(s, w.peer, w.re, .forbidden, password_refusal);
+        }
+        if (e.conn.dead or e.exit != null) return peers.replyError(s, w.peer, w.re, .exited, "The session's shell exited.");
+        switch (input) {
+            .text => |t| typeText(s, w.peer, w.re, e, t.bytes, t.submit),
+            .key => |k| typeKey(s, w.peer, w.re, e, k),
+        }
     } else if (std.mem.eql(u8, msg.t, m.Exit.name)) {
         const x = m.decodePane(m.Exit, arena, msg) catch return brokenEntry(s, e, "a bad exit");
         if (e.exit != null) return;
@@ -289,10 +354,10 @@ pub fn settle(s: *Server, e: *Entry) void {
         .kill, .list, .seen, .subscribe => wait(s, &e.waiters, w),
         // A session asked for its text or state answers, unless it was
         // refused: then its connection is closed.
-        .history, .inspect => if (e.refused)
-            peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.")
-        else
-            wait(s, &e.waiters, w),
+        .history, .inspect, .wait, .typing => if (e.refused) {
+            if (w.input) |i| i.deinit(s.gpa);
+            peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.");
+        } else wait(s, &e.waiters, w),
     };
     answerLists(s);
 }
@@ -342,7 +407,11 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     for (e.waiters.items) |w| switch (w.kind) {
         .kill => peers.reply(s, w.peer, w.re, m.SessionKill, .{}),
         .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session ended before it was ready."),
-        .info, .list, .seen, .history, .inspect, .subscribe => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .info, .list, .seen, .history, .inspect, .subscribe, .wait => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .typing => {
+            w.input.?.deinit(s.gpa);
+            peers.replyError(s, w.peer, w.re, .not_found, "No session has this id.");
+        },
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
@@ -635,39 +704,158 @@ fn terminalEntry(s: *Server, p: *Peer, re: u64, id: []const u8, running: bool) ?
     return e;
 }
 
+/// The error text of input that an `mcp` client sends while the pane reads
+/// a password (design/014 §5).
+pub const password_refusal = "The pane reads a password. Ask the user to type it.";
+
+/// A pty in canonical mode with echo off reads a password: `sudo`, `ssh`
+/// and `read -s` set it. A program that is not a password prompt can set it
+/// too; the rule then refuses too much, which is the safe side.
+fn readsPassword(mode: m.TtyMode) bool {
+    return mode.canonical and !mode.echo;
+}
+
 /// `session.send`: the text goes to the session as input of a client that
-/// does not show the pane, so the leader stays.
+/// does not show the pane, so the leader stays. For an `mcp` client, the
+/// session first says if the pane reads a password (`guard`).
 pub fn send(s: *Server, p: *Peer, re: u64, args: m.SessionSend.Args) void {
     if (args.text.bytes.len > m.send_max)
         return peers.replyError(s, p.id, re, .invalid_args, "The text is over 64 KiB.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    if (args.text.bytes.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, args.text.bytes) catch return lostEntry(s, p, re, e);
-    if (args.submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return lostEntry(s, p, re, e);
-    peers.reply(s, p.id, re, m.SessionSend, .{});
+    if (p.role != .mcp) return typeText(s, p.id, re, e, args.text.bytes, args.submit);
+    const bytes = s.gpa.dupe(u8, args.text.bytes) catch
+        return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
+    guard(s, p, re, e, .{ .text = .{ .bytes = bytes, .submit = args.submit } });
+}
+
+fn typeText(s: *Server, peer: u64, re: u64, e: *Entry, text: []const u8, submit: bool) void {
+    if (text.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, text) catch return lostEntry(s, peer, re, e);
+    if (submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return lostEntry(s, peer, re, e);
+    peers.reply(s, peer, re, m.SessionSend, .{});
 }
 
 /// The session's connection failed during a request that waits for no
 /// answer of the session: the request gets its reply here.
-fn lostEntry(s: *Server, p: *Peer, re: u64, e: *Entry) void {
+fn lostEntry(s: *Server, peer: u64, re: u64, e: *Entry) void {
     entryGone(s, e);
-    peers.replyError(s, p.id, re, .not_found, "No session has this id.");
+    peers.replyError(s, peer, re, .not_found, "No session has this id.");
 }
 
 /// `session.key`: the session parses and encodes the chord itself. The
 /// server parses it too, so that a chord that does not parse gets an error.
+/// For an `mcp` client, the session first says if the pane reads a password.
 pub fn sendKey(s: *Server, p: *Peer, re: u64, args: m.SessionKey.Args) void {
     if (chord.parse(args.chord) == null)
         return peers.replyError(s, p.id, re, .invalid_args, "The key combination does not parse.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    e.conn.sendPane(s.gpa, m.Key, .{ .chord = args.chord }) catch return lostEntry(s, p, re, e);
-    peers.reply(s, p.id, re, m.SessionKey, .{});
+    if (p.role != .mcp) return typeKey(s, p.id, re, e, args.chord);
+    const key = s.gpa.dupe(u8, args.chord) catch
+        return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
+    guard(s, p, re, e, .{ .key = key });
+}
+
+fn typeKey(s: *Server, peer: u64, re: u64, e: *Entry, key: []const u8) void {
+    e.conn.sendPane(s.gpa, m.Key, .{ .chord = key }) catch return lostEntry(s, peer, re, e);
+    peers.reply(s, peer, re, m.SessionKey, .{});
+}
+
+/// Holds the input of an `mcp` client and asks the session for its line
+/// modes now (`tty_read`). The answer types the input or refuses it. A
+/// session that cannot answer (an older build) refuses it: fail closed.
+fn guard(s: *Server, p: *Peer, re: u64, e: *Entry, input: Input) void {
+    if (!e.tty_read) {
+        input.deinit(s.gpa);
+        return peers.replyError(s, p.id, re, .forbidden, "The session runs an older build that cannot say if the pane reads a password. Ask the user to type it.");
+    }
+    const held = e.waiters.items.len;
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .typing, .input = input });
+    // One `tty_read` for each held input, so that the answers stay in order.
+    if (e.waiters.items.len > held) sendEntryPane(s, e, m.TtyRead, .{});
 }
 
 /// `session.history`: the reply goes when the session's `history` comes.
 pub fn readHistory(s: *Server, p: *Peer, re: u64, args: m.SessionHistory.Args) void {
+    if (args.tail_lines == 0)
+        return peers.replyError(s, p.id, re, .invalid_args, "tail_lines must be 1 or more.");
     const e = terminalEntry(s, p, re, args.id, false) orelse return;
-    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history });
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history, .tail_lines = args.tail_lines });
     sendEntryPane(s, e, m.HistoryRead, .{ .scrollback = args.scrollback });
+}
+
+/// `session.wait`: the session waits, and the reply goes when its `waited`
+/// comes. The server keeps its own deadline, so that a session that does not
+/// answer does not hold the request for ever (`timers`).
+pub fn startWait(s: *Server, p: *Peer, re: u64, args: m.SessionWait.Args) void {
+    if (args.text) |t| if (t.len == 0 or t.len > m.wait_text_max)
+        return peers.replyError(s, p.id, re, .invalid_args, "The marker must be 1 to 1024 bytes.");
+    if (args.timeout_ms > m.wait_max_ms)
+        return peers.replyError(s, p.id, re, .invalid_args, "timeout_ms is over 600000.");
+    const e = terminalEntry(s, p, re, args.id, false) orelse return;
+    s.wait_tag += 1;
+    const tag = s.wait_tag;
+    wait(s, &e.waiters, .{
+        .peer = p.id,
+        .re = re,
+        .kind = .wait,
+        .tag = tag,
+        .deadline = s.now() + args.timeout_ms + wait_grace_ms,
+    });
+    sendEntryPane(s, e, m.Wait, .{ .tag = tag, .text = args.text, .timeout_ms = args.timeout_ms });
+}
+
+/// A client left: each session stops the waits of that client.
+pub fn cancelWaits(s: *Server, peer: u64) void {
+    for (s.entries.items) |e| {
+        var i: usize = 0;
+        while (i < e.waiters.items.len) {
+            const w = e.waiters.items[i];
+            if (w.kind != .wait or w.peer != peer) {
+                i += 1;
+                continue;
+            }
+            _ = e.waiters.orderedRemove(i);
+            if (!e.conn.dead) sendEntryPane(s, e, m.WaitCancel, .{ .tag = w.tag });
+        }
+    }
+}
+
+/// The waits of `e` that the session did not answer in time get an error.
+pub fn expireWaits(s: *Server, e: *Entry, now: i64) void {
+    var i: usize = 0;
+    while (i < e.waiters.items.len) {
+        const w = e.waiters.items[i];
+        if (w.kind != .wait or now < w.deadline) {
+            i += 1;
+            continue;
+        }
+        _ = e.waiters.orderedRemove(i);
+        peers.replyError(s, w.peer, w.re, .unavailable, "The session did not answer the wait. It can run an older build: restart the pane.");
+    }
+}
+
+/// The earliest deadline of the waits of `e`.
+pub fn waitDeadline(e: *const Entry) ?i64 {
+    var next: ?i64 = null;
+    for (e.waiters.items) |w| if (w.kind == .wait) {
+        next = @min(next orelse w.deadline, w.deadline);
+    };
+    return next;
+}
+
+pub const Tail = struct { text: []const u8, cut: u64 };
+
+/// The last `n` lines of `text`, and the count of lines before them. A
+/// newline at the end ends the last line and starts no new one.
+pub fn tailLines(text: []const u8, n: u32) Tail {
+    const body = if (std.mem.endsWith(u8, text, "\n")) text[0 .. text.len - 1] else text;
+    var start = body.len;
+    var kept: u32 = 0;
+    while (std.mem.lastIndexOfScalar(u8, body[0..start], '\n')) |nl| {
+        kept += 1;
+        if (kept == n) return .{ .text = text[nl + 1 ..], .cut = std.mem.count(u8, body[0..nl], "\n") + 1 };
+        start = nl;
+    }
+    return .{ .text = text, .cut = 0 };
 }
 
 /// `session.inspect`: the reply goes when the session's `inspect` comes.
@@ -679,7 +867,10 @@ pub fn readInspect(s: *Server, p: *Peer, re: u64, id: []const u8) void {
 
 /// Adds a waiter, or answers it at once when there is no memory for it.
 pub fn wait(s: *Server, list: *std.ArrayList(Waiter), w: Waiter) void {
-    list.append(s.gpa, w) catch peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    list.append(s.gpa, w) catch {
+        if (w.input) |i| i.deinit(s.gpa);
+        peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    };
 }
 
 /// A refused session has no connection. Each list and each idle check
@@ -897,6 +1088,14 @@ test "the error text is the first line without its prefix" {
     try testing.expectEqualStrings("The session did not start.", errorText("error: \xff\n"));
 }
 
+test "only a canonical read with echo off is a password read" {
+    try testing.expect(readsPassword(.{ .canonical = true, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = true, .echo = true }));
+    // Raw mode passes: a full-screen program, or a prompt that draws its own mask.
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = true }));
+}
+
 test "the server signals no pid that reaches a group or every process" {
     try testing.expect(validPid(2));
     try testing.expect(!validPid(1));
@@ -935,4 +1134,21 @@ test "a session's build is kept only as short printable text" {
     try testing.expectEqualStrings("unknown", buildName("a\x1b[2Jb"));
     const long: [65]u8 = @splat('x');
     try testing.expectEqualStrings("unknown", buildName(&long));
+}
+
+test "a tail keeps the last lines and counts the lines before them" {
+    const t = tailLines("a\nb\nc\nd\n", 2);
+    try std.testing.expectEqualStrings("c\nd\n", t.text);
+    try std.testing.expectEqual(2, t.cut);
+    const no_newline = tailLines("a\nb\nc", 1);
+    try std.testing.expectEqualStrings("c", no_newline.text);
+    try std.testing.expectEqual(2, no_newline.cut);
+    // Fewer lines than asked: all of them, and nothing cut.
+    const short = tailLines("a\nb\n", 2);
+    try std.testing.expectEqualStrings("a\nb\n", short.text);
+    try std.testing.expectEqual(0, short.cut);
+    try std.testing.expectEqual(0, tailLines("", 3).cut);
+    const empty_lines = tailLines("\n\nx\n", 1);
+    try std.testing.expectEqualStrings("x\n", empty_lines.text);
+    try std.testing.expectEqual(2, empty_lines.cut);
 }

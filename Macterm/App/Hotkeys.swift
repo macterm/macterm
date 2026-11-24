@@ -159,11 +159,11 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
         case .resizePaneDown: "cmd+shift+j"
         case .resizePaneUp: "cmd+shift+k"
         case .resizePaneRight: "cmd+shift+l"
-        // The arrow row of the same families: ⌃←/⌃→ step the tab through the
-        // sidebar's list (it runs top to bottom), and ⌘⌃ + an arrow moves the
-        // pane the way ⌘⌃ + h/j/k/l moves focus.
-        case .moveTabUp: "ctrl+left"
-        case .moveTabDown: "ctrl+right"
+        // ⌃⇧[/⌃⇧] move the tab through the sidebar's list, next to ⌃[/⌃]
+        // that step through it. No ghostty default binds them.
+        case .moveTabUp: "ctrl+shift+["
+        case .moveTabDown: "ctrl+shift+]"
+        // ⌘⌃ + an arrow moves the pane as ⌘⌃ + h/j/k/l moves focus.
         case .movePaneLeft: "cmd+ctrl+left"
         case .movePaneDown: "cmd+ctrl+down"
         case .movePaneUp: "cmd+ctrl+up"
@@ -354,15 +354,6 @@ enum HotkeyRegistry {
         if let shifted = shiftedSymbols[token] { return shifted }
         let upper = token.uppercased()
         return upper == token ? token : upper
-    }
-
-    /// The hardware key code for a base key token (`"c"` → 8), or nil for a
-    /// token we don't map — the inverse of `baseToken(forKeyCode:)`. Lets code
-    /// that carries its own key codes (`TerminalCommandSubmission`, which stays
-    /// isolation-free and so can't read this `@MainActor` map at runtime) pin
-    /// them to this vocabulary in a test.
-    static func keyCode(forToken token: String) -> UInt16? {
-        keyCodes[token]
     }
 
     /// Every key token the chord grammar accepts. Lets a test sweep the whole
