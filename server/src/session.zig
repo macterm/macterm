@@ -274,6 +274,15 @@ const Session = struct {
     listen_fd: i32,
     pty_fd: i32,
     shell_pid: lib_posix.pid_t,
+    /// The shell's process group. It is `shell_pid` until a shell under
+    /// login(1) takes the foreground (`isShellGroup`).
+    shell_pgid: lib_posix.pid_t,
+    /// The command is login(1), which starts the shell in a process group
+    /// of its own. ghostty starts every local shell this way on macOS.
+    under_login: bool,
+    /// The last group in front that `isShellGroup` found is not the shell's,
+    /// so that a program in front costs no read of its parent at each output.
+    other_pgid: lib_posix.pid_t = 0,
     pty_name: []const u8,
     pty_name_buf: [128]u8,
     epoch: u64,
@@ -325,6 +334,8 @@ const Session = struct {
             .listen_fd = listen_fd,
             .pty_fd = pty.master_fd,
             .shell_pid = pty.pid,
+            .shell_pgid = pty.pid,
+            .under_login = isLogin(opts.command),
             .pty_name = "",
             .pty_name_buf = pty.name_buf,
             .epoch = epoch,
@@ -378,6 +389,7 @@ const Session = struct {
             // Held events whose window ended, and a foreground that changed
             // while the pty was quiet.
             s.watch.flush(s.nowMs());
+            if (s.watch.watchesForeground(s.nowMs())) s.observeForeground();
             s.checkForeground(null);
             s.checkTty(null);
             s.sendEvents();
@@ -521,8 +533,10 @@ const Session = struct {
 
         // A foreground change goes before the output: a report that the
         // shell is back lands before the shell's prompt (zmx 0010).
+        s.observeForeground();
         s.checkForeground(null);
         s.checkTty(null);
+        s.sendEvents();
         // Each event goes between the output before the sequence that gave
         // it and the output after: a client that reads its screen at an end
         // mark has the command's last line. The terminal parses up to the
@@ -704,7 +718,7 @@ const Session = struct {
             var buf: [128]u8 = undefined;
             var w: std.Io.Writer = .fixed(&buf);
             chord.encode(&w, parsed, &s.watch.term) catch return;
-            s.queueInput(w.buffered());
+            s.queueUserInput(w.buffered());
         } else if (std.mem.eql(u8, msg.t, m.HistoryRead.name)) {
             const r = try m.decodePane(m.HistoryRead, arena, msg);
             const text = terminal.plainText(arena, &s.watch.term, r.scrollback, history_max) catch
@@ -726,11 +740,53 @@ const Session = struct {
     /// dropped when it is a terminal's reply (v1's rule). A client that does
     /// not show the pane (a script) sends input with no effect on leadership.
     fn handleInput(s: *Session, c: *Client, data: []const u8) void {
-        if (!c.attached or s.leader == c) return s.queueInput(data);
+        if (!c.attached or s.leader == c) return s.queueUserInput(data);
         if (util.isUserInput(data)) {
             s.setLeader(c);
-            s.queueInput(data);
+            s.queueUserInput(data);
         }
+    }
+
+    /// Input that a person or the CLI sent, not a reply of a terminal: a
+    /// submission in it can start a run (`Watch.submitted`).
+    fn queueUserInput(s: *Session, data: []const u8) void {
+        if (!s.pty_closed and events.isSubmission(data)) {
+            s.observeForeground();
+            s.watch.submitted(s.nowMs());
+            s.sendEvents();
+        }
+        s.queueInput(data);
+    }
+
+    /// Whether `pgrp` is the shell's process group. login(1) is in front
+    /// before it starts the shell, and counts as the shell. The first group
+    /// in front whose leader is login's child is the shell's: login has one
+    /// child.
+    fn isShellGroup(s: *Session, pgrp: lib_posix.pid_t) bool {
+        if (pgrp == s.shell_pid or pgrp == s.shell_pgid) return true;
+        if (!s.under_login or s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
+        if (foreground.parentPid(pgrp) != s.shell_pid) {
+            s.other_pgid = pgrp;
+            return false;
+        }
+        s.shell_pgid = pgrp;
+        std.log.info("session {s}: the shell's group is {d}, under login pid={d}", .{ s.name, pgrp, s.shell_pid });
+        return true;
+    }
+
+    /// Reads the foreground group and the line mode of the pty for the run
+    /// status (`Watch.foreground`), with no client. The session reads it at
+    /// each output, at each submission, and on a timer only while
+    /// `Watch.watchesForeground`, so an idle session does not wake.
+    fn observeForeground(s: *Session) void {
+        if (s.pty_closed) return;
+        var pgrp: lib_posix.pid_t = 0;
+        if (cross.ioctl(s.pty_fd, cross.TIOCGPGRP, &pgrp) != 0 or pgrp <= 0) return;
+        var t: cross.termios = undefined;
+        const raw = cross.tcgetattr(s.pty_fd, &t) == 0 and !ttyModeOf(t.c_lflag).canonical;
+        const next: events.Foreground = .{ .idle = s.isShellGroup(pgrp), .raw = raw, .pgrp = pgrp };
+        if (std.meta.eql(next, s.watch.fg)) return;
+        s.watch.foreground(next, s.nowMs());
     }
 
     fn attach(s: *Session, c: *Client, size: Resize, want: ?Resume) void {
@@ -927,7 +983,8 @@ const Session = struct {
     }
 
     fn pollTimeout(s: *const Session) i32 {
-        return pollTimeoutFor((foreground.supported and s.hasForegroundClient()) or s.hasTtyClient(), s.watch.deadline(), s.nowMs());
+        const now = s.nowMs();
+        return pollTimeoutFor((foreground.supported and s.hasForegroundClient()) or s.hasTtyClient() or s.watch.watchesForeground(now), s.watch.deadline(), now);
     }
 
     /// A live client asked for `foreground` messages. With none, the
@@ -989,7 +1046,7 @@ const Session = struct {
         var pgrp: lib_posix.pid_t = 0;
         if (cross.ioctl(s.pty_fd, cross.TIOCGPGRP, &pgrp) != 0 or pgrp <= 0) return out;
         out.foreground_pid = pgrp;
-        out.busy = pgrp != s.shell_pid;
+        out.busy = !s.isShellGroup(pgrp);
         if (!foreground.supported) return out;
         var comm_buf: [std.fs.max_path_bytes]u8 = undefined;
         var args_buf: [foreground.args_max]u8 = undefined;
@@ -1042,7 +1099,7 @@ const Session = struct {
             return;
         };
         const msg: m.Foreground = .{
-            .idle = pgrp == s.shell_pid,
+            .idle = s.isShellGroup(pgrp),
             .shell = if (s.etc_shells) |shells| foreground.isListedShell(shells, process.comm) else null,
             .comm = .{ .bytes = process.comm },
             .args = .{ .bytes = process.args },
@@ -1173,6 +1230,13 @@ fn sequenceEnd(data: []const u8, from: usize) usize {
 /// interval while a client wants foreground reports: a program that takes
 /// the pty and prints nothing is still reported (zmx 0010). With neither,
 /// -1: the session sleeps until a fd is ready.
+/// Whether `command` runs login(1): its program is a file named `login`.
+fn isLogin(command: ?[]const []const u8) bool {
+    const argv = command orelse return false;
+    if (argv.len == 0) return false;
+    return std.mem.eql(u8, std.fs.path.basename(argv[0]), "login");
+}
+
 fn pollTimeoutFor(foreground_client: bool, deadline: ?i64, now: i64) i32 {
     var timeout: i32 = if (foreground_client) foreground.poll_interval_ms else -1;
     if (deadline) |due| {
@@ -1240,6 +1304,13 @@ test "a pane size is cut to the limit, and 0 is ignored" {
     try testing.expectEqual(max_cells, big.cols);
     try testing.expectEqual(max_cells, big.rows);
     try testing.expectEqual(80, paneSize(80, 24, 0, 0).?.cols);
+}
+
+test "session: isLogin names a command whose program is login(1)" {
+    try std.testing.expect(isLogin(&.{ "/usr/bin/login", "-flp", "me", "/bin/zsh" }));
+    try std.testing.expect(!isLogin(&.{ "/bin/zsh", "-l" }));
+    try std.testing.expect(!isLogin(&.{}));
+    try std.testing.expect(!isLogin(null));
 }
 
 test "a session polls the foreground only for a client that wants it" {
