@@ -277,9 +277,6 @@ const Session = struct {
     /// The shell's process group. It is `shell_pid` until a shell under
     /// login(1) takes the foreground (`isShellGroup`).
     shell_pgid: lib_posix.pid_t,
-    /// The command is login(1), which starts the shell in a process group
-    /// of its own. ghostty starts every local shell this way on macOS.
-    under_login: bool,
     /// The last group in front that `isShellGroup` found is not the shell's,
     /// so that a program in front costs no read of its parent at each output.
     other_pgid: lib_posix.pid_t = 0,
@@ -335,7 +332,6 @@ const Session = struct {
             .pty_fd = pty.master_fd,
             .shell_pid = pty.pid,
             .shell_pgid = pty.pid,
-            .under_login = isLogin(opts.command),
             .pty_name = "",
             .pty_name_buf = pty.name_buf,
             .epoch = epoch,
@@ -758,14 +754,17 @@ const Session = struct {
         s.queueInput(data);
     }
 
-    /// Whether `pgrp` is the shell's process group. login(1) is in front
-    /// before it starts the shell, and counts as the shell. The first group
-    /// in front whose leader is login's child is the shell's: login has one
-    /// child.
+    /// Whether `pgrp` is the shell's process group. login(1) starts the
+    /// shell in a process group of its own (ghostty starts every local shell
+    /// this way on macOS). login is in front before it starts the shell, and
+    /// counts as the shell. The first group in front whose leader is login's
+    /// child is the shell's: login has one child. The session reads the
+    /// program of `shell_pid` at that time, not the command it started: a
+    /// wrapper (`macterm palette exec`) can run login(1) with exec.
     fn isShellGroup(s: *Session, pgrp: lib_posix.pid_t) bool {
         if (pgrp == s.shell_pid or pgrp == s.shell_pgid) return true;
-        if (!s.under_login or s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
-        if (foreground.parentPid(pgrp) != s.shell_pid) {
+        if (s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
+        if (foreground.parentPid(pgrp) != s.shell_pid or !foreground.runsLogin(s.shell_pid)) {
             s.other_pgid = pgrp;
             return false;
         }
@@ -1230,13 +1229,6 @@ fn sequenceEnd(data: []const u8, from: usize) usize {
 /// interval while a client wants foreground reports: a program that takes
 /// the pty and prints nothing is still reported (zmx 0010). With neither,
 /// -1: the session sleeps until a fd is ready.
-/// Whether `command` runs login(1): its program is a file named `login`.
-fn isLogin(command: ?[]const []const u8) bool {
-    const argv = command orelse return false;
-    if (argv.len == 0) return false;
-    return std.mem.eql(u8, std.fs.path.basename(argv[0]), "login");
-}
-
 fn pollTimeoutFor(foreground_client: bool, deadline: ?i64, now: i64) i32 {
     var timeout: i32 = if (foreground_client) foreground.poll_interval_ms else -1;
     if (deadline) |due| {
@@ -1304,13 +1296,6 @@ test "a pane size is cut to the limit, and 0 is ignored" {
     try testing.expectEqual(max_cells, big.cols);
     try testing.expectEqual(max_cells, big.rows);
     try testing.expectEqual(80, paneSize(80, 24, 0, 0).?.cols);
-}
-
-test "session: isLogin names a command whose program is login(1)" {
-    try std.testing.expect(isLogin(&.{ "/usr/bin/login", "-flp", "me", "/bin/zsh" }));
-    try std.testing.expect(!isLogin(&.{ "/bin/zsh", "-l" }));
-    try std.testing.expect(!isLogin(&.{}));
-    try std.testing.expect(!isLogin(null));
 }
 
 test "a session polls the foreground only for a client that wants it" {
