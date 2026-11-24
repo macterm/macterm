@@ -504,16 +504,11 @@ struct SidebarContent: View {
         )
     }
 
-    /// One project's disclosure (design 013): its tab rows (draggable, and
-    /// a drop target that reorders or moves at the insertion offset), then
-    /// the projects inside it, each again a disclosure. Its header accepts
-    /// drops too (the append path for a collapsed or empty project, and the
-    /// way into a project for a dragged project). The child rows take no
-    /// insertion drop: a `.dropDestination` on a `ForEach` of disclosure
-    /// rows crashes the outline accept (see the notes in `body`). Tab rows
-    /// and child disclosures as siblings were measured in trial 0479 (no
-    /// crash, the tab line lands where it shows). `AnyView`, because the
-    /// function calls itself for the projects inside.
+    /// One project's disclosure (design 013): its tab rows, then the
+    /// projects inside it, each again a disclosure. Only the tab `ForEach`
+    /// takes an insertion drop: on a `ForEach` of disclosure rows, a drop
+    /// crashes (see the notes in `body`). `AnyView`, because the function
+    /// calls itself for the projects inside.
     private func projectSection(_ node: SidebarNode) -> AnyView {
         let project = node.project
         let tabs = appState.workspaces[project.id]?.tabs ?? []
@@ -606,17 +601,22 @@ struct SidebarContent: View {
         // target, no taller band) so the tab ForEach's insertion line can
         // appear there.
         .dropDestination(for: SidebarDropItem.self) { items, _ in
+            // False when the store refused every project of the drop (a
+            // project into itself or into a project inside it).
+            var accepted = false
             for item in items {
                 switch item {
                 case let .tab(tab):
                     receiveTabDrop([tab], into: project, at: nil)
+                    accepted = true
                 case let .project(dragged):
-                    SidebarTree.drop(dragged.projectID, onto: project, in: projectStore)
+                    if SidebarTree.drop(dragged.projectID, onto: project, in: projectStore) { accepted = true }
                 case let .pane(pane):
                     receivePaneDrop([pane], into: project, at: nil)
+                    accepted = true
                 }
             }
-            return true
+            return accepted
         } isTargeted: { targeted in
             // Spring-open a collapsed project while hovering a drag over it,
             // so the user can see where a tab will land. This also fires for
@@ -805,7 +805,11 @@ struct SidebarContent: View {
                 ForEach(targets) { target in
                     Button(SidebarTree.pathName(of: target, in: projectStore)) {
                         projectStore.move(project.id, into: target.id)
-                        windowState.expandedRows.insert(target.id)
+                        // Open the target and the projects above it, so
+                        // that the moved row shows.
+                        windowState.expandedRows.formUnion(
+                            [target.id] + SidebarTree.parentsToOpen(for: target.id, in: projectStore)
+                        )
                     }
                 }
             }

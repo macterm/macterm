@@ -61,8 +61,9 @@ struct ProjectsSettings: View {
                     //
                     // The cost is `.onMove`, which exists only on `List`, so
                     // reordering moved into the row menu.
-                    // The tree of the sidebar (design 013): every project in
-                    // tree order, indented one step for each parent above it.
+                    //
+                    // The rows are the sidebar's tree (design 013), in tree
+                    // order, with one indent step for each parent above.
                     ForEach(projectStore.projects) { project in
                         projectRow(project)
                     }
@@ -377,13 +378,14 @@ private struct ProjectRow: View {
                     )
                     appState.noteLayoutFilesChanged()
                 }
-                .disabled(appState.workspaces[project.id] == nil)
+                // A layout file matches a project by its folder.
+                .disabled(appState.workspaces[project.id] == nil || !project.hasFolder)
 
                 // A project from a dev build's group row has no folder
                 // (design 013 §1): its shells start in the home folder
                 // until the user chooses one here.
                 if !project.hasFolder {
-                    Button("Choose Folder…") { chooseFolder() }
+                    Button("Select Folder…") { selectFolder() }
                 }
 
                 // Only after the user declined the server on this host: its
@@ -426,7 +428,7 @@ private struct ProjectRow: View {
     }
 
     /// Give a project with no folder the folder that the user selects.
-    private func chooseFolder() {
+    private func selectFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false

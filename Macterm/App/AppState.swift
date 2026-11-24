@@ -2250,13 +2250,10 @@ final class AppState {
         saveWorkspaces()
     }
 
-    /// Remove the project `projectID` (design 013 §3). A project with no
-    /// projects inside goes at once, unless a process runs in it: then one
-    /// question. A project with projects inside always asks, in one dialog
-    /// that also covers running processes: Remove All removes it and every
-    /// project inside it, and Keep Inside Projects removes only it and moves
-    /// the projects inside to its place. Each choice reads the tree again,
-    /// because a project can move while the question is up.
+    /// Remove the project `projectID` (design 013 §3). With no projects
+    /// inside, it goes at once, or after one question when a process runs
+    /// in it. With projects inside, one dialog always asks: Remove All, or
+    /// Keep Inside Projects. Each choice reads the tree again at the answer.
     func requestRemoveProject(_ projectID: UUID, store: ProjectStore, host: DialogHost = .mainWindow) {
         guard let project = store.row(projectID) else { return }
         let inside = store.descendants(of: projectID).map(\.id)
@@ -2281,14 +2278,12 @@ final class AppState {
         let count = inside.count
         let message = closeNeedsConfirmation(projectIDs: [projectID] + inside, tabs: [])
             ? String(localized: """
-            This project contains \(count) projects, and a process is still running. Remove All removes this \
-            project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes \
-            only this project and moves the projects inside to its place.
+            This project contains \(count) projects, and a process is still running. Remove All also removes \
+            them. Keep Inside Projects moves them to the place of this project.
             """)
             : String(localized: """
-            This project contains \(count) projects. Remove All removes this project and the projects inside, \
-            and ends every process in their tabs. Keep Inside Projects removes only this project and moves the \
-            projects inside to its place.
+            This project contains \(count) projects. Remove All also removes them. Keep Inside Projects moves \
+            them to the place of this project.
             """)
         present(PendingDialog(
             kind: .removeProject(projectID),

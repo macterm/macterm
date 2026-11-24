@@ -148,26 +148,6 @@ final class ProjectStore {
         treeOrder(under: id)
     }
 
-    /// Put the row `id` beside the row `target`: in the parent of `target`,
-    /// at the place of `target`. In one parent, a row that moves down goes
-    /// after `target` and a row that moves up goes before it. A row from
-    /// another parent goes before `target`. Returns false when the move
-    /// would put a project inside itself.
-    @discardableResult
-    func place(_ id: UUID, beside target: UUID) -> Bool {
-        guard id != target, let targetRow = row(target), let moving = row(id) else { return false }
-        let parent = targetRow.parent
-        let sameParent = moving.parent == parent
-        var siblings = children(of: parent).map(\.id)
-        let wasBefore = sameParent && (siblings.firstIndex(of: id) ?? 0) < (siblings.firstIndex(of: target) ?? 0)
-        guard move(id, into: parent, saving: false) else { return false }
-        siblings = children(of: parent).map(\.id).filter { $0 != id }
-        let index = siblings.firstIndex(of: target) ?? siblings.endIndex
-        siblings.insert(id, at: wasBefore ? index + 1 : index)
-        reorder(parent: parent, ids: siblings)
-        return true
-    }
-
     /// Move the project `id` out of its parent, to the place after that
     /// parent. A project at the top level does not move.
     func moveOut(_ id: UUID) {
@@ -195,22 +175,6 @@ final class ProjectStore {
         guard let parent = row(id).map(\.parent) else { return nil }
         let siblings = children(of: parent)
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
-    }
-
-    /// Add `project`. With `beside`, it goes after that project, in its
-    /// parent. Without it, it goes at the end of the top level.
-    @discardableResult
-    func add(_ project: Project, beside: UUID?) -> Project {
-        var project = project
-        project.parent = beside.flatMap { row($0)?.parent }
-        let added = add(project)
-        if let beside {
-            var siblings = children(of: added.parent).map(\.id).filter { $0 != added.id }
-            let index = siblings.firstIndex(of: beside).map { $0 + 1 } ?? siblings.endIndex
-            siblings.insert(added.id, at: index)
-            reorder(parent: added.parent, ids: siblings)
-        }
-        return added
     }
 
     /// Remove the project `id` and keep its children: they go to the parent

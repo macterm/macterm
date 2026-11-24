@@ -530,18 +530,6 @@ struct ProjectStoreTests {
     }
 
     @Test
-    func add_beside_a_project_goes_after_it_in_its_parent() {
-        let store = makeStore()
-        let outer = store.add(Project(name: "outer", path: "/tmp/outer"))
-        let a = store.add(Project(name: "a", path: "/tmp/a", parent: outer.id))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: outer.id))
-        let new = store.add(Project(name: "new", path: ""), beside: a.id)
-        #expect(store.children(of: outer.id).map(\.id) == [a.id, new.id, b.id])
-        let top = store.add(Project(name: "top", path: ""), beside: nil)
-        #expect(store.children(of: nil).map(\.id) == [outer.id, top.id])
-    }
-
-    @Test
     func remove_keeping_children_puts_them_at_the_place_of_the_parent() {
         let store = makeStore()
         let a = store.add(Project(name: "a", path: "/tmp/a"))

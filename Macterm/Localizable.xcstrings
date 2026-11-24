@@ -2231,22 +2231,6 @@
         }
       }
     },
-    "Choose Folder…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "폴더 선택…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择文件夹…"
-          }
-        }
-      }
-    },
     "Clear" : {
       "comment" : "Liquid glass style: transparent",
       "localizations" : {
@@ -4414,7 +4398,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "안의 프로젝트 유지"
+            "value" : "내부 프로젝트 유지"
           }
         },
         "zh-Hans" : {
@@ -5691,7 +5675,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "안에 새로운 프로젝트"
+            "value" : "내부에 새로운 프로젝트"
           }
         },
         "zh-Hans" : {
@@ -9255,6 +9239,22 @@
         }
       }
     },
+    "Select Folder…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 선택…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文件夹…"
+          }
+        }
+      }
+    },
     "Select Mode" : {
       "comment" : "Pill on a pane in Helix copy mode",
       "localizations" : {
@@ -11267,7 +11267,7 @@
         }
       }
     },
-    "This project contains %lld projects, and a process is still running. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place." : {
+    "This project contains %lld projects, and a process is still running. Remove All also removes them. Keep Inside Projects moves them to the place of this project." : {
       "localizations" : {
         "en" : {
           "variations" : {
@@ -11275,13 +11275,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "This project contains %lld project, and a process is still running. Remove All removes this project and the project inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the project inside to its place."
+                  "value" : "This project contains %lld project, and a process is still running. Remove All also removes it. Keep Inside Projects moves it to the place of this project."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "This project contains %lld projects, and a process is still running. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place."
+                  "value" : "This project contains %lld projects, and a process is still running. Remove All also removes them. Keep Inside Projects moves them to the place of this project."
                 }
               }
             }
@@ -11290,18 +11290,18 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 프로젝트에는 프로젝트 %lld개가 있고 프로세스가 아직 실행 중입니다. 모두 제거는 이 프로젝트와 안의 프로젝트를 제거하고 탭의 모든 프로세스를 종료합니다. 안의 프로젝트 유지는 이 프로젝트만 제거하고 안의 프로젝트를 그 자리로 이동합니다."
+            "value" : "이 프로젝트에는 프로젝트 %lld개가 있고 프로세스가 아직 실행 중입니다. 모두 제거는 이 프로젝트들도 제거합니다. 내부 프로젝트 유지는 이 프로젝트들을 이 프로젝트의 자리로 이동합니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此项目包含 %lld 个项目，且仍有进程正在运行。“全部移除”会移除此项目及其内部项目，并结束其标签页中的所有进程。“保留内部项目”只移除此项目，并将内部项目移到它的位置。"
+            "value" : "此项目包含 %lld 个项目，且仍有进程正在运行。“全部移除”也会移除这些项目。“保留内部项目”会将它们移到此项目的位置。"
           }
         }
       }
     },
-    "This project contains %lld projects. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place." : {
+    "This project contains %lld projects. Remove All also removes them. Keep Inside Projects moves them to the place of this project." : {
       "localizations" : {
         "en" : {
           "variations" : {
@@ -11309,13 +11309,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "This project contains %lld project. Remove All removes this project and the project inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the project inside to its place."
+                  "value" : "This project contains %lld project. Remove All also removes it. Keep Inside Projects moves it to the place of this project."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "This project contains %lld projects. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place."
+                  "value" : "This project contains %lld projects. Remove All also removes them. Keep Inside Projects moves them to the place of this project."
                 }
               }
             }
@@ -11324,13 +11324,13 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 프로젝트에는 프로젝트 %lld개가 있습니다. 모두 제거는 이 프로젝트와 안의 프로젝트를 제거하고 탭의 모든 프로세스를 종료합니다. 안의 프로젝트 유지는 이 프로젝트만 제거하고 안의 프로젝트를 그 자리로 이동합니다."
+            "value" : "이 프로젝트에는 프로젝트 %lld개가 있습니다. 모두 제거는 이 프로젝트들도 제거합니다. 내부 프로젝트 유지는 이 프로젝트들을 이 프로젝트의 자리로 이동합니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此项目包含 %lld 个项目。“全部移除”会移除此项目及其内部项目，并结束其标签页中的所有进程。“保留内部项目”只移除此项目，并将内部项目移到它的位置。"
+            "value" : "此项目包含 %lld 个项目。“全部移除”也会移除这些项目。“保留内部项目”会将它们移到此项目的位置。"
           }
         }
       }
