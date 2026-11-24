@@ -590,6 +590,8 @@ final class ControlHandler {
                 break
             case .missing:
                 throw ControlError(code: .notFound, message: "no path at \(canonical)")
+            case .notDirectory:
+                throw ControlError(code: .notFound, message: "\(canonical) is not a directory")
             case .unreachable:
                 throw ControlError(code: .internalError, message: "cannot connect to \(destination)")
             }
