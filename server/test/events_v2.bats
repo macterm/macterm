@@ -332,6 +332,31 @@ assert c.messages("attention")[-1]["a"]["unseen"] is True
 PY
 }
 
+@test "events: a program that a nested shell starts is a run, also when the outer shell has marks" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+# The outer shell sends a prompt mark (as zsh with shell integration does),
+# so its marks own its runs. The nested sh does not get PS1 and sends none.
+c.type("PS1=\"$(printf '\\033]133;A\\007')m$ \"\r")
+c.wait(lambda: any(m["a"]["kind"] == "prompt" for m in c.messages("mark")), what="the prompt mark")
+c.type("sh\r")
+c.wait_output("$ sh", timeout=5)
+[c._read(0.05) for _ in range(30)]
+start = len(c.messages("status"))
+c.type("sleep 1\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")[start:]), what="the run")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", what="the end of the run")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+# The nested shell's prompt after the run starts no second run.
+[c._read(0.05) for _ in range(80)]
+assert [m["a"]["state"] for m in c.messages("status")[start:]] == ["running", "done"]
+PY
+}
+
 @test "events: a reply of a raw program is a run that ends when its output is quiet" {
   "$ZMX" __create-session s1 -- /bin/sh
   python3 - <<'PY'

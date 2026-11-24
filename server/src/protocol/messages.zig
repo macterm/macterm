@@ -1556,9 +1556,10 @@ pub const RunState = enum {
 };
 
 /// The pane's run (`events.Watch`): `running` from OSC 133;C, a progress
-/// report that sets work, a program that a shell with no marks starts after
-/// a Return, or output after a Return to a program in raw mode (an agent).
-/// `done` from OSC 133;D, a report that ends it, the shell back in front, or
+/// report that sets work, a new group in front after a Return to a shell
+/// with no marks or to a program (a nested shell), or output after a Return
+/// to a program in raw mode (an agent). `done` from OSC 133;D, a report that
+/// ends it, the shell or the group that took the Return back in front, or
 /// 3 s with no output while a program in raw mode is in front.
 pub const Status = struct {
     pub const name = "status";

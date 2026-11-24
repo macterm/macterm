@@ -784,7 +784,7 @@ const Session = struct {
         if (cross.ioctl(s.pty_fd, cross.TIOCGPGRP, &pgrp) != 0 or pgrp <= 0) return;
         var t: cross.termios = undefined;
         const raw = cross.tcgetattr(s.pty_fd, &t) == 0 and !ttyModeOf(t.c_lflag).canonical;
-        const next: events.Foreground = .{ .idle = s.isShellGroup(pgrp), .raw = raw };
+        const next: events.Foreground = .{ .idle = s.isShellGroup(pgrp), .raw = raw, .pgrp = pgrp };
         if (std.meta.eql(next, s.watch.fg)) return;
         s.watch.foreground(next, s.nowMs());
     }

@@ -79,6 +79,8 @@ pub const Foreground = struct {
     /// The tty is not in canonical mode: a full-screen program or an agent
     /// reads each key.
     raw: bool = false,
+    /// The foreground process group, or 0 when not known.
+    pgrp: i32 = 0,
 };
 
 /// A program that takes the foreground within this time after a submission
@@ -127,8 +129,13 @@ pub const Watch = struct {
     /// commands, and the foreground does not start a run.
     has_marks: bool = false,
     fg: Foreground = .{},
-    /// A submission while the shell was in front, in a shell with no marks.
+    /// A submission to the group in front (`fg_armed_pgrp`): the shell with
+    /// no marks, or a program (a nested shell) that the marks do not cover.
     fg_armed_at: ?i64 = null,
+    fg_armed_pgrp: i32 = 0,
+    /// The group that took the submission of a `.foreground` run: the run
+    /// ends when it is in front again.
+    fg_owner: i32 = 0,
     /// A submission to a raw program, with no reply yet.
     agent_armed_at: ?i64 = null,
     /// The last output, or the start of the run or of raw mode when later.
@@ -196,21 +203,24 @@ pub const Watch = struct {
     /// reads the foreground first.
     pub fn submitted(w: *Watch, now: i64) void {
         w.now_ms = now;
-        if (w.fg.idle) {
-            if (!w.has_marks) w.fg_armed_at = now;
-        } else if (w.fg.raw) {
-            w.agent_armed_at = now;
+        // The marks are the session shell's: a nested shell (sh from zsh)
+        // sends none, so a submission to it arms the foreground rule too.
+        if (!w.fg.idle or !w.has_marks) {
+            w.fg_armed_at = now;
+            w.fg_armed_pgrp = w.fg.pgrp;
         }
+        if (!w.fg.idle and w.fg.raw) w.agent_armed_at = now;
     }
 
     /// The session read the foreground at `now`.
     ///
     /// - The shell's return ends a run that the foreground or an agent
-    ///   started.
-    /// - A program that takes the foreground within `submit_window_ms` of a
-    ///   submission starts a run. Only a shell with no marks arms it: a
-    ///   shell with marks sends 133;C for the command, and its prompt hooks
-    ///   take the foreground with no submission.
+    ///   started. The return of the group that took the submission ends a
+    ///   `.foreground` run: a nested shell is back at its prompt.
+    /// - Another group that takes the foreground within `submit_window_ms`
+    ///   of a submission starts a run. The session shell with marks does
+    ///   not arm it (`submitted`): it sends 133;C for the command, and its
+    ///   prompt hooks take the foreground with no submission.
     pub fn foreground(w: *Watch, next: Foreground, now: i64) void {
         w.now_ms = now;
         const was = w.fg;
@@ -221,10 +231,24 @@ pub const Watch = struct {
                 w.setStatus(.done, false);
             return;
         }
-        if (was.idle) if (w.fg_armed_at) |at| {
-            w.fg_armed_at = null;
-            if (now - at < submit_window_ms) w.startRun(.foreground);
-        };
+        if (w.status.state == .running and w.run_by == .foreground and w.fg_owner != 0 and
+            next.pgrp == w.fg_owner and was.pgrp != w.fg_owner)
+        {
+            w.setStatus(.done, false);
+        } else if (w.fg_armed_at) |at| {
+            // A group of 0 is not known: then only the shell's leave counts.
+            const moved = if (next.pgrp != 0 and w.fg_armed_pgrp != 0) next.pgrp != w.fg_armed_pgrp else was.idle;
+            if (moved) {
+                // The submission was a command: the output after it is not
+                // the reply of an agent.
+                w.fg_armed_at = null;
+                w.agent_armed_at = null;
+                if (now - at < submit_window_ms and w.status.state != .running) {
+                    w.startRun(.foreground);
+                    w.fg_owner = w.fg_armed_pgrp;
+                }
+            }
+        }
         if (next.raw and !(was.raw and !was.idle)) w.quiet_from = @max(w.quiet_from, now);
     }
 
@@ -1486,6 +1510,35 @@ test "events: with marks, a submission at the shell arms no foreground run" {
     try testing.expect(!f.w.watchesForeground(100));
     f.w.foreground(.{ .idle = false }, 200);
     try testing.expectEqual(.idle, f.w.status.state);
+}
+
+test "events: with marks, a program that a nested shell starts runs until that shell is back" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    // zsh (group 10, marks) starts sh (group 20), whose prompt reads keys.
+    f.feed("\x1b]133;A\x07$ \x1b]133;C\x07", 0);
+    const sh: Foreground = .{ .idle = false, .raw = true, .pgrp = 20 };
+    f.w.foreground(sh, 10);
+    f.w.flush(10 + quiet_ms);
+    try testing.expectEqual(.done, f.w.status.state);
+    // At sh's prompt, `sleep 3`: a new group with no output.
+    f.w.submitted(10_000);
+    try testing.expect(f.w.watchesForeground(10_000));
+    f.w.foreground(.{ .idle = false, .pgrp = 30 }, 10_050);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.flush(10_050 + quiet_ms * 10);
+    try testing.expectEqual(.running, f.w.status.state);
+    // sh is back: the run ends, and sh's prompt is not the reply of an
+    // agent.
+    f.w.foreground(sh, 13_050);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    try testing.expectEqual(m.Attention{ .unseen = true }, f.w.attention);
+    f.feed("sh$ ", 13_100);
+    try testing.expectEqual(.done, f.w.status.state);
+    // A group that comes with no submission starts nothing.
+    f.w.foreground(.{ .idle = false, .pgrp = 40 }, 20_000);
+    try testing.expectEqual(.done, f.w.status.state);
 }
 
 test "events: a command that becomes a raw program ends for quiet output, and progress does not" {
