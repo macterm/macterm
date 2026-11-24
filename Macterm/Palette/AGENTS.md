@@ -47,6 +47,8 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
+      - An `AppCommand` that asks its value on an input screen returns it from `AppCommand.inputScope`. Its palette row enters it in place, and its keybind and menu item open the palette on it.
+      - Rename Current Tab and Rename Current Project ask the name here (`PaletteInput.renameTab`, `PaletteInput.renameProject`). The inline rename of a sidebar row (a double-click, the context menu) and ghostty's `prompt_surface_title` still edit the row.
     - `PasswordPaletteScope`.
     - `FilesPaletteScope`: the files and directories of the active local project.
       - `FileIndex.scan` walks a level at a time, so that the cap of 20k cuts the deepest level, never the top. It skips hidden directories and the directories for dependencies and builds. It lists a linked directory, and it never enters it.
