@@ -15,10 +15,11 @@ import Foundation
 /// A commit that `commit` refuses keeps the screen and shows the reason as
 /// one line above the rows, until the text changes.
 ///
-/// A screen with `results` shows them in place of completions: rows as the
-/// root shows them, that run. The top one is selected, Return runs the
-/// selected one, and Tab puts the first that changes the field in it.
-/// Return commits the field only when no result is selected.
+/// A screen with `results` shows them in place of completions: rows that
+/// run, as the root's rows do. The top result is selected, and Return runs
+/// the selected result. Tab fills the field with the first completion, from
+/// the selected row down, that changes the field. Return commits the field
+/// only when no result is selected.
 ///
 /// The pill of an input screen is its `title` alone, with no icon.
 ///
@@ -168,7 +169,7 @@ final class InputPaletteScope: PaletteScope {
             completions = []
             results = makeResults(text, context)
             let items = results.map(\.item)
-            return actionSection + (items.isEmpty ? [] : [PaletteSection(header: items.first?.category, items: items)])
+            return actionSection + (items.isEmpty ? [] : [PaletteSection(header: nil, items: items)])
         }
         results = []
         completions = input.completions(text)

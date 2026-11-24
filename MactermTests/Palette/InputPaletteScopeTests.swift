@@ -154,7 +154,7 @@ struct InputPaletteScopeTests {
         let scope = InputPaletteScope(input: input)
 
         let sections = scope.sections(for: PaletteQuery(raw: "no"), context: makeContext())
-        #expect(sections.map(\.header) == [nil, "Things"], "the results replace the completions, under their category")
+        #expect(sections.map(\.header) == [nil, nil], "the results replace the completions")
         #expect(sections.map { $0.items.map(\.title) } == [["Browse"], ["notes", "novel"]])
         let novel = try #require(sections.last?.items.last)
         #expect(scope.isResult(novel))

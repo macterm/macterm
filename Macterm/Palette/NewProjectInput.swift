@@ -9,7 +9,7 @@ import Foundation
 /// has switches to that project, with an Add Another Project row below; any
 /// other folder becomes a new project; a remote spec (`devbox:~/api`) opens
 /// the New Remote Project dialog, filled in. Return with no row selected
-/// commits the typed text in the same way (`NewProjectInput.commit`).
+/// runs the top row (`NewProjectInput.commit`).
 /// Select in Finder always makes a new project, as the folder panel always
 /// did (`AppState.newProjectFromFolderPanel`).
 extension PaletteInput {
@@ -36,46 +36,28 @@ extension PaletteInput {
 
 enum NewProjectInput {
     /// The rows of path mode of the root for `text`, each with the text that
-    /// Tab puts in the field for it.
+    /// Tab puts in the field for it: a local folder only, as in the root.
     @MainActor
     static func results(_ text: String, context: PaletteContext) -> [PaletteInputResult] {
-        DirectorySource().items(query: text, context: context).map { item in
-            PaletteInputResult(
-                item: item,
-                completion: DirectorySource.path(of: item).map { PathCompleter.fieldText(for: $0, typed: text) }
-            )
+        let query = PaletteQuery(raw: text).trimmed
+        return DirectorySource().items(query: query, context: context).map { item in
+            let path = DirectorySource.path(of: item).flatMap { ProjectPath.isRemote($0) ? nil : $0 }
+            return PaletteInputResult(item: item, completion: path.map { PathCompleter.fieldText(for: $0, typed: query) })
         }
     }
 
-    /// Add or select the project of the folder at `text`, or refuse a path
-    /// that names no folder: Return when no row is selected.
+    /// Return with no row selected: run the top row, as the root would, or
+    /// refuse a text that names no folder.
     @MainActor
     static func commit(_ text: String, context: PaletteContext) -> PaletteCommit {
-        let typed = text.trimmingCharacters(in: .whitespaces)
+        if let top = results(text, context: context).first {
+            top.item.action()
+            return .done
+        }
+        let typed = PaletteQuery(raw: text).trimmed
         if typed.isEmpty {
             return .refused(String(localized: "Type the path of a folder."))
         }
-        if PaletteQuery.isRemoteSpecQuery(typed) {
-            if let existing = context.projectStore.projects.first(where: { ProjectPath.matches($0.path, typed) }) {
-                context.appState.showLastTab(of: existing)
-            } else {
-                DirectorySource.addRemote(typed, appState: context.appState)
-            }
-            return .done
-        }
-        let path = ProjectPath.normalizedForStorage((typed as NSString).expandingTildeInPath)
-        var isDirectory: ObjCBool = false
-        guard path.hasPrefix("/"),
-              FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-              isDirectory.boolValue
-        else {
-            return .refused(String(localized: "There is no folder at \(typed)."))
-        }
-        if let existing = context.projectStore.project(matchingPath: path) {
-            context.appState.showLastTab(of: existing)
-        } else {
-            context.appState.selectProject(context.projectStore.create(name: (path as NSString).lastPathComponent, path: path))
-        }
-        return .done
+        return .refused(String(localized: "There is no folder at \(typed)."))
     }
 }

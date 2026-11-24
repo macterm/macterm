@@ -49,7 +49,7 @@ struct NewProjectInputTests {
         #expect(try scope.isAction(#require(sections.first?.items.first)))
         #expect(sections.last?.items.map(\.id) == rootRows.map(\.id))
         #expect(sections.last?.items.map(\.subtitle) == rootRows.map(\.subtitle))
-        #expect(sections.last?.header == rootRows.first?.category)
+        #expect(sections.last?.header == nil, "no header, as in the root")
         let child = try #require(sections.last?.items.last)
         #expect(child.title == "api")
         #expect(scope.isResult(child))
@@ -123,6 +123,27 @@ struct NewProjectInputTests {
         #expect(context.projectStore.projects.isEmpty, "the dialog adds the project")
         #expect(window.isNewRemoteProjectSheetPresented)
         #expect(window.newRemoteProjectDraft != nil)
+    }
+
+    @Test
+    func text_with_spaces_around_it_lists_the_same_rows() throws {
+        let folder = try makeFolder("api")
+        let scope = InputPaletteScope(input: .newProject)
+        let (context, _) = makeContext()
+        let plain = scope.sections(for: PaletteQuery(raw: folder.path), context: context).last?.items.map(\.id)
+        let padded = scope.sections(for: PaletteQuery(raw: " \(folder.path) "), context: context).last?.items.map(\.id)
+        #expect(plain != nil)
+        #expect(padded == plain)
+    }
+
+    @Test
+    func remote_rows_complete_nothing() throws {
+        let (context, _) = makeContext()
+        _ = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
+        let scope = InputPaletteScope(input: .newProject)
+        let rows = try #require(scope.sections(for: PaletteQuery(raw: "devbox:~/dev/api"), context: context).last?.items)
+        #expect(rows.count == 2, "switch, then add another")
+        #expect(rows.allSatisfy { scope.isResult($0) && scope.completion(for: $0) == nil })
     }
 
     @Test
