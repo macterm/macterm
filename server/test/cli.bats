@@ -182,3 +182,64 @@ wait_dump() {
   run "$ZMX" session info api1
   [ "$status" -eq 1 ]
 }
+
+# Prints the value at the Python expression $1 of the JSON on stdin (`r`).
+json_py() {
+  python3 -c "import json, sys; r = json.load(sys.stdin); print($1)"
+}
+
+@test "api call session.history with tail_lines gives the last lines and counts the cut" {
+  "$ZMX" __create-session tail1 -- /bin/sh
+  "$ZMX" api call session.send --args '{"id": "tail1", "text": "for i in 1 2 3 4 5 6; do echo tail-$i; done"}'
+  wait_dump tail1 tail-6
+  run "$ZMX" api call session.history --args '{"id": "tail1", "scrollback": true, "tail_lines": 2}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | json_py 'len(r["text"].rstrip("\n").split("\n")) <= 2 and r["truncated"] and r["lines_cut"] > 0')" = "True" ]
+  # All lines: nothing cut.
+  run "$ZMX" api call session.history --args '{"id": "tail1", "scrollback": true, "tail_lines": 100000}'
+  [ "$(printf '%s' "$output" | json_py '"tail-1" in r["text"] and not r["truncated"] and r["lines_cut"] == 0')" = "True" ]
+  run "$ZMX" api call session.history --args '{"id": "tail1", "tail_lines": 0}'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(invalid_args)"* ]]
+}
+
+@test "api call session.wait ends at the marker, at the timeout, when the shell is quiet, and at the exit" {
+  "$ZMX" __create-session wait1 -- /bin/sh
+  # The typed command line holds the marker, but does not start with it.
+  "$ZMX" api call session.send --args '{"id": "wait1", "text": "sleep 1; echo w-$((40+2))-done"}'
+  start=$(date +%s)
+  run "$ZMX" api call session.wait --args '{"id": "wait1", "text": "w-42", "timeout_ms": 10000}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | json_py 'r["end"], r["line"]')" = "matched w-42-done" ]
+  [ $(($(date +%s) - start)) -ge 1 ]
+  # A marker that is already in the text ends the wait at once.
+  run "$ZMX" api call session.wait --args '{"id": "wait1", "text": "w-42", "timeout_ms": 10000}'
+  [ "$(printf '%s' "$output" | json_py 'r["end"]')" = "matched" ]
+
+  run "$ZMX" api call session.wait --args '{"id": "wait1", "text": "never-here", "timeout_ms": 300}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | json_py 'r["end"], r.get("line")')" = "timeout None" ]
+
+  # With no marker: no run and 500 ms with no output. A command that prints
+  # nothing is a run.
+  "$ZMX" api call session.send --args '{"id": "wait1", "text": "sleep 2"}'
+  start=$(date +%s)
+  run "$ZMX" api call session.wait --args '{"id": "wait1", "timeout_ms": 10000}'
+  [ "$(printf '%s' "$output" | json_py 'r["end"]')" = "done" ]
+  [ $(($(date +%s) - start)) -ge 2 ]
+
+  "$ZMX" api call session.send --args '{"id": "wait1", "text": "exit"}'
+  run "$ZMX" api call session.wait --args '{"id": "wait1", "text": "never-here", "timeout_ms": 5000}'
+  [ "$(printf '%s' "$output" | json_py 'r["end"]')" = "exited" ]
+}
+
+@test "api call session.wait refuses a bad marker or timeout before it waits" {
+  "$ZMX" __create-session wait2 -- /bin/sh
+  run "$ZMX" api call session.wait --args '{"id": "wait2", "timeout_ms": 600001}'
+  [ "$status" -eq 1 ]
+  run "$ZMX" api call session.wait --args '{"id": "wait2", "text": ""}'
+  [ "$status" -eq 1 ]
+  run "$ZMX" api call session.wait --args '{"id": "nope"}'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(not_found)"* ]]
+}

@@ -1717,7 +1717,7 @@ test "api call sends the method with the JSON args and prints the result" {
     const args = try decodedArgs(a, m.SessionHistory, r);
     try testing.expectEqualStrings("macterm-x", args.id);
     try testing.expect(args.scrollback);
-    try testing.expectEqualStrings("{\n  \"text\" : \"$ ls\",\n  \"truncated\" : false\n}\n", r.out);
+    try testing.expectEqualStrings("{\n  \"lines_cut\" : 0,\n  \"text\" : \"$ ls\",\n  \"truncated\" : false\n}\n", r.out);
 
     // No --args is {}.
     const ping = try runStub(a, try okStub(a, m.Ping, .{}), &.{ "api", "call", "ping" }, &.{});
