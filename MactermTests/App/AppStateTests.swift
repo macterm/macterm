@@ -338,7 +338,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(projectID: UUID()))
+        #expect(!state.closeNeedsConfirmation(state.panes(inProject: UUID())))
     }
 
     @Test
@@ -1425,9 +1425,11 @@ struct AppStateTests {
     @Test
     func the_async_verdict_uses_the_hosts_answer() async throws {
         let idle = try plainShellTab(answer: false)
-        #expect(await !idle.state.judgeClose([#require(idle.tab.splitRoot.findPane(id: idle.target))]))
+        let idlePane = try #require(idle.tab.splitRoot.findPane(id: idle.target))
+        #expect(await !idle.state.judgeClose([idlePane]))
         let busy = try plainShellTab(answer: true)
-        #expect(await busy.state.judgeClose([#require(busy.tab.splitRoot.findPane(id: busy.target))]))
+        let busyPane = try #require(busy.tab.splitRoot.findPane(id: busy.target))
+        #expect(await busy.state.judgeClose([busyPane]))
     }
 
     @Test
