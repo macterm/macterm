@@ -80,8 +80,13 @@ pub const Connect = union(enum) {
 };
 
 /// Connects to the first socket of `paths` whose server answers the
-/// handshake.
+/// handshake, with the role `cli`.
 pub fn connect(arena: std.mem.Allocator, paths: []const []const u8) error{OutOfMemory}!Connect {
+    return connectAs(arena, paths, .cli);
+}
+
+/// `connect` with the role of the `hello`: `cli`, or `mcp` for `macterm mcp`.
+pub fn connectAs(arena: std.mem.Allocator, paths: []const []const u8, role: m.Role) error{OutOfMemory}!Connect {
     var attempts: std.ArrayList(Attempt) = .empty;
     for (paths) |path| {
         const fd = open(path) catch |err| {
@@ -99,7 +104,7 @@ pub fn connect(arena: std.mem.Allocator, paths: []const []const u8) error{OutOfM
             try attempts.append(arena, .{ .path = path, .reason = "the socket belongs to another user" });
             continue;
         }
-        var c: Connection = .{ .arena = arena, .fd = fd, .path = path, .pid = runtime.peerPid(fd) };
+        var c: Connection = .{ .arena = arena, .fd = fd, .path = path, .pid = runtime.peerPid(fd), .role = role };
         switch (try c.handshake()) {
             .ok => return .{ .ok = c },
             .no_answer => {
@@ -131,13 +136,13 @@ fn open(path: []const u8) error{ NoFile, NotASocket, Unreadable, Refused, Failed
 }
 
 /// The `hello` of this CLI. The server refuses any other build (`negotiate`).
-pub fn helloMessage() m.Hello {
+pub fn helloMessage(role: m.Role) m.Hello {
     return .{
         .level = m.level,
         .min_level = m.min_level,
         .build = build_options.version,
         .build_key = build_options.key,
-        .role = .cli,
+        .role = role,
         .epoch = 0,
         .caps = &.{},
     };
@@ -149,6 +154,8 @@ pub const Connection = struct {
     path: []const u8,
     /// The server process, from the socket.
     pid: ?std.c.pid_t,
+    /// The role of its `hello`.
+    role: m.Role = .cli,
     /// The server's `hello`.
     hello: m.Hello = undefined,
     in: std.ArrayList(u8) = .empty,
@@ -158,7 +165,7 @@ pub const Connection = struct {
     const Handshake = union(enum) { ok, no_answer, failed: []const u8 };
 
     fn handshake(c: *Connection) error{OutOfMemory}!Handshake {
-        const mine = helloMessage();
+        const mine = helloMessage(c.role);
         c.sendControl(mine) catch return .no_answer;
         while (true) {
             const body = (c.nextMessage(handshake_timeout_ms) catch |err| switch (err) {

@@ -45,6 +45,10 @@ pub const Role = enum {
     cli,
     server,
     session,
+    /// `macterm mcp`: a coding agent drives it (design/014 §5). It may send
+    /// what the CLI may send, but `session.send` and `session.key` are
+    /// refused while the pane reads a password.
+    mcp,
     /// A role that a later build added. It decodes, so that the two builds
     /// can still refuse each other clearly.
     unknown,
@@ -114,16 +118,21 @@ pub const Negotiation = union(enum) {
 ///
 /// The CLI is always the same build as its server (design/007), so a CLI on
 /// either side refuses any other build (`build_mismatch`). The CLI names
-/// both builds from the two hellos.
+/// both builds from the two hellos. `macterm mcp` is the CLI binary, so the
+/// same rule holds for it.
 pub fn negotiate(mine: Hello, theirs: Hello) Negotiation {
     const speak = @min(mine.level, theirs.level);
     if (speak < mine.min_level) return .{ .refuse = .{
         .reason = "level_too_low",
         .needs_level = mine.min_level,
     } };
-    if ((mine.role == .cli or theirs.role == .cli) and !std.mem.eql(u8, mine.build, theirs.build))
+    if ((isCli(mine.role) or isCli(theirs.role)) and !std.mem.eql(u8, mine.build, theirs.build))
         return .{ .refuse = .{ .reason = "build_mismatch", .needs_level = mine.level } };
     return .{ .speak = speak };
+}
+
+fn isCli(role: Role) bool {
+    return role == .cli or role == .mcp;
 }
 
 // ── Envelopes ───────────────────────────────────────────────────────────────
@@ -1848,6 +1857,21 @@ pub const History = struct {
     truncated: bool = false,
 };
 
+/// The server asks for the pty's line modes now, before it types for an
+/// `mcp` client (design/014 §5). The session answers with `TtyMode`, in the
+/// order of the requests, also when no client asked for `tty_mode`. A
+/// session that cannot read the modes answers a password read, so that the
+/// server refuses the input. A session has the `tty-read` cap when it
+/// answers this message.
+pub const TtyRead = struct {
+    pub const name = "tty_read";
+    pub const since = 3;
+    pub const senders = from_client;
+};
+
+/// The cap in a session's `hello` that says it answers `TtyRead`.
+pub const tty_read_cap = "tty-read";
+
 /// The server asks the session to wait (`session.wait`). The session
 /// answers with `Waited` and the same `tag` when the wait ends. Waits end in
 /// any order.
@@ -2101,7 +2125,7 @@ pub const max_program_records = 64;
 pub const pane_messages = .{
     State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,        Refresh,
     Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention,  Seen,
-    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel, TtyRead,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

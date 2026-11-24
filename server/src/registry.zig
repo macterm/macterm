@@ -45,13 +45,31 @@ pub const Replace = struct {
 pub const Waiter = struct {
     peer: u64,
     re: u64,
-    kind: enum { create, info, kill, list, seen, history, inspect, subscribe, wait },
+    kind: enum { create, info, kill, list, seen, history, inspect, subscribe, wait, typing },
     /// `history`: the `tail_lines` of the request.
     tail_lines: ?u32 = null,
     /// `wait`: the tag of the session's `wait`, and when the server stops
     /// to wait for its `waited` (`wait_grace_ms` after the timeout).
     tag: u64 = 0,
     deadline: i64 = 0,
+    /// `typing`: the input that waits for the session's `tty_mode`. The
+    /// server owns it.
+    input: ?Input = null,
+};
+
+/// Input of an `mcp` client that waits for the password check.
+pub const Input = union(enum) {
+    /// `session.send`: the text, and if a newline follows.
+    text: struct { bytes: []u8, submit: bool },
+    /// `session.key`: the chord.
+    key: []u8,
+
+    pub fn deinit(i: Input, gpa: std.mem.Allocator) void {
+        switch (i) {
+            .text => |t| gpa.free(t.bytes),
+            .key => |k| gpa.free(k),
+        }
+    }
 };
 
 /// The time after a wait's timeout that the server gives the session to
@@ -73,6 +91,8 @@ pub const Entry = struct {
     /// one that is not a key.
     build_key: ?[]u8 = null,
     level: u32 = 0,
+    /// Its `hello` has the `tty-read` cap: it answers `tty_read`.
+    tty_read: bool = false,
     refused: bool = false,
     state: ?State = null,
     /// The session's attention flags, from its last `attention` message.
@@ -215,6 +235,9 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
                 e.build = s.gpa.dupe(u8, buildName(h.build)) catch return entryGone(s, e);
                 if (keyOf(h.build_key)) |k| e.build_key = s.gpa.dupe(u8, k) catch return entryGone(s, e);
                 e.level = h.level;
+                for (h.caps) |cap| if (std.mem.eql(u8, cap, m.tty_read_cap)) {
+                    e.tty_read = true;
+                };
                 switch (m.negotiate(s.hello(), h)) {
                     .speak => e.conn.greeted = true,
                     .refuse => |r| {
@@ -291,6 +314,25 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
         const i = m.decodePane(m.Inspect, arena, msg) catch return brokenEntry(s, e, "a bad inspect");
         const w = takeWaiter(e, .inspect) orelse return;
         peers.reply(s, w.peer, w.re, m.SessionInspect, .{ .terminal = i.terminal });
+    } else if (std.mem.eql(u8, msg.t, m.TtyMode.name)) {
+        // The server never asks for `tty_mode` in an `attach`, so each one
+        // is the answer to a `tty_read`.
+        const mode = m.decodePane(m.TtyMode, arena, msg) catch return brokenEntry(s, e, "a bad tty mode");
+        const w = takeWaiter(e, .typing) orelse return;
+        const input = w.input.?;
+        defer input.deinit(s.gpa);
+        // A client that left gets no input typed: it may have read its
+        // call as failed.
+        if (peers.findPeer(s, w.peer) == null) return;
+        if (readsPassword(mode)) {
+            std.log.info("server: input from mcp to session {s} refused: the pane reads a password", .{e.id});
+            return peers.replyError(s, w.peer, w.re, .forbidden, password_refusal);
+        }
+        if (e.conn.dead or e.exit != null) return peers.replyError(s, w.peer, w.re, .exited, "The session's shell exited.");
+        switch (input) {
+            .text => |t| typeText(s, w.peer, w.re, e, t.bytes, t.submit),
+            .key => |k| typeKey(s, w.peer, w.re, e, k),
+        }
     } else if (std.mem.eql(u8, msg.t, m.Exit.name)) {
         const x = m.decodePane(m.Exit, arena, msg) catch return brokenEntry(s, e, "a bad exit");
         if (e.exit != null) return;
@@ -312,10 +354,10 @@ pub fn settle(s: *Server, e: *Entry) void {
         .kill, .list, .seen, .subscribe => wait(s, &e.waiters, w),
         // A session asked for its text or state answers, unless it was
         // refused: then its connection is closed.
-        .history, .inspect, .wait => if (e.refused)
-            peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.")
-        else
-            wait(s, &e.waiters, w),
+        .history, .inspect, .wait, .typing => if (e.refused) {
+            if (w.input) |i| i.deinit(s.gpa);
+            peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.");
+        } else wait(s, &e.waiters, w),
     };
     answerLists(s);
 }
@@ -366,6 +408,10 @@ pub fn entryGone(s: *Server, e: *Entry) void {
         .kill => peers.reply(s, w.peer, w.re, m.SessionKill, .{}),
         .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session ended before it was ready."),
         .info, .list, .seen, .history, .inspect, .subscribe, .wait => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .typing => {
+            w.input.?.deinit(s.gpa);
+            peers.replyError(s, w.peer, w.re, .not_found, "No session has this id.");
+        },
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
@@ -658,32 +704,73 @@ fn terminalEntry(s: *Server, p: *Peer, re: u64, id: []const u8, running: bool) ?
     return e;
 }
 
+/// The error text of input that an `mcp` client sends while the pane reads
+/// a password (design/014 §5).
+pub const password_refusal = "The pane reads a password. Ask the user to type it.";
+
+/// A pty in canonical mode with echo off reads a password: `sudo`, `ssh`
+/// and `read -s` set it. A program that is not a password prompt can set it
+/// too; the rule then refuses too much, which is the safe side.
+fn readsPassword(mode: m.TtyMode) bool {
+    return mode.canonical and !mode.echo;
+}
+
 /// `session.send`: the text goes to the session as input of a client that
-/// does not show the pane, so the leader stays.
+/// does not show the pane, so the leader stays. For an `mcp` client, the
+/// session first says if the pane reads a password (`guard`).
 pub fn send(s: *Server, p: *Peer, re: u64, args: m.SessionSend.Args) void {
     if (args.text.bytes.len > m.send_max)
         return peers.replyError(s, p.id, re, .invalid_args, "The text is over 64 KiB.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    if (args.text.bytes.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, args.text.bytes) catch return lostEntry(s, p, re, e);
-    if (args.submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return lostEntry(s, p, re, e);
-    peers.reply(s, p.id, re, m.SessionSend, .{});
+    if (p.role != .mcp) return typeText(s, p.id, re, e, args.text.bytes, args.submit);
+    const bytes = s.gpa.dupe(u8, args.text.bytes) catch
+        return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
+    guard(s, p, re, e, .{ .text = .{ .bytes = bytes, .submit = args.submit } });
+}
+
+fn typeText(s: *Server, peer: u64, re: u64, e: *Entry, text: []const u8, submit: bool) void {
+    if (text.len > 0) e.conn.send(s.gpa, m.pane_channel, .bytes, text) catch return lostEntry(s, peer, re, e);
+    if (submit) e.conn.send(s.gpa, m.pane_channel, .bytes, "\n") catch return lostEntry(s, peer, re, e);
+    peers.reply(s, peer, re, m.SessionSend, .{});
 }
 
 /// The session's connection failed during a request that waits for no
 /// answer of the session: the request gets its reply here.
-fn lostEntry(s: *Server, p: *Peer, re: u64, e: *Entry) void {
+fn lostEntry(s: *Server, peer: u64, re: u64, e: *Entry) void {
     entryGone(s, e);
-    peers.replyError(s, p.id, re, .not_found, "No session has this id.");
+    peers.replyError(s, peer, re, .not_found, "No session has this id.");
 }
 
 /// `session.key`: the session parses and encodes the chord itself. The
 /// server parses it too, so that a chord that does not parse gets an error.
+/// For an `mcp` client, the session first says if the pane reads a password.
 pub fn sendKey(s: *Server, p: *Peer, re: u64, args: m.SessionKey.Args) void {
     if (chord.parse(args.chord) == null)
         return peers.replyError(s, p.id, re, .invalid_args, "The key combination does not parse.");
     const e = terminalEntry(s, p, re, args.id, true) orelse return;
-    e.conn.sendPane(s.gpa, m.Key, .{ .chord = args.chord }) catch return lostEntry(s, p, re, e);
-    peers.reply(s, p.id, re, m.SessionKey, .{});
+    if (p.role != .mcp) return typeKey(s, p.id, re, e, args.chord);
+    const key = s.gpa.dupe(u8, args.chord) catch
+        return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
+    guard(s, p, re, e, .{ .key = key });
+}
+
+fn typeKey(s: *Server, peer: u64, re: u64, e: *Entry, key: []const u8) void {
+    e.conn.sendPane(s.gpa, m.Key, .{ .chord = key }) catch return lostEntry(s, peer, re, e);
+    peers.reply(s, peer, re, m.SessionKey, .{});
+}
+
+/// Holds the input of an `mcp` client and asks the session for its line
+/// modes now (`tty_read`). The answer types the input or refuses it. A
+/// session that cannot answer (an older build) refuses it: fail closed.
+fn guard(s: *Server, p: *Peer, re: u64, e: *Entry, input: Input) void {
+    if (!e.tty_read) {
+        input.deinit(s.gpa);
+        return peers.replyError(s, p.id, re, .forbidden, "The session runs an older build that cannot say if the pane reads a password. Ask the user to type it.");
+    }
+    const held = e.waiters.items.len;
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .typing, .input = input });
+    // One `tty_read` for each held input, so that the answers stay in order.
+    if (e.waiters.items.len > held) sendEntryPane(s, e, m.TtyRead, .{});
 }
 
 /// `session.history`: the reply goes when the session's `history` comes.
@@ -780,7 +867,10 @@ pub fn readInspect(s: *Server, p: *Peer, re: u64, id: []const u8) void {
 
 /// Adds a waiter, or answers it at once when there is no memory for it.
 pub fn wait(s: *Server, list: *std.ArrayList(Waiter), w: Waiter) void {
-    list.append(s.gpa, w) catch peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    list.append(s.gpa, w) catch {
+        if (w.input) |i| i.deinit(s.gpa);
+        peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    };
 }
 
 /// A refused session has no connection. Each list and each idle check
@@ -996,6 +1086,14 @@ test "the error text is the first line without its prefix" {
     try testing.expectEqualStrings("one", errorText("one\ntwo\n"));
     try testing.expectEqualStrings("The session did not start.", errorText(""));
     try testing.expectEqualStrings("The session did not start.", errorText("error: \xff\n"));
+}
+
+test "only a canonical read with echo off is a password read" {
+    try testing.expect(readsPassword(.{ .canonical = true, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = true, .echo = true }));
+    // Raw mode passes: a full-screen program, or a prompt that draws its own mask.
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = true }));
 }
 
 test "the server signals no pid that reaches a group or every process" {

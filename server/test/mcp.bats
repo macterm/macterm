@@ -112,6 +112,37 @@ call() {
   [ "$status" -eq 0 ]
 }
 
+@test "an mcp client may not type into a pane that reads a password; the CLI may" {
+  "$ZMX" __create-session mcp3 -- /bin/sh
+  run mcp "$(call session_send '{"id":"mcp3","text":"stty -echo; echo rea''dy; read x; stty echo; echo x=$x"}')"
+  [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["isError"]')" = "False" ]
+  # `ready` shows after `stty -echo`: the pty reads a password.
+  for i in $(seq 100); do
+    out=$(mcp "$(call session_history '{"id":"mcp3"}')" | jq_py 'r["result"]["structuredContent"]["text"]')
+    printf '%s\n' "$out" | grep -qxF ready && break
+    sleep 0.1
+  done
+  printf '%s\n' "$out" | grep -qxF ready
+  refusal="The pane reads a password. Ask the user to type it. (forbidden)"
+  run mcp "$(call session_send '{"id":"mcp3","text":"hunter2"}')"
+  [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" = "$refusal" ]
+  run mcp "$(call session_key '{"id":"mcp3","chord":"enter"}')"
+  [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" = "$refusal" ]
+  # The CLI keeps v1's behavior: it types into the password read.
+  run "$ZMX" api call session.send --args '{"id":"mcp3","text":"typed-by-the-user"}'
+  [ "$status" -eq 0 ]
+  for i in $(seq 100); do
+    out=$(mcp "$(call session_history '{"id":"mcp3"}')" | jq_py 'r["result"]["structuredContent"]["text"]')
+    printf '%s\n' "$out" | grep -q '^x=' && break
+    sleep 0.1
+  done
+  # `read` got only the CLI's text: no refused text reached the pty.
+  printf '%s\n' "$out" | grep -qxF x=typed-by-the-user
+  # With echo on again, the mcp client types.
+  run mcp "$(call session_send '{"id":"mcp3","text":"echo after"}')"
+  [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["isError"]')" = "False" ]
+}
+
 @test "resources/list gives the two formats, and resources/read gives each schema of assets/" {
   run mcp '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'
   [ "$status" -eq 0 ]

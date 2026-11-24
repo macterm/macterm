@@ -56,6 +56,9 @@ pub const Peer = struct {
     /// `relay.fill` moves frames into it from `control` and the channels.
     conn: FrameConn,
     connected_at: i64,
+    /// The role of its `hello`. It gives no trust (design/006 §2): it only
+    /// adds the password rule for `mcp` (`registry.send`).
+    role: m.Role = .unknown,
     /// Channel 0's frames that wait.
     control: FrameQueue = .{},
     channels: std.ArrayList(*Channel) = .empty,
@@ -194,7 +197,10 @@ pub fn handlePeerFrame(s: *Server, p: *Peer, f: frame.Frame, arena: std.mem.Allo
                 sendControl(s, p, r);
                 p.conn.closing = true;
             },
-            .speak => p.conn.greeted = true,
+            .speak => {
+                p.conn.greeted = true;
+                p.role = theirs.role;
+            },
         }
         return;
     }

@@ -432,6 +432,7 @@ extension MactermProtocol {
         case cli
         case server
         case session
+        case mcp
         case unknown
     }
 }
@@ -5669,6 +5670,20 @@ extension MactermProtocol.WaitCancel: ProtocolValue {
     }
 }
 
+extension MactermProtocol {
+    struct TtyRead: Equatable {}
+}
+
+extension MactermProtocol.TtyRead: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
+    }
+}
+
 extension MactermProtocol.Hello: ProtocolMessage {
     static let name = "hello"
     static let since: UInt32 = 1
@@ -5933,6 +5948,12 @@ extension MactermProtocol.WaitCancel: ProtocolMessage {
     static let senders: [MactermProtocol.Trust] = [.local]
 }
 
+extension MactermProtocol.TtyRead: ProtocolMessage {
+    static let name = "tty_read"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
 extension MactermProtocol {
     /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
     enum ErrorCode: Equatable {
@@ -6013,6 +6034,7 @@ extension MactermProtocol {
         case wait(Wait)
         case waited(Waited)
         case waitCancel(WaitCancel)
+        case ttyRead(TtyRead)
         case unknown(String)
     }
 }
@@ -6053,6 +6075,7 @@ extension MactermProtocol.PaneMessage {
         case MactermProtocol.Wait.name: try .wait(message(of: MactermProtocol.Wait.self))
         case MactermProtocol.Waited.name: try .waited(message(of: MactermProtocol.Waited.self))
         case MactermProtocol.WaitCancel.name: try .waitCancel(message(of: MactermProtocol.WaitCancel.self))
+        case MactermProtocol.TtyRead.name: try .ttyRead(message(of: MactermProtocol.TtyRead.self))
         default: .unknown(t)
         }
     }

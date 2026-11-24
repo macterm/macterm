@@ -869,6 +869,14 @@
       "senders": [
         "local"
       ]
+    },
+    {
+      "name": "tty_read",
+      "type": "TtyRead",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
     }
   ],
   "types": [
@@ -931,6 +939,7 @@
         "cli",
         "server",
         "session",
+        "mcp",
         "unknown"
       ],
       "variants": []
@@ -4409,6 +4418,13 @@
           "since": 3
         }
       ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TtyRead",
+      "kind": "struct",
+      "fields": [],
       "cases": [],
       "variants": []
     }

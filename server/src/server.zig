@@ -482,6 +482,10 @@ pub const Server = struct {
                 for (waiters) |w| switch (w.kind) {
                     .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session does not answer."),
                     .info, .list, .seen, .history, .inspect, .subscribe, .wait => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
+                    .typing => {
+                        if (w.input) |i| i.deinit(s.gpa);
+                        peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer.");
+                    },
                     .kill => registry.wait(s, &e.waiters, w),
                 };
             }
@@ -561,6 +565,7 @@ pub const Server = struct {
                 registry.startReplacements(s, e);
                 e.replacing.deinit(s.gpa);
                 e.conn.deinit(s.gpa);
+                for (e.waiters.items) |w| if (w.input) |input| input.deinit(s.gpa);
                 e.waiters.deinit(s.gpa);
                 s.gpa.free(e.build);
                 if (e.build_key) |k| s.gpa.free(k);

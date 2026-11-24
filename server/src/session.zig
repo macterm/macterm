@@ -522,7 +522,7 @@ const Session = struct {
             .build_key = build_options.key,
             .role = .session,
             .epoch = s.epoch,
-            .caps = &.{},
+            .caps = &.{m.tty_read_cap},
         };
     }
 
@@ -765,6 +765,8 @@ const Session = struct {
             };
         } else if (std.mem.eql(u8, msg.t, m.InspectRead.name)) {
             s.sendPane(c, m.Inspect, .{ .terminal = s.terminalState(arena) });
+        } else if (std.mem.eql(u8, msg.t, m.TtyRead.name)) {
+            s.sendPane(c, m.TtyMode, s.readTtyMode());
         } else if (std.mem.eql(u8, msg.t, m.Take.name)) {
             if (s.exited() != null) {
                 std.log.info("session {s}: exit status taken", .{s.name});
@@ -1112,6 +1114,16 @@ const Session = struct {
     fn hasForegroundClient(s: *const Session) bool {
         for (s.clients.items) |c| if (c.wants_foreground and !c.conn.dead) return true;
         return false;
+    }
+
+    /// The pty's line modes now, for `tty_read`. A pty that cannot be read
+    /// reads as a password read: the server then refuses the input.
+    fn readTtyMode(s: *const Session) m.TtyMode {
+        const password: m.TtyMode = .{ .canonical = true, .echo = false };
+        if (s.pty_closed) return password;
+        var t: cross.termios = undefined;
+        if (cross.tcgetattr(s.pty_fd, &t) != 0) return password;
+        return ttyModeOf(t.c_lflag);
     }
 
     /// A live client asked for `tty_mode` messages.
