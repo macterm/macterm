@@ -2091,7 +2091,7 @@ pub const max_program_records = 64;
 pub const pane_messages = .{
     State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
     Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,       Wait,      Waited,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {
