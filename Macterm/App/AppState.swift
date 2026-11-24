@@ -1327,12 +1327,6 @@ final class AppState {
         let onEvent: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.notePollEvent() }
         }
-        let onQuietSettleDeadline: @Sendable (Notification) -> Void = { [weak self] _ in
-            // Do not route through notePollEvent: if another poll ran within
-            // 250ms, coalescing plus a fully occluded window would pause with
-            // no timer and never retry this deadline.
-            MainActor.assumeIsolated { self?.pollNow() }
-        }
         let tokens: [(NotificationCenter, NSObjectProtocol)] = [
             (center, center.addObserver(forName: .terminalPollEvent, object: nil, queue: .main, using: onEvent)),
             (center, center.addObserver(forName: .terminalSurfaceSized, object: nil, queue: .main) { [weak self] _ in
@@ -1341,12 +1335,6 @@ final class AppState {
             (center, center.addObserver(forName: .terminalSessionLead, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.claimLeadershipForKeyWindow() }
             }),
-            (center, center.addObserver(
-                forName: .terminalQuietSettleDeadline,
-                object: nil,
-                queue: .main,
-                using: onQuietSettleDeadline
-            )),
             (center, center.addObserver(
                 forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
             ) { [weak self] _ in
@@ -1481,11 +1469,6 @@ final class AppState {
         for (projectID, ws) in workspaces {
             for tab in ws.tabs {
                 for pane in tab.splitRoot.allPanes() {
-                    // An activity-sourced run whose output has been quiet past
-                    // the window settles to `.done`. The output heartbeat is
-                    // occlusion-independent, so silence is meaningful whether or
-                    // not the pane is on screen — no occlusion special-casing.
-                    pane.settleTerminalActivityIfQuiet()
                     if pane.executionState == .running { sawBusyPane = true }
                     markSeenIfActive(paneID: pane.id, projectID: projectID)
                 }

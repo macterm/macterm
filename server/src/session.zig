@@ -324,6 +324,10 @@ const Session = struct {
     foreground_pgid: ?lib_posix.pid_t = null,
     foreground_read_at: i64 = 0,
     foreground_hash: u64 = 0,
+    /// The shell's group at the last read of its program, and a hash of that
+    /// program (`noteShellProgram`).
+    shell_program_pgid: lib_posix.pid_t = 0,
+    shell_program_hash: u64 = 0,
     /// The last tty mode sent (`ttyModeOf`), or null before the first read.
     tty_mode: ?m.TtyMode = null,
     etc_shells: ?[]const u8 = null,
@@ -793,6 +797,9 @@ const Session = struct {
     fn queueUserInput(s: *Session, data: []const u8) void {
         if (!s.pty_closed and events.isSubmission(data)) {
             s.submitted_at = s.nowMs();
+            // An exec that the timer did not see yet must not hide this
+            // command from the foreground rule.
+            s.readShellProgram();
             s.observeForeground();
             s.watch.submitted(s.submitted_at);
             s.sendEvents();
@@ -819,6 +826,40 @@ const Session = struct {
         s.shell_pgid = pgrp;
         std.log.info("session {s}: the shell's group is {d}, under login pid={d}", .{ s.name, pgrp, s.shell_pid });
         return true;
+    }
+
+    /// The shell's group runs `comm`. Another program in the same group is
+    /// an `exec` of the shell (`exec sh` from zsh, `isShellExec`): the watch
+    /// must not wait for the old shell's marks (`Watch.shellReplaced`).
+    ///
+    /// The session reads the program at each submission
+    /// (`readShellProgram`). It also reads it each `poll_interval_ms` while
+    /// a client asks for the foreground (`checkForeground`). With no such
+    /// client and no submission, an exec is seen at the next read, also
+    /// after a detach. On Linux `comm` is the name only, so an exec of a
+    /// shell with the same name is not seen.
+    fn noteShellProgram(s: *Session, pgrp: lib_posix.pid_t, comm: []const u8) void {
+        const hash = std.hash.Wyhash.hash(0, comm);
+        const replaced = isShellExec(s.shell_program_pgid, s.shell_program_hash, pgrp, hash);
+        s.shell_program_pgid = pgrp;
+        s.shell_program_hash = hash;
+        if (!replaced) return;
+        std.log.info("session {s}: the shell's group {d} runs {s} now", .{ s.name, pgrp, comm });
+        s.watch.shellReplaced(s.nowMs());
+    }
+
+    /// Reads the program of the shell's group now, when the shell's group is
+    /// in front (`noteShellProgram`).
+    fn readShellProgram(s: *Session) void {
+        if (!foreground.supported or s.pty_closed) return;
+        var pgrp: lib_posix.pid_t = 0;
+        if (cross.ioctl(s.pty_fd, cross.TIOCGPGRP, &pgrp) != 0 or pgrp <= 0) return;
+        if (!s.isShellGroup(pgrp)) return;
+        var comm_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var args_buf: [foreground.args_max]u8 = undefined;
+        var scratch: [8192]u8 = undefined;
+        const process = foreground.readProcess(s.gpa, pgrp, &comm_buf, &args_buf, &scratch, ' ') orelse return;
+        s.noteShellProgram(pgrp, process.comm);
     }
 
     /// Reads the foreground group and the line mode of the pty for the run
@@ -1230,8 +1271,10 @@ const Session = struct {
             std.log.info("session {s}: foreground pgid={d} has no readable leader", .{ s.name, pgrp });
             return;
         };
+        const idle = s.isShellGroup(pgrp);
+        if (idle) s.noteShellProgram(pgrp, process.comm);
         const msg: m.Foreground = .{
-            .idle = s.isShellGroup(pgrp),
+            .idle = idle,
             .shell = if (s.etc_shells) |shells| foreground.isListedShell(shells, process.comm) else null,
             .comm = .{ .bytes = process.comm },
             .args = .{ .bytes = process.args },
@@ -1362,6 +1405,13 @@ fn sequenceEnd(data: []const u8, from: usize) usize {
 /// interval while a client wants foreground reports: a program that takes
 /// the pty and prints nothing is still reported (zmx 0010). With neither,
 /// -1: the session sleeps until a fd is ready.
+/// Whether a read of the shell's group shows an exec: the same group runs
+/// another program. A new group (the shell under login(1), after login) is
+/// no exec.
+fn isShellExec(last_pgid: lib_posix.pid_t, last_hash: u64, pgrp: lib_posix.pid_t, hash: u64) bool {
+    return pgrp == last_pgid and hash != last_hash;
+}
+
 fn pollTimeoutFor(foreground_client: bool, deadline: ?i64, now: i64) i32 {
     var timeout: i32 = if (foreground_client) foreground.poll_interval_ms else -1;
     if (deadline) |due| {
@@ -1462,6 +1512,17 @@ test "a pane size is cut to the limit, and 0 is ignored" {
     try testing.expectEqual(max_cells, big.cols);
     try testing.expectEqual(max_cells, big.rows);
     try testing.expectEqual(80, paneSize(80, 24, 0, 0).?.cols);
+}
+
+test "an exec is another program in the same group of the shell" {
+    // The first read records the program.
+    try std.testing.expect(!isShellExec(0, 0, 10, 1));
+    // The same program again.
+    try std.testing.expect(!isShellExec(10, 1, 10, 1));
+    // `exec sh` from zsh.
+    try std.testing.expect(isShellExec(10, 1, 10, 2));
+    // login(1) starts the shell in a new group.
+    try std.testing.expect(!isShellExec(10, 1, 20, 2));
 }
 
 test "a session polls the foreground only for a client that wants it" {
