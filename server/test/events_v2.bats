@@ -157,7 +157,9 @@ PY
 }
 
 # An idle session with only clients that did not ask for the foreground
-# does not wake. With a client that asked, it wakes each 500 ms. macOS counts
+# does not wake, once `submit_window_ms` after the last Return is over (the
+# session reads the foreground in that time, for a program that prints
+# nothing). With a client that asked, it wakes each 500 ms. macOS counts
 # each wakeup of the session's poll as an interrupt wakeup
 # (`proc_pid_rusage`, as scripts/_harness.py reads it), Linux as a voluntary
 # context switch.
@@ -185,6 +187,7 @@ a = Client("s1")
 a.attach()
 a.type("printf 'idle-%s\\n' 1\r")
 a.wait_output("idle-1")
+time.sleep(2)
 quiet = wakeups()
 assert quiet <= 1, quiet
 b = Client("s1")
@@ -310,5 +313,76 @@ d.wait_msg("state")
 d.type("printf 'quiet-%s\\n' 1\r")
 d.wait_output("quiet-1")
 assert d.messages("tty_mode") == []
+PY
+}
+
+# v1's tracker rules, in the session: a shell with no marks (sh) gets a run
+# for a program that it starts after a Return, and an agent (a program in
+# raw mode) gets a run for a reply, which ends after 3 s of quiet output.
+@test "events: a program that a shell with no marks starts is a run until the shell is back" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+c.type("sleep 1\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")), what="the run")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", what="the end of the run")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+PY
+}
+
+@test "events: a program that a nested shell starts is a run, also when the outer shell has marks" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+# The outer shell sends a prompt mark (as zsh with shell integration does),
+# so its marks own its runs. The nested sh does not get PS1 and sends none.
+c.type("PS1=\"$(printf '\\033]133;A\\007')m$ \"\r")
+c.wait(lambda: any(m["a"]["kind"] == "prompt" for m in c.messages("mark")), what="the prompt mark")
+c.type("sh\r")
+c.wait_output("$ sh", timeout=5)
+[c._read(0.05) for _ in range(30)]
+start = len(c.messages("status"))
+# Longer than quiet_ms: with bash 3.2 as sh, the prompt after the run
+# then comes after the window of the agent rule.
+c.type("sleep 4\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")[start:]), what="the run")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", timeout=15, what="the end of the run")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+# The nested shell's prompt after the run starts no second run.
+[c._read(0.05) for _ in range(80)]
+assert [m["a"]["state"] for m in c.messages("status")[start:]] == ["running", "done"]
+PY
+}
+
+@test "events: a reply of a raw program is a run that ends when its output is quiet" {
+  "$ZMX" __create-session s1 -- /bin/sh
+  python3 - <<'PY'
+import os, time
+from v2client import Client
+c = Client("s1")
+c.attach()
+c.wait_msg("state")
+path = os.path.join(os.environ["RT"], "agent.py")
+# The agent: raw mode, and for each Return a sparse reply, one line each
+# 0.5 s for 1.5 s, as the review's slow agent printed.
+agent = ("import sys,time,tty;tty.setraw(0);print('ready',end='\\r\\n',flush=True)\n"
+         "while sys.stdin.read(1)!='q':\n"
+         " [time.sleep(0.5) or print('line',end='\\r\\n',flush=True) for _ in range(3)]\n")
+open(path, "w").write(agent)
+c.type("python3 %s\r" % path)
+c.wait_output("ready")
+time.sleep(4)
+start = len(c.messages("status"))
+c.type("\r")
+c.wait(lambda: any(m["a"]["state"] == "running" for m in c.messages("status")[start:]), what="the run of the reply")
+c.wait(lambda: c.messages("status")[-1]["a"]["state"] == "done", timeout=8, what="the end of the reply")
+assert c.messages("attention")[-1]["a"]["unseen"] is True
+c.type("q")
 PY
 }

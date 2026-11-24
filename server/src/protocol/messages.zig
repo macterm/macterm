@@ -1577,10 +1577,12 @@ pub const RunState = enum {
     unknown,
 };
 
-/// The pane's run, derived from the marks and the progress reports only:
-/// `running` from OSC 133;C or a progress report that sets work, `done` from
-/// OSC 133;D or a report that ends it. A shell with no integration and a
-/// program with no progress report stay `idle`.
+/// The pane's run (`events.Watch`): `running` from OSC 133;C, a progress
+/// report that sets work, a new group in front after a Return to a shell
+/// with no marks or to a program (a nested shell), or output after a Return
+/// to a program in raw mode (an agent). `done` from OSC 133;D, a report that
+/// ends it, the shell or the group that took the Return back in front, or
+/// 3 s with no output while a program in raw mode is in front.
 pub const Status = struct {
     pub const name = "status";
     pub const since = 1;
