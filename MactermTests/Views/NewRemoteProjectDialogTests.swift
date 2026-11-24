@@ -115,11 +115,11 @@ struct NewRemoteProjectDialogTests {
         dialog.present(on: nil, startCheck: true)
         #expect(dialog.isChecking)
         await settle { check.isWaiting }
-        check.answer("There is no path ~/none on devbox.")
+        check.answer("Path ~/none doesn't exist")
         await settle { !dialog.isChecking }
 
         #expect(created.projects.isEmpty)
-        #expect(dialog.statusText == "There is no path ~/none on devbox.")
+        #expect(dialog.statusText == "Path ~/none doesn't exist")
         #expect(dialog.hostField.isEnabled)
         #expect(NewRemoteProjectDialog.checking("devbox") == nil)
         // The refused path stays refused: Add is off until an edit.

@@ -485,6 +485,7 @@ struct CommandPalettePanel: View {
     }
 
     private func refresh() {
+        let selectedID = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex].id : nil
         if let scope {
             let context = PaletteContext(appState: appState, projectStore: projectStore)
             sections = scope.sections(for: PaletteQuery(raw: query), context: context)
@@ -499,10 +500,14 @@ struct CommandPalettePanel: View {
         // match after a query change), nor past the end of a list that just
         // got shorter (a screen's redraw, a hover resolved against the old
         // rows) — Return would have nothing to run. An input screen's
-        // selection rests on its action row, the first row, or on no row
-        // when the text has none.
+        // selection stays on the row it was on, by its id, so a redraw never
+        // moves it to another row that Return would then take. Else it
+        // rests on the action row, the first row, or on no row when the
+        // text has none.
         if let inputScope {
-            if !flatItems.indices.contains(selectedIndex) {
+            if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
+                selectedIndex = index
+            } else {
                 selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
             }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
