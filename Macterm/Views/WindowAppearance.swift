@@ -33,21 +33,15 @@ extension NSView {
         }
     }
 
-    /// First view of type `View` at or below this view, this view included.
-    /// Callers sit beside the AppKit view that SwiftUI made (a `.background`
-    /// probe, the window's content view), so the search runs down from
-    /// wherever the caller stands.
-    func firstDescendant<View: NSView>(ofType _: View.Type) -> View? {
-        if let match = self as? View { return match }
+    /// First `NSSplitView` at or below this view. Callers sit beside the split
+    /// view (a `.background` probe, the window's content view), so the search
+    /// runs down from wherever the caller stands.
+    var firstSplitView: NSSplitView? {
+        if let split = self as? NSSplitView { return split }
         for subview in subviews {
-            if let found = subview.firstDescendant(ofType: View.self) { return found }
+            if let found = subview.firstSplitView { return found }
         }
         return nil
-    }
-
-    /// First `NSSplitView` at or below this view.
-    var firstSplitView: NSSplitView? {
-        firstDescendant(ofType: NSSplitView.self)
     }
 
     /// The `NSSplitViewController` whose root view this is. A view controller
