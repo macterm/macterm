@@ -18,6 +18,7 @@ const m = @import("../protocol/messages.zig");
 const chord = @import("../chord.zig");
 const skills = @import("skills.zig");
 const api = @import("api.zig");
+const mcp = @import("mcp.zig");
 const ssh = @import("ssh.zig");
 const askpass = @import("askpass.zig");
 
@@ -370,10 +371,31 @@ fn apiSend(ctx: Context, parsed: command.Parsed, comptime M: type, value: std.js
     return 0;
 }
 
+// ── mcp (design 014) ────────────────────────────────────────────────────────
+
+const mcp_command: Command = .{
+    .name = "mcp",
+    .abstract = "Run an MCP server on stdin and stdout for AI coding agents. It works with no running app.",
+    .discussion =
+    \\The agent starts this command and sends JSON-RPC messages, one on each line. Each tool is one method of the server's protocol (see `macterm api list`). The tools connect to Macterm at each call. While Macterm is not running, a tool call fails and tells the agent so.
+    ,
+    .options = &.{socket_option},
+};
+
+fn mcpRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const in = ctx.in orelse return 0;
+    mcp.serve(std.heap.page_allocator, .{ .env = ctx.env, .socket = parsed.value("--socket") }, in, ctx.out) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WriteFailed => return error.WriteFailed,
+        error.ReadFailed => return 1,
+    };
+    return 0;
+}
+
 pub const root: Command = .{
     .name = "macterm",
     .abstract = "Control a running Macterm: projects, tabs, panes, zmx sessions.",
-    .subcommands = &.{ &status_command, &pane_command, &session_command, &ssh_command, &skills_command, &askpass_command, &api_command, &help_command },
+    .subcommands = &.{ &status_command, &pane_command, &session_command, &ssh_command, &skills_command, &askpass_command, &api_command, &mcp_command, &help_command },
 };
 
 /// Runs one argument line (without the program name) and returns the exit
@@ -402,6 +424,7 @@ pub fn run(ctx: Context, words: []const []const u8) error{ OutOfMemory, WriteFai
             if (c == &api_list_command) return apiList(ctx, parsed);
             if (c == &api_describe_command) return apiDescribe(ctx, parsed);
             if (c == &api_call_command) return apiCall(ctx, parsed);
+            if (c == &mcp_command) return mcpRun(ctx, parsed);
             if (c == &ssh_command) return sshRun(ctx, parsed);
             if (c == &askpass_command) return askpass.run(ctx.arena, ctx.env, ctx.out, ctx.err, if (parsed.positionals.len > 0) parsed.positionals[0] else "");
             unreachable;
@@ -966,7 +989,7 @@ fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
 
 /// The commands that v1 did not have (design 011 §4). The contract has no
 /// line for them.
-const new_in_v2 = [_]*const Command{&api_command};
+const new_in_v2 = [_]*const Command{ &api_command, &mcp_command };
 
 fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contract, path: []const *const Command) !void {
     const c = path[path.len - 1];
@@ -1065,7 +1088,7 @@ test "the overview of a group wraps as its golden help" {
     }
 }
 
-test "the root help lists the ported commands as the golden text does, and api" {
+test "the root help lists the ported commands as the golden text does, and api and mcp" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
     try command.writeHelp(&out.writer, &.{&root});
@@ -1089,6 +1112,8 @@ test "the root help lists the ported commands as the golden text does, and api" 
         \\                          Macterm. It works with no running app.
         \\  api                     List, describe and call the methods of the server's
         \\                          protocol.
+        \\  mcp                     Run an MCP server on stdin and stdout for AI coding
+        \\                          agents. It works with no running app.
         \\
         \\  See 'macterm help <subcommand>' for detailed help.
         \\

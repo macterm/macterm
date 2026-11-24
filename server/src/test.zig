@@ -32,6 +32,7 @@ comptime {
     _ = @import("cli/cli.zig");
     _ = @import("cli/skills.zig");
     _ = @import("cli/api.zig");
+    _ = @import("cli/mcp.zig");
     _ = @import("cli/ssh.zig");
     _ = @import("cli/askpass.zig");
 }
