@@ -5643,6 +5643,32 @@ extension MactermProtocol.Waited: ProtocolValue {
     }
 }
 
+extension MactermProtocol {
+    struct WaitCancel: Equatable {
+        var tag: UInt64
+    }
+}
+
+extension MactermProtocol.WaitCancel: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var tag: UInt64?
+        try reader.readMap { key, reader in
+            switch key {
+            case "tag": tag = try UInt64(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.tag = try MessagePackReader.required(tag, "tag")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("tag")
+        tag.encode(to: &writer)
+    }
+}
+
 extension MactermProtocol.Hello: ProtocolMessage {
     static let name = "hello"
     static let since: UInt32 = 1
@@ -5901,6 +5927,12 @@ extension MactermProtocol.Waited: ProtocolMessage {
     static let senders: [MactermProtocol.Trust] = [.session]
 }
 
+extension MactermProtocol.WaitCancel: ProtocolMessage {
+    static let name = "wait_cancel"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
 extension MactermProtocol {
     /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
     enum ErrorCode: Equatable {
@@ -5980,6 +6012,7 @@ extension MactermProtocol {
         case inspect(Inspect)
         case wait(Wait)
         case waited(Waited)
+        case waitCancel(WaitCancel)
         case unknown(String)
     }
 }
@@ -6019,6 +6052,7 @@ extension MactermProtocol.PaneMessage {
         case MactermProtocol.Inspect.name: try .inspect(message(of: MactermProtocol.Inspect.self))
         case MactermProtocol.Wait.name: try .wait(message(of: MactermProtocol.Wait.self))
         case MactermProtocol.Waited.name: try .waited(message(of: MactermProtocol.Waited.self))
+        case MactermProtocol.WaitCancel.name: try .waitCancel(message(of: MactermProtocol.WaitCancel.self))
         default: .unknown(t)
         }
     }

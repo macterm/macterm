@@ -313,14 +313,14 @@
           },
           "truncated": {
             "type": "boolean",
-            "description": "The text is the end of the terminal text only: the text was longer than a frame holds, or than tail_lines.",
+            "description": "Only the end of the text is here, because the text was longer than a frame holds or than tail_lines.",
             "default": false
           },
           "lines_cut": {
             "type": "integer",
             "minimum": 0,
             "maximum": 18446744073709551615,
-            "description": "The lines that tail_lines removed from the start of the text.",
+            "description": "The lines that tail_lines removed. Lines that the frame limit removed are not counted.",
             "default": 0
           }
         },

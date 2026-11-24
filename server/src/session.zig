@@ -336,6 +336,10 @@ const Session = struct {
     /// Output came since the last read of the text for a marker.
     wait_dirty: bool = false,
     wait_scanned_at: i64 = 0,
+    /// The last submission (`queueUserInput`). A wait with no marker counts
+    /// its quiet time from it too: the run that it starts can show only
+    /// after the shell read it.
+    submitted_at: i64 = 0,
 
     const pty_in_max = 256 * 1024;
 
@@ -752,6 +756,13 @@ const Session = struct {
             });
             // A marker that is already in the text ends the wait now.
             s.checkWaits(true);
+        } else if (std.mem.eql(u8, msg.t, m.WaitCancel.name)) {
+            const w = try m.decodePane(m.WaitCancel, arena, msg);
+            for (s.waits.items, 0..) |pending, i| if (pending.client == c and pending.tag == w.tag) {
+                _ = s.waits.orderedRemove(i);
+                if (pending.text) |t| s.gpa.free(t);
+                break;
+            };
         } else if (std.mem.eql(u8, msg.t, m.InspectRead.name)) {
             s.sendPane(c, m.Inspect, .{ .terminal = s.terminalState(arena) });
         } else if (std.mem.eql(u8, msg.t, m.Take.name)) {
@@ -779,8 +790,9 @@ const Session = struct {
     /// submission in it can start a run (`Watch.submitted`).
     fn queueUserInput(s: *Session, data: []const u8) void {
         if (!s.pty_closed and events.isSubmission(data)) {
+            s.submitted_at = s.nowMs();
             s.observeForeground();
-            s.watch.submitted(s.nowMs());
+            s.watch.submitted(s.submitted_at);
             s.sendEvents();
         }
         s.queueInput(data);
@@ -1035,7 +1047,7 @@ const Session = struct {
             const again = if (w.text != null)
                 (if (s.wait_dirty) s.wait_scanned_at + wait_scan_ms else null)
             else if (s.watch.status.state != .running)
-                s.watch.quiet_from + m.wait_quiet_ms
+                s.quietFrom() + m.wait_quiet_ms
             else
                 null;
             if (again) |d| next = @min(next orelse d, d);
@@ -1063,7 +1075,7 @@ const Session = struct {
             s.wait_scanned_at = now;
             text = terminal.plainText(arena_state.allocator(), &s.watch.term, true, std.math.maxInt(usize)) catch null;
         }
-        const quiet = s.watch.status.state != .running and now - s.watch.quiet_from >= m.wait_quiet_ms;
+        const quiet = s.watch.status.state != .running and now - s.quietFrom() >= m.wait_quiet_ms;
         var i: usize = 0;
         while (i < s.waits.items.len) {
             const w = s.waits.items[i];
@@ -1079,6 +1091,11 @@ const Session = struct {
                 s.endWait(i, .timeout, null);
             } else i += 1;
         }
+    }
+
+    /// The last output or submission.
+    fn quietFrom(s: *const Session) i64 {
+        return @max(s.watch.quiet_from, s.submitted_at);
     }
 
     /// Answers the wait at `i` and removes it. A client that is gone gets

@@ -242,4 +242,7 @@ json_py() {
   run "$ZMX" api call session.wait --args '{"id": "nope"}'
   [ "$status" -eq 1 ]
   [[ "$output" == *"(not_found)"* ]]
+  run "$ZMX" api describe session.wait
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | json_py 'sorted(r["args"]["properties"]), r["args"]["properties"]["timeout_ms"]["maximum"]')" = "['id', 'text', 'timeout_ms'] 600000" ]
 }

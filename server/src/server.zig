@@ -521,6 +521,7 @@ pub const Server = struct {
         while (i < s.peers.items.len) {
             const p = s.peers.items[i];
             if (p.conn.dead) {
+                registry.cancelWaits(s, p.id);
                 // Nobody waits for its commands: they end now, and free
                 // their places (`max_runs`).
                 for (s.runs.items) |r| if (r.peer == p.id and !r.timed_out) {

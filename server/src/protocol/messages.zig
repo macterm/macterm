@@ -575,8 +575,8 @@ pub const SessionHistory = struct {
     pub const Result = struct {
         pub const field_doc = .{
             .text = "The text of the terminal.",
-            .truncated = "The text is the end of the terminal text only: the text was longer than a frame holds, or than tail_lines.",
-            .lines_cut = "The lines that tail_lines removed from the start of the text.",
+            .truncated = "Only the end of the text is here, because the text was longer than a frame holds or than tail_lines.",
+            .lines_cut = "The lines that tail_lines removed. Lines that the frame limit removed are not counted.",
         };
 
         text: msgpack.Bin,
@@ -1861,6 +1861,16 @@ pub const Wait = struct {
     timeout_ms: u32,
 };
 
+/// The client of a `session.wait` left: the session stops the wait with
+/// this tag and sends no `waited`.
+pub const WaitCancel = struct {
+    pub const name = "wait_cancel";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    tag: u64,
+};
+
 pub const Waited = struct {
     pub const name = "waited";
     pub const since = 3;
@@ -2089,9 +2099,9 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
-    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,
+    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,        Refresh,
+    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention,  Seen,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {

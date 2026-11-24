@@ -861,6 +861,14 @@
       "senders": [
         "session"
       ]
+    },
+    {
+      "name": "wait_cancel",
+      "type": "WaitCancel",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
     }
   ],
   "types": [
@@ -1682,7 +1690,7 @@
           "optional": false,
           "default": "false",
           "since": 3,
-          "doc": "The text is the end of the terminal text only: the text was longer than a frame holds, or than tail_lines."
+          "doc": "Only the end of the text is here, because the text was longer than a frame holds or than tail_lines."
         },
         {
           "name": "lines_cut",
@@ -1690,7 +1698,7 @@
           "optional": false,
           "default": "0",
           "since": 3,
-          "doc": "The lines that tail_lines removed from the start of the text."
+          "doc": "The lines that tail_lines removed. Lines that the frame limit removed are not counted."
         }
       ],
       "cases": [],
@@ -4348,6 +4356,20 @@
           "name": "line",
           "type": "bin",
           "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WaitCancel",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tag",
+          "type": "u64",
+          "optional": false,
           "since": 3
         }
       ],

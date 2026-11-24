@@ -716,6 +716,22 @@ pub fn startWait(s: *Server, p: *Peer, re: u64, args: m.SessionWait.Args) void {
     sendEntryPane(s, e, m.Wait, .{ .tag = tag, .text = args.text, .timeout_ms = args.timeout_ms });
 }
 
+/// A client left: each session stops the waits of that client.
+pub fn cancelWaits(s: *Server, peer: u64) void {
+    for (s.entries.items) |e| {
+        var i: usize = 0;
+        while (i < e.waiters.items.len) {
+            const w = e.waiters.items[i];
+            if (w.kind != .wait or w.peer != peer) {
+                i += 1;
+                continue;
+            }
+            _ = e.waiters.orderedRemove(i);
+            if (!e.conn.dead) sendEntryPane(s, e, m.WaitCancel, .{ .tag = w.tag });
+        }
+    }
+}
+
 /// The waits of `e` that the session did not answer in time get an error.
 pub fn expireWaits(s: *Server, e: *Entry, now: i64) void {
     var i: usize = 0;

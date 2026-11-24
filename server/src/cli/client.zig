@@ -222,8 +222,8 @@ pub const Connection = struct {
         }
     }
 
-    /// A method that waits on the server (`session.wait`) has a
-    /// `timeout_ms`: its reply can take that long, and then the usual time.
+    /// A method with a `timeout_ms` (`session.wait`, `command.run`) can
+    /// reply that late: the client waits that long, and then the usual time.
     fn replyTimeoutMs(comptime M: type, args: M.Args) i32 {
         if (!@hasField(M.Args, "timeout_ms")) return request_timeout_ms;
         return @intCast(@min(@as(u64, args.timeout_ms) + request_timeout_ms, std.math.maxInt(i32)));
