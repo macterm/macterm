@@ -11,8 +11,11 @@ protocol ServerLink: AnyObject, Sendable {
     /// False once the connection ended.
     var isOpen: Bool { get }
     /// Sends one request and waits for its response. A response with `err`
-    /// throws `ProtocolControlError.errorResponse`.
-    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result
+    /// throws `ProtocolControlError.errorResponse`. With a `timeout`, a
+    /// response that does not come in time throws
+    /// `ServerClientError.noAnswer`. A cancelled or timed-out request leaves
+    /// nothing behind.
+    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args, timeout: Duration?) async throws -> M.Result
     /// Opens a pane channel to `session` (design/003 §1).
     func openChannel(session: String) async throws -> PaneChannel
     /// Sends a frame on a pane channel. Throws `disconnected` when the
@@ -31,36 +34,9 @@ extension ServerConnection: ServerLink {}
 let serverRequestTimeout: Duration = .seconds(10)
 
 extension ServerLink {
-    /// The reply, or `ServerClientError.noAnswer` after `timeout`. A request
-    /// that waits for its reply cannot be cancelled, so the two race in tasks
-    /// of their own and the first to finish answers.
-    func call<M: ProtocolMethod>(
-        _ method: M.Type,
-        _ args: M.Args,
-        timeout: Duration
-    ) async throws -> M.Result {
-        let answered = OSAllocatedUnfairLock(initialState: false)
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<M.Result, Error>) in
-            func finish(_ result: Result<M.Result, Error>) {
-                guard answered.withLock({ done in
-                    defer { done = true }
-                    return !done
-                })
-                else { return }
-                continuation.resume(with: result)
-            }
-            Task {
-                do {
-                    try await finish(.success(call(method, args)))
-                } catch {
-                    finish(.failure(error))
-                }
-            }
-            Task {
-                try? await Task.sleep(for: timeout)
-                finish(.failure(ServerClientError.noAnswer))
-            }
-        }
+    /// A request with no time limit.
+    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result {
+        try await call(method, args, timeout: nil)
     }
 }
 

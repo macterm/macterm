@@ -102,7 +102,7 @@ struct PaneSessionTests {
             // The new channel asks to resume: the session sends only the
             // bytes after the offset, and draws no snapshot.
             try await host.waitFor { $0.leads.count >= 3 && $0.leads.last == true }
-            #expect(session.resumePoint != nil)
+            #expect(await session.resumePoint != nil)
             session.sendInput(Data("x\n".utf8))
             try await host.waitFor { $0.screen.contains("after-x") }
             let state = host.snapshot()
@@ -443,8 +443,7 @@ struct PaneSessionTests {
             session.sendInput(Data("hi\n".utf8))
             session.start()
             try await host.waitFor { $0.screen.contains("up-ok") }
-            session.stop()
-            #expect(session.takePendingInput() == Data("hi\n".utf8))
+            #expect(await session.finish().pendingInput == Data("hi\n".utf8))
             try await Task.sleep(for: .seconds(1.5))
 
             // Another client sees the session's screen: the line never came.
@@ -570,7 +569,7 @@ struct PaneSessionEndpointTests {
         let attach = try #require(second.attaches(on: "s").first)
         #expect(attach.resumeEpoch == 7)
         #expect(attach.resumeOffset == 103, "the snapshot's offset and the 3 output bytes after it")
-        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
         second.deliver(MactermProtocol.Resumed(offset: 103), to: "s")
         second.deliver(output: "three", to: "s")
         try await host.waitFor { $0.screen == "onetwothree" }
@@ -585,7 +584,7 @@ struct PaneSessionEndpointTests {
         #expect(host.snapshot().resets == 1, "a skip-ahead snapshot clears its own screen, not the scrollback")
         second.close()
         try await host.waitFor { $0.gone == 1 }
-        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
         session.stop()
     }
 
@@ -655,7 +654,7 @@ struct PaneSessionEndpointTests {
         try await host.waitFor { $0.screen == "abc" }
         // The channel is still open: a key that found the link down ends a
         // remote pane's session while it reads.
-        #expect(await session.finish() == PaneSession.ResumePoint(epoch: 7, offset: 3))
+        #expect(await session.finish().resume == PaneSession.ResumePoint(epoch: 7, offset: 3))
     }
 
     @Test

@@ -86,9 +86,13 @@ extension PaneSessionHost {
 
 /// One pane's session on a server, local or on a host: it makes the session
 /// when a `launch` is given, opens a channel, attaches, and feeds the host
-/// from the channel. Input, claims and sizes go back on the same channel, in
-/// order, from a queue of its own, so a stalled server never blocks the
-/// caller.
+/// from the channel.
+///
+/// The session's state is the actor's. The surface's input, claims and
+/// sizes come in from any thread: they go into one ordered stream of
+/// commands, which the actor takes in order, so a caller never waits. The
+/// writes to the channel go out on one serial queue, in order, so a stalled
+/// server never blocks the reading.
 ///
 /// One rule for a lost link: a channel that ends with no exit reports
 /// `paneLinkLost`, and the session asks its endpoint for a connection again,
@@ -100,7 +104,7 @@ extension PaneSessionHost {
 /// (`ServerEndpoint`): the local server tries for a few seconds, and a
 /// host's link has none after it ended. An endpoint with no connection to
 /// give ends the session with `paneGone`.
-final class PaneSession: PaneInputRoute, @unchecked Sendable {
+actor PaneSession: PaneInputRoute {
     /// What a new session runs: the launch that libghostty resolved for the
     /// pane (`ghostty_launch_resolve`), or nothing for a remote pane, whose
     /// session runs the user's login shell on the host.
@@ -116,6 +120,24 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     struct ResumePoint: Equatable {
         var epoch: UInt64
         var offset: UInt64
+    }
+
+    /// What a session leaves when it stopped (`finish`).
+    struct Finished: Equatable {
+        /// Where the next session for the same pane can resume.
+        var resume: ResumePoint?
+        /// The input that never reached a channel.
+        var pendingInput: Data
+    }
+
+    /// What the surface asks, in the order that it asked.
+    private enum Command {
+        case start
+        case stop
+        case input(Data)
+        case claim(PaneGrid?)
+        case size(PaneGrid?)
+        case seen
     }
 
     /// Clears the screen, the scrollback and the cursor.
@@ -134,15 +156,17 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// after this time.
     static let shellStartWait: Duration = .seconds(2)
 
-    let name: String
+    nonisolated let name: String
     private let host: any PaneSessionHost
     private let endpoint: any ServerEndpoint
     private let launch: Launch?
     private let wantsForeground: Bool
     private let wantsTty: Bool
     private let startWait: Duration
+    private let commands: AsyncStream<Command>.Continuation
+    /// The writes to the channel, in order.
+    private let output = DispatchQueue(label: "PaneSession.output")
 
-    private let lock = NSLock()
     private var channel: PaneChannel?
     /// Where the next attach asks to resume. Nil while the surface shows
     /// no screen of a known offset: before the first output, and from the
@@ -167,7 +191,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     private var holdTimer: Task<Void, Never>?
     /// A claim that came before the first attach.
     private var claimPending = false
-    private let output = DispatchQueue(label: "PaneSession.input")
 
     init(
         name: String,
@@ -187,128 +210,154 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         self.startWait = startWait
         self.host = host
         self.endpoint = endpoint
+        let (stream, commands) = AsyncStream.makeStream(of: Command.self)
+        self.commands = commands
+        // The stream, not the session, keeps this task: it ends with the
+        // session.
+        Task { [weak self] in
+            for await command in stream {
+                await self?.handle(command)
+            }
+        }
+    }
+
+    deinit {
+        commands.finish()
     }
 
     /// Starts the session and the reading. Call it once.
-    func start() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard task == nil, !stopped else { return }
-        task = Task { [self] in await run() }
+    nonisolated func start() {
+        commands.yield(.start)
     }
 
     /// Ends the reading and the channel. The session keeps running.
-    func stop() {
-        lock.lock()
-        stopped = true
-        let task = task
-        let channel = channel
-        self.channel = nil
-        let holdTimer = holdTimer
-        self.holdTimer = nil
-        lock.unlock()
-        task?.cancel()
-        holdTimer?.cancel()
-        if let channel { Task { await channel.close() } }
+    nonisolated func stop() {
+        commands.yield(.stop)
     }
 
     /// Stops the session and waits until its reading ended. Then no byte
-    /// goes to the host any more, and `resumePoint` is the offset of the
-    /// last byte that it got. A driver that starts a new session for the
-    /// same pane takes the point from here, not from `stop()`.
-    func finish() async -> ResumePoint? {
-        stop()
-        let task = lock.withLock { task }
+    /// goes to the host any more. The result has the offset of the last byte
+    /// that it got, and the input that never reached a channel. A driver that
+    /// starts a new session for the same pane takes both from here.
+    func finish() async -> Finished {
+        shutDown()
         await task?.value
-        return resumePoint
+        defer {
+            heldInput = Data()
+            pendingInput = Data()
+        }
+        return Finished(resume: resume, pendingInput: heldInput + pendingInput)
+    }
+
+    /// Where the surface can resume now.
+    var resumePoint: ResumePoint? {
+        resume
+    }
+
+    private func handle(_ command: Command) {
+        switch command {
+        case .start:
+            guard task == nil, !stopped else { return }
+            task = Task { await run() }
+        case .stop:
+            shutDown()
+        case let .input(data):
+            input(data)
+        case let .claim(grid):
+            takeLead(grid)
+        case let .size(grid):
+            resize(grid)
+        case .seen:
+            write { try $0.send(MactermProtocol.Seen()) }
+        }
+    }
+
+    private func shutDown() {
+        stopped = true
+        task?.cancel()
+        holdTimer?.cancel()
+        holdTimer = nil
+        if let channel {
+            self.channel = nil
+            Task { await channel.close() }
+        }
     }
 
     // MARK: - Input
 
     /// Keys, pastes and terminal replies. Input that the channel cannot take
     /// goes back to the host (`paneInputUndelivered`). Input that waits for
-    /// the first attach or for the shell is returned by `takePendingInput`.
-    func sendInput(_ data: Data) {
-        lock.lock()
+    /// the first attach or for the shell is returned by `finish`.
+    nonisolated func sendInput(_ data: Data) {
+        commands.yield(.input(data))
+    }
+
+    /// Takes the lead: this client's size becomes the pty's.
+    nonisolated func claim(grid: PaneGrid?) {
+        commands.yield(.claim(grid))
+    }
+
+    /// The user saw the pane: the session clears its attention flags and
+    /// sends them again to every client.
+    nonisolated func seen() {
+        commands.yield(.seen)
+    }
+
+    /// Tells the session the surface's size. Only the leader's size reaches
+    /// the pty.
+    nonisolated func sendSize(_ known: PaneGrid?) {
+        commands.yield(.size(known))
+    }
+
+    private func input(_ data: Data) {
         if !attached {
             if pendingInput.count + data.count <= 1 << 20 { pendingInput.append(data) }
-            lock.unlock()
             return
         }
-        lock.unlock()
-        guard let channel = currentChannel() else {
+        guard let channel else {
             host.paneInputUndelivered(data)
             // A key in a channel that ended reports it again.
             host.paneLinkLost()
             return
         }
-        output.async { [host] in
+        output.async { [host, name] in
             do { try channel.sendInput(data) } catch ProtocolFrame.FrameError.tooLarge {
                 // A paste over the frame limit never fits: the link is fine.
-                logger.info("pane \(self.name, privacy: .public): input too large")
+                logger.info("pane \(name, privacy: .public): input too large")
             } catch {
-                logger.info("pane \(self.name, privacy: .public): input not sent: \(String(describing: error), privacy: .public)")
+                logger.info("pane \(name, privacy: .public): input not sent: \(String(describing: error), privacy: .public)")
                 host.paneInputUndelivered(data)
                 host.paneLinkLost()
             }
         }
     }
 
-    /// The input that never reached a channel. Call it after `stop()`.
-    func takePendingInput() -> Data {
-        lock.lock()
-        defer { lock.unlock() }
-        let kept = heldInput + pendingInput
-        heldInput = Data()
-        pendingInput = Data()
-        return kept
-    }
-
-    /// Takes the lead: this client's size becomes the pty's.
-    func claim(grid: PaneGrid?) {
-        lock.lock()
+    private func takeLead(_ grid: PaneGrid?) {
         if !attached {
             claimPending = true
-            lock.unlock()
             return
         }
-        lock.unlock()
-        send { channel in
-            try channel.send(MactermProtocol.Claim())
-        }
-        sendSize(grid)
+        write { try $0.send(MactermProtocol.Claim()) }
+        resize(grid)
     }
 
-    /// The user saw the pane: the session clears its attention flags and
-    /// sends them again to every client.
-    func seen() {
-        send { try $0.send(MactermProtocol.Seen()) }
-    }
-
-    /// Tells the session the surface's size. Only the leader's size reaches
-    /// the pty.
-    func sendSize(_ known: PaneGrid?) {
+    private func resize(_ known: PaneGrid?) {
         let grid = known ?? host.paneGrid()
         let resize = MactermProtocol.Resize(
             cols: grid.cols, rows: grid.rows,
             xpixel: Self.clamp(grid.widthPx), ypixel: Self.clamp(grid.heightPx)
         )
-        send { try $0.send(resize) }
+        write { try $0.send(resize) }
     }
 
-    private func send(_ body: @escaping @Sendable (PaneChannel) throws -> Void) {
-        guard let channel = currentChannel() else { return }
-        output.async {
+    /// Writes on the channel, after every write that came before.
+    private func write(_ body: @escaping @Sendable (PaneChannel) throws -> Void) {
+        guard let channel else { return }
+        output.async { [name] in
             do { try body(channel) } catch {
-                logger.info("pane \(self.name, privacy: .public): send failed: \(String(describing: error), privacy: .public)")
+                logger.info("pane \(name, privacy: .public): send failed: \(String(describing: error), privacy: .public)")
             }
         }
-    }
-
-    private func currentChannel() -> PaneChannel? {
-        lock.lock()
-        defer { lock.unlock() }
-        return channel
     }
 
     private static func clamp(_ value: UInt32) -> UInt16 {
@@ -361,7 +410,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     }
                     firstAttach = false
                 }
-                if markAttached(channel) { claim(grid: nil) }
+                if markAttached(channel) { takeLead(nil) }
                 let started = Date()
                 if await read(channel, reconnected: reconnected || resuming != nil, shows: shown, attachedAt: grid) {
                     return
@@ -389,7 +438,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         }
     }
 
-    private func sendAttach(_ channel: PaneChannel, _ grid: PaneGrid, resume: ResumePoint? = nil) throws {
+    nonisolated private func sendAttach(_ channel: PaneChannel, _ grid: PaneGrid, resume: ResumePoint? = nil) throws {
         try channel.send(MactermProtocol.Attach(
             cols: grid.cols, rows: grid.rows,
             xpixel: Self.clamp(grid.widthPx), ypixel: Self.clamp(grid.heightPx),
@@ -400,29 +449,19 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         ))
     }
 
-    /// Where the surface can resume now. A driver that starts a new session
-    /// for the same pane gives it to that session.
-    var resumePoint: ResumePoint? {
-        lock.withLock { resume }
-    }
-
     /// The point to resume on `channel`: only for the epoch of the session
     /// that the surface shows. Another epoch is another session process,
     /// whose offsets count from 0.
     private func matchingResumePoint(_ channel: PaneChannel) -> ResumePoint? {
-        lock.withLock {
-            guard let point = resume, point.epoch == channel.epoch else { return nil }
-            return point
-        }
+        guard let point = resume, point.epoch == channel.epoch else { return nil }
+        return point
     }
 
     /// The reading of `channel` ended: the next attach resumes after
     /// `offset`, the last output byte that the surface got. Nil when the
     /// screen shows no known offset: the next attach gets a snapshot.
     private func keepResumePoint(_ channel: PaneChannel, _ offset: UInt64?) {
-        lock.withLock {
-            resume = channel.epoch.flatMap { epoch in offset.map { ResumePoint(epoch: epoch, offset: $0) } }
-        }
+        resume = channel.epoch.flatMap { epoch in offset.map { ResumePoint(epoch: epoch, offset: $0) } }
     }
 
     /// Reads events until the channel ends. True when the session ended (an
@@ -494,7 +533,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     logger.info("pane \(self.name, privacy: .public): grid \(change, privacy: .public), attach again")
                     // On the queue of the sizes, so that it goes after a
                     // resize that waits there.
-                    send { [self] in try sendAttach($0, now) }
+                    write { [self] in try sendAttach($0, now) }
                     continue
                 }
                 attachGrid = nil
@@ -505,7 +544,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             case let .lead(leader):
                 leads = leader
                 // A client that starts to lead sends its size.
-                if leader { sendSize(nil) }
+                if leader { resize(nil) }
                 host.paneLead(leader)
             case let .foreground(foreground):
                 host.paneForeground(foreground)
@@ -569,8 +608,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     }
 
     private func install(_ channel: PaneChannel) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
         guard !stopped else { return false }
         self.channel = channel
         return true
@@ -579,8 +616,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// True when a channel was installed.
     @discardableResult
     private func uninstall() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
         defer { channel = nil }
         return channel != nil
     }
@@ -588,8 +623,6 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// An attach went out. The input from before the first attach becomes
     /// `heldInput`. True when a claim waited too.
     private func markAttached(_ channel: PaneChannel) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
         if !attached {
             heldInput = pendingInput
             pendingInput = Data()
@@ -598,10 +631,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         if !heldInput.isEmpty {
             // The wait starts again at each attach: the input went nowhere.
             holdTimer?.cancel()
-            holdTimer = Task { [self, startWait] in
+            holdTimer = Task { [weak self, startWait] in
                 try? await Task.sleep(for: startWait)
                 guard !Task.isCancelled else { return }
-                releaseHeldInput()
+                await self?.releaseHeldInput()
             }
         }
         defer { claimPending = false }
@@ -609,20 +642,18 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     }
 
     /// Sends `heldInput`, once. A stopped session sends nothing, and
-    /// `takePendingInput` gives the input back.
+    /// `finish` gives the input back.
     private func releaseHeldInput() {
-        lock.lock()
-        defer { lock.unlock() }
         guard !heldInput.isEmpty, !stopped, let channel else { return }
         holdTimer?.cancel()
         holdTimer = nil
         let held = heldInput
         heldInput = Data()
-        output.async { [host] in
+        output.async { [host, name] in
             do { try channel.sendInput(held) } catch ProtocolFrame.FrameError.tooLarge {
-                logger.info("pane \(self.name, privacy: .public): held input too large")
+                logger.info("pane \(name, privacy: .public): held input too large")
             } catch {
-                logger.info("pane \(self.name, privacy: .public): held input not sent: \(String(describing: error), privacy: .public)")
+                logger.info("pane \(name, privacy: .public): held input not sent: \(String(describing: error), privacy: .public)")
                 host.paneInputUndelivered(held)
             }
         }

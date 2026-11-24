@@ -88,7 +88,7 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
         }
     }
 
-    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result {
+    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args, timeout _: Duration?) async throws -> M.Result {
         guard isOpen else { throw ServerClientError.disconnected }
         lock.withLock { methods.append(M.name) }
         guard let result = try answer(M.name, args) as? M.Result else { throw ServerClientError.protocolError }

@@ -115,29 +115,67 @@ final class ServerConnection: @unchecked Sendable {
     }
 
     /// Sends one request and waits for its response. A response with `err`
-    /// throws `ProtocolControlError.errorResponse`.
-    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result {
-        let response = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MactermProtocol.Response, Error>) in
-            lock.lock()
-            guard !isClosed else {
-                lock.unlock()
-                continuation.resume(throwing: ServerClientError.disconnected)
-                return
+    /// throws `ProtocolControlError.errorResponse`. With a `timeout`, a
+    /// response that does not come in time throws
+    /// `ServerClientError.noAnswer`. A cancelled or timed-out request
+    /// forgets its id: a late response is dropped.
+    func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args, timeout: Duration?) async throws -> M.Result {
+        guard let timeout else { return try await request(method, args) }
+        return try await withThrowingTaskGroup(of: M.Result.self) { group in
+            group.addTask { try await self.request(M.self, args) }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw ServerClientError.noAnswer
             }
-            let id = nextID
-            nextID += 1
-            pending[id] = continuation
-            lock.unlock()
-            do {
-                try send(.request(MactermProtocol.Request(id: id, method: method, args: args)))
-            } catch {
+            // The loser is cancelled: the request forgets its id, and the
+            // sleep ends.
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else { throw CancellationError() }
+            return result
+        }
+    }
+
+    /// The requests that wait for a response. Tests read it.
+    var pendingCount: Int {
+        lock.withLock { pending.count }
+    }
+
+    private func request<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result {
+        let id = lock.withLock {
+            defer { nextID += 1 }
+            return nextID
+        }
+        let response = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MactermProtocol.Response, Error>) in
                 lock.lock()
-                let waiting = pending.removeValue(forKey: id)
+                guard !isClosed else {
+                    lock.unlock()
+                    continuation.resume(throwing: ServerClientError.disconnected)
+                    return
+                }
+                // The cancel handler takes the lock too: a cancel before this
+                // point is seen here, and one after it finds the entry.
+                guard !Task.isCancelled else {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                pending[id] = continuation
                 lock.unlock()
-                waiting?.resume(throwing: error)
+                do {
+                    try send(.request(MactermProtocol.Request(id: id, method: method, args: args)))
+                } catch {
+                    forget(id)?.resume(throwing: error)
+                }
             }
+        } onCancel: {
+            forget(id)?.resume(throwing: CancellationError())
         }
         return try response.result(of: method)
+    }
+
+    private func forget(_ id: UInt64) -> CheckedContinuation<MactermProtocol.Response, Error>? {
+        lock.withLock { pending.removeValue(forKey: id) }
     }
 
     /// False once the connection ended.
@@ -151,7 +189,7 @@ final class ServerConnection: @unchecked Sendable {
     /// it to the session, and every frame of the channel comes through the
     /// returned object. The pane sends `attach` first, to get output.
     func openChannel(session: String) async throws -> PaneChannel {
-        let result = try await call(MactermProtocol.ChannelOpen.self, .init(session: session))
+        let result = try await call(MactermProtocol.ChannelOpen.self, .init(session: session), timeout: nil)
         let channel = PaneChannel(connection: self, number: result.channel, epoch: result.epoch)
         guard register(channel.sink, as: result.channel) else {
             channel.sink.finish()
@@ -246,10 +284,7 @@ final class ServerConnection: @unchecked Sendable {
     private func handle(_ message: ProtocolControl) throws {
         switch message {
         case let .response(response):
-            lock.lock()
-            let waiting = pending.removeValue(forKey: response.re)
-            lock.unlock()
-            waiting?.resume(returning: response)
+            forget(response.re)?.resume(returning: response)
         case let .events(batch):
             let events = batch.ev.compactMap(ServerEvent.init)
             if !events.isEmpty { eventSink.yield(ServerEventBatch(seq: batch.seq, events: events)) }

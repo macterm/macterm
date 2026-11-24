@@ -222,7 +222,10 @@ final class RemotePaneDriver: PaneInputRoute {
         let end = await withCheckedContinuation { ending = $0 }
         // A key can end the session while its reading still feeds the
         // surface: the point is the offset after the last byte fed.
-        resume = await session.finish()
+        let finished = await session.finish()
+        resume = finished.resume
+        // Input that never reached a channel waits for the next session.
+        undelivered.append(finished.pendingInput)
         return end
     }
 
@@ -278,8 +281,6 @@ final class RemotePaneDriver: PaneInputRoute {
         switch state {
         case let .running(session):
             session.stop()
-            // Input that never reached a channel waits for the next session.
-            undelivered.append(session.takePendingInput())
         case let .plain(shell): shell.terminate()
         default: break
         }
