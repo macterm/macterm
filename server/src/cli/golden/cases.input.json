@@ -196,6 +196,26 @@
   {
     "arguments": [
       "project",
+      "create",
+      "/tmp/api",
+      "--name",
+      "Work/api"
+    ],
+    "method": null,
+    "responses": {
+      "project.create": {
+        "error": {
+          "action": "select another name",
+          "code": "bad_request",
+          "message": "a project name cannot contain a slash"
+        },
+        "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
       "select",
       "api"
     ],
@@ -295,6 +315,25 @@
           ]
         },
         "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
+      "rename",
+      "api",
+      "Work/api"
+    ],
+    "method": null,
+    "responses": {
+      "project.rename": {
+        "error": {
+          "action": "select another name",
+          "code": "bad_request",
+          "message": "a project name cannot contain a slash"
+        },
+        "ok": false
       }
     }
   },

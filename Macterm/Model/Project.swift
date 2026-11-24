@@ -130,18 +130,32 @@ extension Project {
         synthetic(for: id) != nil
     }
 
-    /// Why a typed project name is refused, or nil when it is free. A
-    /// sentinel workspace reserves its name, because `ControlHandler`
-    /// resolves it before any project (`PinnedTabs.reservesName`,
-    /// `ScratchTabs.reservesName`). The one test every naming path applies.
-    static func reservedNameMessage(for name: String) -> String? {
+    /// Why a typed project name is refused, or nil when it is allowed. The
+    /// one test every naming path applies. A name cannot contain a slash
+    /// (`hasSlash`). A sentinel workspace reserves its name, because
+    /// `ControlHandler` resolves it before any project
+    /// (`PinnedTabs.reservesName`, `ScratchTabs.reservesName`).
+    static func nameRefusal(for name: String) -> String? {
+        if hasSlash(name) { return slashMessage }
         if PinnedTabs.reservesName(name) { return PinnedTabs.reservedNameMessage }
         if ScratchTabs.reservesName(name) { return ScratchTabs.reservedNameMessage }
         return nil
     }
 
-    /// `reservedNameMessage(for:) != nil`.
+    /// Whether a sentinel workspace reserves `name`.
     static func reservesName(_ name: String) -> Bool {
-        reservedNameMessage(for: name) != nil
+        PinnedTabs.reservesName(name) || ScratchTabs.reservesName(name)
     }
+
+    /// Whether `name` contains a slash. A nested project is named by the
+    /// path of names from the top level ("Work/api/lib": the palette and
+    /// Move to Project), so a slash in one name makes that path ambiguous.
+    /// Names that got a slash before this rule still load.
+    static func hasSlash(_ name: String) -> Bool {
+        name.contains("/")
+    }
+
+    /// Why a typed name with a slash was refused, as the app says it. The
+    /// CLI says the same in English (`ControlHandler.checkName`).
+    static let slashMessage = String(localized: "A project name cannot contain a slash.")
 }

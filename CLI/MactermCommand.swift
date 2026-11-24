@@ -213,7 +213,7 @@ struct ProjectCommand: ParsableCommand {
         @Argument(help: "Project directory (absolute or ~-prefixed), or a remote [user@]host:dir.")
         var path: String
 
-        @Option(help: "Display name. The default is the name of the directory.")
+        @Option(help: "Display name, with no slash. The default is the name of the directory.")
         var name: String?
 
         @Flag(help: "Select the project too.")
@@ -270,7 +270,7 @@ struct ProjectCommand: ParsableCommand {
         @Argument(help: "Project name, UUID, or index.")
         var project: String
 
-        @Argument(help: "New name for the project.")
+        @Argument(help: "New name for the project, with no slash.")
         var name: String
 
         @OptionGroup var options: ConnectionOptions
