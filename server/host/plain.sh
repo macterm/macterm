@@ -10,9 +10,15 @@
 # line, and the shell starts in the home folder. The error of cd itself goes
 # to /dev/null: it is in the words of the host's shell.
 #
+# The first output is the pid of the shell on the host, in an OSC that no
+# terminal knows (PlainShellAnnouncement). The pid stays when the script
+# execs the login shell. The app removes the OSC before the pane gets the
+# bytes, and asks the host about that pid before a close warning.
+#
 # The text has no two backslashes in a row: fish reads them in single
 # quotes as one (HostCommands.command). printf makes the backslash of each
 # octal escape.
+printf "\033]7701;shell=%s\007" "$$";
 b=$(printf "\134");
 f=;
 for p in $(printf "%s\n" "$1" | fold -w 2); do

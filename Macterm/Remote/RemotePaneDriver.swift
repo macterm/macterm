@@ -131,6 +131,10 @@ final class RemotePaneDriver {
     private var undelivered = Data()
     /// The session attached at least once in this run.
     private var attached = false
+    /// A session of this run is ending (`PaneSession.finish`). A key then
+    /// goes to no session: before the first attach it waits in `earlyInput`,
+    /// and after an attach it is dropped, as a key in a lost pane is.
+    private var finishing = false
     /// The session told a client of this running state that it attached.
     private var runAttached = false
     /// After this time with no attach, the first connect is slow
@@ -207,9 +211,11 @@ final class RemotePaneDriver {
         view.ready = false
         if let session = view.session {
             view.session = nil
-            session.stop()
-            let kept = session.takePendingInput()
-            if !kept.isEmpty { undelivered.append(kept) }
+            // Input that never reached a channel waits for the next session.
+            Task { [weak self] in
+                let kept = await session.finish().pendingInput
+                if !kept.isEmpty { self?.undelivered.append(kept) }
+            }
         }
         guard case .plain = state else { return }
         syncPlainOutput()
@@ -342,13 +348,16 @@ final class RemotePaneDriver {
         let end = await withCheckedContinuation { ending = $0 }
         // A key can end a session while its reading still feeds the view:
         // each view's point is the offset after the last byte it fed.
+        finishing = true
         for view in views {
             guard let session = view.session else { continue }
             view.session = nil
-            view.resume = await session.finish()
+            let finished = await session.finish()
+            view.resume = finished.resume
             // Input that never reached a channel waits for the next session.
-            undelivered.append(session.takePendingInput())
+            undelivered.append(finished.pendingInput)
         }
+        finishing = false
         return end
     }
 
@@ -392,6 +401,21 @@ final class RemotePaneDriver {
             showPlain(in: view)
         }
         return await withCheckedContinuation { ending = $0 }
+    }
+
+    /// The pane runs a plain shell now.
+    var runsPlainShell: Bool {
+        if case .plain = state { true } else { false }
+    }
+
+    /// Asks the host whether the pane's plain shell waits at its prompt
+    /// (0494). nil when the pane runs no plain shell. false while a program
+    /// runs, and when the host gives no clear answer: never kill an unknown
+    /// foreground in silence.
+    func plainShellIsIdle(timeout: Duration) async -> Bool? {
+        guard case let .plain(shell) = state else { return nil }
+        guard let host, let pid = shell.hostShellPID else { return false }
+        return await host.plainShellIsIdle(pid: pid, timeout: timeout) ?? false
     }
 
     /// The first ready view runs the plain shell, from a clear screen.
@@ -461,12 +485,10 @@ final class RemotePaneDriver {
     private func teardown() {
         switch state {
         case .running:
+            // Each view's session stops here. `runChannel` takes its point
+            // and its input with `finish`.
             for view in views {
-                guard let session = view.session else { continue }
-                view.session = nil
-                session.stop()
-                // Input that never reached a channel waits for the next session.
-                undelivered.append(session.takePendingInput())
+                view.session?.stop()
             }
         case let .plain(shell):
             shell.terminate()
@@ -493,6 +515,8 @@ final class RemotePaneDriver {
 
     private func route(_ data: Data, from view: View) {
         switch state {
+        case .running where finishing:
+            if !attached { keep(data) }
         case .running:
             if let session = view.session {
                 session.sendInput(data)

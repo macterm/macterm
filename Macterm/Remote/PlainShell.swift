@@ -17,6 +17,14 @@ final class PlainShell: PaneInputRoute, @unchecked Sendable {
     private var exitSource: DispatchSourceProcess?
     /// Read and written on `io` only.
     private var closed = false
+    /// Takes the shell's pid on the host out of the first output
+    /// (`PlainShellAnnouncement`). The reader writes it, the close check reads it.
+    private let announcement = OSAllocatedUnfairLock(initialState: PlainShellAnnouncement())
+
+    /// The pid of the login shell on the host, when `plain.sh` announced it.
+    var hostShellPID: Int32? {
+        announcement.withLock(\.pid)
+    }
 
     /// Starts `/usr/bin/ssh` (or the first argument, when it is a path)
     /// with `arguments` on a new pty of size `grid`. nil when it cannot.
@@ -73,10 +81,14 @@ final class PlainShell: PaneInputRoute, @unchecked Sendable {
         pid = childPID
 
         let reader = DispatchSource.makeReadSource(fileDescriptor: primaryFD, queue: .global(qos: .userInitiated))
+        let announcement = announcement
         reader.setEventHandler { [weak host] in
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             let count = read(primaryFD, &buffer, buffer.count)
-            if count > 0 { host?.paneFeed(Data(buffer[0 ..< count])) }
+            guard count > 0 else { return }
+            let chunk = Data(buffer[0 ..< count])
+            let bytes = announcement.withLock { $0.consume(chunk) }
+            if !bytes.isEmpty { host?.paneFeed(bytes) }
         }
         reader.setCancelHandler { close(primaryFD) }
         reader.resume()
