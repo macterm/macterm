@@ -15,6 +15,21 @@ enum PaletteMotion {
     static var transition: BlurReplaceTransition { .blurReplace }
 }
 
+// MARK: - Insets
+
+/// The horizontal insets of a result row, and the edge that the text of the
+/// list starts at. A section header and a one-line notice start at `text`,
+/// so the label lines up with the title of a row with no icon, as in native
+/// lists. A row with an icon puts its title after the icon.
+enum PaletteRowInsets {
+    /// From the list's edge to the selection highlight.
+    static let highlight: CGFloat = 6
+    /// From the highlight's edge to the row's content.
+    static let content: CGFloat = 14
+    /// From the list's edge to the row's content.
+    static let text: CGFloat = highlight + content
+}
+
 // MARK: - Mount
 
 /// Puts the palette over a window while it is visible, in one frame, and
@@ -262,7 +277,7 @@ struct CommandPalettePanel: View {
                                     Text(header)
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(MactermTheme.fgDim)
-                                        .padding(.horizontal, 14)
+                                        .padding(.horizontal, PaletteRowInsets.text)
                                         .padding(.top, sectionIndex == 0 ? 8 : 12)
                                         .padding(.bottom, 4)
                                 }
@@ -565,8 +580,9 @@ struct CommandPalettePanel: View {
 
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
-    /// The list's padding above the first row and below the last.
-    private static let listPadding: CGFloat = 6
+    /// The list's padding above the first row and below the last: the rows'
+    /// side inset, so the gap above the first row equals the side gap.
+    private static let listPadding = PaletteRowInsets.highlight
 
     /// The height of a notice that fills a list with no rows: the viewport
     /// less the list's padding. A notice of the full viewport height made the
@@ -878,7 +894,7 @@ private struct PaletteFailureNotice: View {
         }
         .font(.system(size: 13))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PaletteRowInsets.text)
         .padding(.vertical, 6)
     }
 
@@ -970,13 +986,13 @@ private struct CommandPaletteRow: View {
                     .foregroundStyle(MactermTheme.fgDim)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PaletteRowInsets.content)
         .padding(.vertical, 8)
         .background(isSelected ? MactermTheme.fg.opacity(0.12) : .clear)
         // Radius is concentric with the palette container (16) minus the 6pt
         // inset below, so the highlight's curve aligns with the palette's edge.
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .padding(.horizontal, 6)
+        .padding(.horizontal, PaletteRowInsets.highlight)
     }
 
     /// The title with the characters the query matched in semibold — what
