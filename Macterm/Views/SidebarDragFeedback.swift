@@ -168,7 +168,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
 ///    with "index -2 out of bounds". A drag leaves the outline view each time
 ///    that it goes onto a row with its own `.dropDestination`, for example a
 ///    project header. The guard answers "no drop" and does not call SwiftUI.
-/// 2. **A branch drag** (a pasteboard type of `branchTypes`: a project). Only
+/// 2. **A branch drag** (a pasteboard type of `branchTypes(of:)`: a project). Only
 ///    the `ForEach`s of expandable rows take it, but AppKit proposes the slots
 ///    between the leaf rows (the tabs). SwiftUI refuses them, so the gap stays
 ///    at the slot where the drag started and the drop lands somewhere else.
@@ -204,23 +204,28 @@ enum OutlineGapDropGuard {
     /// The classes that have the guard.
     private static var guardedClasses: Set<ObjectIdentifier> = []
 
-    /// The pasteboard types that only the `ForEach`s of expandable rows take.
-    private(set) static var branchTypes: Set<NSPasteboard.PasteboardType> = []
+    /// The key of the branch types of one outline view.
+    private static var branchTypesKey: UInt8 = 0
+
+    /// The pasteboard types that only the `ForEach`s of expandable rows of
+    /// `outline` take. Each outline view has its own: the guard is on a
+    /// class, which other Lists share.
+    static func branchTypes(of outline: NSOutlineView) -> [NSPasteboard.PasteboardType] {
+        (objc_getAssociatedObject(outline, &branchTypesKey) as? [String] ?? []).map { .init($0) }
+    }
 
     /// Installs the guard on the class of the outline view's data source,
-    /// one time for each class. `branchTypes` add to the types of a branch
-    /// drag.
+    /// one time for each class, and sets the branch types of `outline`.
     static func install(
         on outline: NSOutlineView,
         branchTypes: Set<NSPasteboard.PasteboardType> = []
     ) -> Result {
         guard let source = outline.dataSource else { return .noDataSource }
         guard let dataSourceClass = declaredClass(of: source) else { return .unsupported }
+        let names = branchTypes.map(\.rawValue).sorted()
+        objc_setAssociatedObject(outline, &branchTypesKey, names, .OBJC_ASSOCIATION_COPY_NONATOMIC)
         let key = ObjectIdentifier(dataSourceClass)
-        if guardedClasses.contains(key) {
-            self.branchTypes.formUnion(branchTypes)
-            return .installed
-        }
+        if guardedClasses.contains(key) { return .installed }
         let selector = #selector(NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:))
         guard let method = class_getInstanceMethod(dataSourceClass, selector) else { return .unsupported }
         let original = unsafeBitCast(method_getImplementation(method), to: Validate.self)
@@ -231,7 +236,7 @@ enum OutlineGapDropGuard {
                         return original(source, selector, view, info, item, index)
                     }
                     if index < NSOutlineViewDropOnItemIndex { return [] }
-                    let types = Array(OutlineGapDropGuard.branchTypes)
+                    let types = OutlineGapDropGuard.branchTypes(of: view)
                     guard !types.isEmpty, info.draggingPasteboard.availableType(from: types) != nil else {
                         return original(source, selector, view, info, item, index)
                     }
@@ -251,7 +256,6 @@ enum OutlineGapDropGuard {
             method_setImplementation(method, block)
         }
         guardedClasses.insert(key)
-        self.branchTypes.formUnion(branchTypes)
         return .installed
     }
 
