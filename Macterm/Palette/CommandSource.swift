@@ -99,7 +99,7 @@ struct CommandSource: PaletteSource {
                 category: command.category.title,
                 score: 0,
                 isEnabled: false,
-                icon: command.paletteScope?.pill.icon,
+                icon: command.paletteIcon,
                 searchAliases: command.searchAliases,
                 action: {}
             )

@@ -31,7 +31,7 @@ final class PaletteResponder: KeyResponder {
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
         if appState.isCommandPaletteVisible,
            let action = HotkeyAction.allCases.first(where: {
-               HotkeyRegistry.matches(event, action: $0) && $0.appCommand.paletteScreen(in: ctx) != nil
+               $0.appCommand.opensPaletteScreen && HotkeyRegistry.matches(event, action: $0)
            })
         {
             if let run = action.appCommand.action(in: ctx) {

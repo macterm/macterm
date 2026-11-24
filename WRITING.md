@@ -79,7 +79,7 @@ Each row has one word to use. The words in the second column have more than one 
 | command | action | Use "action" only for an App Intent in Shortcuts, and for the `action:` key in a palette file. |
 | grid cell | cell | Use "character cell" for a cell in a terminal. |
 | display | screen, monitor | |
-| folder | directory | Use "directory" only in a file path, a key name or a command. The command **Change Project Directory** and its row **Current Pane's Directory** keep the word "directory": Ethan chose these names. |
+| folder | directory | Use "directory" only in a file path, a key name or a command. The command **Change Project Directory** and its row **Current Pane's Directory** keep the word "directory". |
 | setting | option, preference | |
 | Settings | Preferences | |
 | use | utilize, leverage | |

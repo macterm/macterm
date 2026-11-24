@@ -7,7 +7,9 @@ import Foundation
 ///
 /// The field starts on `initialValue`, selected, so a keystroke replaces
 /// it. Return commits the text in the field, or the value of the selected
-/// row when an arrow key selected one. The rows under the field are
+/// row when an arrow key selected one. At an empty field the top row is
+/// selected, and Return takes it: the rows at an empty field are offers,
+/// and an empty field has no value to commit. The rows under the field are
 /// completions: Tab or a click puts the selected one in the field, and
 /// never commits. Escape, or Backspace at an empty field, pops the screen
 /// like any screen. A commit that `commit` refuses keeps the screen and

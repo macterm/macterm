@@ -56,8 +56,9 @@ extension AppCommand {
 
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
-    /// project is active, Change Project Directory for a remote project). Single source of truth for execution — used by both the
-    /// command palette and the menu bar so the two stay in sync.
+    /// project is active, Change Project Directory for a remote project).
+    /// Single source of truth for execution — used by both the command
+    /// palette and the menu bar so the two stay in sync.
     @MainActor
     func action(in ctx: AppCommandContext) -> (@MainActor () -> Void)? {
         if actsOnShownTab, ctx.appState.keyWindowShowsProjectScreen { return nil }
@@ -461,6 +462,20 @@ extension AppCommand {
     /// on the host, and Macterm cannot complete or check a path there.
     static var changeProjectDirectoryUnavailableReason: String {
         String(localized: "Change Project Directory is not available for remote projects")
+    }
+
+    /// The command opens a palette screen: a built-in one (`paletteScope`)
+    /// or an input screen (`paletteScreen(in:)`), when it applies.
+    var opensPaletteScreen: Bool {
+        paletteScope != nil || self == .changeProjectDirectory
+    }
+
+    /// The glyph of the command's palette row, also when the row is muted:
+    /// the pill glyph of the screen that it opens.
+    @MainActor
+    var paletteIcon: PaletteIcon? {
+        if self == .changeProjectDirectory { return AppState.changeProjectDirectoryPill.icon }
+        return paletteScope?.pill.icon
     }
 
     /// The palette screen that this command opens now: a built-in screen

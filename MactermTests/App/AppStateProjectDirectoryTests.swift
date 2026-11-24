@@ -42,11 +42,15 @@ struct AppStateProjectDirectoryTests {
         let root = try makeFolder()
         let sub = root + "/sub"
         let fixture = makeFixture(path: root)
-        let input = try #require(fixture.state.changeProjectDirectoryInput(
+        var paneDirectory: String? = root
+        let made = fixture.state.changeProjectDirectoryInput(
             for: fixture.project,
-            paneDirectory: sub + "/",
-            projectStore: fixture.store
-        ))
+            projectStore: fixture.store,
+            paneDirectory: { paneDirectory }
+        )
+        let input = try #require(made)
+        #expect(input.completions("").isEmpty, "the pane is in the project folder")
+        paneDirectory = sub + "/"
         let rows = input.completions("")
         #expect(rows == [PaletteCompletion(title: "Current Pane's Directory", value: sub, subtitle: sub)])
         #expect(input.commit(rows[0].value) == .done)
@@ -57,11 +61,12 @@ struct AppStateProjectDirectoryTests {
     func a_typed_path_sets_the_folder_and_completes_like_add_project() throws {
         let root = try makeFolder()
         let fixture = makeFixture(path: "/tmp")
-        let input = try #require(fixture.state.changeProjectDirectoryInput(
+        let made = fixture.state.changeProjectDirectoryInput(
             for: fixture.project,
-            paneDirectory: nil,
-            projectStore: fixture.store
-        ))
+            projectStore: fixture.store,
+            paneDirectory: { nil }
+        )
+        let input = try #require(made)
         #expect(input.initialValue.isEmpty)
         #expect(input.completions("").isEmpty, "no pane folder: only the typed field")
         #expect(input.completions(root + "/").map(\.title) == ["sub"])
@@ -73,14 +78,18 @@ struct AppStateProjectDirectoryTests {
     func a_bad_folder_is_refused_and_changes_nothing() throws {
         let root = try makeFolder()
         let fixture = makeFixture(path: root)
-        let input = try #require(fixture.state.changeProjectDirectoryInput(
+        let made = fixture.state.changeProjectDirectoryInput(
             for: fixture.project,
-            paneDirectory: nil,
-            projectStore: fixture.store
-        ))
+            projectStore: fixture.store,
+            paneDirectory: { nil }
+        )
+        let input = try #require(made)
         #expect(input.commit(root + "/missing") == .refused("No folder at \(root)/missing"))
         #expect(input.commit("relative/path") == .refused("No folder at relative/path"))
         #expect(input.commit("  ") == .refused("Type a folder path"))
+        let file = root + "/file.txt"
+        try "x".write(toFile: file, atomically: true, encoding: .utf8)
+        #expect(input.commit(file) == .refused("No folder at \(file)"), "a file is not a folder")
         #expect(path(of: fixture) == root)
     }
 
@@ -94,6 +103,14 @@ struct AppStateProjectDirectoryTests {
         #expect(AppState.paneDirectoryOffer(root + "/sub", for: project) == root + "/sub")
         let noFolder = Project(name: "bare", path: "", sortOrder: 0)
         #expect(AppState.paneDirectoryOffer(root, for: noFolder) == nil, "a project with no folder has only the typed field")
+    }
+
+    @Test
+    func a_path_with_a_tilde_expands() {
+        let fixture = makeFixture(path: "/tmp")
+        let home = ProjectPath.normalizedForStorage(NSHomeDirectory())
+        #expect(fixture.state.setProjectDirectory(fixture.project.id, to: "~", projectStore: fixture.store) == .done)
+        #expect(path(of: fixture) == home)
     }
 
     @Test
@@ -122,6 +139,8 @@ struct AppStateProjectDirectoryTests {
             return
         }
         #expect(input.pill.title == "Change Project Directory")
+        #expect(AppCommand.changeProjectDirectory.opensPaletteScreen, "its chord is answered with the palette up")
+        #expect(AppCommand.changeProjectDirectory.paletteIcon == "folder")
 
         let item = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
             .first { $0.title == AppCommand.changeProjectDirectory.title }
@@ -137,6 +156,10 @@ struct AppStateProjectDirectoryTests {
         #expect(AppCommand.changeProjectDirectory.paletteScreen(in: ctx) == nil)
         #expect(AppCommand.changeProjectDirectory.unavailableNotice(in: ctx) == reason)
         #expect(AppCommand.changeProjectDirectory.paletteDisabledHint(in: ctx) == reason)
+        let muted = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
+            .first { $0.title == AppCommand.changeProjectDirectory.title }
+        #expect(muted?.isEnabled == false)
+        #expect(muted?.icon == "folder", "the muted row keeps the screen's glyph")
         #expect(fixture.state.setProjectDirectory(fixture.project.id, to: "/tmp", projectStore: fixture.store) == .refused(reason))
         #expect(path(of: fixture) == "devbox:~/proj")
     }

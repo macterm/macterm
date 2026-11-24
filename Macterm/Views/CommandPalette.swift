@@ -105,6 +105,11 @@ struct CommandPalettePanel: View {
 
     @State
     private var selectedIndex = 0
+    /// An arrow key chose the selected row of an input screen. Only then
+    /// does Return take the row while the field has text: a row that the
+    /// pointer selected is not a choice (`commit`).
+    @State
+    private var inputRowChosen = false
     @State
     private var sections: [PaletteSection] = []
     /// The top screen's listing in flight, read off its scope on every
@@ -323,6 +328,7 @@ struct CommandPalettePanel: View {
                           hoverTracker.noteHover(over: idx, current: selectedIndex)
                     else { return }
                     selectedIndex = idx
+                    inputRowChosen = false
                 }
                 .onChange(of: selectedIndex) { old, idx in
                     // Only follow keyboard navigation; hovering shouldn't scroll.
@@ -377,6 +383,7 @@ struct CommandPalettePanel: View {
         }
         .onChange(of: query) {
             selectedIndex = restingIndex
+            inputRowChosen = false
             refresh()
         }
         .onChange(of: windowState.paletteStack) {
@@ -504,6 +511,7 @@ struct CommandPalettePanel: View {
         }
         if idx >= 0, idx < flatItems.count {
             selectedIndex = idx
+            inputRowChosen = true
         }
     }
 
@@ -623,12 +631,14 @@ struct CommandPalettePanel: View {
         let itemID: String
     }
 
-    /// Commit an input screen's selected row, or its field when no row is
-    /// selected: the palette closes when the action ran, and stays with the
+    /// Commit an input screen's selected row, or its field: the row when an
+    /// arrow key chose it, or when the field is empty and so has nothing to
+    /// commit. The palette closes when the action ran, and stays with the
     /// reason when the value was refused. A refused row puts its value in
     /// the field, so the reason shows with the text it is about.
     private func commit(_ inputScope: InputPaletteScope) {
-        let row = flatItems.indices.contains(selectedIndex) ? inputScope.completion(for: flatItems[selectedIndex]) : nil
+        let takesRow = (inputRowChosen || query.isEmpty) && flatItems.indices.contains(selectedIndex)
+        let row = takesRow ? inputScope.completion(for: flatItems[selectedIndex]) : nil
         let value = row ?? query
         guard inputScope.commit(value) else {
             if value != query {

@@ -4,27 +4,32 @@ import Foundation
 /// folder. Open panes and their sessions stay where they are; a new tab
 /// that starts in the project's folder starts in the new one.
 extension AppState {
-    /// The palette screen of Change Project Directory for `project`: a typed
-    /// path with completion, and above it the focused pane's folder
-    /// (`currentPaneDirectory`) while the field is empty. Nil for a remote
-    /// project: its folder is on the host, and nothing completes or checks
-    /// a path there.
-    func changeProjectDirectoryInput(for project: Project, projectStore: ProjectStore) -> PaletteInput? {
-        changeProjectDirectoryInput(for: project, paneDirectory: currentPaneDirectory(of: project), projectStore: projectStore)
+    /// The pill of the screen, and the glyph of its palette row.
+    static var changeProjectDirectoryPill: PalettePill {
+        PalettePill(title: AppCommand.changeProjectDirectory.title, icon: "folder")
     }
 
-    /// The screen with `paneDirectory` as the pane row's folder: the row
-    /// shows only for `Self.paneDirectoryOffer`.
-    func changeProjectDirectoryInput(for project: Project, paneDirectory: String?, projectStore: ProjectStore) -> PaletteInput? {
+    /// The palette screen of Change Project Directory for `project`: a typed
+    /// path with completion, and above it the focused pane's folder while
+    /// the field is empty (`paneDirectoryOffer`). The screen reads the
+    /// pane's folder when it shows, not when the palette builds its row:
+    /// `paneDirectory` (`currentPaneDirectory` by default). Nil for a remote
+    /// project: its folder is on the host, and nothing completes or checks
+    /// a path there.
+    func changeProjectDirectoryInput(
+        for project: Project,
+        projectStore: ProjectStore,
+        paneDirectory: (@MainActor () -> String?)? = nil
+    ) -> PaletteInput? {
         guard !project.isRemote else { return nil }
         let projectID = project.id
-        let paneDirectory = Self.paneDirectoryOffer(paneDirectory, for: project)
+        let readPaneDirectory = paneDirectory ?? { [self] in currentPaneDirectory(of: project) }
         return PaletteInput(
             id: "changeProjectDirectory:\(projectID.uuidString)",
-            pill: PalettePill(title: AppCommand.changeProjectDirectory.title, icon: "folder"),
+            pill: Self.changeProjectDirectoryPill,
             prompt: String(localized: "Type a folder path"),
             completions: { text in
-                if text.isEmpty, let paneDirectory {
+                if text.isEmpty, let paneDirectory = Self.paneDirectoryOffer(readPaneDirectory(), for: project) {
                     return [PaletteCompletion(
                         title: String(localized: "Current Pane's Directory"),
                         value: paneDirectory,
