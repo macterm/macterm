@@ -342,9 +342,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The palette screen this command opens now: `paletteScope`, or an
-    /// input screen about the active project (Move Into Project), which
-    /// needs the context to name it. nil when the command opens no screen,
+    /// The palette screen this command opens now: `paletteScope`, or a
+    /// screen about the active project (Move Into Project), which needs the
+    /// context to name it. nil when the command opens no screen,
     /// or when it does not apply.
     @MainActor
     func paletteScope(in ctx: AppCommandContext) -> PaletteScopeID? {
@@ -353,7 +353,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
               !SidebarTree.moveTargets(for: projectID, in: ctx.projectStore).isEmpty,
               ctx.projectStore.row(projectID) != nil
         else { return nil }
-        return .input(MoveIntoProjectInput.make(projectID: projectID, appState: ctx.appState, store: ctx.projectStore))
+        return .moveIntoProject(projectID)
     }
 
     /// The raw value is an identifier, never shown: `title` is the label.

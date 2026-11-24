@@ -26,6 +26,9 @@ enum PaletteScopeID: Hashable {
     case custom(CustomPaletteTarget)
     /// A screen that asks for one value (`PaletteInput`).
     case input(PaletteInput)
+    /// The projects that this project can move into
+    /// (`MoveIntoProjectPaletteScope`).
+    case moveIntoProject(UUID)
 
     /// The screens Macterm ships.
     static let builtIn: [PaletteScopeID] = [.passwords, .files]
@@ -38,6 +41,7 @@ enum PaletteScopeID: Hashable {
         case .files: PalettePill(title: AppCommand.files.title, icon: "doc.text.magnifyingglass")
         case let .custom(target): target.pill
         case let .input(input): input.pill
+        case .moveIntoProject: PalettePill(title: AppCommand.moveIntoProject.title, icon: "folder")
         }
     }
 
@@ -50,7 +54,8 @@ enum PaletteScopeID: Hashable {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
         case .custom,
-             .input: ""
+             .input,
+             .moveIntoProject: ""
         }
     }
 
@@ -62,6 +67,7 @@ enum PaletteScopeID: Hashable {
         case .files: .files
         case .custom,
              .input: nil
+        case .moveIntoProject: .moveIntoProject
         }
     }
 
@@ -72,6 +78,7 @@ enum PaletteScopeID: Hashable {
         case .files: FilesPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
         case let .input(input): InputPaletteScope(input: input)
+        case let .moveIntoProject(projectID): MoveIntoProjectPaletteScope(projectID: projectID)
         }
     }
 }

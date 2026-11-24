@@ -827,22 +827,6 @@
         }
       }
     },
-    "A project cannot move into itself or into a project inside it." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트는 자신이나 자신 안의 프로젝트로 이동할 수 없습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "项目不能移入其自身或其中的项目。"
-          }
-        }
-      }
-    },
     "A project is a folder, on this Mac or on a remote machine. A layout is a file that says which tabs, splits and commands a project has." : {
       "localizations" : {
         "ko" : {
@@ -5414,22 +5398,6 @@
         }
       }
     },
-    "More than one project has this path. Rename one of them." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 경로를 가진 프로젝트가 둘 이상입니다. 그중 하나의 이름을 변경하십시오."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有多个项目使用此路径。请重新命名其中一个。"
-          }
-        }
-      }
-    },
     "Morph cursor while moving" : {
       "localizations" : {
         "ko" : {
@@ -5618,23 +5586,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上移"
-          }
-        }
-      }
-    },
-    "Move into “%@”" : {
-      "comment" : "Command palette, Move Into Project: the action row",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%@” 안으로 이동"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移入“%@”"
           }
         }
       }
@@ -6261,22 +6212,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未声明路径。"
-          }
-        }
-      }
-    },
-    "No project has this path." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 경로를 가진 프로젝트가 없습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有项目使用此路径。"
           }
         }
       }
@@ -9271,6 +9206,22 @@
         }
       }
     },
+    "Search projects by name or path..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름 또는 경로로 프로젝트 검색..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按名称或路径搜索项目..."
+          }
+        }
+      }
+    },
     "Search projects or commands..." : {
       "localizations" : {
         "ko" : {
@@ -11010,22 +10961,6 @@
         }
       }
     },
-    "The project is already inside “%@”." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트가 이미 “%@” 안에 있습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "该项目已在“%@”中。"
-          }
-        }
-      }
-    },
     "The row has no directory" : {
       "localizations" : {
         "ko" : {
@@ -11981,22 +11916,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入密码。密码有效后，Macterm 会提议更新存储的密码。"
-          }
-        }
-      }
-    },
-    "Type the path of a project, for example Work/api" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 경로를 입력하십시오. 예: Work/api"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "输入项目路径，例如 Work/api"
           }
         }
       }
