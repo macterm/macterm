@@ -62,7 +62,7 @@ struct NewProjectInputTests {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
-        for text in ["~", "/", folder.path, folder.deletingLastPathComponent().path + "/a", "devbox:~/api"] {
+        for text in [" ", "~", "/", folder.path, folder.deletingLastPathComponent().path + "/a", "devbox:~/api"] {
             #expect(!rows(scope, text, context).contains { $0.title == "Select in Finder" }, "\(text)")
         }
     }
@@ -82,6 +82,15 @@ struct NewProjectInputTests {
         #expect(project.name == "api")
         #expect(project.path == ProjectPath.normalizedForStorage(folder.path), "the path loses its trailing slash")
         #expect(context.appState.activeProjectID == project.id)
+    }
+
+    @Test
+    func spaces_around_a_path_change_nothing() throws {
+        let folder = try makeFolder("api")
+        let scope = InputPaletteScope(input: .newProject)
+        let (context, _) = makeContext()
+        let parent = folder.deletingLastPathComponent().path + "/"
+        #expect(rows(scope, " \(parent) ", context).map(\.title) == ["New Project \"\(parent)\"", "api"])
     }
 
     @Test

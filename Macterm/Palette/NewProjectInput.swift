@@ -24,7 +24,7 @@ extension PaletteInput {
             title: AppCommand.newProject.title,
             prompt: String(localized: "Type a folder path, or select one in Finder"),
             summary: String(localized: "Add a project from a folder"),
-            completions: PaletteInput.pathCompletions,
+            completions: { PaletteInput.pathCompletions($0.trimmingCharacters(in: .whitespaces)) },
             check: NewProjectInput.check
         )
     }
@@ -36,12 +36,14 @@ enum NewProjectInput {
         let typed = text.trimmingCharacters(in: .whitespaces)
         let appState = context.appState
         let store = context.projectStore
-        if typed.isEmpty {
+        if text.isEmpty {
             return .action(PaletteInputAction(title: String(localized: "Select in Finder")) {
                 appState.postPaletteAction = { appState.newProjectFromFolderPanel(store: store) }
                 return .done
             })
         }
+        // Spaces alone are typed text: no Select in Finder, and no path.
+        if typed.isEmpty { return .nothing }
         if PaletteQuery.isRemoteSpecQuery(typed) {
             if let existing = store.projects.first(where: { ProjectPath.matches($0.path, typed) }) {
                 return switchAction(to: existing, appState: appState)

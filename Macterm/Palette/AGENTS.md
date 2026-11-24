@@ -39,7 +39,7 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The panel appears and vanishes in one frame. A view inside the window cannot get the fade at window level. It cannot get the blur of the backdrop either. The panel of the quick terminal gets both for free. A transition that we drew in its place read as a slower fade.
       - The breadcrumb and each pill come and go through `PaletteMotion`. This is `blurReplace` of SwiftUI on an ease-out of 120 ms. Reduce Motion lands them in one frame.
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
-      - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill and a chevron.
+      - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill (none for an input screen) and a chevron.
       - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
