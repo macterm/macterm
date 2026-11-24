@@ -284,9 +284,9 @@ ensure_server() {
     return 0
   fi
   fetched="$(mktemp -d "${TMPDIR:-/tmp}/macterm-server.XXXXXX")"
-  if scripts/build-server.sh download "$SERVER_REPO" "$SERVER_RELEASE" "$key" "$fetched"; then
+  if scripts/build-server.sh download "$SERVER_REPO" "$SERVER_RELEASE" "$key" "$fetched/build" >/dev/null; then
     echo "Downloaded the prebuilt server $key"
-    install_server "$fetched" "$key"
+    install_server "$fetched/build" "$key"
     rm -rf "$fetched"
     return 0
   fi

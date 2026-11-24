@@ -16,7 +16,7 @@
 #                                          <target>, from the manifest
 #   scripts/build-server.sh stage <dir> <tag> <out>
 #                                          copy the build of <dir> to <out>,
-#                                          with the tag in each tarball name
+#                                          with the tag in each file name
 #   scripts/build-server.sh download <repo> <release> <key> <dir>
 #                                          download the build of <key> into
 #                                          <dir> and verify it
@@ -36,12 +36,15 @@
 # scripts and the workflows read the targets and check a build with
 # `targets` and `verify`, and do not repeat the list or the check.
 #
-# A build in the `server-prebuilt` release has tarballs with a tag in their
-# names (`macterm-<key>-<target>-<tag>.tar.gz`, `stage`), and its manifest
-# names them. CI tags them with its run, so two runs never write an asset of
-# the same name. A run that stops before its manifest leaves only tarballs
-# that no manifest names, and the first manifest of a key is the build of
-# that key. Read a tarball's name from the manifest (`file`), never make it.
+# In the `server-prebuilt` release, every file of a build has the tag of the
+# run that uploaded it (`stage`): `macterm-<key>-<target>-<tag>.tar.gz` and
+# `macterm-<key>-server-<tag>.json`. CI uses its run as the tag, so two runs
+# never write an asset of the same name. A run uploads its manifest last.
+# A run that stops before then leaves tarballs that no manifest names, and
+# they do not change any build. `download` takes the oldest manifest of the
+# key that verifies. It writes it as `macterm-<key>-server.json`, so a
+# downloaded build reads as a local build. Get a tarball's name from the
+# manifest (`file`). Do not make the name.
 #
 # The build needs macOS (lipo makes the universal binary) and Zig
 # $ZIG_VERSION. Zig cannot link with Xcode 26.4 or later (zig#31658), so CI
@@ -166,7 +169,7 @@ with open(found[0]) as f:
 PY
 }
 
-# Copy the build in `dir` to `out`, with `tag` in the name of each tarball,
+# Copy the build in `dir` to `out`, with `tag` in the name of each file,
 # and a manifest that names the copies.
 stage() {
   local dir="$1" tag="$2" out="$3"
@@ -183,25 +186,55 @@ for target, entry in manifest["files"].items():
     name = f"macterm-{key}-{target}-{tag}.tar.gz"
     shutil.copyfile(os.path.join(folder, entry["file"]), os.path.join(out, name))
     entry["file"] = name
-with open(os.path.join(out, os.path.basename(path)), "w") as f:
+with open(os.path.join(out, f"macterm-{key}-server-{tag}.json"), "w") as f:
     json.dump(manifest, f, indent=2)
     f.write("\n")
 PY
-  verify "$out" >/dev/null
 }
 
-# Download the build of `key` from a release into `dir`: the manifest, then
-# the tarballs that it names. Exit 0 when the build verifies.
-download() {
-  local repo="$1" release="$2" key="$3" dir="$4" target name
-  mkdir -p "$dir"
-  gh release download "$release" --repo "$repo" --dir "$dir" \
-    --pattern "macterm-$key-server.json" || return 1
+# Download the manifest `name` and the tarballs that it names into `dir`.
+# Exit 0 when the build verifies.
+download_manifest() {
+  local repo="$1" release="$2" key="$3" name="$4" dir="$5" target path
+  gh release download "$release" --repo "$repo" --dir "$dir" --pattern "$name" || return 1
+  if [[ "$name" != "macterm-$key-server.json" ]]; then
+    mv "$dir/$name" "$dir/macterm-$key-server.json" || return 1
+  fi
   for target in "${TARGETS[@]}"; do
-    name="$(basename "$(tarball "$dir" "$target")")" || return 1
-    gh release download "$release" --repo "$repo" --dir "$dir" --pattern "$name" || return 1
+    path="$(tarball "$dir" "$target")" || return 1
+    gh release download "$release" --repo "$repo" --dir "$dir" \
+      --pattern "$(basename "$path")" || return 1
   done
   verify "$dir" "$key" >/dev/null
+}
+
+# Download the build of `key` from a release into `dir`, which must not
+# exist. It tries the manifests of the key that are complete, the oldest
+# first, and takes the first whose tarballs verify. Prints the name of the
+# manifest that it took.
+download() {
+  local repo="$1" release="$2" key="$3" dir="$4"
+  local id manifests name try
+  [[ ! -e "$dir" ]] || { echo "error: $dir exists" >&2; return 1; }
+  id="$(gh api "repos/$repo/releases/tags/$release" --jq .id)" || return 1
+  # The manifest without a tag is the form before tags.
+  manifests="$(gh api --paginate "repos/$repo/releases/$id/assets?per_page=100" \
+    --jq ".[] | select(.state == \"uploaded\")
+      | select(.name | test(\"^macterm-$key-server(-[^/]+)?\\\\.json\$\"))
+      | \"\\(.created_at) \\(.name)\"" | sort)" || return 1
+  [[ -n "$manifests" ]] || { echo "No build of $key in $release" >&2; return 1; }
+  while read -r _ name; do
+    try="$(mktemp -d "${TMPDIR:-/tmp}/macterm-server-download.XXXXXX")"
+    if download_manifest "$repo" "$release" "$key" "$name" "$try"; then
+      mkdir -p "$(dirname "$dir")"
+      mv "$try" "$dir"
+      echo "$name"
+      return 0
+    fi
+    echo "warning: the build of $name does not verify" >&2
+    rm -rf "$try"
+  done <<<"$manifests"
+  return 1
 }
 
 # Global, not local: the EXIT trap runs after build() returns, and under
