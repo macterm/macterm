@@ -77,9 +77,15 @@ extension ScrollbarSurface {
     /// feel is Ghostty's. The 2× on precise deltas is Ghostty's own
     /// frontend factor ("subjective, it feels better"), not a Macterm tune.
     func forwardScrollWheel(_ event: NSEvent) {
+        forwardScrollWheel(event, deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY)
+    }
+
+    /// The wheel path with the deltas of `event` replaced: the part of a pan
+    /// of a zoomed picture that the pan could not take (`PaneZoomController`).
+    func forwardScrollWheel(_ event: NSEvent, deltaX: CGFloat, deltaY: CGFloat) {
         guard let surface else { return }
-        var x = event.scrollingDeltaX
-        var y = event.scrollingDeltaY
+        var x = deltaX
+        var y = deltaY
         if event.hasPreciseScrollingDeltas {
             x *= 2
             y *= 2
