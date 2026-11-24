@@ -179,8 +179,8 @@ final class Pane: Identifiable {
     /// Whether the session's `status` message says that a run goes on. The
     /// session ends a run at OSC 133;D, at a new prompt, at the end of a
     /// progress report, and for a program with no marks (`events.zig`). The
-    /// pane's link gives it the status of its counting view only
-    /// (`PaneLink.counts`). When that view's channel ends,
+    /// pane's link gives it the status of one channel
+    /// (`PaneLink.readsMessages(from:)`). When that channel ends,
     /// `PaneSession.channelEnded` sends `idle`: at an attach, the session
     /// sends its status only when it is not idle.
     private var isSessionRunning = false {
@@ -209,6 +209,12 @@ final class Pane: Identifiable {
     /// runs, and for a command that started before the channel attached.
     @ObservationIgnored
     var commandStartedAt: Date?
+
+    /// The shell's folder that the session reports (OSC 7), for Project
+    /// Insights. nil before the first report, and for a surface with no
+    /// session, which keeps its own (`GhosttyTerminalNSView.currentPwd`).
+    @ObservationIgnored
+    private(set) var sessionDirectory: String?
 
     /// The session's shell and pty, from the channel's `state` message
     /// (`receiveSessionState`). Code that needs a local pid reads it:
@@ -253,9 +259,12 @@ final class Pane: Identifiable {
         case let .foreground(foreground): applyForeground(foreground)
         case let .title(title): receiveReportedTitle(title)
         case let .ttyMode(mode): lineMode = mode
-        case let .mark(mark, host): receiveSessionMark(mark, view: host?.terminalView)
+        case let .mark(mark): receiveCommandMark(mark)
+        case let .cwd(path): sessionDirectory = path
         case let .status(status): receiveSessionStatus(status)
         case let .attention(flags): receiveAttention(flags)
+        case let .notification(title, body): postDesktopNotification(title: title, body: body)
+        case .bell: ringBell()
         case .ended: sessionDidEnd()
         case let .plainShellRunsIn(host): plainShellSurfaceID = host?.surfaceID
         }

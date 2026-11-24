@@ -120,6 +120,11 @@ struct CommandPalettePanel: View {
 
     @State
     private var selectedIndex = 0
+    /// True when `refresh` put the selection on an input screen's resting
+    /// row: that is not navigation, so the list does not scroll to it (a
+    /// Cancel row under many completions stays out of view).
+    @State
+    private var selectionIsResting = false
     @State
     private var sections: [PaletteSection] = []
     /// The top screen's listing in flight, read off its scope on every
@@ -233,9 +238,7 @@ struct CommandPalettePanel: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
 
-            if showsResults {
-                Divider().background(MactermTheme.border)
-            }
+            Divider().background(MactermTheme.border)
 
             // Results
             ScrollViewReader { proxy in
@@ -320,16 +323,7 @@ struct CommandPalettePanel: View {
                         .padding(.vertical, Self.listPadding)
                     }
                 }
-                // The height of the results. An input screen with no row and
-                // no notice has none. An input screen's results take the
-                // height of their content, up to the maximum: `fixedSize`
-                // proposes no height, so the scroll view takes the ideal
-                // height of its content, and `maxHeight` caps it. Every other
-                // screen takes the full height, so that the panel does not
-                // change size during a search.
-                .frame(height: showsResults ? nil : 0)
-                .frame(maxHeight: Self.maxResultsHeight)
-                .fixedSize(horizontal: false, vertical: inputScope != nil)
+                .frame(maxHeight: Self.listHeight)
                 .coordinateSpace(name: rowSpace)
                 .background(
                     GeometryReader { geo in
@@ -351,7 +345,7 @@ struct CommandPalettePanel: View {
                 }
                 .onChange(of: selectedIndex) { old, idx in
                     // Only follow keyboard navigation; hovering shouldn't scroll.
-                    guard !hoverTracker.isHoverSelection(idx) else { return }
+                    guard !hoverTracker.isHoverSelection(idx), !selectionIsResting else { return }
                     scrollSelectionIntoView(idx, from: old, proxy: proxy)
                 }
                 // A new screen or a new query is a new list, and it starts at
@@ -519,7 +513,8 @@ struct CommandPalettePanel: View {
             if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
                 selectedIndex = index
             } else {
-                selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
+                selectionIsResting = true
+                selectedIndex = inputScope.restingItemID.flatMap { id in flatItems.firstIndex { $0.id == id } } ?? -1
             }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
@@ -532,6 +527,7 @@ struct CommandPalettePanel: View {
     /// Enter can never land on one. When only disabled rows remain in that
     /// direction, the selection stays put.
     private func moveSelection(_ delta: Int) {
+        selectionIsResting = false
         var idx = min(selectedIndex, flatItems.count) + delta
         while idx >= 0, idx < flatItems.count, !flatItems[idx].isEnabled {
             idx += delta
@@ -585,25 +581,19 @@ struct CommandPalettePanel: View {
         return .handled
     }
 
+    /// The most height of the results under the field. The scroll view
+    /// takes all the height that it gets, so the list has this height on
+    /// every screen and in every state. The panel therefore does not grow or
+    /// shrink while the user types. Do not size the list to its rows: an
+    /// input screen with one row has the height of the root palette. Only a
+    /// window that is too short makes the list shorter.
+    static let listHeight: CGFloat = 340
+
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
     /// The list's padding above the first row and below the last: the rows'
     /// side inset, so the gap above the first row equals the side gap.
     private static let listPadding = PaletteRowInsets.highlight
-
-    /// The maximum height of the results. Past it, they scroll.
-    private static let maxResultsHeight: CGFloat = 340
-
-    private var showsResults: Bool {
-        Self.showsResults(isInput: inputScope != nil, hasRows: !sections.isEmpty, hasNotice: failure != nil || loading != nil)
-    }
-
-    /// Whether the panel shows its divider and results under the field. An
-    /// input screen with no row and no notice shows the field alone. Every
-    /// other screen always shows its results.
-    static func showsResults(isInput: Bool, hasRows: Bool, hasNotice: Bool) -> Bool {
-        !isInput || hasRows || hasNotice
-    }
 
     /// The height of a notice that fills a list with no rows: the viewport
     /// less the list's padding. A notice of the full viewport height made the
@@ -671,6 +661,8 @@ struct CommandPalettePanel: View {
             query = text
         case .refused:
             refresh()
+        case .cancelled:
+            leaveScope()
         case .closed:
             query = ""
             windowState.isCommandPaletteVisible = false

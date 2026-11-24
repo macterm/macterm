@@ -103,9 +103,45 @@ struct InputPaletteScopeTests {
         #expect(rows(scope, "ab").count == 1)
         #expect(scope.failure == nil, "an edit clears it")
 
-        #expect(rows(scope, "").isEmpty, "an empty field has no row")
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.cancelItemID], "an empty field has only the Cancel row")
         #expect(scope.failure == nil, "and no notice")
         #expect(log.committed.isEmpty)
+    }
+
+    @Test
+    func an_empty_field_has_a_cancel_row_last_that_leaves_the_screen() throws {
+        let log = Log()
+        let scope = InputPaletteScope(input: makeInput(log: log) { _ in
+            [PaletteCompletion(title: "Select in Finder", value: "~/")]
+        })
+        let items = rows(scope, "")
+        #expect(items.map(\.title) == ["Select in Finder", "Cancel"])
+        let cancel = try #require(items.last)
+        #expect(!scope.isAction(cancel))
+        #expect(scope.completion(for: cancel) == nil)
+        #expect(scope.restingItemID == InputPaletteScope.cancelItemID, "with no action row, Return on an empty field cancels")
+        #expect(scope.press(cancel) == .cancelled)
+        #expect(scope.press(items[0]) == .fill("~/"), "another selected row is not the Cancel row")
+        #expect(log.committed.isEmpty)
+
+        let typed = rows(scope, "notes")
+        #expect(!typed.contains { $0.id == InputPaletteScope.cancelItemID }, "text hides the Cancel row")
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "the action row is the resting row")
+        #expect(scope.press(cancel) != .cancelled, "a stale Cancel row does nothing once there is text")
+
+        #expect(rows(scope, "a/b").allSatisfy { $0.id != InputPaletteScope.cancelItemID })
+        #expect(scope.restingItemID == nil, "no row rests for a value that is not valid")
+    }
+
+    @Test
+    func an_empty_field_with_an_action_row_rests_on_the_action_row() {
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.empty-action",
+            pill: PalettePill(title: "Here", icon: "folder"),
+            prompt: "Folder"
+        ) { _ in .action(PaletteInputAction(title: "Current Pane's Directory") { .done }) })
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.actionItemID, InputPaletteScope.cancelItemID])
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "Cancel is selected only when no other row is")
     }
 
     @Test

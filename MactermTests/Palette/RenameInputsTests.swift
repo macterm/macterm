@@ -90,11 +90,11 @@ struct RenameInputsTests {
     }
 
     @Test
-    func tab_empty_field_of_an_automatic_name_gives_no_row() throws {
+    func tab_empty_field_of_an_automatic_name_gives_only_cancel() throws {
         let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        #expect(rows(screen, "", state, store).isEmpty)
+        #expect(rows(screen, "", state, store).map(\.id) == [InputPaletteScope.cancelItemID], "an empty field has no action row")
         #expect(screen.failure == nil)
     }
 
@@ -189,10 +189,10 @@ struct RenameInputsTests {
     }
 
     @Test
-    func project_empty_field_gives_no_row() throws {
+    func project_empty_field_gives_only_cancel() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        #expect(rows(screen, "", state, store).isEmpty)
+        #expect(rows(screen, "", state, store).map(\.id) == [InputPaletteScope.cancelItemID], "an empty field has no action row")
         #expect(screen.failure == nil)
         #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
     }

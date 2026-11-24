@@ -282,6 +282,20 @@ struct PaneChannelTests {
         MactermProtocol.PaneMessage(attention).encode(to: &flags)
         #expect(PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: flags.data)) == .attention(attention))
 
+        var note = MessagePackWriter()
+        MactermProtocol.PaneMessage(MactermProtocol.DesktopNotification(
+            title: ProtocolBin(Data("Deploy".utf8)),
+            body: ProtocolBin(Data("done".utf8))
+        )).encode(to: &note)
+        #expect(
+            PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: note.data))
+                == .notification(title: Data("Deploy".utf8), body: Data("done".utf8))
+        )
+
+        var bell = MessagePackWriter()
+        MactermProtocol.PaneMessage(MactermProtocol.Bell()).encode(to: &bell)
+        #expect(PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: bell.data)) == .bell)
+
         var unknown = MessagePackWriter()
         MactermProtocol.PaneMessage(t: "from.a.later.build", a: nil).encode(to: &unknown)
         #expect(PaneChannelEvent(ProtocolFrame(channel: 3, kind: .msg, body: unknown.data)) == .other("from.a.later.build"))
