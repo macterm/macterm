@@ -7,9 +7,9 @@ import Foundation
 /// output. Every text field has gone through `MemoryRedaction`.
 struct MemoryEntry: Codable, Equatable, Identifiable {
     var id = UUID()
-    /// The command line as the user typed it, or nil when the screen did not
-    /// show it (`CommandRecordExtractor`). A record with no command still says
-    /// when something ran and how it ended.
+    /// The command line as the shell sent it or as the prompt's input cells
+    /// held it (`CommandEnd.command`). nil only in records from older builds:
+    /// an end with no command is not recorded.
     var command: String?
     /// The shell's working directory when the command finished (OSC 7).
     var directory: String?
