@@ -22,9 +22,9 @@ struct PasswordEditorRequest: Identifiable {
     }
 }
 
-/// One password, untruncated and editable: the command exactly as the
-/// process table reported it (the list shows a shortened form), the prompt
-/// line, and the password itself. A saved password is shown behind the same
+/// One password, untruncated and editable: the host of a remote entry (shown,
+/// not editable), the command exactly as the process table reported it (the
+/// list shows a shortened form), the prompt line, and the password itself. A saved password is shown behind the same
 /// authentication Autofill uses and becomes a field once shown; a new one is
 /// typed into a secure field. Nothing is written until Save; Cancel discards
 /// every edit. Save files the entry under the edited command and prompt
@@ -81,6 +81,15 @@ struct PasswordEditorSheet: View {
         VStack(spacing: 0) {
             Form {
                 Section {
+                    // The editor files an edit on the entry's own host, so
+                    // the host shows but does not change here.
+                    if let host = entry?.id.host {
+                        LabeledContent("Host") {
+                            Text(verbatim: host)
+                                .font(.body.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
                     TextField("Command", text: $command, prompt: Text(isPromptOnly ? "Any command" : "Required"))
                         .font(.body.monospaced())
                         .focused($focus, equals: .command)
