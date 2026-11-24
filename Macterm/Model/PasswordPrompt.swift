@@ -49,7 +49,7 @@ struct PasswordEntryID: Hashable, Codable {
 
     /// What a person reads as "which one": the command, or the prompt when
     /// the entry is command-independent. A host's entry has its host in
-    /// parentheses after it. Settings shows the host as a `HostPill` instead.
+    /// parentheses after it.
     var title: String {
         let base = displayCommand ?? prompt
         return host.map { "\(base) (\($0))" } ?? base

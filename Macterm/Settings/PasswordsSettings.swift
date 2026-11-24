@@ -168,6 +168,7 @@ private struct SavedPasswordRow: View {
                         .truncationMode(.middle)
                     if let host = entry.id.host {
                         HostPill(host: host)
+                            .frame(maxWidth: 220, alignment: .leading)
                             .layoutPriority(1)
                     }
                 }
@@ -207,10 +208,10 @@ private struct SavedPasswordRow: View {
     }
 }
 
-/// The host of a host's entry (`PasswordEntryID.host`), set apart from the
-/// command, so two hosts' entries for one command look different. The help
-/// tag shows a host that the pill truncates. System styles, not
-/// `MactermTheme`: the Settings window follows the system appearance.
+/// The host of a host's entry (`PasswordEntryID.host`), apart from the
+/// command. The row gives it its width first, up to a limit, so a long host
+/// does not hide the command. System styles, not `MactermTheme`: the Settings
+/// window follows the system appearance.
 private struct HostPill: View {
     let host: String
 
