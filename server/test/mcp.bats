@@ -114,16 +114,18 @@ call() {
 
 @test "an mcp client may not type into a pane that reads a password; the CLI may" {
   "$ZMX" __create-session mcp3 -- /bin/sh
-  run mcp "$(call session_send '{"id":"mcp3","text":"stty -echo; read x; stty echo; echo done-$((1+1))"}')"
+  run mcp "$(call session_send '{"id":"mcp3","text":"stty -echo; echo rea''dy; read x; stty echo; echo x=$x"}')"
   [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["isError"]')" = "False" ]
-  # The pty reads a password when `read` waits with echo off.
-  refusal="The pane reads a password. Ask the user to type it. (forbidden)"
+  # `ready` shows after `stty -echo`: the pty reads a password.
   for i in $(seq 100); do
-    text=$(mcp "$(call session_send '{"id":"mcp3","text":"hunter2"}')" | jq_py 'r["result"]["content"][0]["text"]')
-    [ "$text" = "$refusal" ] && break
+    out=$(mcp "$(call session_history '{"id":"mcp3"}')" | jq_py 'r["result"]["structuredContent"]["text"]')
+    printf '%s\n' "$out" | grep -qxF ready && break
     sleep 0.1
   done
-  [ "$text" = "$refusal" ]
+  printf '%s\n' "$out" | grep -qxF ready
+  refusal="The pane reads a password. Ask the user to type it. (forbidden)"
+  run mcp "$(call session_send '{"id":"mcp3","text":"hunter2"}')"
+  [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" = "$refusal" ]
   run mcp "$(call session_key '{"id":"mcp3","chord":"enter"}')"
   [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" = "$refusal" ]
   # The CLI keeps v1's behavior: it types into the password read.
@@ -131,12 +133,11 @@ call() {
   [ "$status" -eq 0 ]
   for i in $(seq 100); do
     out=$(mcp "$(call session_history '{"id":"mcp3"}')" | jq_py 'r["result"]["structuredContent"]["text"]')
-    printf '%s\n' "$out" | grep -qxF done-2 && break
+    printf '%s\n' "$out" | grep -q '^x=' && break
     sleep 0.1
   done
-  printf '%s\n' "$out" | grep -qxF done-2
-  # No refused text reached the pty.
-  [[ "$out" != *hunter2* ]] || false
+  # `read` got only the CLI's text: no refused text reached the pty.
+  printf '%s\n' "$out" | grep -qxF x=typed-by-the-user
   # With echo on again, the mcp client types.
   run mcp "$(call session_send '{"id":"mcp3","text":"echo after"}')"
   [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["isError"]')" = "False" ]

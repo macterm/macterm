@@ -298,6 +298,9 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
         const w = takeWaiter(e, .typing) orelse return;
         const input = w.input.?;
         defer input.deinit(s.gpa);
+        // A client that left gets no input typed: it may have read its
+        // call as failed.
+        if (peers.findPeer(s, w.peer) == null) return;
         if (readsPassword(mode)) {
             std.log.info("server: input from mcp to session {s} refused: the pane reads a password", .{e.id});
             return peers.replyError(s, w.peer, w.re, .forbidden, password_refusal);
@@ -739,13 +742,12 @@ fn typeKey(s: *Server, peer: u64, re: u64, e: *Entry, key: []const u8) void {
 fn guard(s: *Server, p: *Peer, re: u64, e: *Entry, input: Input) void {
     if (!e.tty_read) {
         input.deinit(s.gpa);
-        return peers.replyError(s, p.id, re, .forbidden, "The session cannot say if the pane reads a password. Ask the user to restart the pane.");
+        return peers.replyError(s, p.id, re, .forbidden, "The session runs an older build that cannot say if the pane reads a password. Ask the user to type it.");
     }
-    e.waiters.append(s.gpa, .{ .peer = p.id, .re = re, .kind = .typing, .input = input }) catch {
-        input.deinit(s.gpa);
-        return peers.replyError(s, p.id, re, .unavailable, "The server is out of memory.");
-    };
-    sendEntryPane(s, e, m.TtyRead, .{});
+    const held = e.waiters.items.len;
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .typing, .input = input });
+    // One `tty_read` for each held input, so that the answers stay in order.
+    if (e.waiters.items.len > held) sendEntryPane(s, e, m.TtyRead, .{});
 }
 
 /// `session.history`: the reply goes when the session's `history` comes.
@@ -764,7 +766,10 @@ pub fn readInspect(s: *Server, p: *Peer, re: u64, id: []const u8) void {
 
 /// Adds a waiter, or answers it at once when there is no memory for it.
 pub fn wait(s: *Server, list: *std.ArrayList(Waiter), w: Waiter) void {
-    list.append(s.gpa, w) catch peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    list.append(s.gpa, w) catch {
+        if (w.input) |i| i.deinit(s.gpa);
+        peers.replyError(s, w.peer, w.re, .unavailable, "The server is out of memory.");
+    };
 }
 
 /// A refused session has no connection. Each list and each idle check
