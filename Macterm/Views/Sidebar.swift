@@ -297,7 +297,7 @@ struct SidebarContent: View {
             //   The tab ForEach below can use the same API because its rows
             //   are one level down in the outline. The nested ForEach of
             //   child projects in `projectSection` takes tab and pane drops
-            //   only (issue 0482; its ui-review checks for this crash).
+            //   only, and only while its rows are visible.
             // - A List-level catch-all never fires: the outline view claims
             //   every drag over the sidebar, so unhandled drops don't bubble
             //   to enclosing views.
@@ -508,22 +508,46 @@ struct SidebarContent: View {
 
     /// One project's disclosure (design 013): its tab rows, then the
     /// projects inside it, each again a disclosure. `AnyView`, because the
-    /// function calls itself for the projects inside.
-    private func projectSection(_ node: SidebarNode) -> AnyView {
+    /// function calls itself for the projects inside. `parentsOpen` is
+    /// false when a project above this one is closed.
+    private func projectSection(_ node: SidebarNode, parentsOpen: Bool = true) -> AnyView {
         let project = node.project
+        let tabs = appState.workspaces[project.id]?.tabs ?? []
+        // Only visible rows take drops. The outline can give the line below
+        // a closed project to a destination inside it, and that accept
+        // crashes SwiftUI's outline list. An empty `ForEach` takes no drops
+        // either. A drop on the header still lands in a closed project.
+        let open = parentsOpen && windowState.expandedRows.contains(project.id)
         return AnyView(
             DisclosureGroup(isExpanded: expansion(of: project.id)) {
-                // A closed project's rows take no drops. The outline can give
-                // the line below a closed project to a destination inside it,
-                // and its accept then reads a child of the closed item that
-                // the list does not hold: SwiftUI's assertion in
-                // `OutlineListCoordinator` (ui-review 0551). A drop on the
-                // header still lands in a closed project, and a drag that
-                // hovers the header opens it.
-                if windowState.expandedRows.contains(project.id) {
-                    projectContent(node)
+                if open, !tabs.isEmpty {
+                    tabRows(tabs, of: project)
+                        // SwiftUI reports the insertion `offset` in this
+                        // project's tab list. A tab of this project goes to
+                        // that slot, a tab of another project moves in at
+                        // that slot, and a PANE (the grab handle drag from
+                        // the workspace) becomes a new tab at that slot.
+                        .dropDestination(for: TabSlotDropItem.self) { items, offset in
+                            receiveSlotDrop(items, into: project, at: offset)
+                        }
                 } else {
-                    projectRows(node)
+                    tabRows(tabs, of: project)
+                }
+                if open, !node.children.isEmpty {
+                    childSections(node, open: open)
+                        // The outline gives the line between the last tab and
+                        // the first project inside to this `ForEach`, not to
+                        // the tab `ForEach` (ui-review 0522). A tab or a pane
+                        // dropped among these rows goes after the last tab.
+                        // Tabs and panes only: a project drop on a `ForEach`
+                        // of disclosures crashes (see the notes in `body`).
+                        .dropDestination(for: TabSlotDropItem.self) { items, _ in
+                            // An explicit slot: nil does not reorder a tab of
+                            // this project (`receiveTabDrop`).
+                            receiveSlotDrop(items, into: project, at: appState.workspaces[project.id]?.tabs.count ?? 0)
+                        }
+                } else {
+                    childSections(node, open: open)
                 }
             } label: {
                 projectHeader(project: project)
@@ -532,67 +556,25 @@ struct SidebarContent: View {
         )
     }
 
-    /// The rows inside a project, with no drop destination: the content of
-    /// a closed project (see `projectSection`).
-    @ViewBuilder
-    private func projectRows(_ node: SidebarNode) -> some View {
-        let project = node.project
-        let tabs = appState.workspaces[project.id]?.tabs ?? []
+    private func tabRows(_ tabs: [TerminalTab], of project: Project) -> some View {
         ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
             tabRow(tab: tab, index: tabIndex, project: project)
-        }
-        ForEach(node.children) { child in
-            projectSection(child)
         }
     }
 
-    /// The rows inside an open project, with their drop destinations.
-    @ViewBuilder
-    private func projectContent(_ node: SidebarNode) -> some View {
-        let project = node.project
-        let tabs = appState.workspaces[project.id]?.tabs ?? []
-        ForEach(Array(tabs.enumerated()), id: \.element.id) { tabIndex, tab in
-            tabRow(tab: tab, index: tabIndex, project: project)
-        }
-        // Single drop mechanism for every case: SwiftUI reports the
-        // insertion `offset` within THIS project's tab list. A tab drop
-        // from the same project reorders to that slot; one from another
-        // project moves the tab in at that slot; a PANE drop (the grab
-        // handle drag from the workspace) separates that pane into a new
-        // tab landing at the same slot. Replaces the old `.onMove` (which
-        // is per-section and can't express a cross-project move).
-        .dropDestination(for: TabSlotDropItem.self) { items, offset in
-            for item in items {
-                switch item {
-                case let .tab(tab):
-                    receiveTabDrop([tab], into: project, at: offset)
-                case let .pane(pane):
-                    receivePaneDrop([pane], into: project, at: offset)
-                }
-            }
-        }
-        // The outline gives the line between the last tab and the
-        // first project inside to this `ForEach` (its offset 0), not
-        // to the tab `ForEach`. With no destination here, a tab drop
-        // at that line did nothing (ui-review 0522). A tab or a pane
-        // dropped at any line among these rows goes after the last
-        // tab of this project. This destination takes tabs and panes
-        // only; a project drop on the top-level `ForEach` of
-        // disclosures crashes (see the notes in `body`).
+    private func childSections(_ node: SidebarNode, open: Bool) -> some View {
         ForEach(node.children) { child in
-            projectSection(child)
+            projectSection(child, parentsOpen: open)
         }
-        .dropDestination(for: TabSlotDropItem.self) { items, _ in
-            // An explicit slot, not nil: nil does not reorder a tab
-            // of this project (`receiveTabDrop`).
-            let slot = appState.workspaces[project.id]?.tabs.count ?? 0
-            for item in items {
-                switch item {
-                case let .tab(tab):
-                    receiveTabDrop([tab], into: project, at: slot)
-                case let .pane(pane):
-                    receivePaneDrop([pane], into: project, at: slot)
-                }
+    }
+
+    private func receiveSlotDrop(_ items: [TabSlotDropItem], into project: Project, at slot: Int) {
+        for item in items {
+            switch item {
+            case let .tab(tab):
+                receiveTabDrop([tab], into: project, at: slot)
+            case let .pane(pane):
+                receivePaneDrop([pane], into: project, at: slot)
             }
         }
     }
