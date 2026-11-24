@@ -1,17 +1,19 @@
 import Foundation
 
 /// The first-run workspace: a pinned "Welcome" tab and a project on the user's
-/// home directory, each with a short tutorial printed as ordinary terminal
-/// output (`macterm tutor`, the bundled CLI already on every pane's PATH).
+/// home directory. The pinned tab prints a short tutorial as ordinary terminal
+/// output (`macterm tutor`, the bundled CLI already on every pane's PATH). The
+/// project's tab is a plain shell that runs no command, as in every project
+/// that the user adds.
 ///
 /// A fresh install otherwise opens on `WelcomeView` with an empty sidebar —
 /// nothing to click, and no hint that projects, tabs and pinned rows are the
 /// three things the sidebar holds. Seeding one of each makes the shape of the
-/// app visible, and the tutorials ride in as `run:` commands so they are plain
+/// app visible, and the tutorial rides in as a `run:` command so they are plain
 /// scrollback the user can read, re-run (`macterm tutor project`) or clear —
 /// not chrome that has to be dismissed.
 ///
-/// Pure by design: the decision and the two declarations are values, so the
+/// Pure by design: the decision and the declaration are values, so the
 /// side-effecting half (`AppState.seedFirstRunIfNeeded`) has nothing to test
 /// but the wiring. See `AppState+FirstRun.swift`.
 enum FirstRunSeed {
@@ -94,18 +96,6 @@ enum FirstRunSeed {
         LayoutTab(
             name: pinnedTabName,
             layout: .pane(LayoutPane(cwd: nil, run: run(.pinned), shell: nil))
-        )
-    }
-
-    /// The home project's single tab. Declared rather than built by hand
-    /// because `Pane.start` is `let`-bound at init: going through the
-    /// reconciler is how the tutorial becomes the pane's typed
-    /// `PaneStartCommand` instead of text typed at a prompt that may not
-    /// exist yet.
-    static var projectLayout: LayoutFile {
-        LayoutFile(
-            name: projectName,
-            tabs: [LayoutTab(layout: .pane(LayoutPane(cwd: nil, run: run(.project), shell: nil)))]
         )
     }
 }

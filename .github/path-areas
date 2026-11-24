@@ -24,6 +24,9 @@ app                .github/workflows/release.yml
 app                .github/workflows/release-tip.yml
 app,bench          .github/workflows/server-build.yml
 app,docs           assets/*
+# `macterm mcp` embeds these two schemas (server/build.zig).
+server,bench       assets/palette.schema.json
+server,bench       assets/project.schema.json
 
 # The extensions: the unit tests read each through the validator.
 extensions         extensions/*

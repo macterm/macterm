@@ -41,6 +41,18 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.addOptions("build_options", options);
 
+    // The file formats that `macterm mcp` serves as resources: the schemas
+    // that the website publishes, from assets/ (one source).
+    const formats = b.addWriteFiles();
+    _ = formats.addCopyFile(b.path("../assets/palette.schema.json"), "palette.schema.json");
+    _ = formats.addCopyFile(b.path("../assets/project.schema.json"), "project.schema.json");
+    const formats_mod = b.createModule(.{ .root_source_file = formats.add("formats.zig",
+        \\pub const palette = @embedFile("palette.schema.json");
+        \\pub const layout = @embedFile("project.schema.json");
+        \\
+    ) });
+    exe_mod.addImport("formats", formats_mod);
+
     const dep = b.lazyDependency("ghostty", .{
         .target = target,
         .optimize = optimize,
@@ -90,6 +102,7 @@ pub fn build(b: *std.Build) void {
             },
         });
         test_module.addOptions("build_options", options);
+        test_module.addImport("formats", formats_mod);
         const test_dep = b.dependency("ghostty", .{
             .target = target,
             .optimize = optimize,

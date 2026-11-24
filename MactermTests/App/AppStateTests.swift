@@ -338,7 +338,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(projectID: UUID()))
+        #expect(state.panes(inProject: UUID()).isEmpty)
     }
 
     @Test
@@ -1422,6 +1422,43 @@ struct AppStateTests {
         #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
     }
 
+    @Test
+    func the_async_verdict_uses_the_hosts_answer() async throws {
+        let idle = try plainShellTab(answer: false)
+        let idlePane = try #require(idle.tab.splitRoot.findPane(id: idle.target))
+        #expect(await !idle.state.judgeClose([idlePane]))
+        let busy = try plainShellTab(answer: true)
+        let busyPane = try #require(busy.tab.splitRoot.findPane(id: busy.target))
+        #expect(await busy.state.judgeClose([busyPane]))
+    }
+
+    @Test
+    func the_quit_rows_leave_out_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == panes.map(\.id).filter { $0 != fx.target })
+    }
+
+    @Test
+    func the_quit_rows_wait_for_every_host() async throws {
+        let fx = try plainShellTab(answer: true)
+        let panes = fx.tab.splitRoot.allPanes()
+        let slow = try #require(panes.first { $0.id != fx.target })
+        // Both panes run a plain shell. The first answer is busy, and the
+        // second host answers idle later: a stop at the first busy answer
+        // would give the slow pane the surface's busy reading.
+        fx.state.paneRunsPlainShell = { _ in true }
+        fx.state.askPlainShellNeedsConfirmClose = { pane, _ in
+            if pane.id == fx.target { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+            return false
+        }
+        let rows = await fx.state.panesThatNeedConfirmClose(panes)
+        #expect(rows.map(\.id) == [fx.target])
+        #expect(!rows.contains { $0.id == slow.id })
+    }
+
     // MARK: - applyLayout
 
     /// Create a temp project directory and seed a workspace rooted there.
@@ -1920,6 +1957,50 @@ struct AppStateTests {
         #expect(ws.tabs[0].customTitle == nil)
         #expect(ws.tabs[0].splitRoot.allPanes().count == 1)
         #expect(state.pendingDialog == nil)
+    }
+
+    @Test
+    func restore_gives_a_never_opened_project_its_first_tab_and_a_group_none() throws {
+        // A project holds its tabs from the start (design 010 section 11): a
+        // project with no snapshot that no window selects still gets its
+        // first tab at the restore. A group (no folder) holds no tabs.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-neveropened-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let project = Project(name: "never", path: dir.path, sortOrder: 0)
+        let group = Project(name: "Work", path: "", sortOrder: 1)
+        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
+
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+
+        let state = makeAppState(store: store)
+        state.restoreSelection(projects: [project, group])
+
+        #expect(state.activeProjectID == nil)
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+    }
+
+    @Test
+    func an_added_project_gets_its_first_tab_at_once() {
+        let state = makeAppState()
+        let projects = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-added-\(UUID().uuidString).json"))
+        projects.onAdd = { [weak state] in state?.projectAdded($0) }
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+        state.restoreSelection(projects: projects.projects)
+
+        let project = projects.create(name: "fresh", path: "/tmp")
+        let group = projects.add(Project(name: "Work", path: ""))
+
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+        #expect(state.activeProjectID == nil)
     }
 
     @Test

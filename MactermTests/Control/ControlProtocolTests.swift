@@ -159,7 +159,6 @@ struct ControlProtocolTests {
               "name": "api",
               "path": "/tmp",
               "active": true,
-              "loaded": true,
               "tabCount": 1
             }]
           }
