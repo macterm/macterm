@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: appBundleID, category: "ServerEndpoint")
 /// One connection to a server, as a pane and a session list use it.
 /// `ServerConnection` is the connection that the app runs. The unit tests
 /// use an in-memory link that speaks frames (`FakeServerLink`).
-protocol ServerLink: PaneChannelOpener, PaneChannelTransport {
+protocol ServerLink: PaneChannelOpener, PausingChannelTransport {
     /// False once the connection ended.
     var isOpen: Bool { get }
     /// Sends one request and waits for its response. A response with `err`

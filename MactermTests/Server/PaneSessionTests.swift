@@ -589,6 +589,51 @@ struct PaneSessionEndpointTests {
     }
 
     @Test
+    func a_failed_resume_ends_the_channel_and_the_session_attaches_again() async throws {
+        let first = FakeServerLink(epoch: 7) { method, args in
+            if method == MactermProtocol.ChannelResume.name { throw ServerClientError.noAnswer }
+            return try FakeServerLink.standard(method, args)
+        }
+        let second = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([first, second]))
+        session.setVisible(false)
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(output: "abc", to: "s")
+        try await host.waitFor { $0.screen == "abc" }
+
+        session.setVisible(true)
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(host.snapshot().linkLost == 1)
+        #expect(second.attaches(on: "s").first?.resumeOffset == 3, "the screen as the surface shows it")
+        #expect(!second.calls.contains(MactermProtocol.ChannelPause.name), "a visible surface does not pause")
+        session.stop()
+    }
+
+    /// A terminal that feeds slower than the output comes holds the reading:
+    /// the output waits in the channel, and its limit skips ahead.
+    @Test
+    func a_slow_host_holds_the_reading_so_that_the_channel_skips_ahead() async throws {
+        let link = FakeServerLink(epoch: 7, buffering: .skipAhead(bytes: 64 * 1024))
+        let gate = DispatchSemaphore(value: 0)
+        let host = GatedPaneHost(gate: gate)
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.recorder.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        let chunk = String(repeating: "x", count: 16 * 1024)
+        // The first feed blocks. The reading takes `feedAhead` bytes, then
+        // waits; the channel holds its limit, then skips.
+        for _ in 0 ..< (PaneSession.feedAhead + 128 * 1024) / chunk.count {
+            link.deliver(output: chunk, to: "s")
+        }
+        try await host.recorder.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Refresh.name) }
+        gate.signal()
+        host.open()
+        session.stop()
+    }
+
+    @Test
     func output_that_the_channel_skipped_leaves_no_resume_point_until_the_snapshot() async throws {
         // A limit of 0: each output byte that is not in a snapshot skips.
         let link = FakeServerLink(epoch: 7, buffering: .skipAhead(bytes: 0))
@@ -876,5 +921,48 @@ struct PaneSessionEndpointTests {
         let finished = await session.finish()
         #expect(finished.pendingInput == Data("ls\n".utf8))
         #expect(link.sent(on: "s").isEmpty)
+    }
+}
+
+/// A host whose feeds wait at a gate until `open`: a terminal that is slower
+/// than the output.
+private final class GatedPaneHost: PaneSessionHost, @unchecked Sendable {
+    let recorder = RecordingPaneHost()
+    private let gate: DispatchSemaphore
+    private let lock = NSLock()
+    private var opened = false
+
+    init(gate: DispatchSemaphore) {
+        self.gate = gate
+    }
+
+    func open() {
+        lock.withLock { opened = true }
+    }
+
+    func paneFeed(_ data: Data) {
+        if !lock.withLock({ opened }) {
+            gate.wait()
+            gate.signal()
+        }
+        recorder.paneFeed(data)
+    }
+
+    func paneGrid() -> PaneGrid {
+        recorder.paneGrid()
+    }
+
+    func paneForeground(_ foreground: MactermProtocol.Foreground) {
+        recorder.paneForeground(foreground)
+    }
+
+    func paneTtyMode(_: MactermProtocol.TtyMode) {}
+
+    func paneExited(code: UInt8?, signal: UInt8?) {
+        recorder.paneExited(code: code, signal: signal)
+    }
+
+    func paneGone() {
+        recorder.paneGone()
     }
 }

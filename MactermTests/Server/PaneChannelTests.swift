@@ -75,17 +75,111 @@ struct PaneChannelTests {
     /// channel asks again while the skip waits.
     @Test
     func a_skipped_channel_asks_again_until_the_snapshot_comes() async throws {
-        let link = FakeServerLink(buffering: .skipAhead(bytes: 1))
+        let link = FakeServerLink(buffering: .skipAhead(bytes: 1, askAgain: .milliseconds(20)))
         let channel = try await link.openChannel(session: "s")
         link.deliver(output: "ab", to: "s")
         try await Self.waitFor { link.sent(on: "s").count >= 2 }
         #expect(Set(link.sent(on: "s")) == [MactermProtocol.Refresh.name])
 
         link.deliver(MactermProtocol.SnapshotStart(scrollback: false), to: "s")
+        try await Task.sleep(for: .milliseconds(50))
         let asked = link.sent(on: "s").count
-        try await Task.sleep(for: .milliseconds(1500))
+        try await Task.sleep(for: .milliseconds(150))
         #expect(link.sent(on: "s").count == asked, "no request after the snapshot started")
         channel.sink.finish()
+    }
+
+    @Test
+    func a_skipped_channel_stops_asking_when_it_ends() async throws {
+        let link = FakeServerLink(buffering: .skipAhead(bytes: 1, askAgain: .milliseconds(20)))
+        let channel = try await link.openChannel(session: "s")
+        link.deliver(output: "ab", to: "s")
+        try await Self.waitFor { !link.sent(on: "s").isEmpty }
+        channel.sink.finish()
+        try await Task.sleep(for: .milliseconds(50))
+        let asked = link.sent(on: "s").count
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(link.sent(on: "s").count == asked)
+    }
+
+    /// Output over the limit inside a snapshot passes: the pane never draws
+    /// half a snapshot.
+    @Test
+    func a_snapshot_is_never_cut() async throws {
+        let link = FakeServerLink(buffering: .skipAhead(bytes: 2))
+        let channel = try await link.openChannel(session: "s")
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false), to: "s")
+        link.deliver(output: "abc", to: "s")
+        link.deliver(output: "def", to: "s")
+        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        var events = channel.events.makeAsyncIterator()
+        var seen: [PaneChannelEvent] = []
+        for _ in 0 ..< 4 {
+            if let event = await events.next() { seen.append(event) }
+        }
+        #expect(seen == [
+            .snapshotStart(.init(scrollback: false)),
+            .output(Data("abc".utf8)),
+            .output(Data("def".utf8)),
+            .snapshotEnd,
+        ])
+        #expect(link.sent(on: "s").isEmpty)
+        channel.sink.finish()
+    }
+
+    /// A paused channel gets no output, and the resume brings a snapshot
+    /// with the screen as it is now.
+    @Test
+    func a_paused_channel_gets_no_output_and_the_resume_brings_a_snapshot() async throws {
+        try await withServer { server in
+            let connection = try await server.connect()
+            defer { connection.close() }
+            let id = "chan-pause-\(UInt32.random(in: 0 ... .max))"
+            _ = try await connection.call(
+                MactermProtocol.SessionCreate.self,
+                Self.args(
+                    id: id,
+                    command: ["/bin/sh", "-c", "stty -echo; printf ready-%s ok; read line; printf hidden-%s \"$line\"; read line"]
+                )
+            )
+            let channel = try await connection.openChannel(session: id)
+            try channel.send(MactermProtocol.Attach(cols: 80, rows: 24))
+            var iterator = channel.events.makeAsyncIterator()
+            var screen = Data()
+            while !String(decoding: screen, as: UTF8.self).contains("ready-ok") {
+                guard let event = await iterator.next() else { Issue.record("no output")
+                    return
+                }
+                if case let .output(data) = event { screen.append(data) }
+            }
+
+            try await channel.setPaused(true)
+            try channel.sendInput(Data("one\n".utf8))
+            try await Task.sleep(for: .milliseconds(300))
+            try await channel.setPaused(false)
+
+            var output = Data()
+            var snapshot = Data()
+            var inSnapshot = false
+            // The attach's own snapshot can still be in progress: read up to
+            // the snapshot that has the screen.
+            reading: while let event = await iterator.next() {
+                switch event {
+                case .snapshotStart:
+                    inSnapshot = true
+                    snapshot = Data()
+                case .snapshotEnd:
+                    inSnapshot = false
+                    if String(decoding: snapshot, as: UTF8.self).contains("hidden-one") { break reading }
+                case let .output(data):
+                    if inSnapshot { snapshot.append(data) } else { output.append(data) }
+                default: break
+                }
+            }
+            #expect(!String(decoding: output, as: UTF8.self).contains("hidden-one"), "no output while paused")
+            #expect(String(decoding: snapshot, as: UTF8.self).contains("hidden-one"), "the snapshot has the screen")
+            await channel.close()
+        }
     }
 
     @Test

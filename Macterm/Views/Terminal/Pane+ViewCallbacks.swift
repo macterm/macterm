@@ -81,7 +81,7 @@ extension Pane {
             guard let self, counts() else { return }
             // The single activity source. Output heartbeats fire from the pty
             // IO path regardless of occlusion, so they also reach background
-            // tabs, and they carry the row total so the tracker can tell
+            // tabs (not a hidden remote pane, whose channel pauses), and they carry the row total so the tracker can tell
             // growth from an in-place redraw. The session's foreground and
             // tty mode reach the tracker on their own (`applyForeground`).
             markOutputActivity(totalRows: total)

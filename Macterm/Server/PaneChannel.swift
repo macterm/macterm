@@ -82,9 +82,15 @@ protocol PaneChannelTransport: AnyObject, Sendable {
     func send(frame: ProtocolFrame) throws
     /// Ends the channel. Its events end. The session keeps running.
     func closeChannel(_ number: UInt32) async
+}
+
+/// A transport whose channels pause: a server's connection, which relays
+/// them (`ServerLink`). A session's own socket does not pause: its reader
+/// waits at the read-ahead limit, and the session holds the output.
+protocol PausingChannelTransport: PaneChannelTransport {
     /// Stops or starts the output of the channel. The session's messages
     /// still come while it is paused, and a resume brings a snapshot
-    /// (design/003 §6). A transport that cannot pause does nothing.
+    /// (design/003 §6).
     func setPaused(_ paused: Bool, channel number: UInt32) async throws
 }
 
@@ -114,10 +120,12 @@ final class PaneChannel: @unchecked Sendable {
     enum Buffering: Equatable {
         /// The reader waits while this many events are not taken.
         case readAhead(Int)
-        /// The reader never waits. When more than this many bytes of output
-        /// are not taken, it drops the output up to the next snapshot,
-        /// sends `skipped`, and asks the session for a snapshot.
-        case skipAhead(bytes: Int)
+        /// The reader never waits. When more than `bytes` of output are not
+        /// taken, it drops the output up to the next snapshot, sends
+        /// `skipped`, and asks the session for a snapshot, again after each
+        /// `askAgain` until the snapshot starts. The session's messages are
+        /// not counted: they are small, and the session coalesces them.
+        case skipAhead(bytes: Int, askAgain: DispatchTimeInterval = PaneChannel.snapshotWait)
     }
 
     /// The most output bytes of a relayed channel that wait for the pane:
@@ -128,9 +136,6 @@ final class PaneChannel: @unchecked Sendable {
     /// again: the server's `relay.skip_ms`. A session that is behind sends
     /// its snapshot when it catches up, and ignores the request before that.
     static let snapshotWait: DispatchTimeInterval = .seconds(1)
-    /// The requests for a snapshot, off the reader's thread: a write can
-    /// wait for the peer, and the reader must not.
-    private static let requests = DispatchQueue(label: "PaneChannel.requests")
 
     let number: UInt32
     /// The `epoch` of the session's `hello`. Nil from a server that does
@@ -148,6 +153,10 @@ final class PaneChannel: @unchecked Sendable {
         fileprivate let skip: SkipAhead?
         private weak var transport: (any PaneChannelTransport)?
         private let number: UInt32
+        /// The requests for a snapshot, off the reader's thread: a write can
+        /// wait for the peer, and the reader must not. One queue for each
+        /// channel, so that a stalled link holds only its own requests.
+        private let requests = DispatchQueue(label: "PaneChannel.requests")
 
         fileprivate init(
             _ continuation: AsyncStream<PaneChannelEvent>.Continuation,
@@ -191,18 +200,18 @@ final class PaneChannel: @unchecked Sendable {
             continuation.finish()
         }
 
-        /// Asks the session for a snapshot (`refresh`), and again after
-        /// `snapshotWait` while the skip waits for it.
+        /// Asks the session for a snapshot (`refresh`), and again after each
+        /// `askAgain` while the skip waits for it.
         private func askSnapshot(_ generation: Int) {
-            PaneChannel.requests.async { [weak self] in
-                guard let self, let transport, skip?.waits(generation) == true else { return }
+            requests.async { [weak self] in
+                guard let self, let transport, let skip, skip.waits(generation) else { return }
                 do {
                     try transport.send(frame: PaneChannel.frame(MactermProtocol.Refresh(), on: number))
                 } catch {
                     // The channel ends with its link.
                     return
                 }
-                PaneChannel.requests.asyncAfter(deadline: .now() + PaneChannel.snapshotWait) { [weak self] in
+                requests.asyncAfter(deadline: .now() + skip.askAgain) { [weak self] in
                     self?.askSnapshot(generation)
                 }
             }
@@ -262,6 +271,7 @@ final class PaneChannel: @unchecked Sendable {
 
         private let lock = NSLock()
         private let limit: Int
+        let askAgain: DispatchTimeInterval
         private var waiting = 0
         private var inSnapshot = false
         private var skipping = false
@@ -269,8 +279,9 @@ final class PaneChannel: @unchecked Sendable {
         private var generation = 0
         private var ended = false
 
-        init(limit: Int) {
+        init(limit: Int, askAgain: DispatchTimeInterval) {
             self.limit = limit
+            self.askAgain = askAgain
         }
 
         func admit(_ event: PaneChannelEvent) -> Verdict {
@@ -355,7 +366,7 @@ final class PaneChannel: @unchecked Sendable {
         var skip: SkipAhead?
         switch buffering {
         case let .readAhead(count): credit = Credit(limit: count)
-        case let .skipAhead(bytes): skip = SkipAhead(limit: bytes)
+        case let .skipAhead(bytes, askAgain): skip = SkipAhead(limit: bytes, askAgain: askAgain)
         case nil: break
         }
         events = Events(stream: stream, credit: credit, skip: skip)
@@ -381,13 +392,18 @@ final class PaneChannel: @unchecked Sendable {
         try transport.send(frame: Self.frame(message, on: number))
     }
 
+    /// True when the channel can pause (`PausingChannelTransport`).
+    var pauses: Bool {
+        transport is any PausingChannelTransport
+    }
+
     /// Stops the output of a pane that no window shows, or starts it again.
     /// The session's messages still come. A resume brings a snapshot
-    /// (design/003 §6). A session's own socket does not pause: its reader
-    /// waits at the read-ahead limit.
+    /// (design/003 §6). A channel that cannot pause does nothing.
     func setPaused(_ paused: Bool) async throws {
         guard let transport else { throw ServerClientError.disconnected }
-        try await transport.setPaused(paused, channel: number)
+        guard let pausing = transport as? any PausingChannelTransport else { return }
+        try await pausing.setPaused(paused, channel: number)
     }
 
     /// Ends the channel. The session keeps running.

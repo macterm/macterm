@@ -127,7 +127,9 @@ final class GhosttyCallbacks: @unchecked Sendable {
         case GHOSTTY_ACTION_OUTPUT_ACTIVITY:
             // Throttled heartbeat from the pty IO path — fires while the
             // program produces output, even when the surface is occluded and
-            // the renderer (and thus the scrollbar action) is parked. Carries
+            // the renderer (and thus the scrollbar action) is parked. A remote
+            // pane that no window shows gets no output: its channel pauses
+            // (`PaneInputRoute.setVisible`). Carries
             // the same geometry as GHOSTTY_ACTION_SCROLLBAR so the tracker can
             // tell real output growth from in-place redraws.
             guard let view = surfaceView(from: target) else { return true }
