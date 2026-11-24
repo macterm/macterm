@@ -1653,9 +1653,9 @@ final class AppState {
                 activeTabID: pinnedWorkspace.activeTabID
             ))
         }
-        // The pinned and the scratch rows are not projects of the model.
-        let selected = activeProjectID.flatMap { Project.isSynthetic($0) ? nil : $0 }
-        modelShadow.workspacesDidSave(inputs, activeProjectID: selected)
+        // The pinned and the scratch workspaces are hidden projects of the
+        // model, so a window can select them (design/010 §11).
+        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
     }
 
     // MARK: - Project

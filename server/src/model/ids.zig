@@ -5,15 +5,12 @@
 //!
 //! An id is text: a UUID, or a short name in a test. A pane id is its
 //! session id (design/004). Panes and splits share one namespace, so the
-//! model compares their text (`nodeIdInUse`). A workspace id must also not
-//! be a tab id or another project's id: those checks compare text too.
+//! model compares their text (`nodeIdInUse`).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const ProjectId = Id(.project);
-/// A project's workspace has the project's id (`WorkspaceId.ofProject`).
-pub const WorkspaceId = Id(.workspace);
 pub const TabId = Id(.tab);
 pub const PaneId = Id(.pane);
 pub const SplitId = Id(.split);
@@ -23,7 +20,7 @@ pub fn Map(comptime K: type, comptime V: type) type {
     return std.HashMapUnmanaged(K, V, K.Context, std.hash_map.default_max_load_percentage);
 }
 
-const IdKind = enum { project, workspace, tab, pane, split };
+const IdKind = enum { project, tab, pane, split };
 
 /// A distinct type for each `kind`.
 fn Id(comptime kind: IdKind) type {
@@ -31,6 +28,10 @@ fn Id(comptime kind: IdKind) type {
         text: []const u8,
 
         const Self = @This();
+
+        /// What the id names. The compiler refuses a parameter that no code
+        /// reads, and each value of `kind` makes a type of its own.
+        const id_kind = kind;
 
         /// A str on the wire, as in JSON (`msgpack.isText`).
         pub const wire_str = {};
@@ -49,11 +50,6 @@ fn Id(comptime kind: IdKind) type {
 
         pub fn dupe(x: Self, a: Allocator) Allocator.Error!Self {
             return .{ .text = try a.dupe(u8, x.text) };
-        }
-
-        pub fn ofProject(p: ProjectId) Self {
-            if (kind != .workspace) @compileError("ofProject makes a workspace id");
-            return .{ .text = p.text };
         }
 
         /// For a hash map keyed by this id (`Map`).

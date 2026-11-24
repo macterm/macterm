@@ -51,16 +51,51 @@ pub const Base = enum {
     release,
 };
 
-/// The removals that the check against `main` lets pass, as `check` names
-/// them. No release has these items, so no peer in the field reads them.
-/// The check against a release never lets a removal pass. An entry does
-/// nothing once `main` has no such item: remove it then.
+/// The removals and changes that the check against `main` lets pass: the
+/// lines of `check`, without the line feed. No release has these items, so
+/// no peer in the field reads them. The check against a release never lets
+/// one pass. An entry does nothing once `main` has the change: remove it
+/// then.
 ///
-/// Issue 0480 (design/013, "Ethan chose B" §1): a project has no `kind`.
+/// Issue 0498 (design/010 §11): one project type. `Workspace` and its
+/// requests and event go, the tabs are in the project, the tab requests and
+/// events name a `project`, and `Node` is `SplitNode`.
 const removals_before_release = [_][]const u8{
-    "type ProjectKind",
-    "Project.kind",
-    "ProjectCreate.Args.kind",
+    "method workspace.create was removed",
+    "method workspace.remove was removed",
+    "event workspace.remove was removed",
+    "type Kind was removed",
+    "type Workspace was removed",
+    "type WorkspaceCreate.Args was removed",
+    "type WorkspaceCreate.Result was removed",
+    "type WorkspaceRemove.Args was removed",
+    "type WorkspaceRemove.Result was removed",
+    "type WorkspaceRemoved was removed",
+    "type Node was removed",
+    "ModelData.workspaces was removed",
+    "ProjectChanged.project: its type or default changed",
+    "Split.first: its type or default changed",
+    "Split.second: its type or default changed",
+    "Tab.root: its type or default changed",
+    "TabCreate.Args.workspace was removed",
+    "TabCreate.Args.root: its type or default changed",
+    "TabSelect.Args.workspace was removed",
+    "TabReorder.Args.workspace was removed",
+    "TabMove.Args.to_workspace was removed",
+    "PaneSeparate.Args.workspace was removed",
+    "TabChanged.workspace was removed",
+    "TabRemoved.workspace was removed",
+    "TabOrder.workspace was removed",
+    "TabOrder.kind was removed",
+    "TabCreate.Args.project is new, but it is not optional and has no default",
+    "TabSelect.Args.project is new, but it is not optional and has no default",
+    "TabReorder.Args.project is new, but it is not optional and has no default",
+    "TabMove.Args.to_project is new, but it is not optional and has no default",
+    "TabChanged.project is new, but it is not optional and has no default",
+    "TabRemoved.project is new, but it is not optional and has no default",
+    "TabOrder.project is new, but it is not optional and has no default",
+    // `model.json` version 2.
+    "ModelData.version: its type or default changed",
 };
 
 fn removalPasses(against: Base, comptime fmt: []const u8, args: anytype) bool {
@@ -69,6 +104,14 @@ fn removalPasses(against: Base, comptime fmt: []const u8, args: anytype) bool {
     const item = std.fmt.bufPrint(&buf, fmt, args) catch return false;
     for (removals_before_release) |r| if (std.mem.eql(u8, r, item)) return true;
     return false;
+}
+
+/// Writes one line of `check` and counts it, unless the check is against
+/// `main` and `removals_before_release` lists the line.
+fn report(w: *std.Io.Writer, n: *usize, against: Base, comptime fmt: []const u8, args: anytype) std.Io.Writer.Error!void {
+    if (removalPasses(against, fmt, args)) return;
+    try w.print(fmt ++ "\n", args);
+    n.* += 1;
 }
 
 /// Writes one line for each change from `old` to `new` that an older peer
@@ -115,9 +158,9 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
     }
     const level: NewLevel = .{ .level = new.level, .released = if (against == .release) o.level else null };
 
-    n += try checkMessages(w, "message", o.messages, new.messages, level);
-    n += try checkMessages(w, "event", o.events, new.events, level);
-    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level);
+    n += try checkMessages(w, "message", o.messages, new.messages, level, against);
+    n += try checkMessages(w, "event", o.events, new.events, level, against);
+    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level, against);
 
     for (o.error_codes) |code| {
         for (new.error_codes) |c| {
@@ -130,8 +173,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
 
     for (o.methods) |om| {
         const nm = findName(Method, new.methods, om.name) orelse {
-            try w.print("method {s} was removed\n", .{om.name});
-            n += 1;
+            try report(w, &n, against, "method {s} was removed", .{om.name});
             continue;
         };
         if (nm.since != om.since) {
@@ -172,9 +214,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
 
     for (o.types) |ot| {
         const nt = findName(TypeDef, new.types, ot.name) orelse {
-            if (removalPasses(against, "type {s}", .{ot.name})) continue;
-            try w.print("type {s} was removed\n", .{ot.name});
-            n += 1;
+            try report(w, &n, against, "type {s} was removed", .{ot.name});
             continue;
         };
         if (nt.kind != ot.kind) {
@@ -225,16 +265,13 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
         };
         for (ot.fields) |of| {
             const nf = findName(Field, nt.fields, of.name) orelse {
-                if (removalPasses(against, "{s}.{s}", .{ ot.name, of.name })) continue;
-                try w.print("{s}.{s} was removed\n", .{ ot.name, of.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s} was removed", .{ ot.name, of.name });
                 continue;
             };
             if (!std.mem.eql(u8, nf.type, of.type) or nf.optional != of.optional or
                 !optionalEql(nf.default, of.default))
             {
-                try w.print("{s}.{s}: its type or default changed\n", .{ ot.name, of.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s}: its type or default changed", .{ ot.name, of.name });
             }
             if (nf.since != of.since) {
                 try w.print("{s}.{s}: since changed from {d} to {d}\n", .{ ot.name, of.name, of.since, nf.since });
@@ -248,8 +285,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
         for (nt.fields) |nf| {
             if (findName(Field, ot.fields, nf.name) != null) continue;
             if (!nf.optional and nf.default == null) {
-                try w.print("{s}.{s} is new, but it is not optional and has no default\n", .{ ot.name, nf.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s} is new, but it is not optional and has no default", .{ ot.name, nf.name });
             }
             if (!level.ok(nf.since)) {
                 try w.print("{s}.{s} is new, but {f}\n", .{ ot.name, nf.name, level.why(nf.since) });
@@ -291,12 +327,12 @@ fn checkMessages(
     old: []const Message,
     new: []const Message,
     level: NewLevel,
+    against: Base,
 ) std.Io.Writer.Error!usize {
     var n: usize = 0;
     for (old) |om| {
         const nm = findName(Message, new, om.name) orelse {
-            try w.print(what ++ " {s} was removed\n", .{om.name});
-            n += 1;
+            try report(w, &n, against, what ++ " {s} was removed", .{om.name});
             continue;
         };
         if (nm.since != om.since or !std.mem.eql(u8, nm.type, om.type)) {
@@ -987,9 +1023,8 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
     }
 
     // The model (design/010): a split tree with an f64 ratio and both cases
-    // of the Node union, in a reply, a request, a batch and an import.
+    // of the SplitNode union, in a reply, a request, a batch and an import.
     const project_id = model.ProjectId.of("p-1");
-    const workspace_id = model.WorkspaceId.ofProject(project_id);
     const tab_id = model.TabId.of("t-1");
     const left: model.Pane = .{
         .id = model.PaneId.of("pane-1"),
@@ -1019,25 +1054,27 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         .focused = right.id,
     };
     var tabs = [_]model.Tab{tab};
-    var projects = [_]model.Project{.{
+    var projects = [_]model.Project{ .{
         .id = project_id,
         .name = "api",
         .path = "/src/api",
         .color = "blue",
         .sort_order = 2,
         .created_at = 1_700_000_000_000,
-    }};
-    var workspaces = [_]model.Workspace{.{
-        .id = workspace_id,
-        .kind = .project,
         .tabs = &tabs,
         .active_tab = tab_id,
-    }};
+    }, .{
+        .id = .of("pin-1"),
+        .name = "Pinned",
+        .path = "",
+        .sidebar = .top,
+        .removable = false,
+        .alias = "pinned",
+    } };
     const model_data: model.ModelData = .{
         .epoch_hint = 5,
         .imported_v1 = true,
         .projects = &projects,
-        .workspaces = &workspaces,
         .selection = .{ .active_project = project_id },
     };
 
@@ -1051,15 +1088,16 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
     });
     try list.append(arena, try control(arena, "state.subscribe result", Raw{ .bytes = try buf.toOwnedSlice() }, true));
     try m.encodeRequest(&buf.writer, 11, m.TabCreate, .{
-        .workspace = workspace_id,
+        .project = project_id,
         .id = tab_id,
         .root = .{ .split = &split },
         .title = "build",
     });
     try list.append(arena, try control(arena, "tab.create request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
     try list.append(arena, try control(arena, "model events", m.EventBatch{ .seq = 13, .cause = 11, .ev = &.{
-        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .workspace = workspace_id, .tab = tab, .zoomed = right.id }) } },
-        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .workspace = workspace_id, .kind = .project, .ids = &.{tab_id}, .active_tab = tab_id }) } },
+        .{ .e = m.ProjectChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.ProjectChanged{ .project = .of(projects[1]) }) } },
+        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .project = project_id, .tab = tab, .zoomed = right.id }) } },
+        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .project = project_id, .ids = &.{tab_id}, .active_tab = tab_id }) } },
     } }, true));
     try m.encodeRequest(&buf.writer, 12, m.ModelImport, .{ .model = model_data, .source = "workspaces_v3.json" });
     try list.append(arena, try control(arena, "model.import request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
@@ -1217,19 +1255,19 @@ test "a listed removal passes against main, never against a release" {
     const opts: std.json.ParseOptions = .{ .ignore_unknown_fields = true };
     // A type and a field from `removals_before_release`.
     const listed = try edit(arena, "{\"name\": \"Role\", \"kind\": \"enum\", \"cases\": [\"gui\", \"unknown\"]}",
-        \\{"name": "ProjectKind", "kind": "enum", "cases": ["project", "group"]},
-        \\   {"name": "Project", "kind": "struct", "fields": [
-        \\     {"name": "id", "type": "str", "since": 1},
-        \\     {"name": "kind", "type": "ProjectKind", "since": 1}]}
+        \\{"name": "Kind", "kind": "enum", "cases": ["project", "pinned"]},
+        \\   {"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "Kind", "since": 1}]}
     );
     const removed = try std.mem.replaceOwned(u8, arena, listed,
-        \\{"name": "ProjectKind", "kind": "enum", "cases": ["project", "group"]},
-        \\   {"name": "Project", "kind": "struct", "fields": [
-        \\     {"name": "id", "type": "str", "since": 1},
-        \\     {"name": "kind", "type": "ProjectKind", "since": 1}]}
+        \\{"name": "Kind", "kind": "enum", "cases": ["project", "pinned"]},
+        \\   {"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "Kind", "since": 1}]}
     ,
-        \\{"name": "Project", "kind": "struct", "fields": [
-        \\     {"name": "id", "type": "str", "since": 1}]}
+        \\{"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1}]}
     );
     try testing.expectEqualStrings("", try problems(arena, listed, removed));
 
@@ -1237,7 +1275,7 @@ test "a listed removal passes against main, never against a release" {
     const new = try std.json.parseFromSliceLeaky(Metadata, arena, removed, opts);
     var out: std.Io.Writer.Allocating = .init(arena);
     try testing.expectEqual(2, try check(&out.writer, old, new, .release));
-    try testing.expectEqualStrings("type ProjectKind was removed\nProject.kind was removed\n", out.written());
+    try testing.expectEqualStrings("type Kind was removed\nTabOrder.kind was removed\n", out.written());
 }
 
 test "a listed limit never gets stricter, and a new limit can come" {
@@ -1507,11 +1545,11 @@ test "the secret check reads a type that holds itself once" {
 }
 
 /// The model's split tree, as the schema would carry it (design/010 §3).
-const model_types = collect(model.tree.Node, &.{});
+const model_types = collect(model.tree.SplitNode, &.{});
 
 test "the model's tree has a schema: a union, a pointer and an f64" {
     const defs = comptime typeDefs(model_types);
-    const node = findName(TypeDef, &defs, "Node").?;
+    const node = findName(TypeDef, &defs, "SplitNode").?;
     try testing.expectEqual(.@"union", node.kind);
     try testing.expectEqualStrings("pane", node.variants[0].name);
     try testing.expectEqualStrings("Pane", node.variants[0].type.?);
@@ -1522,9 +1560,9 @@ test "the model's tree has a schema: a union, a pointer and an f64" {
     const ratio = findName(Field, split.fields, "ratio").?;
     try testing.expectEqualStrings("f64", ratio.type);
     try testing.expectEqualStrings("0.5", ratio.default.?);
-    try testing.expectEqualStrings("Node", findName(Field, split.fields, "first").?.type);
+    try testing.expectEqualStrings("SplitNode", findName(Field, split.fields, "first").?.type);
     try testing.expectEqual(.@"enum", findName(TypeDef, &defs, "Dir").?.kind);
-    try testing.expect(!protocol.holdsSecret(model.tree.Node));
+    try testing.expect(!protocol.holdsSecret(model.tree.SplitNode));
 }
 
 test "a model id is a str on the wire" {
@@ -1551,9 +1589,9 @@ test "the model's tree round-trips through MessagePack" {
         .first = .{ .pane = .{ .id = .of("a"), .session = "macterm-a" } },
         .second = .{ .pane = .{ .id = .of("b"), .session = "macterm-b", .host = "box", .attention = .failed } },
     };
-    const root: tree.Node = .{ .split = &split };
+    const root: tree.SplitNode = .{ .split = &split };
     const bytes = try msgpack.encodeAlloc(arena, root);
-    const back = try msgpack.decodeSlice(tree.Node, arena, bytes);
+    const back = try msgpack.decodeSlice(tree.SplitNode, arena, bytes);
     try testing.expectEqual(0.3, back.split.ratio);
     try testing.expectEqualStrings("box", back.split.second.pane.host.?);
     try testing.expectEqualSlices(u8, bytes, try msgpack.encodeAlloc(arena, back));
@@ -1565,7 +1603,7 @@ test "the Swift output of a union is an indirect enum on {t, a}" {
     defer out.deinit();
     for (defs) |t| try writeSwiftType(&out.writer, t);
     const s = out.written();
-    try testing.expect(std.mem.indexOf(u8, s, "    indirect enum Node: Equatable {\n        case pane(MactermProtocol.Pane)\n        case split(MactermProtocol.Split)\n") != null);
+    try testing.expect(std.mem.indexOf(u8, s, "    indirect enum SplitNode: Equatable {\n        case pane(MactermProtocol.Pane)\n        case split(MactermProtocol.Split)\n") != null);
     try testing.expect(std.mem.indexOf(u8, s, "case \"split\": self = try .split(reader.decodePayload(MactermProtocol.Split.self, from: payload))") != null);
     try testing.expect(std.mem.indexOf(u8, s, "case let other: throw MessagePackError.unknownEnumTag(other)") != null);
     try testing.expect(std.mem.indexOf(u8, s, "var ratio: Double = 0.5\n") != null);
