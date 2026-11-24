@@ -332,7 +332,6 @@ enum ServerEvent: Equatable {
                  .tabChanged,
                  .tabRemoved,
                  .tabOrder,
-                 .workspaceRemoved,
                  .selectionChanged,
                  .paneRemoved:
                 self = .model(kind)

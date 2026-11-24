@@ -105,7 +105,9 @@ final class ModelMirror {
 
     /// A project with the fields of `project.set` and the tabs that the
     /// mirror has: `tab.order` and `tab.set` carry those.
-    private static func project(_ info: MactermProtocol.ProjectInfo, tabs: [MactermProtocol.Tab], activeTab: String?) -> MactermProtocol.Project {
+    private static func project(_ info: MactermProtocol.ProjectInfo, tabs: [MactermProtocol.Tab], activeTab: String?) -> MactermProtocol
+        .Project
+    {
         .init(
             id: info.id,
             name: info.name,

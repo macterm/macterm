@@ -224,7 +224,16 @@ struct ProtocolFixtureTests {
         epochHint: 5,
         importedV1: true,
         projects: [
-            .init(id: "p-1", name: "api", path: "/src/api", color: "blue", sortOrder: 2, createdAt: 1_700_000_000_000, tabs: [tab], activeTab: "t-1"),
+            .init(
+                id: "p-1",
+                name: "api",
+                path: "/src/api",
+                color: "blue",
+                sortOrder: 2,
+                createdAt: 1_700_000_000_000,
+                tabs: [tab],
+                activeTab: "t-1"
+            ),
             .init(id: "pin-1", name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned"),
         ],
         selection: .init(activeProject: "p-1")
@@ -267,7 +276,14 @@ struct ProtocolFixtureTests {
             Issue.record("not an event batch")
             return
         }
-        let pinned = MactermProtocol.ProjectChanged(project: .init(id: "pin-1", name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned"))
+        let pinned = MactermProtocol.ProjectChanged(project: .init(
+            id: "pin-1",
+            name: "Pinned",
+            path: "",
+            sidebar: .top,
+            removable: false,
+            alias: "pinned"
+        ))
         let changed = MactermProtocol.TabChanged(project: "p-1", tab: Self.tab, zoomed: "pane-2")
         let order = MactermProtocol.TabOrder(project: "p-1", ids: ["t-1"], activeTab: "t-1")
         #expect(batch == .init(seq: 13, ev: [

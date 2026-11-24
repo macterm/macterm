@@ -60,7 +60,15 @@ enum ModelConversion {
         case .project: return nil
         case .pinned: .init(id: id(w.id), name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned")
         case .scratch: .init(id: id(w.id), name: "Scratch Tabs", path: "", sidebar: .bottom, removable: false, alias: "scratch")
-        case .quick: .init(id: id(w.id), name: "Quick Terminal", path: "", sidebar: .none, singleTab: true, removable: false, alias: "quick")
+        case .quick: .init(
+                id: id(w.id),
+                name: "Quick Terminal",
+                path: "",
+                sidebar: .none,
+                singleTab: true,
+                removable: false,
+                alias: "quick"
+            )
         case .widget: .init(id: id(w.id), name: "Widget", path: "", sidebar: .none, singleTab: true)
         }
         p.tabs = w.tabs.map(tab)

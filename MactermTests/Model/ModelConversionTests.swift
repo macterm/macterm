@@ -34,7 +34,12 @@ struct ModelConversionTests {
         let group = Project(name: "G", path: "")
         let a = Project(name: "a", path: "/a", parent: group.id)
         let b = Project(name: "b", path: "/b")
-        let tab = TabSnapshot(id: UUID(), customTitle: nil, focusedPaneID: nil, splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/a")))
+        let tab = TabSnapshot(
+            id: UUID(),
+            customTitle: nil,
+            focusedPaneID: nil,
+            splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/a"))
+        )
         let model = ModelConversion.model(
             projects: [group, a, b],
             workspaces: [.init(id: a.id, kind: .project, tabs: [tab], activeTabID: tab.id)],
@@ -52,7 +57,12 @@ struct ModelConversionTests {
     @Test
     func the_pinned_and_the_scratch_workspaces_are_hidden_projects_that_a_window_can_select() {
         let p = Project(name: "p", path: "/p")
-        let tab = TabSnapshot(id: UUID(), customTitle: nil, focusedPaneID: nil, splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/p")))
+        let tab = TabSnapshot(
+            id: UUID(),
+            customTitle: nil,
+            focusedPaneID: nil,
+            splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/p"))
+        )
         let model = ModelConversion.model(
             projects: [p],
             workspaces: [
