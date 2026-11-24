@@ -40,14 +40,14 @@ struct PathCompleterTests {
         #expect(completion?.exactMatch == nil)
         #expect(names(completion) == ["api", "App", "apps"])
         #expect(names(PathCompleter.complete(root + "/APP")) == ["App", "apps"])
-        #expect(names(PathCompleter.complete(root + "/zz")) == [])
+        #expect(names(PathCompleter.complete(root + "/zz"))?.isEmpty == true)
     }
 
     @Test
     func hidden_directories_show_only_after_a_typed_dot() throws {
         let root = try makeTree()
         #expect(names(PathCompleter.complete(root + "/.c")) == [".cache", ".config"])
-        #expect(names(PathCompleter.complete(root + "/c")) == [])
+        #expect(names(PathCompleter.complete(root + "/c"))?.isEmpty == true)
     }
 
     @Test

@@ -96,7 +96,7 @@ struct InputPaletteScopeTests {
         })
         let rows = scope.sections(for: PaletteQuery(raw: "no"), context: makeContext()).flatMap(\.items)
         #expect(rows.map(\.title) == ["notes", "novel"])
-        #expect(scope.completion(for: try #require(rows.last)) == "novel-1")
+        #expect(try scope.completion(for: #require(rows.last)) == "novel-1")
         #expect(scope.completion(for: PaletteItem(title: "other", action: {})) == nil)
         #expect(scope.sections(for: PaletteQuery(raw: "x"), context: makeContext()).isEmpty)
     }
