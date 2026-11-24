@@ -13,14 +13,14 @@ import Foundation
 /// row is the selected row** (Ethan, 0578): with no row selected, Return
 /// does nothing, and the field text is never committed in another way.
 /// The rows under the action row are completions: Return, Tab or a click
-/// puts one in the field, and never runs the action. While the field is
-/// empty, a Cancel row comes last: Return on it leaves the screen as
-/// Escape does, and the selection rests on it when there is no action row,
-/// so Return on an empty field does nothing by chance. The screen has the
-/// height of the root palette in every state. Escape, or Backspace
+/// puts one in the field, and never runs the action. Escape, or Backspace
 /// at an empty field, pops the screen like any screen. An action that
 /// refuses when it runs keeps the screen and shows the reason, until the
 /// text changes.
+///
+/// While the field is empty, a Cancel row comes last. Return on it leaves
+/// the screen as Escape does. The selection rests on it when there is no
+/// action row, so Return on an empty field does no action by chance.
 ///
 /// Its identity is `id`: two inputs with one id are one screen to the
 /// palette (a chord toggles it). An input about one thing (a tab, a pane)
