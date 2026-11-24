@@ -827,6 +827,7 @@ extension MactermProtocol.ChannelOpen {
     struct Result: Equatable {
         var channel: UInt32
         var epoch: UInt64?
+        var caps: [String]?
     }
 }
 
@@ -834,27 +835,35 @@ extension MactermProtocol.ChannelOpen.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         var channel: UInt32?
         var epoch: UInt64?
+        var caps: [String]?
         try reader.readMap { key, reader in
             switch key {
             case "channel": channel = try UInt32(from: &reader)
             case "epoch": epoch = try reader.readOptional(UInt64.self)
+            case "caps": caps = try reader.readOptional([String].self)
             default: return false
             }
             return true
         }
         self.channel = try MessagePackReader.required(channel, "channel")
         self.epoch = epoch
+        self.caps = caps
     }
 
     func encode(to writer: inout MessagePackWriter) {
         var keyCount = 1
         if epoch != nil { keyCount += 1 }
+        if caps != nil { keyCount += 1 }
         writer.writeMapHeader(keyCount)
         writer.writeString("channel")
         channel.encode(to: &writer)
         if let epoch {
             writer.writeString("epoch")
             epoch.encode(to: &writer)
+        }
+        if let caps {
+            writer.writeString("caps")
+            caps.encode(to: &writer)
         }
     }
 }

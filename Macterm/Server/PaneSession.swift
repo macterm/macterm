@@ -39,6 +39,9 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneStatus(_ status: MactermProtocol.Status)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
+    /// A channel to the session opened. `caps` are the session's: what it
+    /// sends (`notification`).
+    func paneChannelOpened(caps: [String])
     /// A desktop notification (OSC 9, OSC 777), once for each message.
     func paneNotification(title: Data, body: Data)
     /// The bell (BEL). The session coalesces bells.
@@ -84,6 +87,7 @@ extension PaneSessionHost {
     func paneCwd(_: Data) {}
     func paneMark(_: MactermProtocol.Mark) {}
     func paneStatus(_: MactermProtocol.Status) {}
+    func paneChannelOpened(caps _: [String]) {}
     func paneNotification(title _: Data, body _: Data) {}
     func paneBell() {}
     func paneAttention(_: MactermProtocol.Attention) {}
@@ -437,6 +441,8 @@ actor PaneSession: PaneInputRoute {
                     await channel.close()
                     return
                 }
+                let caps = channel.caps
+                deliver { $0.paneChannelOpened(caps: caps) }
                 let grid = host.paneGrid()
                 let resuming = matchingResumePoint(channel)
                 try sendAttach(channel, grid, resume: resuming)

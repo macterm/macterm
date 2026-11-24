@@ -110,6 +110,9 @@ final class PaneChannel: @unchecked Sendable {
     /// The `epoch` of the session's `hello`. Nil from a server that does
     /// not give it: the channel cannot resume.
     let epoch: UInt64?
+    /// The `caps` of the session's `hello`: what the session sends. Empty
+    /// from a server or a session of an older build.
+    let caps: [String]
     let events: Events
 
     private weak var transport: (any PaneChannelTransport)?
@@ -205,10 +208,17 @@ final class PaneChannel: @unchecked Sendable {
 
     /// `readAhead` is the most events that wait for the consumer; nil for
     /// no limit.
-    init(transport: any PaneChannelTransport, number: UInt32, epoch: UInt64? = nil, readAhead: Int? = nil) {
+    init(
+        transport: any PaneChannelTransport,
+        number: UInt32,
+        epoch: UInt64? = nil,
+        caps: [String] = [],
+        readAhead: Int? = nil
+    ) {
         self.transport = transport
         self.number = number
         self.epoch = epoch
+        self.caps = caps
         let (stream, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
         let credit = readAhead.map(Credit.init(limit:))
         events = Events(stream: stream, credit: credit)

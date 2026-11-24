@@ -44,7 +44,7 @@ extension Pane {
         // A surface with no session reports its own titles.
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
         view.onDesktopNotification = { [weak self, weak view] title, body in
-            guard let self, view?.sessionSendsFacts == false else { return }
+            guard let self, view?.postsOwnNotifications == true else { return }
             postDesktopNotification(title: title, body: body)
         }
         view.onOutputActivity = { [weak view] _ in

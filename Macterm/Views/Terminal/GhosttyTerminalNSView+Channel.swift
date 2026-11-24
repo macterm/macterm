@@ -139,6 +139,10 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     private var grid = PaneGrid(cols: 80, rows: 24)
     /// The pane's link. Set on the main actor before the first message.
     @MainActor weak var link: PaneLink?
+    /// The session sends `notification` (the `notification` cap of its
+    /// `hello`). False until a channel opens, and for a session of an older
+    /// build.
+    @MainActor private(set) var sessionSendsNotifications = false
 
     /// `view` is nil only in a test, which reads the link's events.
     init(view: GhosttyTerminalNSView?) {
@@ -238,6 +242,13 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
 
     func paneStatus(_ status: MactermProtocol.Status) {
         toLink(.status(status))
+    }
+
+    func paneChannelOpened(caps: [String]) {
+        let sends = caps.contains("notification")
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated { sessionSendsNotifications = sends }
+        }
     }
 
     func paneNotification(title: Data, body: Data) {

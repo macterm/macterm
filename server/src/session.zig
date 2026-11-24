@@ -526,7 +526,7 @@ const Session = struct {
             .build_key = build_options.key,
             .role = .session,
             .epoch = s.epoch,
-            .caps = &.{m.tty_read_cap},
+            .caps = &.{ m.tty_read_cap, m.notification_cap },
         };
     }
 

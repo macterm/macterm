@@ -44,10 +44,10 @@ final class GhosttyCallbacks: @unchecked Sendable {
         case GHOSTTY_ACTION_PWD:
             guard let view = surfaceView(from: target) else { return true }
             let pwd = String(cString: action.action.pwd.pwd)
-            // A surface on a channel takes the session's folder
-            // (`SurfaceChannelHost.paneCwd`).
+            // A surface whose session sends the folder takes the session's
+            // (`SurfaceChannelHost.paneCwd`). A plain ssh shell has none.
             DispatchQueue.main.async {
-                guard view.channelRuntime == nil else { return }
+                guard !view.sessionSendsFacts else { return }
                 view.currentPwd = pwd
             }
             return true

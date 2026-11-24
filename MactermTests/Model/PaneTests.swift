@@ -506,7 +506,9 @@ struct PaneTests {
     }
 
     /// The session's folder and command marks are the pane's, with no view:
-    /// Project Insights reads them (`receiveCommandMark`).
+    /// Project Insights reads them (`receiveCommandMark`). An end with no
+    /// start (the command started before the attach) posts no Command
+    /// Finished notification, so this test posts none.
     @Test
     func the_sessions_folder_and_command_start_are_the_panes() {
         let p = Pane(projectPath: "/", projectID: UUID())
@@ -516,6 +518,7 @@ struct PaneTests {
         p.receiveLinkEvent(.mark(MactermProtocol.Mark(kind: .output)))
         #expect(p.commandStartedAt != nil)
         #expect(!p.isShellAtPrompt)
+        p.commandStartedAt = nil
         p.receiveLinkEvent(.mark(MactermProtocol.Mark(kind: .end, exitCode: 0)))
         #expect(p.commandStartedAt == nil)
         #expect(p.isShellAtPrompt)

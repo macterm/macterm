@@ -45,6 +45,9 @@ struct PaneLinkTests {
             link.viewReady(second)
 
             try await waitFor { titles > 0 }
+            // The session says that it sends `notification`: libghostty's
+            // OSC 9 does not post for the pane too.
+            try await waitFor { first.sessionSendsNotifications && second.sessionSendsNotifications }
             // Both channels got the title; the pane hears it once.
             try await Task.sleep(for: .milliseconds(300))
             #expect(titles == 1)
@@ -125,6 +128,18 @@ struct PaneLinkTests {
         #expect(link.readsMessages(from: second))
         link.detach(second)
         #expect(!link.readsMessages(from: second))
+    }
+
+    /// A session of an older build has no `notification` cap. Its pane then
+    /// takes notifications from libghostty (`postsOwnNotifications`).
+    @Test
+    func the_host_reads_the_notification_cap_of_the_session() async throws {
+        let host = SurfaceChannelHost(view: nil)
+        host.paneChannelOpened(caps: ["tty-read"])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!host.sessionSendsNotifications)
+        host.paneChannelOpened(caps: ["tty-read", "notification"])
+        try await waitFor { host.sessionSendsNotifications }
     }
 
     // MARK: - Support

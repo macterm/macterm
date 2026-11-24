@@ -292,6 +292,7 @@ pub const ChannelOpen = struct {
         pub const field_doc = .{
             .channel = "The number of the new channel.",
             .epoch = "The epoch of the hello of the session. Null from a session of an older build.",
+            .caps = "The caps of the hello of the session (notification, tty-read). Null from a server of an older build.",
         };
 
         channel: u32,
@@ -299,8 +300,12 @@ pub const ChannelOpen = struct {
         /// output offset, and its next `Attach` on a new channel asks to
         /// resume with both (design/003 §7).
         epoch: ?u64 = null,
+        /// The `caps` of the session's `hello`. A session keeps the build
+        /// that started it, so a client reads here what the session sends:
+        /// a relayed channel never sees the session's `hello`.
+        caps: ?[]const []const u8 = null,
 
-        pub const field_since = .{ .epoch = 3 };
+        pub const field_since = .{ .epoch = 3, .caps = 3 };
     };
 };
 
@@ -2020,6 +2025,11 @@ pub const TtyRead = struct {
 /// The cap in a session's `hello` that says it answers `TtyRead`.
 pub const tty_read_cap = "tty-read";
 
+/// The cap of a session that sends `DesktopNotification`. A client takes a
+/// notification from the terminal it feeds only when the session has no
+/// such cap: a session of an older build.
+pub const notification_cap = "notification";
+
 /// The server asks the session to wait (`session.wait`). The session
 /// answers with `Waited` and the same `tag` when the wait ends. Waits end in
 /// any order.
@@ -2164,7 +2174,10 @@ pub const Progress = struct {
 };
 
 /// A program asked for a desktop notification (OSC 9 or OSC 777). The
-/// session sends each one once, to every client, and never drops it.
+/// session sends each one once, to each client that is attached then, and
+/// does not drop it for a client that is behind. A client that attaches
+/// later does not get it. A session with this message has the
+/// `notification_cap`.
 pub const DesktopNotification = struct {
     pub const name = "notification";
     pub const since = 3;

@@ -1224,6 +1224,13 @@
           "optional": true,
           "since": 3,
           "doc": "The epoch of the hello of the session. Null from a session of an older build."
+        },
+        {
+          "name": "caps",
+          "type": "[str]",
+          "optional": true,
+          "since": 3,
+          "doc": "The caps of the hello of the session (notification, tty-read). Null from a server of an older build."
         }
       ],
       "cases": [],

@@ -691,6 +691,10 @@ final class RemotePaneDriver {
             surface.paneStatus(status)
         }
 
+        func paneChannelOpened(caps: [String]) {
+            surface.paneChannelOpened(caps: caps)
+        }
+
         func paneNotification(title: Data, body: Data) {
             surface.paneNotification(title: title, body: body)
         }
