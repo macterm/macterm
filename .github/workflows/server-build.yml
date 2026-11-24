@@ -7,7 +7,8 @@ name: Server Build
 # setup installs it from there.
 #
 # The build key is the hash of the server's sources (build-server.sh). Each
-# build has a manifest, `macterm-<key>-server.json`, with the SHA-256 of each
+# build has a manifest, `macterm-<key>-server.json` (with the tag of its run
+# in the release, build-server.sh stage), with the SHA-256 of each
 # tarball; `build-server.sh verify` checks a build against it.
 # With the input `prebuilt`, the Linux job Find Prebuilt downloads the build
 # of the key from the `server-prebuilt` release. When it finds the build, the
@@ -143,6 +144,15 @@ jobs:
               --notes "Builds of server/ for scripts/setup.sh, named by build key. CI adds them. It keeps the builds of main, of open pull requests and of the last 14 days, and removes the others. They are not a release of Macterm." \
               || gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null
           fi
+          # A build of the key that is there already is the served build.
+          # The release workflows build without the prebuilt and come here.
+          served="$RUNNER_TEMP/served"
+          rm -rf "$served"
+          if scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" "$served" > /dev/null; then
+            echo "The release has a build of $KEY. Nothing to upload."
+            exit 0
+          fi
+          rm -rf "$served"
           tag="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           staged="$RUNNER_TEMP/staged"
           rm -rf "$staged"
@@ -151,15 +161,23 @@ jobs:
           gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" "$staged/macterm-$KEY-server-$tag.json"
 
       # The app bundles the builds of build/server, so they must be the bytes
-      # that the release serves: the oldest build of the key that verifies
-      # (build-server.sh download). That can be the build of another run.
+      # that the release serves: the first complete build of the key that
+      # verifies (build-server.sh download). That can be the build of another
+      # run. The summary says if the two builds are the same bytes.
       - name: Use the Served Build
         if: steps.upload.outcome == 'success'
         run: |
           served="$RUNNER_TEMP/served"
-          rm -rf "$served"
-          manifest="$(scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" "$served")"
-          echo "The served build is $manifest" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ ! -d "$served" ]]; then
+            manifest="$(scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" "$served")"
+            echo "The served build is $manifest" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          sums() { jq -S '[.files[].sha256]' "$1/macterm-$KEY-server.json"; }
+          if [[ "$(sums "$served")" == "$(sums build/server)" ]]; then
+            echo "This build is the served build" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The served build has other bytes; using it" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           rm -rf build/server
           cp -R "$served" build/server
 

@@ -41,8 +41,8 @@
 # `macterm-<key>-server-<tag>.json`. CI uses its run as the tag, so two runs
 # never write an asset of the same name. A run uploads its manifest last.
 # A run that stops before then leaves tarballs that no manifest names, and
-# they do not change any build. `download` takes the oldest manifest of the
-# key that verifies. It writes it as `macterm-<key>-server.json`, so a
+# they do not change any build. `download` takes the first complete build of
+# the key that verifies, in the order in which the uploads ended. It writes it as `macterm-<key>-server.json`, so a
 # downloaded build reads as a local build. Get a tarball's name from the
 # manifest (`file`). Do not make the name.
 #
@@ -193,46 +193,60 @@ PY
 }
 
 # Download the manifest `name` and the tarballs that it names into `dir`.
-# Exit 0 when the build verifies.
+# `uploaded` lists the names of the complete assets of the release. Exit 0
+# when the build verifies, 2 when the build is not complete or does not
+# verify, and 1 when a download fails.
 download_manifest() {
-  local repo="$1" release="$2" key="$3" name="$4" dir="$5" target path
+  local repo="$1" release="$2" key="$3" name="$4" dir="$5" uploaded="$6" target path
   gh release download "$release" --repo "$repo" --dir "$dir" --pattern "$name" || return 1
   if [[ "$name" != "macterm-$key-server.json" ]]; then
     mv "$dir/$name" "$dir/macterm-$key-server.json" || return 1
   fi
   for target in "${TARGETS[@]}"; do
-    path="$(tarball "$dir" "$target")" || return 1
+    path="$(tarball "$dir" "$target")" || return 2
+    grep -qxF "$(basename "$path")" <<<"$uploaded" || return 2
     gh release download "$release" --repo "$repo" --dir "$dir" \
       --pattern "$(basename "$path")" || return 1
   done
-  verify "$dir" "$key" >/dev/null
+  verify "$dir" "$key" >/dev/null || return 2
 }
 
 # Download the build of `key` from a release into `dir`, which must not
-# exist. It tries the manifests of the key that are complete, the oldest
-# first, and takes the first whose tarballs verify. Prints the name of the
-# manifest that it took.
+# exist. It tries the manifests of the key that are complete, in the order
+# in which their uploads ended, and takes the first build that is complete
+# and verifies. Prints the name of the manifest that it took. A failed
+# download stops it: it never takes a newer build because of a network
+# error.
 download() {
   local repo="$1" release="$2" key="$3" dir="$4"
-  local id manifests name try
+  local id uploaded manifests name try status
   [[ ! -e "$dir" ]] || { echo "error: $dir exists" >&2; return 1; }
   id="$(gh api "repos/$repo/releases/tags/$release" --jq .id)" || return 1
-  # The manifest without a tag is the form before tags.
-  manifests="$(gh api --paginate "repos/$repo/releases/$id/assets?per_page=100" \
+  # One line for each complete asset of the key: the end of its upload, its
+  # name.
+  uploaded="$(gh api --paginate "repos/$repo/releases/$id/assets?per_page=100" \
     --jq ".[] | select(.state == \"uploaded\")
-      | select(.name | test(\"^macterm-$key-server(-[^/]+)?\\\\.json\$\"))
-      | \"\\(.created_at) \\(.name)\"" | sort)" || return 1
+      | select(.name | startswith(\"macterm-$key-\"))
+      | \"\\(.updated_at) \\(.name)\"" | sort)" || return 1
+  # The manifest without a tag is the form before tags.
+  manifests="$(awk -v k="$key" '$2 ~ ("^macterm-" k "-server(-[^ ]+)?\\.json$") { print $2 }' <<<"$uploaded")"
   [[ -n "$manifests" ]] || { echo "No build of $key in $release" >&2; return 1; }
-  while read -r _ name; do
+  while read -r name; do
     try="$(mktemp -d "${TMPDIR:-/tmp}/macterm-server-download.XXXXXX")"
-    if download_manifest "$repo" "$release" "$key" "$name" "$try"; then
+    status=0
+    download_manifest "$repo" "$release" "$key" "$name" "$try" "$(awk '{ print $2 }' <<<"$uploaded")" || status=$?
+    if [[ "$status" == 0 ]]; then
       mkdir -p "$(dirname "$dir")"
       mv "$try" "$dir"
       echo "$name"
       return 0
     fi
-    echo "warning: the build of $name does not verify" >&2
     rm -rf "$try"
+    if [[ "$status" == 1 ]]; then
+      echo "error: cannot download the build of $name" >&2
+      return 1
+    fi
+    echo "warning: the build of $name is not complete or does not verify" >&2
   done <<<"$manifests"
   return 1
 }
