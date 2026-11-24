@@ -25,14 +25,21 @@ on:
 permissions:
   contents: read
 
+# A push cancels the runs of older commits of the same pull request or of
+# main. A cancelled main commit gets no tip build, and the run of the next
+# commit checks its changes (scripts/changed-areas.sh).
 concurrency:
-  group: server-${{ github.event.pull_request.number || github.sha }}
+  group: server-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   changes:
     name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # actions: read lists the runs of this workflow (scripts/changed-areas.sh).
+    permissions:
+      contents: read
+      actions: read
     outputs:
       server: ${{ steps.changes.outputs.server }}
     steps:
@@ -43,7 +50,7 @@ jobs:
       - name: Find Server Changes
         id: changes
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: scripts/changed-areas.sh
 
   test:

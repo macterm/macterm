@@ -2221,22 +2221,28 @@ final class AppState {
     var plainShellAnswerTimeout: Duration = .seconds(2)
 
     /// Shows the folder panel, adds the selected directory as a new project,
-    /// and selects it: the Select in Finder row of the New Project screen
-    /// and the `+` of Settings → Projects. Returns the project, nil if
-    /// cancelled.
+    /// and selects it: the Select in Finder row of the New Project screen,
+    /// the `+` of Settings → Projects and New Project Inside. Returns the
+    /// project, nil if cancelled. With `parent` (New Project Inside), the
+    /// panel starts in the folder of `parent` when it is a local folder, and
+    /// the new project goes at the end of the projects inside `parent`.
     @discardableResult
-    func newProjectFromFolderPanel(store: ProjectStore) -> Project? {
+    func newProjectFromFolderPanel(store: ProjectStore, inside parent: Project? = nil) -> Project? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.message = String(localized: "Select a project folder")
+        if let parent, parent.hasFolder, !parent.isRemote {
+            panel.directoryURL = URL(filePath: parent.path, directoryHint: .isDirectory)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         // Always create: picking a folder that already backs a project makes a
         // second, independent project for it, not a jump to the existing one.
         let project = store.create(
             name: url.lastPathComponent,
-            path: url.path(percentEncoded: false)
+            path: url.path(percentEncoded: false),
+            parent: parent?.id
         )
         selectProject(project)
         return project
@@ -2354,77 +2360,90 @@ final class AppState {
         saveWorkspaces()
     }
 
-    /// Run `removal` (the caller's full remove: workspace + project store)
-    /// immediately when no pane in the project is busy; otherwise stage it
-    /// for the confirmation alert — removal kills every pane's zmx session.
-    func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        judgeClose(panes(inProject: projectID), target: "project:\(projectID)") { [weak self] needsConfirmation in
-            guard let self else { return }
-            guard needsConfirmation else {
-                removal()
-                return
-            }
-            confirmRemoveProject(projectID, host: host, removal: removal)
+    /// Remove the project `projectID`, its tabs and every project inside
+    /// it, at any depth (design 013 §3, Ethan on ui-review 0522). A project
+    /// with no tabs and no projects inside goes at once. Any other project
+    /// asks one question with the count of tabs and of nested projects:
+    /// Cancel or Remove.
+    func requestRemoveProject(_ projectID: UUID, store: ProjectStore, host: DialogHost = .mainWindow) {
+        guard let project = store.row(projectID) else { return }
+        let removed = projectsRemoved(with: [projectID], store: store)
+        let tabs = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let nested = removed.count - 1
+        let removal: @MainActor () -> Void = { [weak self] in
+            self?.removeProject(projectID, store: store)
         }
-    }
-
-    private func confirmRemoveProject(_ projectID: UUID, host: DialogHost, removal: @escaping @MainActor () -> Void) {
-        present(PendingDialog(
-            kind: .removeProject(projectID),
-            title: String(localized: "Remove project with running processes?"),
-            message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
-            confirmTitle: String(localized: "Remove"),
-            host: host,
-            onConfirm: removal
-        ))
-    }
-
-    /// Remove a sidebar group (design 013). An empty group goes at once. A
-    /// group with projects always asks, and says how many: the removal ends
-    /// the sessions of each project inside, at any depth. Ungroup is the
-    /// path that keeps them.
-    func requestRemoveGroup(
-        _ group: Project,
-        projectCount: Int,
-        host: DialogHost = .mainWindow,
-        removal: @escaping @MainActor () -> Void
-    ) {
-        guard projectCount > 0 else {
+        guard tabs > 0 || nested > 0 else {
             removal()
             return
         }
-        present(PendingDialog(
-            kind: .removeGroup(group.id),
-            title: String(localized: "Remove the group “\(group.name)”?"),
-            message: String(localized: """
-            This group contains \(projectCount) projects. Macterm removes them and stops all processes \
-            in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group.
-            """),
-            confirmTitle: String(localized: "Remove"),
-            host: host,
-            onConfirm: removal
-        ))
+        judgeClose(panes(inProjects: removed, tabs: []), target: "project:\(projectID)") { [weak self] busy in
+            guard let self else { return }
+            let message = busy
+                ? String(localized: "This project contains \(tabs) tabs and \(nested) nested projects. A process is still running.")
+                : String(localized: "This project contains \(tabs) tabs and \(nested) nested projects.")
+            present(PendingDialog(
+                kind: .removeProject(projectID),
+                title: String(localized: "Remove the project “\(project.name)”?"),
+                message: message,
+                confirmTitle: String(localized: "Remove"),
+                host: host,
+                onConfirm: removal
+            ))
+        }
     }
 
-    /// A bulk sidebar delete (multi-selection): run `removal` now, or stage
-    /// it when one or more affected panes has a running foreground program —
-    /// a single dialog for the whole selection instead of one per item.
-    /// Run `removal` (the caller's full bulk close/remove) immediately when no
-    /// affected pane is busy; otherwise stage it behind one confirmation alert.
-    /// Mirrors `requestRemoveProject`/`requestCloseTab`, but for a whole
-    /// multi-selection so the user confirms once rather than per item.
+    /// Remove the project `projectID` and every project inside it: their
+    /// workspaces, their sessions and their rows.
+    func removeProject(_ projectID: UUID, store: ProjectStore) {
+        guard store.row(projectID) != nil else { return }
+        removeProjects(projectsRemoved(with: [projectID], store: store))
+        store.removeWithDescendants(projectID)
+    }
+
+    /// The projects that a removal of `selected` removes: each selected
+    /// project and every project inside it, once each.
+    func projectsRemoved(with selected: [UUID], store: ProjectStore) -> [UUID] {
+        var seen = Set<UUID>()
+        return selected.flatMap { [$0] + store.descendants(of: $0).map(\.id) }.filter { seen.insert($0).inserted }
+    }
+
+    /// A bulk sidebar delete (multi-selection): run `removal` (the caller's
+    /// close of `tabs` and removal of the `selected` projects) now, or after
+    /// one question for the whole selection. A selected project goes with
+    /// everything inside it, as a single Remove does, so the question has
+    /// the same counts when a selected project holds tabs or nested
+    /// projects. A selection of tabs alone asks only when a process runs.
     func requestRemoveSelection(
-        projectIDs: [UUID],
+        projectIDs selected: [UUID],
         tabs: [(tabID: UUID, projectID: UUID)],
+        store: ProjectStore,
         removal: @escaping @MainActor () -> Void
     ) {
-        judgeClose(panes(inProjects: projectIDs, tabs: tabs), target: "selection") { [weak self] needsConfirmation in
+        let removed = projectsRemoved(with: selected, store: store)
+        let tabCount = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let selectedSet = Set(selected)
+        let nested = removed.count(where: { !selectedSet.isDisjoint(with: store.ancestors(of: $0)) })
+        judgeClose(panes(inProjects: removed, tabs: tabs), target: "selection") { [weak self] busy in
             guard let self else { return }
-            guard needsConfirmation else {
-                removal()
+            guard tabCount > 0 || nested > 0 else {
+                if busy { confirmRemoveSelection(removal: removal) } else { removal() }
                 return
             }
-            confirmRemoveSelection(removal: removal)
+            let message = busy
+                ? String(localized: """
+                The selected projects contain \(tabCount) tabs and \(nested) nested projects. \
+                A process is still running.
+                """)
+                : String(localized: "The selected projects contain \(tabCount) tabs and \(nested) nested projects.")
+            present(PendingDialog(
+                kind: .removeSelection,
+                title: String(localized: "Remove the selected items?"),
+                message: message,
+                confirmTitle: String(localized: "Remove"),
+                host: .mainWindow,
+                onConfirm: removal
+            ))
         }
     }
 
@@ -3622,10 +3641,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it. A project with no folder is no slot: the sidebar
-    /// draws it as a group row, with no tabs (`SidebarTree`).
+    /// but never leave it. `projects` is in tree order, so every project,
+    /// with a folder or not, is a slot in the order of the sidebar.
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.filter(\.hasFolder).map(\.id)
+        var slots = projects.map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }

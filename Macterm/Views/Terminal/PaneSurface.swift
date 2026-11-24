@@ -27,9 +27,9 @@ final class PaneSurface: Identifiable {
     var windowID: UUID? { host.windowID }
 
     let searchState = TerminalSearchState()
-    /// What the copy-mode pill says (`Copy Mode`, `Select Mode`), nil while the
-    /// mode is off. The view's `CopyModeController` owns the mode and reports
-    /// it here. Live UI state only — never persisted.
+    /// What the copy-mode pill says (`CopyModeKeymap.label(for:)`), nil
+    /// while the mode is off. The view's `CopyModeController` owns the mode
+    /// and reports it here. Live UI state only — never persisted.
     var copyModeLabel: String?
     /// The surface is read-only (ghostty's `toggle_readonly`): libghostty sends
     /// no input to the pty. Drives the Read-Only pill. A new surface starts
