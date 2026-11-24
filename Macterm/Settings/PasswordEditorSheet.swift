@@ -22,9 +22,9 @@ struct PasswordEditorRequest: Identifiable {
     }
 }
 
-/// One password, untruncated and editable: the host of a remote entry (shown,
-/// not editable), the command exactly as the process table reported it (the
-/// list shows a shortened form), the prompt line, and the password itself. A saved password is shown behind the same
+/// One password, untruncated and editable: the command exactly as the
+/// process table reported it (the list shows a shortened form), the prompt
+/// line, and the password itself. A saved password is shown behind the same
 /// authentication Autofill uses and becomes a field once shown; a new one is
 /// typed into a secure field. Nothing is written until Save; Cancel discards
 /// every edit. Save files the entry under the edited command and prompt
@@ -38,6 +38,8 @@ struct PasswordEditorRequest: Identifiable {
 /// alone are detection's own — a key passphrase belongs to the key whatever
 /// asks, a `read -s` to the shell — so one can be edited as it is, but none
 /// is created here, nor made by clearing a command.
+///
+/// A host's entry shows its host, read-only: an edit stays on that host.
 struct PasswordEditorSheet: View {
     let request: PasswordEditorRequest
     let vault: PasswordVault
@@ -81,8 +83,6 @@ struct PasswordEditorSheet: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    // The editor files an edit on the entry's own host, so
-                    // the host shows but does not change here.
                     if let host = entry?.id.host {
                         LabeledContent("Host") {
                             Text(verbatim: host)
