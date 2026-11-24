@@ -1527,6 +1527,12 @@ final class AppState {
         for ws in WorkspaceSerializer.restore(from: loaded.workspaces, validIDs: valid) {
             workspaces[ws.id] = ws
         }
+        // A project holds its tabs from the start (design 010 section 11):
+        // one with no snapshot gets its first tab now, not when a window
+        // first shows it.
+        for project in projects {
+            giveFirstTab(to: project)
+        }
         // Pinned tabs: records first, then the launch reconcile against
         // `pinned.yaml` (the file is authoritative for membership — see
         // AppState+PinnedTabs). Live tabs materialize async, after zmx says
@@ -3656,7 +3662,25 @@ final class AppState {
         tab.markSeen()
     }
 
+    /// A project that was just added gets its first tab at once, so that
+    /// no project is without tabs (design 010 section 11). `ProjectStore.onAdd`
+    /// calls it for every path that adds a project (`MactermApp` connects
+    /// the two). Before the restore it saves nothing: a save then would
+    /// write over the snapshot that the restore has not read yet.
+    func projectAdded(_ project: Project) {
+        guard workspaces[project.id] == nil, project.hasFolder else { return }
+        giveFirstTab(to: project)
+        if hasRestoredSelection { saveWorkspaces() }
+    }
+
     // MARK: - Private
+
+    /// The first tab of a project with a folder that has no tabs yet. A
+    /// project with no folder is a sidebar group, which holds no tabs.
+    private func giveFirstTab(to project: Project) {
+        guard project.hasFolder else { return }
+        ensureWorkspace(projectID: project.id, path: project.path)
+    }
 
     private func ensureWorkspace(projectID: UUID, path: String) {
         // The pinned workspace starts EMPTY — the path-taking init spawns an

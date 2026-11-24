@@ -171,7 +171,7 @@ The GUI text is in three String Catalogs: `Macterm/Localizable.xcstrings` (the a
 
 ### UI principles
 
-- **The GUI never shows the concept of unloading.** Macterm starts the shells of a project when a window selects it, so the user never loads or unloads a project. There is no action that stops a whole project and keeps its layout: no Unload command, menu item or Settings badge. Remove ends the sessions of a project for good. The CLI keeps the `loaded` field of `project list` (`not loaded` means that no workspace exists yet), because scripts read it.
+- **The GUI never shows the concept of unloading.** Macterm starts the shells of a project when a window selects it, so the user never loads or unloads a project. There is no action that stops a whole project and keeps its layout: no Unload command, menu item or Settings badge. Remove ends the sessions of a project for good. A project with a folder has its first tab from the moment it is added (`AppState.projectAdded`), so `project list` has no `loaded` field.
 - **A pane dims only when it is an unfocused split** (ghostty `unfocused-split-opacity` and `unfocused-split-fill`). No other state dims a pane: not a mirror, not a lost remote pane, not a card of the tab switcher. A dimmed sidebar row is a different thing and can stay.
 - **Use native SwiftUI and AppKit components only**. Accept a native limitation. Do not mimic the behavior.
 - All colors come from `MactermTheme`. Fixed system colors are allowed only for identity labels (`ProjectColor`, `AgentIcon.brandColor`).

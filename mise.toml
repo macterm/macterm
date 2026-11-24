@@ -59,6 +59,8 @@ sources = [
   "scripts/build-server.sh",
   "scripts/_lib.sh",
   "server/**/*",
+  "assets/palette.schema.json",
+  "assets/project.schema.json",
 ]
 outputs = { auto = true }
 run = """

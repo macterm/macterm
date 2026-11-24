@@ -248,7 +248,7 @@ Desktop widgets are terminals on the desktop (`DesktopWidget`, `AppState+Desktop
 
 ## First-run seed
 
-`FirstRunSeed` (pure) and `AppState.seedFirstRunIfNeeded` seed a fresh install with one project (the home directory) and one pinned "Welcome" tab. Each one runs `macterm tutor <topic>` as its `run:`.
+`FirstRunSeed` (pure) and `AppState.seedFirstRunIfNeeded` seed a fresh install with one project (the home directory) and one pinned "Welcome" tab. The pinned tab runs `macterm tutor pinned` as its `run:`. The project's first tab is a plain shell that runs no command.
 
 - It runs after `restoreSelection`.
 - `Preferences.hasSeededFirstRun` is written on the first launch that can answer, seeded or not. The exception is `.postpone` on `WorkspaceStore.loadFailed`.

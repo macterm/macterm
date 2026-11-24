@@ -63,6 +63,27 @@ struct DirectorySource: PaletteSource {
         return items
     }
 
+    /// The local directory that a row of this source points at, from its id
+    /// (`dir-open:`, `dir-switch:` or `dir-new:` and the full path). Nil for
+    /// any other row, a remote row too.
+    static func path(of item: PaletteItem) -> String? {
+        for prefix in ["dir-open:", "dir-switch:", "dir-new:"] where item.id.hasPrefix(prefix) {
+            return String(item.id.dropFirst(prefix.count))
+        }
+        return nil
+    }
+
+    /// The text that Tab puts in the field: the field text
+    /// (`PathCompleter.fieldText`) of the first directory row that is not
+    /// the query. After a Tab, the typed directory is the exact-match row
+    /// at the top, so the next Tab skips it and takes its first child.
+    static func tabCompletion(query: String, items: [PaletteItem]) -> String? {
+        items.lazy
+            .compactMap { path(of: $0) }
+            .map { PathCompleter.fieldText(for: $0, typed: query) }
+            .first { $0 != query }
+    }
+
     func emptyItems(context _: PaletteContext) -> [PaletteItem]? {
         nil
     }

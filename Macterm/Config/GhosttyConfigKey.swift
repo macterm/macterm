@@ -10,8 +10,8 @@ import GhosttyKit
 /// guessing: an enum read through a `ghostty_string_s` comes back with `len`
 /// 0 (`window-colorspace`, `macos-hidden`), because libghostty writes an
 /// enum's `@tagName` as a bare NUL-terminated pointer. Pairing the shape with
-/// the key *at the declaration* makes the pairing unforgeable at the fourteen
-/// places a key is read; `GhosttyApp.read` is the one generic reader.
+/// the key *at the declaration* makes the pairing unforgeable at every
+/// place that reads a key; `GhosttyApp.read` is the one generic reader.
 ///
 /// The factories below are the shapes Macterm reads today. Add one per new
 /// C shape, not per key — and check `c_get.zig` first: a `ghostty_string_s`
@@ -95,6 +95,23 @@ extension GhosttyConfigKey where Value == String {
             guard get(config, name, into: &value), let ptr = value.path else { return nil }
             let path = String(cString: ptr)
             return path.isEmpty ? nil : path
+        }
+    }
+}
+
+extension GhosttyConfigKey where Value == ThemeResolver.Sides {
+    /// The `theme` key, as the two sides that libghostty merged from every
+    /// config file and include (`ghostty_config_theme_s`, a fork patch of
+    /// macterm/ghostty). Each side is a pointer and a length with no NUL.
+    /// The getter fails when no file sets a theme.
+    static func theme(_ name: String) -> Self {
+        Self(name) { config in
+            var value = ghostty_config_theme_s()
+            guard get(config, name, into: &value), let light = value.light, let dark = value.dark else { return nil }
+            func text(_ start: UnsafePointer<CChar>, _ count: Int) -> String {
+                String(decoding: UnsafeRawBufferPointer(start: start, count: count), as: UTF8.self)
+            }
+            return ThemeResolver.Sides(light: text(light, value.light_len), dark: text(dark, value.dark_len))
         }
     }
 }

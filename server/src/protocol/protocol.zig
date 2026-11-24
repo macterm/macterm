@@ -206,15 +206,20 @@ test "a hello under min_level is refused with needs_level" {
     try testing.expectEqual(m.Negotiation{ .speak = 4 }, m.negotiate(strict, newer));
 }
 
-test "a CLI refuses any other build, at any level" {
+test "a CLI and macterm mcp refuse any other build, at any level" {
     var cli = hello;
     cli.role = .cli;
+    var mcp = hello;
+    mcp.role = .mcp;
     var server = hello;
     server.role = .server;
     try testing.expectEqual(m.Negotiation{ .speak = m.level }, m.negotiate(server, cli));
+    try testing.expectEqual(m.Negotiation{ .speak = m.level }, m.negotiate(server, mcp));
     server.build = "2.0.0-tip.2";
     try testing.expectEqualStrings("build_mismatch", m.negotiate(server, cli).refuse.reason);
     try testing.expectEqualStrings("build_mismatch", m.negotiate(cli, server).refuse.reason);
+    try testing.expectEqualStrings("build_mismatch", m.negotiate(server, mcp).refuse.reason);
+    try testing.expectEqualStrings("build_mismatch", m.negotiate(mcp, server).refuse.reason);
     // Two other roles may differ in build.
     var gui = hello;
     gui.build = "2.0.0-tip.9";
