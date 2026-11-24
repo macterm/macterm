@@ -18,8 +18,12 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
     private var frames: [ProtocolFrame] = []
     private var methods: [String] = []
     private let answer: Answer
+    /// The session epoch that `channel.open` gives. Nil is a server that
+    /// gives none.
+    private let epoch: UInt64?
 
-    init(answer: @escaping Answer = FakeServerLink.standard) {
+    init(epoch: UInt64? = nil, answer: @escaping Answer = FakeServerLink.standard) {
+        self.epoch = epoch
         self.answer = answer
     }
 
@@ -63,6 +67,19 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
         }
     }
 
+    /// Each `attach` that the client sent on `session`'s channel, in order.
+    func attaches(on session: String) -> [MactermProtocol.Attach] {
+        lock.withLock {
+            guard let number = sessions[session] else { return [] }
+            return frames.filter { $0.channel == number && $0.kind == .msg }.compactMap { frame in
+                guard let message = try? MessagePackReader.decode(MactermProtocol.PaneMessage.self, from: frame.body),
+                      case let .attach(attach) = try? message.decoded()
+                else { return nil }
+                return attach
+            }
+        }
+    }
+
     /// The input bytes that the client sent on `session`'s channel.
     func input(on session: String) -> Data {
         lock.withLock {
@@ -84,7 +101,7 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
             methods.append(MactermProtocol.ChannelOpen.name)
             let number = nextChannel
             nextChannel += 1
-            let channel = PaneChannel(connection: self, number: number)
+            let channel = PaneChannel(connection: self, number: number, epoch: epoch)
             channels[number] = channel
             sessions[session] = number
             return channel

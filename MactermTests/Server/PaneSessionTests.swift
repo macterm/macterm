@@ -80,23 +80,34 @@ struct PaneSessionTests {
     }
 
     @Test
-    func a_lost_connection_is_made_again_and_the_screen_is_drawn_again() async throws {
+    func a_lost_connection_is_made_again_and_resumes_with_the_screen_and_scrollback_kept() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
             let connections = TestServerEndpoint(server)
             let session = PaneSession(
                 name: "ps-lost-\(UInt32.random(in: 0 ... .max))",
-                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf before-%s lost; sleep 60"], env: []),
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf before-%s lost; read l; printf after-%s \"$l\"; sleep 60"],
+                    env: []
+                ),
                 wantsForeground: false,
                 host: host,
                 endpoint: connections
             )
             session.start()
-            try await host.waitFor { $0.screen.contains("before-lost") }
+            try await host.waitFor { $0.screen.contains("before-lost") && $0.leads == [true] }
             connections.current?.close()
             try await host.waitFor { $0.linkLost > 0 }
-            try await host.waitFor { $0.resets >= 2 && $0.screen.contains("before-lost") }
-            #expect(host.snapshot().leads.contains { $0 == nil }, "the lost channel forgets the lead")
+            // The new channel asks to resume: the session sends only the
+            // bytes after the offset, and draws no snapshot.
+            try await host.waitFor { $0.leads.count >= 3 && $0.leads.last == true }
+            #expect(session.resumePoint != nil)
+            session.sendInput(Data("x\n".utf8))
+            try await host.waitFor { $0.screen.contains("after-x") }
+            let state = host.snapshot()
+            #expect(state.resets == 1, "a resume keeps the screen and the scrollback")
+            #expect(state.screen.components(separatedBy: "before-lost").count == 2, "no byte comes twice")
             session.stop()
         }
     }
@@ -535,6 +546,158 @@ struct PaneSessionEndpointTests {
         // Only the first attach makes the session.
         #expect(first.calls.contains(MactermProtocol.SessionCreate.name))
         #expect(!second.calls.contains(MactermProtocol.SessionCreate.name))
+        session.stop()
+    }
+
+    @Test
+    func a_lost_link_resumes_after_the_last_output_byte_and_keeps_the_screen() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let second = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([first, second]))
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(first.attaches(on: "s").first?.resumeEpoch == nil)
+        first.deliver(MactermProtocol.Lead(leader: true), to: "s")
+        first.deliver(MactermProtocol.SnapshotStart(scrollback: true, offset: 100), to: "s")
+        first.deliver(output: "one", to: "s")
+        first.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        first.deliver(output: "two", to: "s")
+        try await host.waitFor { $0.screen == "onetwo" }
+
+        first.close()
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        let attach = try #require(second.attaches(on: "s").first)
+        #expect(attach.resumeEpoch == 7)
+        #expect(attach.resumeOffset == 103, "the snapshot's offset and the 3 output bytes after it")
+        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
+        second.deliver(MactermProtocol.Resumed(offset: 103), to: "s")
+        second.deliver(output: "three", to: "s")
+        try await host.waitFor { $0.screen == "onetwothree" }
+        #expect(host.snapshot().resets == 1, "only the first attach clears the screen")
+
+        // A skip-ahead snapshot after the resume sets the count again.
+        second.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 500), to: "s")
+        second.deliver(output: "screen", to: "s")
+        second.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        second.deliver(output: "!", to: "s")
+        try await host.waitFor { $0.screen.hasSuffix("screen!") }
+        #expect(host.snapshot().resets == 1, "a skip-ahead snapshot clears its own screen, not the scrollback")
+        second.close()
+        try await host.waitFor { $0.gone == 1 }
+        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
+        session.stop()
+    }
+
+    @Test
+    func a_new_epoch_or_a_lost_offset_draws_the_snapshot_over_a_cleared_screen() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let restarted = FakeServerLink(epoch: 8)
+        let third = FakeServerLink(epoch: 8)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false, host: host,
+            endpoint: FakeEndpoint([first, restarted, third])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(output: "one", to: "s")
+        try await host.waitFor { $0.screen == "one" }
+
+        // Another epoch: the session process is another one. No resume.
+        first.close()
+        try await host.waitFor { _ in restarted.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(restarted.attaches(on: "s").first?.resumeEpoch == nil)
+        restarted.deliver(MactermProtocol.SnapshotStart(scrollback: true, offset: 50), to: "s")
+        restarted.deliver(output: "two", to: "s")
+        restarted.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        try await host.waitFor { $0.screen == "two" }
+        #expect(host.snapshot().resets == 2)
+
+        // The ring lost the bytes: the session answers with a snapshot.
+        restarted.close()
+        try await host.waitFor { _ in third.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(third.attaches(on: "s").first?.resumeEpoch == 8)
+        #expect(third.attaches(on: "s").first?.resumeOffset == 50)
+        Self.attach(third, "s", screen: "three")
+        try await host.waitFor { $0.screen == "three" }
+        #expect(host.snapshot().resets == 3)
+        session.stop()
+    }
+
+    @Test
+    func a_resume_point_from_an_earlier_session_keeps_the_screen_at_the_first_attach() async throws {
+        let link = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false,
+            resume: .init(epoch: 7, offset: 42),
+            host: host, endpoint: FakeEndpoint([link])
+        )
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(link.attaches(on: "s").first?.resumeOffset == 42)
+        link.deliver(MactermProtocol.Resumed(offset: 42), to: "s")
+        link.deliver(output: "more", to: "s")
+        try await host.waitFor { $0.screen == "more" }
+        #expect(host.snapshot().resets == 0)
+        session.stop()
+    }
+
+    @Test
+    func finish_waits_for_the_reading_and_gives_the_offset_of_the_last_byte() async throws {
+        let link = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        link.deliver(output: "abc", to: "s")
+        try await host.waitFor { $0.screen == "abc" }
+        // The channel is still open: a key that found the link down ends a
+        // remote pane's session while it reads.
+        #expect(await session.finish() == PaneSession.ResumePoint(epoch: 7, offset: 3))
+    }
+
+    @Test
+    func a_link_that_drops_before_resumed_keeps_the_resume_point() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let second = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false,
+            resume: .init(epoch: 7, offset: 42),
+            host: host, endpoint: FakeEndpoint([first, second])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.close()
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(second.attaches(on: "s").first?.resumeOffset == 42)
+        #expect(host.snapshot().resets == 0)
+        session.stop()
+    }
+
+    @Test
+    func a_drop_before_the_snapshot_of_another_epoch_leaves_no_resume_point() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let restarted = FakeServerLink(epoch: 8)
+        let third = FakeServerLink(epoch: 8)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false, host: host,
+            endpoint: FakeEndpoint([first, restarted, third])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(output: "one", to: "s")
+        try await host.waitFor { $0.screen == "one" }
+        first.close()
+        // The screen still shows the old session: its offsets are not the
+        // new session's.
+        try await host.waitFor { _ in restarted.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        restarted.close()
+        try await host.waitFor { _ in third.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(third.attaches(on: "s").first?.resumeEpoch == nil)
         session.stop()
     }
 

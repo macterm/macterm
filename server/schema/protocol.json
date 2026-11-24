@@ -1165,6 +1165,12 @@
           "type": "u32",
           "optional": false,
           "since": 1
+        },
+        {
+          "name": "epoch",
+          "type": "u64",
+          "optional": true,
+          "since": 3
         }
       ],
       "cases": [],

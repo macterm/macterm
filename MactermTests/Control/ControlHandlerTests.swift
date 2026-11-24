@@ -142,6 +142,45 @@ struct ControlHandlerTests {
         #expect(two?.tabCount == nil)
     }
 
+    @Test
+    func project_list_indexes_every_project_in_tree_order_and_names_its_parent() async {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "first")
+        let work = seedProject(appState, projectStore, name: "Work", select: false)
+        _ = seedProject(appState, projectStore, name: "last", select: false)
+        let api = seedProject(appState, projectStore, name: "api", select: false)
+        let handlers = seedProject(appState, projectStore, name: "handlers", select: false)
+        #expect(projectStore.move(api.id, into: work.id))
+        #expect(projectStore.move(handlers.id, into: api.id))
+
+        let projects = await handler.handle(request("project.list")).data?.projects
+        // The sidebar order: first, Work, api inside Work, handlers inside
+        // api, last. A parent takes an index too.
+        #expect(projects?.map(\.name) == ["first", "Work", "api", "handlers", "last"])
+        #expect(projects?.map(\.index) == [1, 2, 3, 4, 5])
+        #expect(projects?.map(\.parent) == ["", "", "Work", "api", ""])
+        #expect(projects?.map(\.parentID) == ["", "", work.id.uuidString, api.id.uuidString, ""])
+
+        let selected = await handler.handle(request("project.select", args: ControlArgs(project: "project:3")))
+        #expect(selected.data?.projects?.first?.id == api.id.uuidString)
+        #expect(selected.data?.projects?.first?.parent == "Work")
+        let parent = await handler.handle(request("project.select", args: ControlArgs(project: "Work")))
+        #expect(parent.data?.projects?.first?.id == work.id.uuidString)
+    }
+
+    @Test
+    func one_name_in_two_parents_is_still_ambiguous() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let work = seedProject(appState, projectStore, name: "Work")
+        let home = seedProject(appState, projectStore, name: "Home", select: false)
+        let one = seedProject(appState, projectStore, name: "api", select: false)
+        let two = seedProject(appState, projectStore, name: "api", select: false)
+        #expect(projectStore.move(one.id, into: work.id))
+        #expect(projectStore.move(two.id, into: home.id))
+        let response = await handler.handle(request("tab.list", args: ControlArgs(project: "api")))
+        #expect(response.error?.code == .ambiguous)
+    }
+
     // MARK: - tab.list
 
     @Test
