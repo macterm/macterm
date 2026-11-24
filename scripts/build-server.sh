@@ -15,7 +15,8 @@
 # The key is the git object hashes of the sources (SOURCES below) from the
 # working tree (committed or not), hashed together: the server's code and
 # build files, and this script. This script holds the Zig version and every
-# build flag, so a change to either is a new key. Tests, schema files and
+# build flag, so a change to either is a new key. `macterm mcp` embeds two
+# schemas of assets/, so they are sources too. Tests, the protocol schema and
 # host scripts are not sources: a change to them is not a new build. A
 # prebuilt named for a key is therefore the build of exactly that source
 # (`macterm-<key>-<target>.tar.gz`, the `server-prebuilt` release).
@@ -38,7 +39,7 @@ ZIG_VERSION="0.17.1"
 TARGETS=(universal-macos x86_64-linux aarch64-linux)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCES=(server/src server/build.zig server/build.zig.zon scripts/build-server.sh)
+SOURCES=(server/src server/build.zig server/build.zig.zon scripts/build-server.sh assets/palette.schema.json assets/project.schema.json)
 
 existing_sources() {
   local path
