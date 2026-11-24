@@ -1018,10 +1018,6 @@ struct EmptyProjectView: View {
     private var projectStore
     @State
     private var preferences = Preferences.shared
-    /// The size of the screen: the terminal area that a tab fills, so its
-    /// aspect is the aspect of every tab's preview.
-    @State
-    private var size: CGSize = .zero
 
     private var cards: [ProjectScreenCard] {
         // A sentinel workspace (the scratch tabs) has no project screen of
@@ -1050,22 +1046,18 @@ struct EmptyProjectView: View {
 
     var body: some View {
         let cards = cards
-        let layout = ProjectScreenGridLayout.self
-        let gridWidth = layout.gridWidth(screenWidth: size.width)
-        let showsGrid = !cards.isEmpty && size.height > 0
-            && layout.cardSize(width: layout.contentWidth(gridWidth: gridWidth), aspect: 1).width >= layout.minCardWidth
-        HStack(spacing: 0) {
-            info
-            if showsGrid {
-                ProjectScreenGrid(
-                    project: project,
-                    cards: cards,
-                    size: CGSize(width: gridWidth, height: size.height),
-                    aspect: size.width / size.height
-                )
+        // The size of the screen is the terminal area that a tab fills, so
+        // its aspect is the aspect of every tab's preview.
+        GeometryReader { geo in
+            let size = geo.size
+            HStack(spacing: 0) {
+                info
+                if !cards.isEmpty, size.height > 0, ProjectScreenGridLayout.showsGrid(screenWidth: size.width) {
+                    ProjectScreenGrid(project: project, cards: cards, height: size.height, aspect: size.width / size.height)
+                        .frame(width: ProjectScreenGridLayout.gridWidth(screenWidth: size.width))
+                }
             }
         }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
     }
 
     private var info: some View {

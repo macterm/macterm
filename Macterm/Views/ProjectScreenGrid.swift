@@ -32,8 +32,11 @@ enum ProjectScreenGridLayout {
     /// The space around the cards: a gap to the left side, and space to the
     /// window's edge and its scroller.
     static let padding = EdgeInsets(top: 40, leading: 24, bottom: 40, trailing: 48)
-    /// The narrowest card that the grid shows. A narrower screen shows no grid.
-    static let minCardWidth: CGFloat = 120
+    /// The narrowest card that the grid shows. A narrower screen shows no
+    /// grid, not a narrow strip.
+    static let minCardWidth: CGFloat = 160
+    /// The rim of card fill around a tab's preview, the same on each side.
+    static let inset: CGFloat = 8
 
     /// The width of the grid, padding included, on a screen of `screenWidth`.
     static func gridWidth(screenWidth: CGFloat) -> CGFloat {
@@ -43,6 +46,16 @@ enum ProjectScreenGridLayout {
     /// The width of the cards' area in a grid of `gridWidth`.
     static func contentWidth(gridWidth: CGFloat) -> CGFloat {
         max(0, gridWidth - padding.leading - padding.trailing)
+    }
+
+    /// The width of one card in a cards' area of `width`.
+    static func cardWidth(width: CGFloat) -> CGFloat {
+        max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+    }
+
+    /// Whether a screen of `screenWidth` has room for the grid.
+    static func showsGrid(screenWidth: CGFloat) -> Bool {
+        cardWidth(width: contentWidth(gridWidth: gridWidth(screenWidth: screenWidth))) >= minCardWidth
     }
 
     /// The corner radius of a card of `width`: round as the reference image,
@@ -58,11 +71,13 @@ enum ProjectScreenGridLayout {
         tabs.map(ProjectScreenCard.tab) + children.map(ProjectScreenCard.project)
     }
 
-    /// The size of every card for a grid of `width`, at `aspect` (width over
-    /// height of the terminal area).
+    /// The size of every card for a cards' area of `width`, at `aspect`
+    /// (width over height of the terminal area): a preview of `aspect` with
+    /// a rim of `inset` on each side.
     static func cardSize(width: CGFloat, aspect: CGFloat) -> CGSize {
-        let cardWidth = max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
-        return CGSize(width: cardWidth, height: cardWidth / max(aspect, 0.2))
+        let cardWidth = cardWidth(width: width)
+        let preview = max(0, cardWidth - inset * 2)
+        return CGSize(width: cardWidth, height: preview / max(aspect, 0.2) + inset * 2)
     }
 
     /// The top-left corner of card `index`: the first card left, the second
@@ -107,8 +122,8 @@ enum ProjectScreenGridLayout {
 struct ProjectScreenGrid: View {
     let project: Project
     let cards: [ProjectScreenCard]
-    /// The size of the grid, padding included. Its height is the screen's.
-    let size: CGSize
+    /// The height of the screen. A grid that is not as tall is centered.
+    let height: CGFloat
     /// Width over height of the terminal area: the area of the project screen.
     let aspect: CGFloat
 
@@ -138,25 +153,21 @@ struct ProjectScreenGrid: View {
     }
 
     var body: some View {
-        let layout = ProjectScreenGridLayout.self
-        let contentWidth = layout.contentWidth(gridWidth: size.width)
-        let cardSize = layout.cardSize(width: contentWidth, aspect: aspect)
-        // The grid has a fixed size: its height comes from the same width that
-        // places the cards, so the last card is never cut.
+        // The cards take the width that the scroll view gives, so a scroller
+        // that takes space never eats into the padding. `StaggeredCardGrid`
+        // reports the height of that same width, so the last card is never
+        // cut and a grid that fits does not scroll.
         ScrollView(.vertical) {
             StaggeredCardGrid(aspect: aspect) {
                 ForEach(cards) { card in
-                    ProjectScreenCardView(card: card, cardSize: cardSize, aspect: aspect) { open(card) }
+                    ProjectScreenCardView(card: card, aspect: aspect) { open(card) }
                 }
             }
-            .frame(width: contentWidth, height: layout.height(count: cards.count, cardSize: cardSize))
-            .padding(layout.padding)
-            // A grid shorter than the screen is centered, as the left side is.
-            .frame(width: size.width)
-            .frame(minHeight: size.height)
+            .padding(ProjectScreenGridLayout.padding)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: height)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(width: size.width, height: size.height)
         .background(WindowVisibilityReader { windowIsVisible = $0 })
         .onChange(of: samplingKey, initial: true) { _, key in
             if key.isVisible {
@@ -202,32 +213,35 @@ private struct StaggeredCardGrid: Layout {
 }
 
 /// One card: a rounded rectangle with a soft fill and a thin border, as in
-/// the reference image. A tab's preview sits inside it, inset by `inset`,
-/// with corners that follow the card's. The hover is the tab switcher's
-/// selection fill around it.
+/// the reference image. A tab's preview sits inside it, inset by
+/// `ProjectScreenGridLayout.inset`, with corners that follow the card's. The
+/// hover is the tab switcher's selection fill around it.
 private struct ProjectScreenCardView: View {
     let card: ProjectScreenCard
-    let cardSize: CGSize
     let aspect: CGFloat
     let action: () -> Void
 
     @State
     private var isHovered = false
 
-    /// The rim of card fill around a tab's preview.
-    private static let inset: CGFloat = 8
-    private var cornerRadius: CGFloat {
-        ProjectScreenGridLayout.cornerRadius(cardWidth: cardSize.width)
+    var body: some View {
+        // `StaggeredCardGrid` proposes the card's exact size.
+        GeometryReader { geo in
+            cardButton(size: geo.size)
+        }
     }
+
+    private static let inset = ProjectScreenGridLayout.inset
 
     /// How far the hover fill reaches out of the card, as in the tab
     /// switcher (`TabSwitcherCard.selectionHalo`). It is drawn in the gap
     /// between cards, so the card keeps the size of its slot and its aspect.
     private static let halo: CGFloat = 4
 
-    var body: some View {
-        Button(action: action) {
-            content
+    private func cardButton(size: CGSize) -> some View {
+        let cornerRadius = ProjectScreenGridLayout.cornerRadius(cardWidth: size.width)
+        return Button(action: action) {
+            content(size: size, cornerRadius: cornerRadius)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MactermTheme.surface)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -249,10 +263,10 @@ private struct ProjectScreenCardView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(size: CGSize, cornerRadius: CGFloat) -> some View {
         switch card {
         case let .tab(tab):
-            let inner = CGSize(width: cardSize.width - Self.inset * 2, height: cardSize.height - Self.inset * 2)
+            let inner = CGSize(width: max(0, size.width - Self.inset * 2), height: max(0, size.height - Self.inset * 2))
             TabPreviewMosaic(node: tab.splitRoot)
                 .frame(size: ProjectScreenGridLayout.fitted(aspect: aspect, in: inner))
                 .clipShape(RoundedRectangle(cornerRadius: max(cornerRadius - Self.inset, 4), style: .continuous))

@@ -17,12 +17,12 @@ When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each
 
 `EmptyProjectView` shows the project's name, path and keys on the left, and `ProjectScreenGrid` on the right: one card for each tab, then one card for each child project, in the order of the sidebar (`ProjectScreenGridLayout.cards`). A project with no tabs and no children shows no grid.
 
-- **All cards have one size** (`ProjectScreenGridLayout.cardSize`): half the grid's width, at the aspect of the screen, which is the terminal area that each tab fills. Two columns, filled row by row. The second column starts half a card lower (Ethan's reference image).
-- **The grid has a fixed size** (`ProjectScreenGridLayout.gridWidth`): more than half the screen, padding to the left side and to the window's edge. Its height comes from the width that places the cards, so the last card is never cut and a grid that fits does not scroll. A screen too narrow for a card of `ProjectScreenGridLayout.minCardWidth` shows no grid.
+- **All cards have one size** (`ProjectScreenGridLayout.cardSize`): half the grid's width, a preview at the aspect of the screen with a rim of `ProjectScreenGridLayout.inset` on each side. The aspect is the aspect of the screen, which is the terminal area that each tab fills. Two columns, filled row by row. The second column starts half a card lower (Ethan's reference image).
+- **The grid's width is fixed** (`ProjectScreenGridLayout.gridWidth`): more than half the screen, with padding to the left side and to the window's edge. The cards take the width that the scroll view gives, and the grid reports the height of that width, so a scroller never eats into the padding, the last card is never cut, and a grid that fits does not scroll. A screen too narrow for a card of `ProjectScreenGridLayout.minCardWidth` shows no grid (`ProjectScreenGridLayout.showsGrid`).
 - A tab's card is only the live preview of the tab (`TabPreviewMosaic`, fitted in the card). Its accessibility label is the tab's title. A child's card shows its name and its folder, with no path line for a project with no folder.
 - A click on a tab's card shows the tab. A click on a child's card shows the child's project screen.
 - **The previews are live only while the screen shows and its window is visible** (`WindowVisibilityReader`, the window's occlusion state). The grid is the client `.projectScreen(window id)` of `PanePreviewSampler`: `AppState.showProjectScreenPreviews` and `endProjectScreenPreviews`. `onDisappear`, the occlusion change and `AppState.forgetWindowState` end it.
-- The hover is the tab switcher's selection fill (`RowHoverTracker`). No other state dims or outlines a card.
+- Each card has a soft fill and a thin border (`MactermTheme.surface`, `MactermTheme.border`), as in the reference image. The hover is the tab switcher's selection fill (`RowHoverTracker`). No other state dims or outlines a card.
 
 ## Windows and sidebars, AppKit reach-throughs
 

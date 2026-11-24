@@ -17,9 +17,12 @@ struct ProjectScreenGridTests {
     @Test
     func every_card_has_one_size_from_the_column_width_and_the_aspect() {
         let size = ProjectScreenGridLayout.cardSize(width: 420, aspect: 2)
-        // Two columns with one 20 pt gap.
+        // Two columns with one 20 pt gap. The preview is 184 pt wide at the
+        // aspect, with an 8 pt rim on each side.
         #expect(size.width == 200)
-        #expect(size.height == 100)
+        #expect(size.height == 108)
+        let preview = CGSize(width: size.width - 16, height: size.height - 16)
+        #expect(ProjectScreenGridLayout.fitted(aspect: 2, in: preview) == preview)
     }
 
     @Test
@@ -45,6 +48,14 @@ struct ProjectScreenGridTests {
         // The padding to the left side and to the window's edge.
         #expect(ProjectScreenGridLayout.contentWidth(gridWidth: 660) == 588)
         #expect(ProjectScreenGridLayout.contentWidth(gridWidth: 50) == 0)
+    }
+
+    @Test
+    func a_screen_with_no_room_for_a_wide_enough_card_shows_no_grid() {
+        #expect(ProjectScreenGridLayout.showsGrid(screenWidth: 1200))
+        // 772 pt: a grid of 412 pt, cards of 160 pt.
+        #expect(ProjectScreenGridLayout.showsGrid(screenWidth: 772))
+        #expect(!ProjectScreenGridLayout.showsGrid(screenWidth: 760))
     }
 
     @Test
