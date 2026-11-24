@@ -56,11 +56,12 @@ enum ModelConversion {
     /// version 1 `model.json` makes the same fields (`fromVersion1`). Nil
     /// for a workspace of kind `project`.
     static func hiddenProject(_ w: WorkspaceInput) -> MactermProtocol.Project? {
-        var p: MactermProtocol.Project = switch w.kind {
+        var p: MactermProtocol.Project
+        switch w.kind {
         case .project: return nil
-        case .pinned: .init(id: id(w.id), name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned")
-        case .scratch: .init(id: id(w.id), name: "Scratch Tabs", path: "", sidebar: .bottom, removable: false, alias: "scratch")
-        case .quick: .init(
+        case .pinned: p = .init(id: id(w.id), name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned")
+        case .scratch: p = .init(id: id(w.id), name: "Scratch Tabs", path: "", sidebar: .bottom, removable: false, alias: "scratch")
+        case .quick: p = .init(
                 id: id(w.id),
                 name: "Quick Terminal",
                 path: "",
@@ -69,7 +70,7 @@ enum ModelConversion {
                 removable: false,
                 alias: "quick"
             )
-        case .widget: .init(id: id(w.id), name: "Widget", path: "", sidebar: .none, singleTab: true)
+        case .widget: p = .init(id: id(w.id), name: "Widget", path: "", sidebar: .none, singleTab: true)
         }
         p.tabs = w.tabs.map(tab)
         p.activeTab = w.activeTabID.map(id)
