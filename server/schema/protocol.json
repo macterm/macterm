@@ -877,6 +877,14 @@
       "senders": [
         "local"
       ]
+    },
+    {
+      "name": "notification",
+      "type": "DesktopNotification",
+      "since": 3,
+      "senders": [
+        "session"
+      ]
     }
   ],
   "types": [
@@ -4547,6 +4555,28 @@
       "name": "TtyRead",
       "kind": "struct",
       "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "DesktopNotification",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "title",
+          "type": "bin",
+          "optional": false,
+          "since": 3,
+          "doc": "The title, as the program sent it. Empty for OSC 9, which has a body only."
+        },
+        {
+          "name": "body",
+          "type": "bin",
+          "optional": false,
+          "since": 3,
+          "doc": "The body, as the program sent it. Not UTF-8 from every program."
+        }
+      ],
       "cases": [],
       "variants": []
     }

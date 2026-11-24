@@ -5684,6 +5684,38 @@ extension MactermProtocol.TtyRead: ProtocolValue {
     }
 }
 
+extension MactermProtocol {
+    struct DesktopNotification: Equatable {
+        var title: ProtocolBin
+        var body: ProtocolBin
+    }
+}
+
+extension MactermProtocol.DesktopNotification: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var title: ProtocolBin?
+        var body: ProtocolBin?
+        try reader.readMap { key, reader in
+            switch key {
+            case "title": title = try ProtocolBin(from: &reader)
+            case "body": body = try ProtocolBin(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.title = try MessagePackReader.required(title, "title")
+        self.body = try MessagePackReader.required(body, "body")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(2)
+        writer.writeString("title")
+        title.encode(to: &writer)
+        writer.writeString("body")
+        body.encode(to: &writer)
+    }
+}
+
 extension MactermProtocol.Hello: ProtocolMessage {
     static let name = "hello"
     static let since: UInt32 = 1
@@ -5954,6 +5986,12 @@ extension MactermProtocol.TtyRead: ProtocolMessage {
     static let senders: [MactermProtocol.Trust] = [.local]
 }
 
+extension MactermProtocol.DesktopNotification: ProtocolMessage {
+    static let name = "notification"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.session]
+}
+
 extension MactermProtocol {
     /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
     enum ErrorCode: Equatable {
@@ -6035,6 +6073,7 @@ extension MactermProtocol {
         case waited(Waited)
         case waitCancel(WaitCancel)
         case ttyRead(TtyRead)
+        case desktopNotification(DesktopNotification)
         case unknown(String)
     }
 }
@@ -6076,6 +6115,7 @@ extension MactermProtocol.PaneMessage {
         case MactermProtocol.Waited.name: try .waited(message(of: MactermProtocol.Waited.self))
         case MactermProtocol.WaitCancel.name: try .waitCancel(message(of: MactermProtocol.WaitCancel.self))
         case MactermProtocol.TtyRead.name: try .ttyRead(message(of: MactermProtocol.TtyRead.self))
+        case MactermProtocol.DesktopNotification.name: try .desktopNotification(message(of: MactermProtocol.DesktopNotification.self))
         default: .unknown(t)
         }
     }

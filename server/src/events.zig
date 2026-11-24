@@ -316,7 +316,7 @@ pub const Watch = struct {
             if (!h.held or now - h.sent_at.? < m.coalesce_ms) continue;
             h.held = false;
             h.sent_at = now;
-            w.emit(@enumFromInt(i));
+            w.emit(@fromBackingInt(@intCast(i)));
         }
         if (w.quietDeadline()) |due| if (now >= due) w.setStatus(.done, false);
     }
@@ -370,7 +370,7 @@ pub const Watch = struct {
     /// The first value in a quiet period goes at once; later ones wait for
     /// the end of the window, where the newest goes.
     fn coalesce(w: *Watch, key: Key) void {
-        const h = &w.holds[@intFromEnum(key)];
+        const h = &w.holds[@backingInt(key)];
         if (h.sent_at) |at| if (w.now_ms - at < m.coalesce_ms) {
             h.held = true;
             return;
@@ -651,7 +651,7 @@ pub const Watch = struct {
     pub fn shellExited(w: *Watch, now: i64) void {
         w.now_ms = now;
         if (!w.removeRecords("", .ended)) return;
-        w.holds[@intFromEnum(Key.program)] = .{ .sent_at = now };
+        w.holds[@backingInt(Key.program)] = .{ .sent_at = now };
         w.emit(.program);
     }
 
