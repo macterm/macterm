@@ -11,12 +11,11 @@ on:
   pull_request:
     branches: [main]
 
-# A new push to a pull request cancels the runs of its older commit, so they
-# do not keep the macOS runners that the new jobs need. A push to main has a
-# group for each commit and is never cancelled: release-tip.yml needs the Test
-# and Checks results of each commit on main.
+# A push cancels the runs of older commits of the same pull request or of
+# main. A cancelled main commit gets no tip build, and the run of the next
+# commit checks its changes (scripts/changed-areas.sh).
 concurrency:
-  group: test-${{ github.event.pull_request.number || github.sha }}
+  group: test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,6 +23,10 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # actions: read lists the runs of this workflow (scripts/changed-areas.sh).
+    permissions:
+      contents: read
+      actions: read
     outputs:
       app: ${{ steps.changes.outputs.app }}
       extensions: ${{ steps.changes.outputs.extensions }}
@@ -34,7 +37,7 @@ jobs:
       - name: Find Changes
         id: changes
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: scripts/changed-areas.sh
 
   # The session server that the app bundles, built from server/ at this
@@ -243,7 +246,7 @@ jobs:
   #
   # Only on a push to main, not on a pull request: this job and the two Smoke
   # jobs take three macOS runners for each run. A failure here therefore shows
-  # after the merge. release-tip.yml gates on the Test run of each commit on
+  # after the merge. release-tip.yml gates on the Test run of the commit on
   # main, so a commit that fails here does not ship as tip.
   release-build:
     name: Release Build

@@ -590,6 +590,8 @@ final class ControlHandler {
                 break
             case .missing:
                 throw ControlError(code: .notFound, message: "no path at \(canonical)")
+            case .notDirectory:
+                throw ControlError(code: .notFound, message: "\(canonical) is not a directory")
             case .unreachable:
                 throw ControlError(code: .internalError, message: "cannot connect to \(destination)")
             }
@@ -697,14 +699,14 @@ final class ControlHandler {
         throw ControlError(code: .badRequest, message: message, action: "select another name")
     }
 
-    /// Drop a project's workspace and its `ProjectStore` entry — the same pair
-    /// every in-app removal runs (sidebar row menu, bulk delete, palette,
-    /// Settings → Projects), which is what makes the CLI removal reach exactly
-    /// as far as theirs: panes' zmx sessions die, `projects.json` loses the
-    /// row, and files on disk (the project directory, its layout declaration)
-    /// are untouched. Those paths stage a confirmation dialog for a busy
-    /// project; a headless caller gets a typed `busy` error instead — never a
-    /// dialog the CLI can't answer. Same contract as `tab.close`.
+    /// Remove a project and every project inside it: their workspaces and
+    /// their `ProjectStore` rows, the same set that every removal in the app
+    /// removes (`AppState.removeProject(_:store:)`). Their panes' zmx
+    /// sessions end. Files on disk (the project directory, its layout
+    /// declaration) stay. The app asks before it removes a project that
+    /// holds anything; the CLI refuses with a typed `busy` error only when a
+    /// process runs (never a dialog the CLI cannot answer), and `--force`
+    /// removes anyway. Same contract as `tab.close`.
     private func projectRemove(_ args: ControlArgs) async throws -> ControlData {
         guard let selector = args.project, !selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ControlError(
@@ -721,23 +723,23 @@ final class ControlHandler {
         }
 
         // The same verdict `AppState.requestRemoveProject` waits for before
-        // it decides to stage its dialog, so the CLI refuses exactly when the
-        // app would have asked.
+        // it decides to ask, so the CLI refuses exactly when the app would
+        // have asked about a running process.
         if args.force != true {
-            let busy = await appState.judgeClose(appState.panes(inProject: project.id))
+            let removed = appState.projectsRemoved(with: [project.id], store: projectStore)
+            let busy = await appState.judgeClose(removed.flatMap(appState.panes(inProject:)))
             // The wait for a host can end after the project changed or went.
             project = try resolveProject(project.id.uuidString)
             if busy {
                 throw ControlError(
                     code: .busy,
-                    message: "a pane in that project has a running program (removing kills its sessions)",
+                    message: "a pane in that project or in a project inside it has a running program (removing kills its sessions)",
                     action: "re-run with --force to remove anyway"
                 )
             }
         }
 
-        appState.removeProject(project.id)
-        projectStore.remove(id: project.id)
+        appState.removeProject(project.id, store: projectStore)
         return ControlData()
     }
 

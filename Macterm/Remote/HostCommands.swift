@@ -185,11 +185,14 @@ enum HostCommands {
 
     /// Whether a folder is on the host, before a new remote project is added
     /// (0358, `RemoteHosts.checkFolder`). Exit 0: a shell can `cd` to the
-    /// folder. Exit 3: it cannot (it is not there, or the user may not enter
-    /// it: a pane could not start there). Any other status means that the
-    /// check did not run to its end. A constant here, not a bundled file:
-    /// a bundle without the file must not refuse every host.
-    static let folderCheckScript = expandTilde + " cd -- \"$d\" 2>/dev/null || exit 3; exit 0"
+    /// folder. Exit 4: the path is there and is not a folder (a file).
+    /// Exit 3: any other path that a shell cannot `cd` to (it is not there,
+    /// or the user may not enter it: a pane could not start there). Any
+    /// other status means that the check did not run to its end. A constant
+    /// here, not a bundled file: a bundle without the file must not refuse
+    /// every host.
+    static let folderCheckScript = expandTilde
+        + " cd -- \"$d\" 2>/dev/null && exit 0; [ -d \"$d\" ] && exit 3; [ -e \"$d\" ] && exit 4; exit 3"
 
     /// The `command.run` argv of the folder check on a host that has a link
     /// to its server.

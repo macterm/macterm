@@ -112,14 +112,19 @@ struct TerminalPane: View {
                     // Copy-mode pill: the pane's keys move the selection, not
                     // the shell. The Zoomed pill's chrome, since both are
                     // modes that one click leaves. Per pane, since the mode is.
+                    // A change of the mode (Copy Mode to Visual) changes the
+                    // title of the same pill, so an open pill changes its
+                    // text and its width in place.
                     if let label = surface.copyModeLabel {
                         ModePill(
                             title: label,
                             systemImage: "character.cursor.ibeam",
-                            help: String(localized: "Leave copy mode")
+                            help: String(localized: "Leave copy mode"),
+                            peeksOnChange: true
                         ) { [weak surface] in
                             surface?.nsView?.copyMode.exit()
                         }
+                        .transition(.opacity)
                     }
                     // Outdated-session pill: the session runs from an older
                     // Macterm version, or from a file that an update deleted
@@ -162,9 +167,11 @@ struct TerminalPane: View {
                 .modifier(PanePillRow())
                 .padding(8)
                 // The row's place in the corner animates too, so that no
-                // badge jumps when the remote-link badge comes or goes.
+                // badge jumps when the remote-link or copy-mode badge comes
+                // or goes.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .animation(reduceMotion ? nil : PaletteMotion.animation, value: pane.remoteLinkBadge)
+                .animation(reduceMotion ? nil : PaletteMotion.animation, value: surface.copyModeLabel)
             }
         }
         .background {

@@ -83,7 +83,12 @@ final class SessionSocket: PaneChannelTransport, @unchecked Sendable {
             throw error
         }
         let socket = SessionSocket(fd: fd)
-        let channel = PaneChannel(transport: socket, number: paneChannel, epoch: hello.epoch, readAhead: SessionSockets.readAhead)
+        let channel = PaneChannel(
+            transport: socket,
+            number: paneChannel,
+            epoch: hello.epoch,
+            buffering: .readAhead(SessionSockets.readAhead)
+        )
         socket.startReading(reader, into: channel.sink, exitRead: exitRead)
         return channel
     }

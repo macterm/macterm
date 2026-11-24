@@ -16,6 +16,9 @@ extension GhosttyTerminalNSView {
     final class ChannelRuntime: @unchecked Sendable {
         let route: PaneRoute
         let host: SurfaceChannelHost
+        /// What the route last heard of the surface's visibility. Read and
+        /// written on the main actor.
+        var visible = true
 
         init(route: PaneRoute, host: SurfaceChannelHost) {
             self.route = route
