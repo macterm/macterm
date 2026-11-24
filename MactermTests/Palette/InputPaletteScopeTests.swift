@@ -148,6 +148,27 @@ struct InputPaletteScopeTests {
     }
 
     @Test
+    func an_edit_during_the_check_cancels_it() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        scope.activate(context: makeContext()) {}
+
+        _ = scope.sections(for: PaletteQuery(raw: "~/api"), context: makeContext())
+        #expect(!scope.commit("~/api"))
+        try await waitUntil { gate.continuation != nil }
+        _ = scope.sections(for: PaletteQuery(raw: "~/api"), context: makeContext())
+        #expect(scope.loading != nil, "a redraw of the same text keeps the check")
+
+        _ = scope.sections(for: PaletteQuery(raw: "~/ap"), context: makeContext())
+        #expect(scope.loading == nil)
+        gate.continuation?.resume(returning: .done)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!scope.isFinished)
+        #expect(log.committed.isEmpty, "the add is not for text that is no longer in the field")
+    }
+
+    @Test
     func leaving_the_screen_cancels_its_check() async throws {
         let gate = Gate()
         let log = Log()

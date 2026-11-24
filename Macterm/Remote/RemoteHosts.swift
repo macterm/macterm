@@ -305,7 +305,7 @@ final class RemoteHosts {
     }
 
     /// `checkFolder` for the scp-style path of a new remote project in the
-    /// GUI (the sheet, the palette, Create Project of a layout file in
+    /// GUI (New Remote Project in the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the
     /// line that says why nothing is added.
     func refusal(forNewProjectPath path: String) async -> String? {

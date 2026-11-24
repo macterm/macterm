@@ -148,6 +148,45 @@ struct SSHConfigHostsTests {
     }
 
     @Test
+    func a_comment_after_the_arguments_ends_the_line() throws {
+        let folder = try Folder()
+        try folder.write("""
+        Host devbox # work box
+            HostName devbox.example.com # the office
+        """)
+        #expect(folder.load() == [SSHConfigHost(alias: "devbox", hostName: "devbox.example.com", user: nil)])
+    }
+
+    @Test
+    func patterns_know_only_star_and_question_mark_as_ssh_does() throws {
+        #expect(SSHConfigHosts.matches("*", "devbox"))
+        #expect(SSHConfigHosts.matches("dev*", "devbox"))
+        #expect(SSHConfigHosts.matches("*box", "devbox"))
+        #expect(SSHConfigHosts.matches("d?vb*x", "devbox"))
+        #expect(!SSHConfigHosts.matches("dev?", "devbox"))
+        #expect(SSHConfigHosts.matches("web[1]", "web[1]"), "a bracket is itself")
+        #expect(!SSHConfigHosts.matches("web[1]", "web1"))
+
+        let folder = try Folder()
+        try folder.write("""
+        Host web[1]
+            User me
+        """)
+        #expect(folder.load() == [SSHConfigHost(alias: "web[1]", hostName: nil, user: "me")])
+    }
+
+    @Test
+    func a_file_that_includes_itself_twice_stops_at_the_file_limit() throws {
+        let folder = try Folder()
+        try folder.write("""
+        Include config
+        Include config
+        Host box
+        """)
+        #expect(folder.load().map(\.alias) == ["box"])
+    }
+
+    @Test
     func a_missing_file_gives_no_hosts() throws {
         let folder = try Folder()
         #expect(folder.load().isEmpty)

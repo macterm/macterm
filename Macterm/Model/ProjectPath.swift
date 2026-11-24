@@ -127,8 +127,8 @@ enum ProjectPath: Equatable {
         return parsed
     }
 
-    /// Compose a remote `path:` string from the New Remote Project sheet's
-    /// fields (`[user@]host` + directory), validating through the parser.
+    /// Compose a remote `path:` string from a destination
+    /// (`[user@]host`) and a directory, validating through the parser.
     /// nil when the pair doesn't form a well-formed remote spec.
     static func composeRemote(host: String, directory: String) -> String? {
         let composed = host.trimmingCharacters(in: .whitespaces)

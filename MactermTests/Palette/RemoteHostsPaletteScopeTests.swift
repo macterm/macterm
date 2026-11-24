@@ -59,8 +59,25 @@ struct RemoteHostsPaletteScopeTests {
         #expect(items.first?.title == "ops@bastion")
         #expect(items.first?.subtitle == "Not in ~/.ssh/config")
         #expect(rows("devbox").map(\.title) == ["devbox"], "a host of the config has no typed row")
-        #expect(rows("dev").first?.title == "dev", "a part of a name is a host too")
+        #expect(rows("dev").map(\.title) == ["devbox", "dev"], "a matching host comes before the typed row")
         #expect(!rows("not a host").contains { $0.title == "not a host" })
+        #expect(rows("@box").isEmpty, "an empty user is not a host")
+        #expect(rows("me@").isEmpty, "an empty host is not a host")
+        #expect(rows("dev/box").isEmpty)
+    }
+
+    @Test
+    func a_typed_host_and_folder_opens_the_folder_step_on_that_folder() throws {
+        let item = try #require(rows("me@devbox:~/dev/api").first)
+        guard case let .input(input)? = item.opensScope else {
+            Issue.record("the typed row opens the folder step")
+            return
+        }
+        #expect(input.id == "remote-folder:me@devbox")
+        #expect(input.initialValue == "~/dev/api")
+        #expect(RemoteHostsPaletteScope.target("devbox:/srv")?.destination == "devbox")
+        #expect(RemoteHostsPaletteScope.target("devbox:/srv")?.directory == "/srv")
+        #expect(RemoteHostsPaletteScope.target("dev box:/srv") == nil)
     }
 
     @Test
@@ -162,6 +179,35 @@ struct RemoteHostsPaletteScopeTests {
         try await waitUntil { scope.loading == nil }
         #expect(!scope.isFinished)
         #expect(scope.failure?.title == "There is no path ~/none on devbox.")
+        #expect(store.projects.isEmpty)
+    }
+
+    @Test
+    func a_reserved_folder_name_is_changed_as_for_a_local_folder() async throws {
+        let (context, _, store) = makeContext()
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in nil }
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        #expect(!scope.commit("~/Pinned"))
+        try await waitUntil { scope.isFinished }
+        #expect(store.projects.map(\.name) == ["Pinned 2"])
+    }
+
+    @Test
+    func a_folder_step_left_during_its_check_adds_nothing() async throws {
+        let (context, _, store) = makeContext()
+        var answer: CheckedContinuation<String?, Never>?
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in
+            await withCheckedContinuation { answer = $0 }
+        }
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        #expect(!scope.commit("~/api"))
+        try await waitUntil { answer != nil }
+        scope.deactivate()
+        answer?.resume(returning: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!scope.isFinished)
         #expect(store.projects.isEmpty)
     }
 

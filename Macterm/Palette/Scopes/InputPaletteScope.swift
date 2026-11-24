@@ -104,8 +104,9 @@ struct PaletteCheck: Equatable {
 /// top of the stack.
 ///
 /// A commit that checks (`PaletteCommit.check`) runs as the screen's
-/// `loading`. Return does nothing until it ends. Its `.done` sets
-/// `isFinished`, and the palette closes on the next `onChange`.
+/// `loading`. Return does nothing until it ends, and an edit of the field
+/// cancels it. Its `.done` sets `isFinished`, and the palette closes on the
+/// next `onChange`.
 @MainActor
 final class InputPaletteScope: PaletteScope {
     let input: PaletteInput
@@ -119,6 +120,8 @@ final class InputPaletteScope: PaletteScope {
     /// A checked commit ran its action: the palette closes.
     private(set) var isFinished = false
     private var check: Task<Void, Never>?
+    /// The text that the running check is for. An edit cancels the check.
+    private var checkedText: String?
     private var onChange: (@MainActor () -> Void)?
     /// True until the screen has shown once: only then does the panel
     /// select the field's text, the initial value.
@@ -134,6 +137,7 @@ final class InputPaletteScope: PaletteScope {
 
     func sections(for query: PaletteQuery, context _: PaletteContext) -> [PaletteSection] {
         text = query.raw
+        if check != nil, text != checkedText { deactivate() }
         if failure != nil, text != refusedText {
             failure = nil
             refusedText = nil
@@ -155,6 +159,7 @@ final class InputPaletteScope: PaletteScope {
     func deactivate() {
         check?.cancel()
         check = nil
+        checkedText = nil
         loading = nil
     }
 
@@ -179,10 +184,12 @@ final class InputPaletteScope: PaletteScope {
             failure = nil
             refusedText = nil
             loading = PaletteLoading(message: pending.message)
+            checkedText = text
             check = Task { [weak self] in
                 let result = await pending.run()
                 guard let self, !Task.isCancelled else { return }
                 check = nil
+                checkedText = nil
                 loading = nil
                 if apply(result, for: text) { isFinished = true }
                 onChange?()

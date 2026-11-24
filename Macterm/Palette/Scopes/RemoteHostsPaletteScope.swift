@@ -12,7 +12,7 @@ private let logger = Logger(subsystem: appBundleID, category: "RemoteHostsPalett
 /// reads the file again. A missing file shows only the typed row.
 @MainActor
 final class RemoteHostsPaletteScope: PaletteScope {
-    static let icon: PaletteIcon = "network"
+    nonisolated static let icon: PaletteIcon = "network"
 
     let placeholder = String(localized: "Search hosts or type user@host...")
     private let readHosts: () -> [SSHConfigHost]
@@ -41,11 +41,13 @@ final class RemoteHostsPaletteScope: PaletteScope {
         }
         .rankedByScore()
         var sections: [PaletteSection] = []
-        if !hosts.contains(where: { $0.alias == text }), let typed = typedItem(text, context: context) {
-            sections.append(PaletteSection(header: nil, items: [typed]))
-        }
         if !matches.isEmpty {
             sections.append(PaletteSection(header: header, items: matches))
+        }
+        // The typed row is first only when no host matches, so Return on a
+        // part of a name picks the host and not the part.
+        if !hosts.contains(where: { $0.alias == text }), let typed = typedItem(text, context: context) {
+            sections.insert(PaletteSection(header: nil, items: [typed]), at: matches.isEmpty ? 0 : sections.count)
         }
         return sections
     }
@@ -61,27 +63,57 @@ final class RemoteHostsPaletteScope: PaletteScope {
         ) {}
     }
 
-    /// The row of a typed destination, nil when the text is not one.
+    /// The row of a typed `[user@]host` or `[user@]host:folder`, nil when
+    /// the text is neither.
     private func typedItem(_ text: String, context: PaletteContext) -> PaletteItem? {
-        guard ProjectPath.composeRemote(host: text, directory: "~") != nil else { return nil }
+        guard let target = Self.target(text) else { return nil }
         return PaletteItem(
             id: "remote-host-typed:\(text)",
             title: text,
             subtitle: String(localized: "Not in ~/.ssh/config"),
             score: 0,
-            opensScope: .input(Self.folderInput(destination: text, context: context)),
+            opensScope: .input(Self.folderInput(
+                destination: target.destination,
+                directory: target.directory ?? "~",
+                context: context
+            )),
             icon: Self.icon
         ) {}
     }
 
-    /// New Remote Project, step 2: the folder on `destination`, `~` first
-    /// (or `directory`, a folder that the user typed in the root's
-    /// `host:folder`). Return checks the folder on the host
-    /// (`RemoteHosts.refusal`, 0358) while the screen shows that it
-    /// connects. The login and the install question show as sheets on the
-    /// window. A refusal is the screen's line, and the user can correct the
-    /// folder. A folder that is there adds the project, named by its folder
-    /// (`ProjectPath.remoteDisplayName`), and shows it.
+    /// The destination and the folder of a typed `[user@]host` or
+    /// `[user@]host:folder`. Nil for any other text: a space, an empty part,
+    /// or a host name with characters that a host name cannot have.
+    static func target(_ text: String) -> (destination: String, directory: String?)? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard !text.contains(where: \.isWhitespace) else { return nil }
+        if text.contains(":") {
+            guard case let .remote(user, host, directory) = ProjectPath.parse(text),
+                  isDestination(HostCommands.destination(user: user, host: host))
+            else { return nil }
+            return (HostCommands.destination(user: user, host: host), directory)
+        }
+        return isDestination(text) ? (text, nil) : nil
+    }
+
+    /// Whether `text` is `[user@]host`: a user with no `/` or `:`, and a
+    /// host of letters, digits, `.`, `-` and `_`.
+    static func isDestination(_ text: String) -> Bool {
+        let parts = text.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        let host = parts.last ?? ""
+        if parts.count == 2, parts[0].isEmpty || parts[0].contains(where: { "/:@".contains($0) || $0.isWhitespace }) {
+            return false
+        }
+        return !host.isEmpty && host.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_" }
+    }
+
+    /// New Remote Project, step 2: the folder on `destination`. It starts
+    /// on `directory` (`~`, or the folder of a typed `host:folder`).
+    ///
+    /// Return checks the folder on the host (`RemoteHosts.refusal`). A
+    /// refusal is the screen's line. A folder that is there adds the
+    /// project and shows it, named by its folder
+    /// (`ProjectPath.remoteDisplayName`).
     static func folderInput(
         destination: String,
         directory: String = "~",
@@ -95,11 +127,13 @@ final class RemoteHostsPaletteScope: PaletteScope {
             initialValue: directory
         ) { [appState = context.appState, projectStore = context.projectStore] text in
             let folder = text.trimmingCharacters(in: .whitespaces)
-            guard let path = ProjectPath.composeRemote(host: destination, directory: folder.isEmpty ? "~" : folder),
+            guard isDestination(destination),
+                  let path = ProjectPath.composeRemote(host: destination, directory: folder.isEmpty ? "~" : folder),
                   case let .remote(_, host, parsedFolder) = ProjectPath.parse(path)
             else { return .refused(String(localized: "\(destination) is not a host name.")) }
+            // A name that nobody typed: `ProjectStore.create` changes a
+            // reserved one (`Pinned 2`), as for a local folder.
             let name = ProjectPath.remoteDisplayName(host: host, directory: parsedFolder)
-            if let reason = Project.nameRefusal(for: name) { return .refused(reason) }
             return .check(PaletteCheck(message: String(localized: "Connecting to \(destination)…")) {
                 let answer = await refusal(path)
                 guard !Task.isCancelled else { return .refused("") }

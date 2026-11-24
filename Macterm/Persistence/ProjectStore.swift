@@ -55,7 +55,7 @@ final class ProjectStore {
     /// A directory is not an identity: two projects may share a `path` and
     /// keep wholly independent workspaces (keyed on `Project.id`) and zmx
     /// sessions (named with per-pane entropy). This is the entry point for
-    /// user-initiated creation (folder picker, remote sheet, `project create`).
+    /// user-initiated creation (folder picker, New Remote Project, `project create`).
     ///
     /// A name that `Project.nameRefusal` refuses is stored changed (see
     /// `allowedName`). Most callers pass the folder's own name — the

@@ -26,7 +26,7 @@ struct SSHConfigHost: Equatable {
 ///
 /// - `Include` is followed as ssh follows it: a relative path is under
 ///   `~/.ssh`, `~` is the home folder, a glob reads each match in order, and
-///   the depth stops at 16. The lines of an included file before its first
+///   the depth stops at 16 (and the count at `maxFiles`). The lines of an included file before its first
 ///   `Host` line belong to the block of the `Include`.
 /// - `HostName` and `User` are the first value of each key whose block
 ///   matches the alias (ssh's rule: the first value wins). A `Host` block
@@ -37,6 +37,9 @@ struct SSHConfigHost: Equatable {
 enum SSHConfigHosts {
     /// ssh's own limit (`READCONF_MAX_DEPTH`).
     static let maxIncludeDepth = 16
+    /// The most files that one load reads. A file that includes itself two
+    /// times would otherwise read 2^16 files before the depth stops it.
+    static let maxFiles = 256
 
     static func load(
         config: URL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh/config"),
@@ -56,7 +59,7 @@ enum SSHConfigHosts {
 
     /// The keyword in lower case and the arguments of one line, nil for a
     /// blank line or a comment. `Key value`, `Key=value` and `Key = value`
-    /// are the same; an argument in double quotes can have spaces. Pure.
+    /// are the same. An argument in double quotes can have spaces.
     static func tokens(_ line: String) -> (key: String, args: [String])? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
@@ -71,6 +74,8 @@ enum SSHConfigHosts {
         var quoted = false
         var hasToken = false
         for character in rest {
+            // A `#` that starts a token ends the line (OpenSSH 8.7 and later).
+            if character == "#", !quoted, !hasToken { break }
             if character == "\"" {
                 quoted.toggle()
                 hasToken = true
@@ -93,6 +98,38 @@ enum SSHConfigHosts {
         !pattern.contains("*") && !pattern.contains("?") && !pattern.hasPrefix("!")
     }
 
+    /// ssh's `match_pattern`: `*` is any text, `?` is one character, and
+    /// every other character is itself. Unlike `fnmatch`, `[` and `\` have
+    /// no meaning.
+    static func matches(_ pattern: String, _ text: String) -> Bool {
+        let pattern = Array(pattern)
+        let text = Array(text)
+        var p = 0
+        var t = 0
+        var star: Int?
+        var mark = 0
+        while t < text.count {
+            if p < pattern.count, pattern[p] == "?" || pattern[p] == text[t] {
+                p += 1
+                t += 1
+            } else if p < pattern.count, pattern[p] == "*" {
+                star = p
+                mark = t
+                p += 1
+            } else if let star {
+                p = star + 1
+                mark += 1
+                t = mark
+            } else {
+                return false
+            }
+        }
+        while p < pattern.count, pattern[p] == "*" {
+            p += 1
+        }
+        return p == pattern.count
+    }
+
     /// The block that a line is in.
     enum Condition: Equatable {
         /// Before the first `Host` or `Match` line: every host.
@@ -109,8 +146,8 @@ enum SSHConfigHosts {
                 var matched = false
                 for pattern in patterns {
                     if pattern.hasPrefix("!") {
-                        if fnmatch(String(pattern.dropFirst()), alias, 0) == 0 { return false }
-                    } else if fnmatch(pattern, alias, 0) == 0 {
+                        if SSHConfigHosts.matches(String(pattern.dropFirst()), alias) { return false }
+                    } else if SSHConfigHosts.matches(pattern, alias) {
                         matched = true
                     }
                 }
@@ -130,10 +167,12 @@ enum SSHConfigHosts {
         let home: String
         var aliases: [String] = []
         var entries: [Entry] = []
+        var filesRead = 0
 
         mutating func read(_ url: URL, condition start: Condition, depth: Int) {
-            guard depth <= SSHConfigHosts.maxIncludeDepth,
-                  let text = try? String(contentsOf: url, encoding: .utf8)
+            guard depth <= SSHConfigHosts.maxIncludeDepth, filesRead < SSHConfigHosts.maxFiles else { return }
+            filesRead += 1
+            guard let text = try? String(contentsOf: url, encoding: .utf8)
             else { return }
             var condition = start
             for line in text.split(whereSeparator: \.isNewline) {
