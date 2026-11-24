@@ -160,10 +160,6 @@ private struct SavedPasswordRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: entry.id.command == nil ? "key.horizontal" : "terminal")
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(verbatim: entry.id.displayCommand ?? String(localized: "Any command"))
@@ -215,16 +211,15 @@ private struct SavedPasswordRow: View {
 /// command, so two hosts' entries for one command look different. The help
 /// tag shows a host that the pill truncates. System styles, not
 /// `MactermTheme`: the Settings window follows the system appearance.
-struct HostPill: View {
+private struct HostPill: View {
     let host: String
 
     var body: some View {
-        Label {
+        HStack(spacing: 3) {
+            Image(systemName: "network")
             Text(verbatim: host)
                 .lineLimit(1)
                 .truncationMode(.middle)
-        } icon: {
-            Image(systemName: "network")
         }
         .font(.caption.monospaced())
         .foregroundStyle(.secondary)

@@ -39,8 +39,6 @@ struct PasswordEditorRequest: Identifiable {
 /// alone are detection's own — a key passphrase belongs to the key whatever
 /// asks, a `read -s` to the shell — so one can be edited as it is, but none
 /// is created here, nor made by clearing a command.
-///
-/// A host's entry shows its host, read-only: an edit stays on that host.
 struct PasswordEditorSheet: View {
     let request: PasswordEditorRequest
     let vault: PasswordVault
@@ -84,11 +82,6 @@ struct PasswordEditorSheet: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    if let host = entry?.id.host {
-                        LabeledContent("Host") {
-                            HostPill(host: host)
-                        }
-                    }
                     TextField("Command", text: $command, prompt: Text(isPromptOnly ? "Any command" : "Required"))
                         .font(.body.monospaced())
                         .focused($focus, equals: .command)
