@@ -29,7 +29,8 @@ struct PasswordEditorRequest: Identifiable {
 /// typed into a secure field. Nothing is written until Save; Cancel discards
 /// every edit. Save files the entry under the edited command and prompt
 /// through the rules detection applies (`PasswordPromptIdentity
-/// .declaredEntryID`), so an edit lands where the next prompt will look. A
+/// .declaredEntryID`) on the host of the edited entry, so an edit lands where
+/// the next prompt will look. A
 /// revealed password lives only in this sheet's state and goes with it.
 ///
 /// The command is required; the prompt is not, and without one the entry is
@@ -194,10 +195,14 @@ struct PasswordEditorSheet: View {
         if let current, trimmed == (current.command ?? ""), normalizedPrompt == current.prompt {
             return current
         }
-        return PasswordPromptIdentity.declaredEntryID(
+        var declared = PasswordPromptIdentity.declaredEntryID(
             prompt: normalizedPrompt,
             command: trimmed.isEmpty ? nil : trimmed
         )
+        // The editor has no host field: an edit of a host's entry stays on
+        // that host and never becomes an entry of this Mac.
+        declared.host = current?.host
+        return declared
     }
 
     private var passwordChanged: Bool {

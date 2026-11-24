@@ -25,4 +25,13 @@ struct PasswordEditorSheetTests {
         #expect(PasswordEditorSheet.filing(command: "deploy", prompt: "", editing: nil)
             == PasswordEntryID(command: "deploy", prompt: ""))
     }
+
+    @Test
+    func an_edited_host_entry_keeps_its_host() {
+        let current = PasswordEntryID(command: "sudo", prompt: "[sudo] password for me:", host: "me@prod:22")
+        #expect(PasswordEditorSheet.filing(command: "sudo", prompt: "Password:", editing: current)
+            == PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@prod:22"))
+        #expect(PasswordEditorSheet.filing(command: "deploy", prompt: "", editing: current)
+            == PasswordEntryID(command: "deploy", prompt: "", host: "me@prod:22"))
+    }
 }

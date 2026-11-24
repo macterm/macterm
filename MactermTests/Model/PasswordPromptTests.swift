@@ -398,6 +398,8 @@ struct PasswordVaultTests {
         #expect(vault.entries(matching: "password app").first?.id.command == "psql -h db1")
         #expect(vault.entries(matching: "passphrase").map(\.id.command) == [nil])
         #expect(vault.entries(matching: "nothing").isEmpty)
+        vault.save("d", for: PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@build:22"))
+        #expect(vault.entries(matching: "build").map(\.id.host) == ["me@build:22"])
     }
 }
 

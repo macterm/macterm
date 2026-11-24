@@ -105,7 +105,7 @@ A pane that asks for a password gets a native `NSPopover` at the cursor (`Passwo
   - The idle shell itself (`read -s`) is `.shell`. It is filed by the prompt alone.
   - A foreground that Macterm cannot read is `.unknown`. It is never `.shell`. The prompt stays `sighted` and Macterm tries again. A key that the user types in the meantime taints the capture (`confirmTyping`).
   - When Macterm shows an entry, it shortens a resolved program path to its name. It drops the options that the ssh wrapper of Macterm injected (`SSHWrapper.userArguments`). The exception is a program that is named `sudo`. It keeps its path, so that it cannot pass for the real one. Matching never shortens.
-  - The Details editor files through `declaredEntryID`. It trusts what the user typed.
+  - The Details editor files through `declaredEntryID`. It trusts what the user typed. It keeps the host of the edited entry.
   - **`Preferences.passwordManagerEnabled` is the master switch**. Macterm stores it under the old key "Offer to save", so an old "off" stays off. When it is off, `step` drops the pane to idle with its offers at every observation. Nothing is captured, offered or autofilled. `detectedPasswordInput` still follows the tty.
 - **Macterm offers to save only on evidence** (`PasswordSubmissionJudge`).
   - These events mean failure: a failure line within `failureWindow` (3) lines of the prompt.
