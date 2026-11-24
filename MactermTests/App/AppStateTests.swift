@@ -1934,7 +1934,7 @@ struct AppStateTests {
     }
 
     @Test
-    func an_added_project_gets_its_first_tab_at_once() throws {
+    func an_added_project_gets_its_first_tab_at_once() {
         let state = makeAppState()
         let projects = ProjectStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-added-\(UUID().uuidString).json"))
