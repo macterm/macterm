@@ -242,8 +242,8 @@ final class Pane: Identifiable {
     /// The surface that runs the pane's plain ssh shell (a host with no
     /// server), or nil. A pty is one terminal and no session holds it, so
     /// no other window can take it: the pane's other surfaces show a notice
-    /// in place of the terminal until that surface goes. Live state only;
-    /// the link sets it (`receiveLinkEvent`).
+    /// in place of the terminal. When that surface goes, the pane gets a
+    /// fresh shell. Live state only; the link sets it (`receiveLinkEvent`).
     var plainShellSurfaceID: UUID?
 
     /// Whether the surface `surfaceID` shows the notice that the pane's

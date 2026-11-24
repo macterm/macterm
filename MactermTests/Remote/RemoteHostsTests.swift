@@ -626,12 +626,12 @@ struct RemoteHostsTests {
         }
     }
 
-    /// Two windows show one pane on a host with no server. The pane's one
-    /// plain shell runs in the first view; both views get its output, and
-    /// only the first view's keys reach it. A claim does not move it: no
-    /// session holds it. It moves when the view that runs it goes.
+    /// Two windows show one pane on a host with no server. The first view
+    /// runs the pane's one plain shell and keeps it: the second gets no
+    /// output, and its keys and claims do nothing. When the first view goes,
+    /// the second gets a fresh shell, with nothing of the old one.
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_plain_shell_runs_in_one_view_and_moves_only_when_that_view_goes() async throws {
+    func a_plain_shell_stays_in_its_view_and_the_other_view_gets_a_fresh_one_when_it_goes() async throws {
         try await withSSHDHost(answer: false) { host in
             let fixture = Fixture(host)
             let pane = fixture.pane()
@@ -644,30 +644,29 @@ struct RemoteHostsTests {
             defer { driver.stop() }
             let routes = driver.start(showing: [left, right])
             try await waitUntil { owner == ObjectIdentifier(left) }
-            #expect(driver.showsPlainShell(in: left) == true)
             #expect(driver.showsPlainShell(in: right) == false)
-            routes[1].sendInput(Data("printf 'right-%s\\n' typed\n".utf8))
-            routes[0].sendInput(Data("printf 'left-%s\\n' typed\n".utf8))
-            // Both views get the shell's output.
+            routes[0].sendInput(Data("MT_MARK=old; printf 'left-%s\\n' typed\n".utf8))
             try await left.waitFor { $0.screen.contains("left-typed") }
-            try await right.waitFor { $0.screen.contains("left-typed") }
-            #expect(!left.snapshot().screen.contains("right-typed"))
-            // No view leads a shell: no session decides it.
-            #expect(left.snapshot().leads.isEmpty && right.snapshot().leads.isEmpty)
 
-            // The second view claims, as the key window does: nothing moves.
+            // The second view claims and types, as a key window would:
+            // nothing reaches the shell, and it shows nothing of it.
             routes[1].claim(grid: nil)
-            routes[1].sendInput(Data("printf 'claimed-%s\\n' typed\n".utf8))
-            routes[0].sendInput(Data("printf 'still-%s\\n' here\n".utf8))
-            try await left.waitFor { $0.screen.contains("still-here") }
-            #expect(!left.snapshot().screen.contains("claimed-typed"))
+            routes[1].sendInput(Data("printf 'right-%s\\n' typed\n".utf8))
+            routes[0].sendInput(Data("printf 'still-%s\\n' left\n".utf8))
+            try await left.waitFor { $0.screen.contains("still-left") }
+            #expect(!left.snapshot().screen.contains("right-typed"))
+            #expect(!right.snapshot().screen.contains("left-typed"))
             #expect(driver.showsPlainShell(in: left) == true)
+            // No view leads a plain shell, so none blurs.
+            #expect(left.snapshot().leads.allSatisfy { $0 == nil })
+            #expect(right.snapshot().leads.allSatisfy { $0 == nil })
 
-            // The first window closes: the shell runs in the second.
+            // The first window closes: the second gets a fresh shell.
             routes[0].stop()
             try await waitUntil { owner == ObjectIdentifier(right) }
-            routes[1].sendInput(Data("printf 'moved-%s\\n' here\n".utf8))
-            try await right.waitFor { $0.screen.contains("moved-here") }
+            routes[1].sendInput(Data("printf 'fresh-%s\\n' \"${MT_MARK:-none}\"\n".utf8))
+            try await right.waitFor { $0.screen.contains("fresh-none") }
+            #expect(!right.snapshot().screen.contains("left-typed"))
             #expect(right.snapshot().exit == nil)
         }
     }

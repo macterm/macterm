@@ -31,9 +31,9 @@ struct TerminalPane: View {
         // read-only state, its own view, its own client of the session.
         let surface = SurfaceRegistry.shared.surface(for: pane, in: host)
         // A plain ssh shell (a host with no server) runs in one surface only,
-        // and no window can take it. The other surfaces keep their terminal
-        // (it gets the shell's output) but do not show it: a notice says why,
-        // from the first frame, also in the key window.
+        // and no window can take it. The other surfaces show a notice in
+        // place of the terminal, from the first frame, also in the key
+        // window.
         let plainShellElsewhere = pane.plainShellRunsElsewhere(than: surface.id)
         // The search bar sits above the terminal surface in a VStack, so showing
         // it pushes the terminal content down rather than overlaying it.

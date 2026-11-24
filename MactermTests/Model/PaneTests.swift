@@ -831,7 +831,7 @@ struct PaneTests {
         #expect(!p.plainShellRunsElsewhere(than: running))
         #expect(p.plainShellRunsElsewhere(than: other))
 
-        // The window that ran it closed: the shell runs in the other.
+        // The window that ran it closed: a fresh shell runs in the other.
         p.plainShellSurfaceID = other
         #expect(p.plainShellRunsElsewhere(than: running))
         #expect(!p.plainShellRunsElsewhere(than: other))
