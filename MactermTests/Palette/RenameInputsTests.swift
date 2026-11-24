@@ -48,6 +48,11 @@ struct RenameInputsTests {
         let tab = try #require(state.workspaces[project.id]?.activeTab)
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         #expect(screen.placeholder == "Tab name")
+        #expect(
+            try PaletteScopeID.input(#require(PaletteInput.renameTab(tab.id, in: project.id, appState: state))).pill
+                == PalettePill(title: AppCommand.renameTab.title),
+            "an input pill has no glyph"
+        )
         #expect(screen.initialQuery == tab.sidebarTitle)
     }
 
@@ -125,6 +130,11 @@ struct RenameInputsTests {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
         #expect(screen.placeholder == "Project name")
+        #expect(
+            try PaletteScopeID.input(#require(PaletteInput.renameProject(project.id, appState: state, store: store))).pill
+                == PalettePill(title: AppCommand.renameProject.title),
+            "an input pill has no glyph"
+        )
         #expect(screen.initialQuery == "alpha")
     }
 

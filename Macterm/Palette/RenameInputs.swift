@@ -17,7 +17,7 @@ extension PaletteInput {
         let initial = tab.sidebarTitle
         return PaletteInput(
             id: "rename-tab:\(tabID.uuidString)",
-            pill: PalettePill(title: AppCommand.renameTab.title, icon: "pencil"),
+            title: AppCommand.renameTab.title,
             prompt: String(localized: "Tab name", comment: "Placeholder of the Rename Tab field in the palette"),
             initialValue: initial
         ) { text in
@@ -39,7 +39,7 @@ extension PaletteInput {
         guard let project = store.projects.first(where: { $0.id == projectID }) else { return nil }
         return PaletteInput(
             id: "rename-project:\(projectID.uuidString)",
-            pill: PalettePill(title: AppCommand.renameProject.title, icon: "pencil"),
+            title: AppCommand.renameProject.title,
             prompt: String(localized: "Project name", comment: "Placeholder of the Rename Project field in the palette"),
             initialValue: project.name
         ) { text in

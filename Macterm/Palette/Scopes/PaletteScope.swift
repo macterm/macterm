@@ -77,9 +77,16 @@ enum PaletteScopeID: Hashable {
 }
 
 /// A pill in the breadcrumb above the input: a frame's name and glyph.
+/// An input screen's pill has no glyph (`PaletteInput.pill`): it names the
+/// action that asks for a value, and the field is the screen.
 struct PalettePill: Hashable {
     let title: String
-    let icon: PaletteIcon
+    let icon: PaletteIcon?
+
+    init(title: String, icon: PaletteIcon? = nil) {
+        self.title = title
+        self.icon = icon
+    }
 }
 
 /// A listing in flight: what the scope is waiting on, shown with a spinner

@@ -130,6 +130,10 @@ struct CommandPalettePanel: View {
     /// off-screen and needs scrolling into view.
     @State
     private var viewportHeight: CGFloat = 0
+    /// Height of the results' content (the rows and notices with their
+    /// padding). An input screen sizes the results to it (`resultsHeight`).
+    @State
+    private var listContentHeight: CGFloat = 0
     @FocusState
     private var isFieldFocused: Bool
     /// Whether Option is down, for the rows' alt-action display only: what
@@ -217,7 +221,9 @@ struct CommandPalettePanel: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
 
-            Divider().background(MactermTheme.border)
+            if showsResults {
+                Divider().background(MactermTheme.border)
+            }
 
             // Results
             ScrollViewReader { proxy in
@@ -301,8 +307,16 @@ struct CommandPalettePanel: View {
                         // the first row and below the last equals the side spacing.
                         .padding(.vertical, Self.listPadding)
                     }
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { listContentHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, h in listContentHeight = h }
+                        }
+                    )
                 }
-                .frame(maxHeight: 340)
+                .frame(height: resultsHeight)
+                .frame(maxHeight: Self.maxResultsHeight)
                 .coordinateSpace(name: rowSpace)
                 .background(
                     GeometryReader { geo in
@@ -568,6 +582,27 @@ struct CommandPalettePanel: View {
     /// The list's padding above the first row and below the last.
     private static let listPadding: CGFloat = 6
 
+    /// The most height the results take. Past it, they scroll.
+    private static let maxResultsHeight: CGFloat = 340
+
+    /// An input screen with nothing under its field (no completion, no
+    /// refusal, nothing loading) shows the field alone: no divider and no
+    /// empty results.
+    private var showsResults: Bool {
+        !(inputScope != nil && sections.isEmpty && failure == nil && loading == nil)
+    }
+
+    /// The fixed height of an input screen's results: its content, up to
+    /// `maxResultsHeight`, so that one line of refusal is not a tall empty
+    /// panel. Nil for every other screen, whose results keep the full
+    /// height, so that the panel does not change size as the user types a
+    /// search.
+    private var resultsHeight: CGFloat? {
+        guard inputScope != nil else { return nil }
+        guard showsResults else { return 0 }
+        return min(listContentHeight, Self.maxResultsHeight)
+    }
+
     /// The height of a notice that fills a list with no rows: the viewport
     /// less the list's padding. A notice of the full viewport height made the
     /// list 12 pt taller than its view, so it scrolled and showed a scroll bar.
@@ -788,10 +823,16 @@ private struct PaletteScopePill: View {
     let isCurrent: Bool
 
     var body: some View {
-        Label {
-            Text(pill.title)
-        } icon: {
-            PaletteIconImage(icon: pill.icon, side: 14)
+        Group {
+            if let icon = pill.icon {
+                Label {
+                    Text(pill.title)
+                } icon: {
+                    PaletteIconImage(icon: icon, side: 14)
+                }
+            } else {
+                Text(pill.title)
+            }
         }
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)

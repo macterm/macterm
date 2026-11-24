@@ -15,7 +15,7 @@ struct InputPaletteScopeTests {
     private func makeInput(log: Log, completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] }) -> PaletteInput {
         PaletteInput(
             id: "test.folder-name",
-            pill: PalettePill(title: "New Folder", icon: "folder.badge.plus"),
+            title: "New Folder",
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
@@ -50,7 +50,7 @@ struct InputPaletteScopeTests {
         let input = makeInput(log: Log())
         let frame = PaletteFrame(.input(input))
         let scope = try #require(frame.scope as? InputPaletteScope)
-        #expect(frame.pill == input.pill)
+        #expect(frame.pill == PalettePill(title: "New Folder"), "an input pill has no glyph")
         #expect(scope.placeholder == "Folder name")
         #expect(scope.initialQuery == "untitled")
         #expect(PaletteScopeID.input(input).command == nil)

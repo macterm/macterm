@@ -17,7 +17,9 @@ import Foundation
 /// puts that thing's id in its own, so that two targets are two screens.
 struct PaletteInput: Hashable {
     let id: String
-    let pill: PalettePill
+    /// The name of the action that asks for the value. The pill shows it
+    /// with no glyph.
+    let title: String
     /// The field's placeholder: what to type.
     let prompt: String
     let initialValue: String
@@ -30,18 +32,23 @@ struct PaletteInput: Hashable {
 
     init(
         id: String,
-        pill: PalettePill,
+        title: String,
         prompt: String,
         initialValue: String = "",
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
         commit: @escaping @MainActor (String) -> PaletteCommit
     ) {
         self.id = id
-        self.pill = pill
+        self.title = title
         self.prompt = prompt
         self.initialValue = initialValue
         self.completions = completions
         self.commit = commit
+    }
+
+    /// The breadcrumb pill: the title, with no glyph, for every input screen.
+    var pill: PalettePill {
+        PalettePill(title: title)
     }
 
     static func == (lhs: PaletteInput, rhs: PaletteInput) -> Bool {
