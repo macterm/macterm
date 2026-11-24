@@ -1288,6 +1288,13 @@
           "type": "[bin]",
           "optional": true,
           "since": 1
+        },
+        {
+          "name": "replace_exited",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
         }
       ],
       "cases": [],

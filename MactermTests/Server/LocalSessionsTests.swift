@@ -27,8 +27,10 @@ struct LocalSessionsTests {
         }
     }
 
+    /// The server ends it when a list reads the status. `LocalSessions`
+    /// ends no session itself.
     @Test
-    func a_session_whose_shell_exits_is_ended() async throws {
+    func a_session_whose_shell_exits_is_ended_after_a_list_reads_it() async throws {
         try await withServer { server in
             let sessions = LocalSessions(server: server)
             await sessions.prepare()
@@ -48,7 +50,7 @@ struct LocalSessionsTests {
     }
 
     @Test
-    func a_session_that_exited_while_no_app_was_connected_is_ended_at_the_connect() async throws {
+    func a_session_that_exited_while_no_app_was_connected_is_ended_after_a_list_reads_it() async throws {
         try await withServer { server in
             let id = "gone-\(UInt32.random(in: 0 ... .max))"
             let other = try await server.connect()

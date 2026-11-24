@@ -310,8 +310,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             if Task.isCancelled { return }
             do {
                 // Only the first attach makes the session. A session that is
-                // gone later ended: the app ends a session whose shell exited,
-                // and a new shell here would hide that.
+                // gone later ended: the server ends a session whose shell
+                // exited, and a new shell here would hide that.
                 if firstAttach, let launch { try await createSession(on: link, launch) }
                 let channel = try await link.openChannel(session: name)
                 guard install(channel) else {
@@ -455,8 +455,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return Task.isCancelled
     }
 
-    /// Makes the session, or finds it. A session whose shell exited while no
-    /// app was there is ended and made again, as `zmx attach` did in v1.
+    /// Makes the session, or finds it. The server ends a session whose shell
+    /// exited while no client read its status and makes a new one
+    /// (`replace_exited`), as `zmx attach` did in v1.
     private func createSession(on connection: any ServerLink, _ launch: Launch) async throws {
         let grid = host.paneGrid()
         let args = MactermProtocol.SessionCreate.Args(
@@ -465,14 +466,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             command: launch.argv.map { $0.map { ProtocolBin(Data($0.utf8)) } },
             cols: grid.cols,
             rows: grid.rows,
-            env: launch.env.map { ProtocolBin(Data($0.utf8)) }
+            env: launch.env.map { ProtocolBin(Data($0.utf8)) },
+            replaceExited: true
         )
-        do {
-            _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
-        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .exited {
-            _ = try await connection.call(MactermProtocol.SessionKill.self, .init(id: name))
-            _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
-        }
+        _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
     }
 
     /// The channel ended. The lead and the flags were this channel's: the

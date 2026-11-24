@@ -594,6 +594,28 @@ struct PaneSessionEndpointTests {
     }
 
     @Test
+    func the_create_asks_the_server_to_replace_an_exited_session_and_ends_none_itself() async throws {
+        // As the server: a session of this id whose shell exited.
+        let replace = LockedBox<[Bool]>([])
+        let link = FakeServerLink { method, args in
+            if method == MactermProtocol.SessionCreate.name, let create = args as? MactermProtocol.SessionCreate.Args {
+                replace.mutate { $0.append(create.replaceExited) }
+                if !create.replaceExited {
+                    throw ProtocolControlError.errorResponse(.init(code: "exited", message: "The session's shell exited."))
+                }
+            }
+            return try FakeServerLink.standard(method, args)
+        }
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: Self.launch, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(replace.value == [true])
+        #expect(!link.calls.contains(MactermProtocol.SessionKill.name))
+        session.stop()
+    }
+
+    @Test
     func an_exit_ends_the_session_with_no_new_connection() async throws {
         let first = FakeServerLink()
         let endpoint = FakeEndpoint([first, FakeServerLink()])

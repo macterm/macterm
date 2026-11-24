@@ -314,8 +314,9 @@ pub const Session = struct {
 
 pub const SessionState = enum {
     running,
-    /// The shell ended. The session keeps the status until a client sends
-    /// `session.kill`.
+    /// The shell ended. The session keeps the status until a client reads
+    /// it: the `exit` on a channel, or a `session.list` or `session.info`
+    /// that shows this state. Then the server ends the session.
     exited,
     /// The session and the server have no level in common. The server
     /// cannot read its state or end it.
@@ -333,6 +334,8 @@ pub const SessionCreate = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
+        pub const field_since = .{ .replace_exited = 3 };
+
         /// Made by the client, so that a request sent again finds the session
         /// that the first one started, and starts no second one. Only
         /// letters, digits, `-`, `_` and `.`; not `.` first.
@@ -348,6 +351,10 @@ pub const SessionCreate = struct {
         /// A pane's client sends its own, so that the shell gets the
         /// environment that the terminal made for it.
         env: ?[]const msgpack.Bin = null,
+        /// True: a session of this id whose shell exited is ended, and a
+        /// new one starts. The reply waits until the old session is gone.
+        /// False: the request fails with `exited`.
+        replace_exited: bool = false,
     };
     pub const Result = struct { session: Session };
 };

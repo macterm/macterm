@@ -260,11 +260,9 @@ final class RemoteHost {
         }
         try Task.checkCancellation()
         listFailures = 0
+        // A session whose shell exited: the list read its status, so the
+        // host's server ends it, and a create replaces it.
         let found = listed.first { $0.name == session }
-        if let found, !found.isRunning {
-            // The shell exited while no pane showed it.
-            await link.kill(session)
-        }
         var entry = sessions[session] ?? SessionState()
         // A reported folder with a control character, or a relative one, gives the project folder.
         let known = pane.hostSessionDirectory.map { HostCommands.isSafeHostFolder($0) ? $0 : directory }
