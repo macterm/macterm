@@ -239,6 +239,8 @@ pub const Server = struct {
     /// A session ended or the server started: look for server files that
     /// no session runs, once every session settled (`pruneBuilds`).
     prune_due: bool = true,
+    /// The tag of the last `wait` sent to a session (`registry.startWait`).
+    wait_tag: u64 = 0,
     /// The roaming links (`link.open`, design/009).
     links: link_host.Host,
     /// Socket pair ends of new links. Each becomes a client at the end of the
@@ -388,6 +390,7 @@ pub const Server = struct {
         };
         for (s.entries.items) |e| {
             if (e.kill_deadline) |d| next = @min(next orelse d, d);
+            if (registry.waitDeadline(e)) |d| next = @min(next orelse d, d);
             if (!e.settled(t)) {
                 const d = e.connected_at + settle_ms;
                 next = @min(next orelse d, d);
@@ -469,6 +472,7 @@ pub const Server = struct {
                 if (e.state) |st| lib_posix.kill(@intCast(st.pid), lib_posix.SIG.KILL) catch {};
                 e.kill_deadline = null;
             };
+            registry.expireWaits(s, e, t);
             if (!e.settled(t)) continue;
             // A session that never answered: an info that waits for it gets
             // nothing true to show.
@@ -477,7 +481,7 @@ pub const Server = struct {
                 defer s.gpa.free(waiters);
                 for (waiters) |w| switch (w.kind) {
                     .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session does not answer."),
-                    .info, .list, .seen, .history, .inspect, .subscribe => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
+                    .info, .list, .seen, .history, .inspect, .subscribe, .wait => peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer."),
                     .typing => {
                         if (w.input) |i| i.deinit(s.gpa);
                         peers.replyError(s, w.peer, w.re, .not_found, "The session does not answer.");
@@ -521,6 +525,7 @@ pub const Server = struct {
         while (i < s.peers.items.len) {
             const p = s.peers.items[i];
             if (p.conn.dead) {
+                registry.cancelWaits(s, p.id);
                 // Nobody waits for its commands: they end now, and free
                 // their places (`max_runs`).
                 for (s.runs.items) |r| if (r.peer == p.id and !r.timed_out) {
