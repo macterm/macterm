@@ -238,6 +238,7 @@ pub fn call(s: *Server, comptime M: type, p: *Peer, re: u64, args: M.Args) void 
         m.SessionSend => registry.send(s, p, re, args),
         m.SessionKey => registry.sendKey(s, p, re, args),
         m.SessionHistory => registry.readHistory(s, p, re, args),
+        m.SessionWait => registry.startWait(s, p, re, args),
         m.SessionInspect => registry.readInspect(s, p, re, args.id),
         m.PaneSeen => {
             const e = registry.findEntry(s, args.id) orelse

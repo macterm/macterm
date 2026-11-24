@@ -78,13 +78,10 @@ final class GhosttyApp {
     /// The tint of whichever window is currently key, for the few consumers
     /// that are not painting a specific window (a pane preview, a drag proxy).
     private(set) var adaptiveBackgroundColor: NSColor?
-    /// Memoized `effectiveThemeValue()` and the two sides of `splitThemeColors(_:)`,
-    /// keyed on `configVersion` (it bumps on a reload and on an appearance
-    /// flip): the value walks every config file and its includes, and the
-    /// sides build three whole configs. `MactermTheme` fans one SwiftUI render
-    /// into a dozen color reads.
-    @ObservationIgnored
-    private var themeValueCache: (version: Int, value: String?)?
+    /// Memoized sides of `splitThemeColors(_:)`, keyed on `configVersion`
+    /// (it bumps on a reload and on an appearance flip): the sides build
+    /// three whole configs. `MactermTheme` fans one SwiftUI render into a
+    /// dozen color reads.
     @ObservationIgnored
     private var splitSidesCache: (version: Int, sides: SplitSides?)?
 
@@ -494,6 +491,7 @@ final class GhosttyApp {
         static let background = GhosttyConfigKey.color("background")
         static let foreground = GhosttyConfigKey.color("foreground")
         static let palette = GhosttyConfigKey.palette("palette")
+        static let theme = GhosttyConfigKey.theme("theme")
         static let unfocusedSplitOpacity = GhosttyConfigKey.double("unfocused-split-opacity")
         static let unfocusedSplitFill = GhosttyConfigKey.color("unfocused-split-fill")
         static let bellFeatures = GhosttyConfigKey.packed("bell-features")
@@ -727,41 +725,24 @@ final class GhosttyApp {
 
     // MARK: - Theme split resolution (issue #38)
 
-    /// The effective `theme` value, read from the same files that
-    /// `buildConfig` loads, in the same order, with their `config-file`
-    /// includes (`ThemeResolver.themeValue(rootPaths:read:)`). The C API
-    /// cannot give the value back, so `splitThemeColors` checks the read
-    /// against libghostty's merge.
-    private func effectiveThemeValue() -> String? {
-        if let cache = themeValueCache, cache.version == configVersion { return cache.value }
-        let value = readThemeValue()
-        themeValueCache = (configVersion, value)
-        return value
-    }
-
-    private func readThemeValue() -> String? {
-        let config = MactermConfig.shared
-        let roots = [config.defaultsPath]
-            + GhosttyConfigSource(selection: configSelection).pathsForRawInspection
-            + [config.overridesPath]
-        return ThemeResolver.themeValue(rootPaths: roots) { try? String(contentsOfFile: $0, encoding: .utf8) }
+    /// The two sides of the `theme` value that libghostty merged, from the
+    /// app's config. Nil when no config file sets a theme.
+    private var themeSides: ThemeResolver.Sides? {
+        read(Keys.theme)
     }
 
     /// Whether the theme is a `light:X,dark:Y` pair with two different sides.
     /// The colors of the app are those of the side in use. The other side's
     /// colors come from `splitThemeColors`.
     var themeHasTwoSides: Bool {
-        guard let value = effectiveThemeValue() else { return false }
-        return ThemeResolver.resolve(themeValue: value, scheme: .light) != ThemeResolver.resolve(themeValue: value, scheme: .dark)
+        themeSides?.areDifferent ?? false
     }
 
     /// The colors of one side of a `light:X,dark:Y` pair, as libghostty
     /// merges them: the config of the app with the side as its last layer
     /// (`ThemeResolver.sideLayer`). Nil for a theme with one side, and when
-    /// the side cannot be read with certainty (`readThemeSideColors`,
-    /// `readsTheLightSide`). Only the light side is checked against
-    /// libghostty's merge: no C API gives the dark side of a config. Both
-    /// sides are read together and kept until `configVersion` changes.
+    /// the light side cannot be read with certainty (`readThemeSideColors`).
+    /// Both sides are read together and kept until `configVersion` changes.
     func splitThemeColors(_ scheme: ThemeResolver.Scheme) -> ResolvedColors? {
         if splitSidesCache?.version != configVersion {
             splitSidesCache = (configVersion, computeSplitThemeColors())
@@ -771,20 +752,18 @@ final class GhosttyApp {
     }
 
     private func computeSplitThemeColors() -> SplitSides? {
-        guard themeHasTwoSides, let value = effectiveThemeValue(),
-              let light = ThemeResolver.resolve(themeValue: value, scheme: .light),
-              let dark = ThemeResolver.resolve(themeValue: value, scheme: .dark)
-        else { return nil }
+        guard themeHasTwoSides else { return nil }
         var ignored: [String] = []
         guard let baseline = buildConfig(missingPaths: &ignored) else { return nil }
         defer { ghostty_config_free(baseline) }
-        guard let lightColors = readSide(light, baseline: baseline),
-              Self.readsTheLightSide(lightColors, baseline: baseline)
-        else {
-            logger.info("the theme pair that Macterm read does not agree with libghostty; one icon")
+        // The sides of the baseline, not of the app's config: the files can
+        // change after the last reload, and the side layers load them now.
+        guard let sides = Keys.theme.read(from: baseline), sides.areDifferent else { return nil }
+        guard let light = readSide(sides.light, baseline: baseline) else {
+            logger.info("the light side of the theme pair does not read; one icon")
             return nil
         }
-        return SplitSides(light: lightColors, dark: readSide(dark, baseline: baseline))
+        return SplitSides(light: light, dark: readSide(sides.dark, baseline: baseline))
     }
 
     /// The colors of the config with `side` as its last layer.
@@ -800,15 +779,6 @@ final class GhosttyApp {
         guard let cfg = buildConfig(missingPaths: &ignored, last: layer.path) else { return nil }
         defer { ghostty_config_free(cfg) }
         return Self.readThemeSideColors(from: cfg, baseline: baseline)
-    }
-
-    /// Whether the light side that Macterm read is the side that libghostty
-    /// merged. A config with no conditional state takes the light side of a
-    /// pair, so `baseline` has the light side's colors. A different result
-    /// means the theme value that Macterm read from the files is not the
-    /// value that libghostty loaded (`effectiveThemeValue`).
-    nonisolated static func readsTheLightSide(_ colors: ResolvedColors, baseline: ghostty_config_t) -> Bool {
-        colors == readColors(from: baseline)
     }
 
     /// The colors of a config whose last layer is a side of a split theme.

@@ -1448,7 +1448,7 @@ final class ControlHandler {
     // MARK: - Selector resolution
 
     /// Resolve the project selector (name, UUID, or 1-based list index) to a
-    /// project with a live workspace; defaults to the active project — except
+    /// project and its workspace (a group has none); defaults to the active project — except
     /// for a session selector with no project. A session names one pane
     /// wherever it lives, so it resolves in the project holding it: otherwise
     /// `--session`, and the `MACTERM_SESSION` self-target the CLI sends the
@@ -1467,8 +1467,7 @@ final class ControlHandler {
         guard let workspace = appState.workspaces[project.id] else {
             throw ControlError(
                 code: .notFound,
-                message: "project \"\(project.name)\" has no loaded workspace",
-                action: "select it first: `macterm project select \(project.name)`"
+                message: "project \"\(project.name)\" has no tabs"
             )
         }
         return (project, workspace)
@@ -1673,9 +1672,6 @@ final class ControlHandler {
             name: project.name,
             path: project.path,
             active: project.id == appState.activeProjectID,
-            // "Loaded" = a workspace exists (tabs/panes addressable over
-            // this protocol), whether or not its panes have started shells.
-            loaded: appState.workspaces[project.id] != nil,
             tabCount: appState.workspaces[project.id]?.tabs.count,
             parent: parent?.name ?? "",
             parentID: parent?.id.uuidString ?? ""
