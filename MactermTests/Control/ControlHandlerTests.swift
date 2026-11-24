@@ -727,6 +727,35 @@ struct ControlHandlerTests {
     }
 
     @Test
+    func project_remove_also_removes_the_projects_inside() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "alpha")
+        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        _ = projectStore.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+
+        let response = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
+        #expect(response.ok)
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
+    func project_remove_refuses_when_a_project_inside_is_busy() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "alpha", select: false)
+        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        appState.selectProject(child)
+        appState.paneNeedsConfirmClose = { _ in true }
+
+        let refused = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
+        #expect(refused.error?.code == .busy)
+        #expect(projectStore.projects.count == 2)
+
+        let forced = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha", force: true)))
+        #expect(forced.ok)
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
     func project_remove_of_a_project_never_selected_succeeds() async {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "alpha", select: false)
