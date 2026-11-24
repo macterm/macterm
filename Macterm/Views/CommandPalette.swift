@@ -516,11 +516,12 @@ struct CommandPalettePanel: View {
     }
 
     /// Tab autocompletes the input with the top result. Commands and projects
-    /// complete to their title; in path mode the directory item completes to its
-    /// full path (with a trailing slash) so a second Tab descends into it. Does
-    /// nothing when the query is empty or the completion wouldn't change the
-    /// input — letting the keypress fall through (`.ignored`) to default focus
-    /// traversal in that case.
+    /// complete to their title. In path mode, Tab completes to the first
+    /// directory row that changes the input (`DirectorySource.tabCompletion`),
+    /// so a second Tab descends into the directory. Does nothing when the
+    /// query is empty or the completion wouldn't change the input — letting
+    /// the keypress fall through (`.ignored`) to default focus traversal in
+    /// that case.
     private func completeQuery() -> KeyPress.Result {
         // An input screen's rows are its completions: the selected one, or
         // the top one when none is selected.
@@ -538,29 +539,14 @@ struct CommandPalettePanel: View {
         // there.
         guard scope == nil, !flatItems.isEmpty else { return .ignored }
         let top = flatItems[0]
-        let completion: String = if let path = directoryPath(for: top) {
-            // Re-expand a `~` query to keep the displayed prefix the user typed.
-            query.hasPrefix("~") ? abbreviateTilde(path) : path
+        let completion: String? = if DirectorySource.path(of: top) != nil {
+            DirectorySource.tabCompletion(query: query, items: flatItems)
         } else {
             top.title
         }
-        guard completion != query else { return .ignored }
+        guard let completion, completion != query else { return .ignored }
         query = completion
         return .handled
-    }
-
-    /// Full path a directory item points at, parsed from its id
-    /// (`dir-open:/abs/path` or `dir-switch:/abs/path`). `nil` for non-path items.
-    private func directoryPath(for item: PaletteItem) -> String? {
-        for prefix in ["dir-open:", "dir-switch:"] where item.id.hasPrefix(prefix) {
-            let path = String(item.id.dropFirst(prefix.count))
-            return path.hasSuffix("/") ? path : path + "/"
-        }
-        return nil
-    }
-
-    private func abbreviateTilde(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
     }
 
     /// The id of the zero-height view at the top of the results.
