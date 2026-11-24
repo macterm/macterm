@@ -3,7 +3,8 @@
 This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has the build, the architecture and the conventions.
 
 - `Macterm/Intents/`: the surface of App Intents. `MactermIntentHost` and `IntentTargets` (`IntentHost.swift`), `IntentPermission`, `MactermIntentError`, `Entities`, `ProjectIntents`, `TabIntents`, `PaneIntents`, `CommandIntents` and `MactermShortcuts` (`AppShortcutsProvider`).
-- `Macterm/Palette/`: `PaletteEngine` with `CommandSource`, `ProjectSource` and `DirectorySource`. `PathCompleter` is the one completer of a typed local path. `DirectorySource` and the path field of an input screen (`PaletteInput.pathCompletions`) use it. Do not copy its logic. It completes local paths only: nothing asks a remote host, so a remote spec gets no completion. `PaletteIcon` is the glyph of a row or a pill: an SF Symbol or the icon file of an extension.
+- `Macterm/Palette/`: `PaletteEngine` with `CommandSource`, `ProjectSource` and `DirectorySource`. `PaletteIcon` is the glyph of a row or a pill: an SF Symbol or the icon file of an extension.
+  - `PathCompleter` is the one completer of a typed local path. `DirectorySource` and the path field of an input screen (`PaletteInput.pathCompletions`) use it. Do not copy its logic. It completes local paths only: nothing asks a remote host, so a remote spec gets no completion.
   - **`Custom/`** has extensions. Users and the docs use the name "extension" for what the code calls custom palettes.
     - `CustomPaletteFile` is the YAML model. It is validated into `CustomPalette`. A palette has named nodes. Each node has written `items:`, a `list:` or both (items first, and shown at once). Every row has an `enter:` or an `action:`, and an optional `alt:` for ⌥↩. The `alt:` is wired to `PaletteItem.alt`.
     - `CustomPaletteRows` turns the output of a command (JSON, NDJSON or plain lines) into rows by dotted paths. It is pure.
@@ -42,7 +43,8 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
-      - Return commits the field. The rows are completions: Tab or a click puts the selected row in the field and never commits.
+      - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
+      - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
     - `PasswordPaletteScope`.

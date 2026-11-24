@@ -13,7 +13,8 @@ import Foundation
 /// shows the reason as one line above the rows, until the text changes.
 ///
 /// Its identity is `id`: two inputs with one id are one screen to the
-/// palette (a chord toggles it).
+/// palette (a chord toggles it). An input about one thing (a tab, a pane)
+/// puts that thing's id in its own, so that two targets are two screens.
 struct PaletteInput: Hashable {
     let id: String
     let pill: PalettePill
@@ -93,6 +94,9 @@ final class InputPaletteScope: PaletteScope {
     /// changes.
     private var refusedText: String?
     private var completions: [PaletteCompletion] = []
+    /// True until the screen has shown once: only then does the panel
+    /// select the field's text, the initial value.
+    var isFirstShow = true
 
     init(input: PaletteInput) {
         self.input = input

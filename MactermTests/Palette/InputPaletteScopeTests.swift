@@ -120,7 +120,7 @@ struct InputPaletteScopeTests {
     }
 
     @Test
-    func the_field_keeps_its_text_across_a_pop_and_the_screen_leaves_the_stack() throws {
+    func a_chord_opens_it_on_its_value_and_the_scope_keeps_its_text_while_covered() throws {
         let state = makeAppState()
         let window = WindowState()
         state.registerWindow(window)
@@ -140,7 +140,7 @@ struct InputPaletteScopeTests {
         window.popPaletteFrame()
         #expect(window.paletteStack.last?.scope.initialQuery == "draft")
 
-        // Escape or Backspace at an empty field pops it like any screen.
+        // Its frame leaves the stack like any screen's.
         window.popPaletteFrame()
         #expect(window.paletteStack.isEmpty)
     }

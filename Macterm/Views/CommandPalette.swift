@@ -170,6 +170,10 @@ struct CommandPalettePanel: View {
     /// field, and its rows complete it (`InputPaletteScope`).
     private var inputScope: InputPaletteScope? { scope as? InputPaletteScope }
 
+    /// Where the selection rests on a new list: the top row, or no row on
+    /// an input screen, whose Return commits the field and not a row.
+    private var restingIndex: Int { inputScope == nil ? 0 : -1 }
+
     private var flatItems: [PaletteItem] { sections.flatMap(\.items) }
 
     /// `PaletteItem.id → flat index`, built once per body build. Replaces the
@@ -338,7 +342,7 @@ struct CommandPalettePanel: View {
         .onAppear {
             // Don't clear `query` — it lives on AppState and is deliberately
             // preserved across close/reopen.
-            selectedIndex = 0
+            selectedIndex = restingIndex
             optionHeld = NSEvent.modifierFlags.contains(.option)
             eventMonitor = PaletteEventMonitor(
                 onFlags: { optionHeld = $0.contains(.option) },
@@ -370,17 +374,20 @@ struct CommandPalettePanel: View {
             }
         }
         .onChange(of: query) {
-            selectedIndex = 0
+            selectedIndex = restingIndex
             refresh()
         }
         .onChange(of: windowState.paletteStack) {
-            selectedIndex = 0
+            selectedIndex = restingIndex
             activateScope()
             checkPaletteAvailability()
             refresh()
             // An input screen starts on its value, selected, so that a
-            // keystroke replaces it.
-            if inputScope != nil {
+            // keystroke replaces it — the first time only: text the user
+            // typed, back after a pop, is never selected for a keystroke to
+            // wipe.
+            if let inputScope, inputScope.isFirstShow {
+                inputScope.isFirstShow = false
                 DispatchQueue.main.async { selectFieldText() }
             }
         }
@@ -474,9 +481,12 @@ struct CommandPalettePanel: View {
         // Never rest the selection on a muted row (e.g. when it's the top
         // match after a query change), nor past the end of a list that just
         // got shorter (a screen's redraw, a hover resolved against the old
-        // rows) — Return would have nothing to run.
-        if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
-           let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
+        // rows) — Return would have nothing to run. An input screen's
+        // selection may rest on no row: its Return commits the field.
+        if inputScope != nil, !flatItems.indices.contains(selectedIndex) {
+            selectedIndex = -1
+        } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
+                  let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
         {
             selectedIndex = firstEnabled
         }
@@ -512,10 +522,12 @@ struct CommandPalettePanel: View {
     /// input — letting the keypress fall through (`.ignored`) to default focus
     /// traversal in that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's rows are its completions: the selected one.
+        // An input screen's rows are its completions: the selected one, or
+        // the top one when none is selected.
         if let inputScope {
-            guard flatItems.indices.contains(selectedIndex),
-                  let completion = inputScope.completion(for: flatItems[selectedIndex]),
+            let index = flatItems.indices.contains(selectedIndex) ? selectedIndex : 0
+            guard flatItems.indices.contains(index),
+                  let completion = inputScope.completion(for: flatItems[index]),
                   completion != query
             else { return .ignored }
             query = completion
@@ -838,8 +850,8 @@ private struct PaletteNoMatchesNotice: View {
 
 /// A screen's listing that failed: the failure color's warning glyph, what
 /// failed over why, and Retry, centered — or a value that an input screen
-/// refused, as one line. Not a result row — it is never
-/// selected and Enter never lands on it — so it is a notice.
+/// refused, as one line. Not a result row — it is never selected and Enter
+/// never lands on it — so it is a notice.
 private struct PaletteFailureNotice: View {
     let failure: PaletteFailure
     let retry: () -> Void

@@ -3,9 +3,10 @@ import Foundation
 
 /// Palette source for directory completions (`PathCompleter`). Consulted
 /// only when the query looks like a path. If the exact path matches a
-/// directory, it's surfaced as the top result — and if that directory is already an opened project,
-/// the top item switches to it, with an "add another project" item below
-/// (a directory is not an identity; it can back several projects).
+/// directory, it's surfaced as the top result — and if that directory is
+/// already an opened project, the top item switches to it, with an "add
+/// another project" item below (a directory is not an identity; it can
+/// back several projects).
 @MainActor
 struct DirectorySource: PaletteSource {
     private static var category: String {
