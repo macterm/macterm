@@ -29,6 +29,11 @@ struct TerminalPane: View {
         // This window's view of the pane: its own search, copy mode and
         // read-only state, its own view, its own client of the session.
         let surface = SurfaceRegistry.shared.surface(for: pane, in: host)
+        // A plain ssh shell (a host with no server) runs in one surface only,
+        // and no window can take it. The other surfaces show a notice in
+        // place of the terminal, from the first frame, also in the key
+        // window.
+        let plainShellElsewhere = pane.plainShellRunsElsewhere(than: surface.id)
         // The search bar sits above the terminal surface in a VStack, so showing
         // it pushes the terminal content down rather than overlaying it.
         VStack(spacing: 0) {
@@ -68,6 +73,19 @@ struct TerminalPane: View {
                 onSplitRequest: onSplitRequest,
                 onZoomRequest: onZoomRequest
             )
+            .opacity(plainShellElsewhere ? 0 : 1)
+            .overlay {
+                if plainShellElsewhere {
+                    StandAsideNotice(
+                        title: String(localized: "Showing in another window"),
+                        detail: String(
+                            localized: "The host has no Macterm server, so this shell runs in one window only.",
+                            comment: "Under 'Showing in another window', in a pane whose ssh shell runs in another window"
+                        )
+                    )
+                    .allowsHitTesting(false)
+                }
+            }
             // Overlays anchor to the surface, not the VStack, so the search
             // bar (above) never shifts them.
             .overlay(alignment: .bottomLeading) {
@@ -402,11 +420,9 @@ private struct TerminalSurface: NSViewRepresentable {
     /// work before any window draws it.
     private func configure(_ view: GhosttyTerminalNSView) {
         view.onFocus = onFocus
-        // Every surface of the pane gets the session's exit. Only the feed's
-        // ends the pane: another window's client that dies alone is a detach.
-        view.onProcessExit = { [weak surface] in
-            if surface?.isFeed ?? true { onProcessExit() }
-        }
+        // The pane's link calls one surface's handler at the session's end
+        // (`Pane.sessionDidEnd`); a surface with no session calls its own.
+        view.onProcessExit = onProcessExit
         view.onSplitRequest = onSplitRequest
         view.onZoomRequest = onZoomRequest
         view.isZoomed = isZoomed

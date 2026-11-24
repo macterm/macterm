@@ -55,8 +55,7 @@ enum ForegroundPolicy {
     /// The verdict for a pane on a host with no server (a plain shell,
     /// 0494). It has no sample. libghostty reads it as busy when the host's
     /// shell sends no OSC 133 prompt mark. So the close asks the host first
-    /// (`HostCommands.shellIsIdle`). `shellIdle` is true only when the
-    /// shell of each view of the pane is idle.
+    /// (`HostCommands.shellIsIdle`). `shellIdle` is the host's answer.
     static func plainShellNeedsConfirmClose(shellIdle: Bool, executionState: TerminalExecutionState) -> Bool {
         executionState == .running || !shellIdle
     }

@@ -604,8 +604,9 @@ final class AppState {
     /// Several windows may draw one pane. Each has its own surface, which is
     /// its own client of the session, so a surface that its window does not
     /// draw any more is a stray client: it is retired here. A pane keeps its
-    /// last surface (a warm view), shown or not. Idempotent and cheap: run it
-    /// where a window's selection changes.
+    /// last surface (a warm view), shown or not, and the surface that runs
+    /// its plain ssh shell (`Pane.plainShellSurfaceID`). Idempotent and
+    /// cheap: run it where a window's selection changes.
     private func settleWindowSelections() {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
@@ -624,6 +625,9 @@ final class AppState {
         for pane in allLivePanes() where registry.surfaces(of: pane).count > 1 {
             for surface in registry.surfaces(of: pane) where registry.surfaces(of: pane).count > 1 {
                 guard let windowID = surface.windowID else { continue }
+                // A plain ssh shell is its surface's: only the window, the
+                // tab or the pane ends it, not a tab switch.
+                if pane.plainShellSurfaceID == surface.id { continue }
                 if shown[windowID]?.contains(pane.id) != true { registry.retire(surface) }
             }
         }
@@ -2161,10 +2165,10 @@ final class AppState {
     @ObservationIgnored
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
 
-    /// Whether a view of the pane runs a plain shell (`Pane.plainShellDrivers`).
-    /// A seam, as `paneNeedsConfirmClose`.
+    /// Whether the pane runs a plain shell (`Pane.runsPlainShell`). A seam,
+    /// as `paneNeedsConfirmClose`.
     @ObservationIgnored
-    var paneRunsPlainShell: (Pane) -> Bool = { !$0.plainShellDrivers.isEmpty }
+    var paneRunsPlainShell: (Pane) -> Bool = { $0.runsPlainShell }
 
     /// The host's verdict for a plain shell's pane
     /// (`Pane.plainShellNeedsConfirmClose`). nil when it runs none. A seam,
