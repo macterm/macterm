@@ -696,12 +696,6 @@ private struct DesktopWidgetTerminalView: View {
             onFocusPane: { ModelWriter.paneFocus(tab, paneID: $0) },
             onSplit: { _, _, _ in },
             onClosePane: { _ in onShellExit() },
-            onCommandFinished: { paneID in
-                guard let pane = tab.splitRoot.findPane(id: paneID),
-                      SurfaceRegistry.shared.existingSurface(for: pane, in: .widget(widget.id))?.nsView?.window?.isKeyWindow == true
-                else { return }
-                pane.markSeen()
-            },
             onAdaptiveBackgroundChange: { paneID, color in
                 guard let pane = tab.splitRoot.findPane(id: paneID) else { return }
                 let surface = SurfaceRegistry.shared.surface(for: pane, in: .widget(widget.id))

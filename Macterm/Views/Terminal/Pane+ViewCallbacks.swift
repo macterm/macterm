@@ -1,25 +1,23 @@
 import AppKit
-import GhosttyKit
 
 extension Pane {
-    /// Connect the view's callbacks that feed the pane's own state: the run
-    /// state, attention flags, titles, notifications and project memory.
+    /// Connect the view's callbacks that feed the pane's own state: titles,
+    /// notifications and project memory.
     /// `PaneSurface.ensureNSView` calls this when it makes the view, so the callbacks work
     /// before any window draws the pane. A pane in a `tab new --no-focus` tab,
     /// or in a background tab that a launch warmed, otherwise recorded no
     /// submission and no output, and `pane list` showed its run as idle.
     /// The callbacks that need the window that draws the pane (focus, splits,
-    /// zoom, process exit, tab titles, links, the adaptive background, and
-    /// `onRunEnded`) stay in `TerminalSurface.configure`.
+    /// zoom, process exit, tab titles, links and the adaptive background)
+    /// stay in `TerminalSurface.configure`.
     ///
     /// The session's own messages (foreground, title, tty mode, marks,
-    /// state, status, attention) come on every surface's channel and say the
-    /// same thing, so every surface applies them. Every surface of a pane also
-    /// parses the same output with libghostty, so the callbacks that count
-    /// what it reads (notifications, project memory) act only for the
-    /// feed surface (`PaneSurface.isFeed`), which each one asks when it
-    /// fires: when the first surface goes, the next one takes over with no
-    /// handoff. `PaneSurface` sets the search, copy mode, link and read-only
+    /// state, status, attention) and its end come once, through the pane's
+    /// `PaneLink` (`receiveLinkEvent`), not through the views. Every surface
+    /// of a pane parses the same output with libghostty, so the callbacks
+    /// that count what it reads (notifications, project memory) act
+    /// only for the surface of the link's counting view
+    /// (`PaneSurface.countsOutput`). `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
     func connectViewCallbacks(_ view: GhosttyTerminalNSView) {
         view.onInteraction = { [weak self] in
@@ -46,44 +44,12 @@ extension Pane {
             guard let view else { return }
             AdaptiveTerminalChrome.shared.terminalBackgroundDidChange(color, in: view)
         }
-        // Every surface's channel gets the same messages from the session.
-        view.onAttention = { [weak self, weak view] flags in
-            self?.receiveAttention(flags)
-            // A run ended that no client showed: the window that draws this
-            // surface marks it seen when the user looks at it. The session
-            // sends the flags after the status that ended the run.
-            if flags.unseen { view?.onRunEnded?() }
-        }
+        // A surface with no session reports its own titles.
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
-        view.onSessionState = { [weak self] state in self?.receiveSessionState(state) }
-        view.onSessionForeground = { [weak self] foreground in self?.applyForeground(foreground) }
-        view.onTtyMode = { [weak self] mode in self?.lineMode = mode }
-        view.onSessionStatus = { [weak self, weak view] status in
-            guard let channel = view?.owningSurface?.id else { return }
-            self?.receiveSessionStatus(status, channel: channel)
-        }
-        // libghostty's callbacks, and the marks for project memory: only the
-        // feed surface counts them.
-        let isFeed = { [weak view] in view?.owningSurface?.isFeed ?? true }
-        view.onSessionMark = { [weak self, weak view] mark in
-            guard let self else { return }
-            receiveSessionMark(mark)
-            guard isFeed() else { return }
-            switch mark.kind {
-            case .output:
-                commandStartedAt = Date()
-            case .end:
-                let command = mark.command.map { String(decoding: $0.bytes, as: UTF8.self) }
-                recordCommandEnd(command: command, exitCode: mark.exitCode.map(Int.init), startedAt: commandStartedAt, view: view)
-                commandStartedAt = nil
-            case .prompt,
-                 .input,
-                 .unknown:
-                break
-            }
-        }
+        // libghostty's callbacks: only the counting surface counts what it parses.
+        let counts = { [weak view] in view?.owningSurface?.countsOutput ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
-            guard let self, isFeed() else { return }
+            guard let self, counts() else { return }
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
@@ -95,10 +61,10 @@ extension Pane {
             PasswordPromptMonitor.shared.viewDidOutput(view)
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
-            guard let self, isFeed() else { return }
+            guard let self, counts() else { return }
             // A surface on a channel gets the shell's 133;D from the session
-            // (`onSessionMark`); a surface with no session has only this one.
-            // The prompt gate and the title expiry read it.
+            // (`receiveSessionMark`); a surface with no session has only this
+            // one. The prompt gate and the title expiry read it.
             if view?.channelRuntime == nil {
                 receiveSessionMark(MactermProtocol.Mark(kind: .end))
                 let duration = Double(durationNs) / 1_000_000_000
@@ -106,6 +72,7 @@ extension Pane {
                     command: command,
                     exitCode: exitCode < 0 ? nil : Int(exitCode),
                     startedAt: Date().addingTimeInterval(-duration),
+                    outputTail: nil,
                     view: view
                 )
             }
@@ -121,10 +88,42 @@ extension Pane {
         }
     }
 
+    /// A mark of the pane's session, once for the pane, from the link's
+    /// counting view (`view`): the prompt gate and the title expiry
+    /// (`receiveSessionMark(_:)`), and the command's start and its end for
+    /// project memory.
+    func receiveSessionMark(_ mark: MactermProtocol.Mark, view: GhosttyTerminalNSView?) {
+        receiveSessionMark(mark)
+        switch mark.kind {
+        case .output:
+            commandStartedAt = Date()
+        case .end:
+            let command = mark.command.map { String(decoding: $0.bytes, as: UTF8.self) }
+            recordCommandEnd(
+                command: command,
+                exitCode: mark.exitCode.map(Int.init),
+                startedAt: commandStartedAt,
+                outputTail: mark.outputTail.map { String(decoding: $0.bytes, as: UTF8.self) },
+                view: view
+            )
+            commandStartedAt = nil
+        case .prompt,
+             .input,
+             .unknown:
+            break
+        }
+    }
+
     /// Hands a finished command to project memory (off unless the user
-    /// turned it on, macOS 26+). The screen is read only for a failure's
-    /// output tail, and not while a password prompt owns its last line.
-    private func recordCommandEnd(command: String?, exitCode: Int?, startedAt: Date?, view: GhosttyTerminalNSView?) {
+    /// turned it on, macOS 26+). A failure's output tail comes from the
+    /// session's end mark: nothing reads the screen.
+    private func recordCommandEnd(
+        command: String?,
+        exitCode: Int?,
+        startedAt: Date?,
+        outputTail: String?,
+        view: GhosttyTerminalNSView?
+    ) {
         let end = CommandEnd(
             paneID: id,
             projectID: projectID,
@@ -132,13 +131,10 @@ extension Pane {
             exitCode: exitCode,
             directory: view?.currentPwd,
             startedAt: startedAt,
-            finishedAt: Date()
+            finishedAt: Date(),
+            outputTail: outputTail
         )
-        ProjectMemory.shared.commandEnded(end) { [weak view] in
-            guard let view else { return nil }
-            let phase = PasswordPromptMonitor.shared.state(for: view).phase
-            return ["sighted", "prompting"].contains(phase) ? nil : view.readText(area: GHOSTTY_POINT_ACTIVE)
-        }
+        ProjectMemory.shared.commandEnded(end)
     }
 
     private static func formatDuration(_ seconds: Double) -> String {
@@ -156,6 +152,19 @@ extension Pane {
             let mins = (rounded % 3600) / 60
             return String(localized: "\(hours)h \(mins)m", comment: "A duration in hours and minutes, as in 2h 5m")
         }
+    }
+
+    /// The session ended: the pane closes, once. The handler is the one of
+    /// the window that draws the pane (`TerminalSurface.configure`), or the
+    /// warm's (`AppState.warmPane`): the first surface that has one, from the
+    /// preferred surface on.
+    func sessionDidEnd() {
+        let registry = SurfaceRegistry.shared
+        let all = registry.surfaces(of: self)
+        guard !all.isEmpty else { return }
+        let preferred = registry.preferredSurface(of: self)
+        let ordered = [preferred] + all.filter { $0 !== preferred }
+        ordered.lazy.compactMap(\.nsView).compactMap(\.onProcessExit).first?()
     }
 
     /// Tells the session that the user saw the pane, on the channel of one

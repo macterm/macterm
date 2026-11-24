@@ -977,16 +977,32 @@ struct WelcomeView: View {
 /// key, which is what claims the tab back and renders the panes again.
 private struct MirroredTabNotice: View {
     var body: some View {
+        StandAsideNotice(
+            title: String(localized: "Showing in another window"),
+            detail: String(localized: "Click to work here")
+        )
+        .contentShape(Rectangle())
+    }
+}
+
+/// A notice in place of panes or a pane that shows in another window: a
+/// title and one line under it, in the middle of the space.
+struct StandAsideNotice: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
         VStack(spacing: 4) {
-            Text("Showing in another window")
+            Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(MactermTheme.fg)
-            Text("Click to work here")
+            Text(detail)
                 .font(.system(size: 11))
                 .foregroundStyle(MactermTheme.fgMuted)
+                .multilineTextAlignment(.center)
         }
+        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
     }
 }
 
@@ -1122,9 +1138,6 @@ struct WorkspaceView: View {
             // real end through paneProcessExited, where a pinned tab's
             // last pane unloads the tab instead of closing it (#285).
             onClosePane: { paneID in appState.handleProcessExit(paneID, projectID: project.id) },
-            onCommandFinished: { paneID in
-                appState.markSeenIfActive(paneID: paneID, projectID: project.id)
-            },
             onAdaptiveBackgroundChange: { paneID, color in
                 appState.setAdaptiveBackgroundColor(color, paneID: paneID, projectID: project.id, windowID: windowState.id)
             },

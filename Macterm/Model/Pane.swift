@@ -172,44 +172,37 @@ final class Pane: Identifiable {
     /// channel (a plain surface, a remote shell with no server) has no
     /// status, so it stays idle.
     var executionState: TerminalExecutionState {
-        if !runningChannels.isEmpty { return .running }
+        if isSessionRunning { return .running }
         return attention.unseen ? .done : .idle
     }
 
-    /// The surfaces whose channel's `status` message says that a run goes
-    /// on. The session ends a run at OSC 133;D, at a new prompt, at the end
-    /// of a progress report, and for a program with no marks (`events.zig`).
-    /// One set for the pane, keyed by surface: the end of one window's
-    /// channel (`PaneSession.channelEnded` sends `idle`) does not stop the
-    /// run that another window's channel still shows. At an attach, the
-    /// session sends its status only when it is not idle.
-    private var runningChannels: Set<UUID> = [] {
+    /// Whether the session's `status` message says that a run goes on. The
+    /// session ends a run at OSC 133;D, at a new prompt, at the end of a
+    /// progress report, and for a program with no marks (`events.zig`). The
+    /// pane's link gives it the status of its counting view only
+    /// (`PaneLink.counts`). When that view's channel ends,
+    /// `PaneSession.channelEnded` sends `idle`: at an attach, the session
+    /// sends its status only when it is not idle.
+    private var isSessionRunning = false {
         didSet {
-            guard runningChannels.isEmpty != oldValue.isEmpty else { return }
+            guard isSessionRunning != oldValue else { return }
             // A program's OSC title expires when its command ends (see
             // `receiveReportedTitle`). An agent that finishes a turn ends its
             // run and keeps the foreground, so the title stays while the
             // latest report says a program holds the pty: the shell's own
             // report comes before the prompt that ended the run. A pane with
             // no report keeps no title.
-            if runningChannels.isEmpty, programTitle != nil, !programHoldsForeground {
+            if !isSessionRunning, programTitle != nil, !programHoldsForeground {
                 programTitle = nil
             }
             NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
         }
     }
 
-    /// A `status` message on the channel of the surface `channel`.
-    func receiveSessionStatus(_ status: MactermProtocol.Status, channel: UUID = Pane.soleChannel) {
-        if status.state == .running {
-            runningChannels.insert(channel)
-        } else {
-            runningChannels.remove(channel)
-        }
+    /// The session's `status` message, once for the pane.
+    func receiveSessionStatus(_ status: MactermProtocol.Status) {
+        isSessionRunning = status.state == .running
     }
-
-    /// The channel key of a caller with one channel only (tests).
-    static let soleChannel = UUID()
 
     /// When the running command started: the session's `output` mark (OSC
     /// 133;C), for the `CommandEnd` of its `end` mark. nil while no command
@@ -223,6 +216,51 @@ final class Pane: Identifiable {
     /// nil for a remote pane, and while no channel is up.
     @ObservationIgnored
     private(set) var sessionShell: SessionShell?
+
+    /// The pane's link to its session: made at the first surface that runs
+    /// from a channel, and kept for the pane's life. It makes the session,
+    /// runs a remote pane's driver, and gives the pane the session's
+    /// messages and its end once (`receiveLinkEvent`), however many windows
+    /// show the pane.
+    @ObservationIgnored
+    private var link: PaneLink?
+
+    var sessionLink: PaneLink {
+        if let link { return link }
+        let made = PaneLink.make(for: self)
+        made.onEvent = { [weak self] event in self?.receiveLinkEvent(event) }
+        link = made
+        return made
+    }
+
+    /// A message of the pane's session, once for the pane.
+    func receiveLinkEvent(_ event: PaneLinkEvent) {
+        switch event {
+        case let .state(state): receiveSessionState(state)
+        case let .foreground(foreground): applyForeground(foreground)
+        case let .title(title): receiveReportedTitle(title)
+        case let .ttyMode(mode): lineMode = mode
+        case let .mark(mark, host): receiveSessionMark(mark, view: host?.terminalView)
+        case let .status(status): receiveSessionStatus(status)
+        case let .attention(flags): receiveAttention(flags)
+        case .ended: sessionDidEnd()
+        case let .plainShellRunsIn(host): plainShellSurfaceID = host?.surfaceID
+        }
+    }
+
+    /// The surface that runs the pane's plain ssh shell (a host with no
+    /// server), or nil. A pty is one terminal and no session holds it, so
+    /// no other window can take it: the pane's other surfaces show a notice
+    /// in place of the terminal. When that surface goes, the pane gets a
+    /// fresh shell. Live state only; the link sets it (`receiveLinkEvent`).
+    var plainShellSurfaceID: UUID?
+
+    /// Whether the surface `surfaceID` shows the notice that the pane's
+    /// plain ssh shell runs in another window.
+    func plainShellRunsElsewhere(than surfaceID: UUID) -> Bool {
+        guard let owner = plainShellSurfaceID else { return false }
+        return owner != surfaceID
+    }
 
     /// The channel's `state` message. A remote session's pid is on the
     /// host, so it is not kept.
@@ -290,7 +328,7 @@ final class Pane: Identifiable {
     ///   channel gets at `hello` comes before its first report, so it is
     ///   dropped.
     ///
-    /// It expires at the end of a run (`runningChannels`), at OSC
+    /// It expires at the end of a run (`isSessionRunning`), at OSC
     /// 133;D (`receiveSessionMark`), and at a report of the shell or of
     /// another program (`applyForeground`).
     func receiveReportedTitle(_ title: String) {
@@ -480,7 +518,7 @@ final class Pane: Identifiable {
         foregroundReportIsShell = false
         lastAppliedForeground = nil
         sessionShell = nil
-        runningChannels = []
+        isSessionRunning = false
         isShellAtPrompt = false
         // A notification whose pane no longer exists routes nowhere on tap, so
         // drop any still sitting in Notification Center. Ghostty does the same
@@ -587,7 +625,7 @@ final class Pane: Identifiable {
     /// gone for good (closed, tab/project removed, dropped by a layout apply)
     /// — NOT on transient teardown (window hide, tab-switch churn), where the
     /// session must survive. Fire-and-forget: close paths aren't blocked on
-    /// it; `LocalSessions.requestTimeout` (local) and the host link's request
+    /// it; `serverRequestTimeout` (local) and the host link's request
     /// timeout (remote) bound a stuck peer. The client is
     /// a parameter so AppState's injectable instance flows through in tests.
     func killPersistentSession(using sessionClient: SessionClient) {

@@ -30,10 +30,6 @@ final class ProjectMemory {
     /// the folder.
     private(set) var gitAnswered: Set<UUID> = []
 
-    /// How long after a failed command's end the screen is read for its
-    /// output. The shell sends OSC 133;D before it prints its next prompt,
-    /// and the extractor needs that prompt.
-    @ObservationIgnored var screenReadDelay = Duration.milliseconds(400)
     @ObservationIgnored var gitReader: (String) async -> GitStatus? = { await ProjectGit.status(at: $0) }
     /// The git state of a remote project, from the host's server over the
     /// host's connection (`ProjectGit.remoteStatus`).
@@ -113,26 +109,16 @@ final class ProjectMemory {
     @ObservationIgnored var panelShows: (UUID) -> Bool = { _ in false }
 
     /// A command finished in a pane (`CommandEnd`, the one input of the
-    /// recorder). `screen` reads the pane's screen: it is called only for a
-    /// failure, after `screenReadDelay`, to keep the tail of the output.
-    func commandEnded(_ end: CommandEnd, screen: @escaping @MainActor () -> String? = { nil }) {
+    /// recorder).
+    func commandEnded(_ end: CommandEnd) {
         // Any command can move the branch (`git switch`, a commit), recorded
         // or not: a command with no text changes the Git state just as well.
         if panelShows(end.projectID) { refreshGit(end.projectID, after: Self.gitReadAfterCommand) }
         guard Self.isEnabled, Self.covers(end.projectID) else { return }
-        guard let entry = Self.makeEntry(end, screen: nil) else { return }
-        guard entry.outcome == .failure else { return record(entry, in: end.projectID) }
-        Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(for: screenReadDelay)
-            record(Self.makeEntry(end, screen: screen()) ?? entry, in: end.projectID)
-        }
-    }
-
-    private func record(_ entry: MemoryEntry, in projectID: UUID) {
-        store.append(entry, to: projectID)
-        logger.debug("recorded a command in \(projectID, privacy: .public)")
-        scheduleBackgroundSummary(projectID)
+        guard let entry = Self.makeEntry(end) else { return }
+        store.append(entry, to: end.projectID)
+        logger.debug("recorded a command in \(end.projectID, privacy: .public)")
+        scheduleBackgroundSummary(end.projectID)
     }
 
     /// The command of a command end: the text with its outer spaces
@@ -147,10 +133,9 @@ final class ProjectMemory {
     /// remember: the end has no command. A record with no command is noise
     /// in every list that shows it.
     ///
-    /// The command comes from the end only. `screen` gives a failure's
-    /// output tail, and only when its last command is this command, with or
-    /// without a right prompt. Pure, for the tests.
-    nonisolated static func makeEntry(_ end: CommandEnd, screen: String?) -> MemoryEntry? {
+    /// The command and a failure's output tail come from the end only.
+    /// Pure, for the tests.
+    nonisolated static func makeEntry(_ end: CommandEnd) -> MemoryEntry? {
         guard let command = end.command.flatMap(reportedCommand) else { return nil }
         var entry = MemoryEntry(
             command: MemoryRedaction.redactCommand(command),
@@ -159,10 +144,7 @@ final class ProjectMemory {
             finishedAt: end.finishedAt,
             duration: end.duration
         )
-        let output = screen.flatMap(ScreenCommandExtractor.extract(screen:)).flatMap { shown in
-            ScreenCommandExtractor.screenCommand(shown.command, shows: command) ? shown.output : nil
-        }
-        if entry.outcome == .failure, let output, let tail = MemoryEntry.tail(of: output) {
+        if entry.outcome == .failure, let output = end.outputTail, let tail = MemoryEntry.tail(of: output) {
             entry.failureTail = MemoryRedaction.redact(tail)
         }
         return entry

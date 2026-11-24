@@ -19,7 +19,7 @@ struct PaneSessionTests {
                 ),
                 wantsForeground: false,
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.start()
             try await host.waitFor { $0.screen.contains("up-ok") }
@@ -41,7 +41,7 @@ struct PaneSessionTests {
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "sleep 1; stty size; sleep 30"], env: []),
                 wantsForeground: false,
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.start()
             session.claim(grid: nil)
@@ -60,14 +60,14 @@ struct PaneSessionTests {
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
                 host: first,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             a.start()
             try await first.waitFor { $0.leads == [true] && $0.screen.contains("up-ok") }
 
             // A second client of the session does not lead, and hears so.
             let second = RecordingPaneHost()
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: TestServerEndpoint(server))
             b.start()
             try await second.waitFor { $0.leads == [false] }
 
@@ -80,23 +80,34 @@ struct PaneSessionTests {
     }
 
     @Test
-    func a_lost_connection_is_made_again_and_the_screen_is_drawn_again() async throws {
+    func a_lost_connection_is_made_again_and_resumes_with_the_screen_and_scrollback_kept() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let connections = ConnectionBox()
+            let connections = TestServerEndpoint(server)
             let session = PaneSession(
                 name: "ps-lost-\(UInt32.random(in: 0 ... .max))",
-                launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf before-%s lost; sleep 60"], env: []),
+                launch: .init(
+                    cwd: NSTemporaryDirectory(),
+                    argv: ["/bin/sh", "-c", "printf before-%s lost; read l; printf after-%s \"$l\"; sleep 60"],
+                    env: []
+                ),
                 wantsForeground: false,
                 host: host,
-                connect: { try await connections.next(server) }
+                endpoint: connections
             )
             session.start()
-            try await host.waitFor { $0.screen.contains("before-lost") }
+            try await host.waitFor { $0.screen.contains("before-lost") && $0.leads == [true] }
             connections.current?.close()
             try await host.waitFor { $0.linkLost > 0 }
-            try await host.waitFor { $0.resets >= 2 && $0.screen.contains("before-lost") }
-            #expect(host.snapshot().leads.contains { $0 == nil }, "the lost channel forgets the lead")
+            // The new channel asks to resume: the session sends only the
+            // bytes after the offset, and draws no snapshot.
+            try await host.waitFor { $0.leads.count >= 3 && $0.leads.last == true }
+            #expect(session.resumePoint != nil)
+            session.sendInput(Data("x\n".utf8))
+            try await host.waitFor { $0.screen.contains("after-x") }
+            let state = host.snapshot()
+            #expect(state.resets == 1, "a resume keeps the screen and the scrollback")
+            #expect(state.screen.components(separatedBy: "before-lost").count == 2, "no byte comes twice")
             session.stop()
         }
     }
@@ -105,14 +116,13 @@ struct PaneSessionTests {
     func input_after_a_lost_link_is_handed_back_and_not_dropped() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let connections = ConnectionBox()
+            let connections = TestServerEndpoint(server, once: true)
             let session = PaneSession(
                 name: "ps-keep-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
-                reconnects: false,
                 host: host,
-                connect: { try await connections.next(server) }
+                endpoint: connections
             )
             session.start()
             try await host.waitFor { $0.screen.contains("up-ok") }
@@ -128,19 +138,18 @@ struct PaneSessionTests {
     }
 
     @Test
-    func a_lost_link_with_no_reconnect_forgets_the_lead() async throws {
-        // A remote pane's session does not reconnect. When its link stops,
-        // the surface must not keep the lead of a client that is gone.
+    func a_lost_link_with_no_next_connection_forgets_the_lead() async throws {
+        // A host's link gives no next connection. When it stops, the
+        // surface must not keep the lead of a client that is gone.
         try await withServer { server in
             let host = RecordingPaneHost()
-            let connections = ConnectionBox()
+            let connections = TestServerEndpoint(server, once: true)
             let session = PaneSession(
                 name: "ps-nolead-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf up-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
-                reconnects: false,
                 host: host,
-                connect: { try await connections.next(server) }
+                endpoint: connections
             )
             session.start()
             try await host.waitFor { $0.leads == [true] && $0.screen.contains("up-ok") }
@@ -164,12 +173,12 @@ struct PaneSessionTests {
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "read l; printf '\\a'; sleep 60"], env: []),
                 wantsForeground: false,
                 host: first,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             a.start()
             try await first.waitFor { $0.leads == [true] }
             let second = RecordingPaneHost()
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: TestServerEndpoint(server))
             b.start()
             try await second.waitFor { $0.leads == [false] }
 
@@ -192,14 +201,13 @@ struct PaneSessionTests {
     func a_lost_link_clears_the_attention_flags() async throws {
         try await withServer { server in
             let host = RecordingPaneHost()
-            let connections = ConnectionBox()
+            let connections = TestServerEndpoint(server, once: true)
             let session = PaneSession(
                 name: "ps-flags-\(UInt32.random(in: 0 ... .max))",
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf '\\a'; sleep 60"], env: []),
                 wantsForeground: false,
-                reconnects: false,
                 host: host,
-                connect: { try await connections.next(server) }
+                endpoint: connections
             )
             session.start()
             try await host.waitFor { $0.attention.last == MactermProtocol.Attention(bell: true) }
@@ -220,7 +228,7 @@ struct PaneSessionTests {
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", "printf alive-%s ok; sleep 60"], env: []),
                 wantsForeground: false,
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.start()
             try await host.waitFor { $0.screen.contains("alive-ok") }
@@ -252,7 +260,7 @@ struct PaneSessionTests {
                 ),
                 wantsForeground: false,
                 host: first,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             a.start()
             try await first.waitFor { $0.screen.contains("END") }
@@ -264,7 +272,7 @@ struct PaneSessionTests {
                 box.host?.setGrid(narrow)
                 box.session?.sendSize(narrow)
             }
-            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, connect: { try await server.connect() })
+            let b = PaneSession(name: name, launch: nil, wantsForeground: false, host: second, endpoint: TestServerEndpoint(server))
             box.set(session: b, host: second)
             b.start()
             try await second.waitFor { $0.snapshots.contains { $0.contains("END") } }
@@ -294,7 +302,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .seconds(30),
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
@@ -321,7 +329,7 @@ struct PaneSessionTests {
                 launch: .init(cwd: NSTemporaryDirectory(), argv: ["/bin/sh", "-c", Self.markedShell], env: []),
                 wantsForeground: false,
                 host: first,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             a.start()
             try await first.waitFor { $0.screen.contains("$ ") }
@@ -333,7 +341,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .seconds(30),
                 host: second,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             b.sendInput(Data("hi\n".utf8))
             b.start()
@@ -357,7 +365,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .milliseconds(300),
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
@@ -382,7 +390,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .seconds(30),
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.sendInput(Data("early\n".utf8))
             session.start()
@@ -404,7 +412,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .milliseconds(1500),
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
@@ -430,7 +438,7 @@ struct PaneSessionTests {
                 wantsForeground: false,
                 startWait: .seconds(1),
                 host: host,
-                connect: { try await server.connect() }
+                endpoint: TestServerEndpoint(server)
             )
             session.sendInput(Data("hi\n".utf8))
             session.start()
@@ -441,7 +449,7 @@ struct PaneSessionTests {
 
             // Another client sees the session's screen: the line never came.
             let viewer = RecordingPaneHost()
-            let other = PaneSession(name: name, launch: nil, wantsForeground: false, host: viewer, connect: { try await server.connect() })
+            let other = PaneSession(name: name, launch: nil, wantsForeground: false, host: viewer, endpoint: TestServerEndpoint(server))
             other.start()
             try await viewer.waitFor { $0.screen.contains("up-ok") }
             #expect(!viewer.snapshot().screen.contains("hi"))
@@ -474,29 +482,6 @@ struct PaneSessionTests {
         }
     }
 
-    /// Holds the connection that a session got, so that a test can end it.
-    final class ConnectionBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: ServerConnection?
-        var current: ServerConnection? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored
-        }
-
-        func next(_ server: LocalServer) async throws -> ServerConnection {
-            let connection = try await server.connect()
-            store(connection)
-            return connection
-        }
-
-        private func store(_ connection: ServerConnection) {
-            lock.lock()
-            stored = connection
-            lock.unlock()
-        }
-    }
-
     private func withServer(_ body: (LocalServer) async throws -> Void) async throws {
         let bundled = try #require(LocalServer.bundled, "zmx/zmx missing from the built bundle. Run `mise run setup`.")
         let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
@@ -524,9 +509,303 @@ struct PaneSessionTests {
     }
 }
 
-struct RemotePaneDriverTests {
+/// A pane session over in-memory links (`FakeServerLink`): the rule for a
+/// lost link, with no server.
+@Suite(.timeLimit(.minutes(1)))
+struct PaneSessionEndpointTests {
+    private static let launch = PaneSession.Launch(cwd: "/tmp", argv: ["/bin/sh"], env: [])
+
+    /// The session's first lead and snapshot on `link`.
+    private static func attach(_ link: FakeServerLink, _ name: String, screen: String) {
+        link.deliver(MactermProtocol.Lead(leader: true), to: name)
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false), to: name)
+        link.deliver(output: screen, to: name)
+        link.deliver(MactermProtocol.SnapshotEnd(), to: name)
+    }
+
     @Test
-    func a_line_of_macterm_starts_on_a_line_of_its_own_and_ends_with_cr_lf() {
-        #expect(RemotePaneDriver.paneText("box refuses.\nPress a key.") == "\r\nbox refuses.\r\nPress a key.\r\n")
+    func a_lost_link_asks_the_endpoint_again_and_draws_the_new_snapshot() async throws {
+        let first = FakeServerLink()
+        let second = FakeServerLink()
+        let endpoint = FakeEndpoint([first, second])
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: Self.launch, wantsForeground: false, host: host, endpoint: endpoint)
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        Self.attach(first, "s", screen: "one")
+        try await host.waitFor { $0.screen == "one" }
+
+        first.close()
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        Self.attach(second, "s", screen: "two")
+        try await host.waitFor { $0.screen == "two" }
+        let state = host.snapshot()
+        #expect(state.linkLost == 1)
+        #expect(state.gone == 0)
+        #expect(state.leads == [true, nil, true])
+        // Only the first attach makes the session.
+        #expect(first.calls.contains(MactermProtocol.SessionCreate.name))
+        #expect(!second.calls.contains(MactermProtocol.SessionCreate.name))
+        session.stop()
+    }
+
+    @Test
+    func a_lost_link_resumes_after_the_last_output_byte_and_keeps_the_screen() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let second = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([first, second]))
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(first.attaches(on: "s").first?.resumeEpoch == nil)
+        first.deliver(MactermProtocol.Lead(leader: true), to: "s")
+        first.deliver(MactermProtocol.SnapshotStart(scrollback: true, offset: 100), to: "s")
+        first.deliver(output: "one", to: "s")
+        first.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        first.deliver(output: "two", to: "s")
+        try await host.waitFor { $0.screen == "onetwo" }
+
+        first.close()
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        let attach = try #require(second.attaches(on: "s").first)
+        #expect(attach.resumeEpoch == 7)
+        #expect(attach.resumeOffset == 103, "the snapshot's offset and the 3 output bytes after it")
+        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 103))
+        second.deliver(MactermProtocol.Resumed(offset: 103), to: "s")
+        second.deliver(output: "three", to: "s")
+        try await host.waitFor { $0.screen == "onetwothree" }
+        #expect(host.snapshot().resets == 1, "only the first attach clears the screen")
+
+        // A skip-ahead snapshot after the resume sets the count again.
+        second.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 500), to: "s")
+        second.deliver(output: "screen", to: "s")
+        second.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        second.deliver(output: "!", to: "s")
+        try await host.waitFor { $0.screen.hasSuffix("screen!") }
+        #expect(host.snapshot().resets == 1, "a skip-ahead snapshot clears its own screen, not the scrollback")
+        second.close()
+        try await host.waitFor { $0.gone == 1 }
+        #expect(session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 501))
+        session.stop()
+    }
+
+    @Test
+    func a_new_epoch_or_a_lost_offset_draws_the_snapshot_over_a_cleared_screen() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let restarted = FakeServerLink(epoch: 8)
+        let third = FakeServerLink(epoch: 8)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false, host: host,
+            endpoint: FakeEndpoint([first, restarted, third])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(output: "one", to: "s")
+        try await host.waitFor { $0.screen == "one" }
+
+        // Another epoch: the session process is another one. No resume.
+        first.close()
+        try await host.waitFor { _ in restarted.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(restarted.attaches(on: "s").first?.resumeEpoch == nil)
+        restarted.deliver(MactermProtocol.SnapshotStart(scrollback: true, offset: 50), to: "s")
+        restarted.deliver(output: "two", to: "s")
+        restarted.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        try await host.waitFor { $0.screen == "two" }
+        #expect(host.snapshot().resets == 2)
+
+        // The ring lost the bytes: the session answers with a snapshot.
+        restarted.close()
+        try await host.waitFor { _ in third.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(third.attaches(on: "s").first?.resumeEpoch == 8)
+        #expect(third.attaches(on: "s").first?.resumeOffset == 50)
+        Self.attach(third, "s", screen: "three")
+        try await host.waitFor { $0.screen == "three" }
+        #expect(host.snapshot().resets == 3)
+        session.stop()
+    }
+
+    @Test
+    func a_resume_point_from_an_earlier_session_keeps_the_screen_at_the_first_attach() async throws {
+        let link = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false,
+            resume: .init(epoch: 7, offset: 42),
+            host: host, endpoint: FakeEndpoint([link])
+        )
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(link.attaches(on: "s").first?.resumeOffset == 42)
+        link.deliver(MactermProtocol.Resumed(offset: 42), to: "s")
+        link.deliver(output: "more", to: "s")
+        try await host.waitFor { $0.screen == "more" }
+        #expect(host.snapshot().resets == 0)
+        session.stop()
+    }
+
+    @Test
+    func finish_waits_for_the_reading_and_gives_the_offset_of_the_last_byte() async throws {
+        let link = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        link.deliver(output: "abc", to: "s")
+        try await host.waitFor { $0.screen == "abc" }
+        // The channel is still open: a key that found the link down ends a
+        // remote pane's session while it reads.
+        #expect(await session.finish() == PaneSession.ResumePoint(epoch: 7, offset: 3))
+    }
+
+    @Test
+    func a_link_that_drops_before_resumed_keeps_the_resume_point() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let second = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false,
+            resume: .init(epoch: 7, offset: 42),
+            host: host, endpoint: FakeEndpoint([first, second])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.close()
+        try await host.waitFor { _ in second.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(second.attaches(on: "s").first?.resumeOffset == 42)
+        #expect(host.snapshot().resets == 0)
+        session.stop()
+    }
+
+    @Test
+    func a_drop_before_the_snapshot_of_another_epoch_leaves_no_resume_point() async throws {
+        let first = FakeServerLink(epoch: 7)
+        let restarted = FakeServerLink(epoch: 8)
+        let third = FakeServerLink(epoch: 8)
+        let host = RecordingPaneHost()
+        let session = PaneSession(
+            name: "s", launch: nil, wantsForeground: false, host: host,
+            endpoint: FakeEndpoint([first, restarted, third])
+        )
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(output: "one", to: "s")
+        try await host.waitFor { $0.screen == "one" }
+        first.close()
+        // The screen still shows the old session: its offsets are not the
+        // new session's.
+        try await host.waitFor { _ in restarted.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        restarted.close()
+        try await host.waitFor { _ in third.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(third.attaches(on: "s").first?.resumeEpoch == nil)
+        session.stop()
+    }
+
+    @Test
+    func an_endpoint_with_no_next_connection_ends_the_session_once() async throws {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        Self.attach(link, "s", screen: "up")
+        try await host.waitFor { $0.screen == "up" }
+
+        link.close()
+        try await host.waitFor { $0.gone == 1 }
+        let state = host.snapshot()
+        #expect(state.linkLost == 1)
+        #expect(state.leads == [true, nil])
+        #expect(state.attention.last == MactermProtocol.Attention())
+        // A key after the end comes back to the host.
+        session.sendInput(Data("k".utf8))
+        try await host.waitFor { $0.undelivered == Data("k".utf8) }
+        session.stop()
+    }
+
+    @Test
+    func channels_that_fail_at_once_end_the_pane_after_the_tries() async throws {
+        // A server that drops each connection: every link is closed.
+        let links = (0 ..< 20).map { _ in FakeServerLink() }
+        for link in links {
+            link.close()
+        }
+        let endpoint = FakeEndpoint(links)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: endpoint)
+        session.start()
+        try await host.waitFor { $0.gone == 1 }
+        // 13 failed tries, 500 ms apart: no tight loop.
+        #expect(endpoint.connected.count == 13)
+        session.stop()
+    }
+
+    @Test
+    func a_failed_attach_on_an_endpoint_with_no_next_connection_ends_the_pane_at_once() async throws {
+        let link = FakeServerLink { method, args in
+            if method == MactermProtocol.SessionCreate.name { throw ServerClientError.noAnswer }
+            return try FakeServerLink.standard(method, args)
+        }
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: Self.launch, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        let started = Date()
+        session.start()
+        try await host.waitFor { $0.gone == 1 }
+        #expect(Date().timeIntervalSince(started) < 0.4, "no wait before an endpoint with no next connection")
+        #expect(host.snapshot().linkLost == 0)
+        session.stop()
+    }
+
+    @Test
+    func the_create_asks_the_server_to_replace_an_exited_session_and_ends_none_itself() async throws {
+        // As the server: a session of this id whose shell exited.
+        let replace = LockedBox<[Bool]>([])
+        let link = FakeServerLink { method, args in
+            if method == MactermProtocol.SessionCreate.name, let create = args as? MactermProtocol.SessionCreate.Args {
+                replace.mutate { $0.append(create.replaceExited) }
+                if !create.replaceExited {
+                    throw ProtocolControlError.errorResponse(.init(code: "exited", message: "The session's shell exited."))
+                }
+            }
+            return try FakeServerLink.standard(method, args)
+        }
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: Self.launch, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(replace.value == [true])
+        #expect(!link.calls.contains(MactermProtocol.SessionKill.name))
+        session.stop()
+    }
+
+    @Test
+    func an_exit_ends_the_session_with_no_new_connection() async throws {
+        let first = FakeServerLink()
+        let endpoint = FakeEndpoint([first, FakeServerLink()])
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: endpoint)
+        session.start()
+        try await host.waitFor { _ in first.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        first.deliver(MactermProtocol.Exit(code: 3), to: "s")
+        try await host.waitFor { $0.exit != nil }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(host.snapshot().exit?.code == 3)
+        #expect(endpoint.connected.count == 1)
+        #expect(host.snapshot().linkLost == 0)
+        session.stop()
+    }
+
+    @Test
+    func input_before_the_attach_goes_on_the_channel_after_a_run_starts() async throws {
+        let link = FakeServerLink()
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.sendInput(Data("ls\n".utf8))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(link.input(on: "s").isEmpty, "the input waits for the shell")
+        link.deliver(MactermProtocol.Status(state: .running), to: "s")
+        try await host.waitFor { _ in link.input(on: "s") == Data("ls\n".utf8) }
+        session.stop()
     }
 }

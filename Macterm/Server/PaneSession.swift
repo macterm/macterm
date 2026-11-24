@@ -45,13 +45,14 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneLead(_ leader: Bool?)
     /// The shell exited. The session ended.
     func paneExited(code: UInt8?, signal: UInt8?)
-    /// The channel ended with no exit. The session tries to connect again,
-    /// unless it was made with no reconnect.
+    /// The channel ended with no exit. The session asks its endpoint for a
+    /// connection again.
     func paneLinkLost()
     /// Input that the channel could not take (the link is down). The host
     /// keeps it for the next attach: a key never goes away with no sign.
     func paneInputUndelivered(_ data: Data)
-    /// The session did not come back. The pane has nothing to show.
+    /// The endpoint has no connection to give, or the channel failed too
+    /// often. The session stops. The pane has nothing to show.
     func paneGone()
 }
 
@@ -83,14 +84,23 @@ extension PaneSessionHost {
     func paneInputUndelivered(_: Data) {}
 }
 
-/// One pane's session on a server: it makes the session when a `launch` is
-/// given, opens a channel, attaches, and feeds the host from the channel.
-/// Input, claims and sizes go back on the same channel, in order, from a
-/// queue of its own, so a stalled server never blocks the caller.
+/// One surface's view channel on a pane's session, local or on a host: it
+/// makes the session when a `launch` is given, opens a channel, attaches,
+/// and feeds the host from the channel. A pane's `PaneLink` makes the
+/// session once (`create`) and gives its views no launch. Input, claims
+/// and sizes go back on the same channel, in order, from a queue of its
+/// own, so a stalled server never blocks the caller.
 ///
-/// A channel that ends with no exit is a lost link: the session connects
-/// again (`connect` gives a connection that is up), attaches again, and the
-/// snapshot that follows draws the pane over a cleared screen.
+/// One rule for a lost link: a channel that ends with no exit reports
+/// `paneLinkLost`, and the session asks its endpoint for a connection again,
+/// attaches again, and asks to resume from the last output byte that the
+/// surface got (design/003 §7). The session then sends only the bytes after
+/// it (`resumed`), and the screen and the scrollback stay. When the session
+/// cannot resume (another epoch, or its ring lost the bytes), its snapshot
+/// draws the pane over a cleared screen. The endpoint decides if there is a next connection
+/// (`ServerEndpoint`): the local server tries for a few seconds, and a
+/// host's link has none after it ended. An endpoint with no connection to
+/// give ends the session with `paneGone`.
 final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// What a new session runs: the launch that libghostty resolved for the
     /// pane (`ghostty_launch_resolve`), or nothing for a remote pane, whose
@@ -101,13 +111,22 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         var env: [String]
     }
 
-    typealias Connect = @Sendable () async throws -> ServerConnection
+    /// Where a client can resume a session's output: the `epoch` of the
+    /// session's `hello` and the offset after the last output byte that the
+    /// surface shows.
+    struct ResumePoint: Equatable {
+        var epoch: UInt64
+        var offset: UInt64
+    }
 
     /// Clears the screen, the scrollback and the cursor.
     static let resetScreen = Data("\u{1B}[0m\u{1B}[3J\u{1B}[2J\u{1B}[H".utf8)
 
-    private static let reconnectTries = 12
-    private static let reconnectWait: Duration = .milliseconds(500)
+    /// A channel that fails or ends at once counts as a failed try. After
+    /// more than this many in a row the pane is gone, so a server that drops
+    /// each channel does not make a tight loop.
+    private static let channelTries = 12
+    private static let channelWait: Duration = .milliseconds(500)
     /// The limit of new attaches on one channel for a grid that changes
     /// before its snapshot. After the limit, the snapshot is drawn.
     static let attachAgainLimit = 3
@@ -118,17 +137,18 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
 
     let name: String
     private let host: any PaneSessionHost
-    private let connect: Connect
+    private let endpoint: any ServerEndpoint
     private let launch: Launch?
     private let wantsForeground: Bool
     private let wantsTty: Bool
-    /// A lost link is tried again (a local server that restarted). A remote\n    /// pane's driver connects again itself, with the app's
-    /// backoff.
-    private let reconnects: Bool
     private let startWait: Duration
 
     private let lock = NSLock()
     private var channel: PaneChannel?
+    /// Where the next attach asks to resume. Nil while the surface shows
+    /// no screen of a known offset: before the first output, and from the
+    /// start of a snapshot to its draw.
+    private var resume: ResumePoint?
     private var task: Task<Void, Never>?
     private var stopped = false
     /// Input that came before the first channel. Over 1 MiB the rest is
@@ -155,19 +175,19 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         launch: Launch?,
         wantsForeground: Bool,
         wantsTty: Bool = false,
-        reconnects: Bool = true,
         startWait: Duration = PaneSession.shellStartWait,
+        resume: ResumePoint? = nil,
         host: any PaneSessionHost,
-        connect: @escaping Connect
+        endpoint: any ServerEndpoint
     ) {
         self.name = name
+        self.resume = resume
         self.launch = launch
         self.wantsForeground = wantsForeground
         self.wantsTty = wantsTty
-        self.reconnects = reconnects
         self.startWait = startWait
         self.host = host
-        self.connect = connect
+        self.endpoint = endpoint
     }
 
     /// Starts the session and the reading. Call it once.
@@ -191,6 +211,17 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         task?.cancel()
         holdTimer?.cancel()
         if let channel { Task { await channel.close() } }
+    }
+
+    /// Stops the session and waits until its reading ended. Then no byte
+    /// goes to the host any more, and `resumePoint` is the offset of the
+    /// last byte that it got. A driver that starts a new session for the
+    /// same pane takes the point from here, not from `stop()`.
+    func finish() async -> ResumePoint? {
+        stop()
+        let task = lock.withLock { task }
+        await task?.value
+        return resumePoint
     }
 
     // MARK: - Input
@@ -292,39 +323,55 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         var reconnected = false
         var tries = 0
         while !Task.isCancelled {
+            let link: any ServerLink
             do {
-                let connection = try await connect()
+                link = try await endpoint.connection()
+            } catch {
+                if !(error is CancellationError), !Task.isCancelled {
+                    logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
+                    host.paneGone()
+                }
+                return
+            }
+            // After a failed try, wait before the next one. The endpoint
+            // answers first: one with no next connection ends the pane now.
+            if tries > 0 { try? await Task.sleep(for: Self.channelWait) }
+            if Task.isCancelled { return }
+            do {
                 // Only the first attach makes the session. A session that is
-                // gone later ended: the app ends a session whose shell exited,
-                // and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: connection, launch) }
-                let channel = try await connection.openChannel(session: name)
+                // gone later ended: the server ends a session whose shell
+                // exited, and a new shell here would hide that.
+                if firstAttach, let launch { try await createSession(on: link, launch) }
+                let channel = try await link.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()
                     return
                 }
-                tries = 0
                 let grid = host.paneGrid()
-                try sendAttach(channel, grid)
+                let resuming = matchingResumePoint(channel)
+                try sendAttach(channel, grid, resume: resuming)
+                // The offset that the screen shows. Only a cleared screen
+                // is at 0: a session with no output sends no snapshot.
+                var shown = resuming?.offset
                 if firstAttach {
-                    host.paneFeed(Self.resetScreen)
+                    // A pane that asks to resume keeps its screen. Its
+                    // reset waits for a snapshot.
+                    if resuming == nil {
+                        host.paneFeed(Self.resetScreen)
+                        shown = 0
+                    }
                     firstAttach = false
                 }
                 if markAttached(channel) { claim(grid: nil) }
                 let started = Date()
-                if await read(channel, reconnected: reconnected, attachedAt: grid) { return }
-                reconnected = true
-                // A channel that ends at once counts as a failed try, so a
-                // server that drops each channel does not make a tight loop.
-                if Date().timeIntervalSince(started) < 2 { tries += 1 }
-                if !reconnects {
-                    // The session does not connect again (a remote pane), so
-                    // it reports the end of the channel here: no `lead`.
-                    uninstall()
-                    channelEnded()
-                    host.paneLinkLost()
+                if await read(channel, reconnected: reconnected || resuming != nil, shows: shown, attachedAt: grid) {
                     return
                 }
+                reconnected = true
+                // A channel that ends at once counts as a failed try.
+                tries = Date().timeIntervalSince(started) < 2 ? tries + 1 : 0
+                uninstall()
+                channelEnded()
                 host.paneLinkLost()
             } catch is CancellationError {
                 return
@@ -333,29 +380,50 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                if uninstall() { channelEnded() }
+                tries += 1
             }
-            uninstall()
-            channelEnded()
-            tries += 1
-            if !reconnects {
-                host.paneLinkLost()
-                return
-            }
-            if tries > Self.reconnectTries {
+            if tries > Self.channelTries {
                 host.paneGone()
                 return
             }
-            try? await Task.sleep(for: Self.reconnectWait)
         }
     }
 
-    private func sendAttach(_ channel: PaneChannel, _ grid: PaneGrid) throws {
+    private func sendAttach(_ channel: PaneChannel, _ grid: PaneGrid, resume: ResumePoint? = nil) throws {
         try channel.send(MactermProtocol.Attach(
             cols: grid.cols, rows: grid.rows,
             xpixel: Self.clamp(grid.widthPx), ypixel: Self.clamp(grid.heightPx),
             foreground: wantsForeground,
-            tty: wantsTty
+            tty: wantsTty,
+            resumeEpoch: resume?.epoch,
+            resumeOffset: resume?.offset
         ))
+    }
+
+    /// Where the surface can resume now. A driver that starts a new session
+    /// for the same pane gives it to that session.
+    var resumePoint: ResumePoint? {
+        lock.withLock { resume }
+    }
+
+    /// The point to resume on `channel`: only for the epoch of the session
+    /// that the surface shows. Another epoch is another session process,
+    /// whose offsets count from 0.
+    private func matchingResumePoint(_ channel: PaneChannel) -> ResumePoint? {
+        lock.withLock {
+            guard let point = resume, point.epoch == channel.epoch else { return nil }
+            return point
+        }
+    }
+
+    /// The reading of `channel` ended: the next attach resumes after
+    /// `offset`, the last output byte that the surface got. Nil when the
+    /// screen shows no known offset: the next attach gets a snapshot.
+    private func keepResumePoint(_ channel: PaneChannel, _ offset: UInt64?) {
+        lock.withLock {
+            resume = channel.epoch.flatMap { epoch in offset.map { ResumePoint(epoch: epoch, offset: $0) } }
+        }
     }
 
     /// Reads events until the channel ends. True when the session ended (an
@@ -367,8 +435,21 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// So it is held until its end. When the grid changed while this client
     /// leads, it is dropped with the output after it, and the client attaches
     /// again at the new grid. The second snapshot has that output.
-    private func read(_ channel: PaneChannel, reconnected: Bool, attachedAt grid: PaneGrid) async -> Bool {
+    ///
+    /// It counts the output offset that the surface shows: a drawn
+    /// snapshot's `offset` or a `resumed` offset, and the output bytes after
+    /// it, from `start`, the offset that the screen shows at the attach. The
+    /// relay's skip-ahead drops output and sends a snapshot, which
+    /// sets the count again. When the channel ends, the count is the next
+    /// attach's resume point.
+    private func read(_ channel: PaneChannel, reconnected: Bool, shows start: UInt64?, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
+        // A resume's `resumed` comes before any output, and repeats the
+        // offset. A channel that ends before it leaves the screen as it was.
+        var offset = start
+        // The offset of the snapshot that is in progress.
+        var snapshotOffset: UInt64?
+        defer { keepResumePoint(channel, offset) }
         var leads = false
         // The grid of the last attach, until its snapshot or the first
         // output: an attach to a session with no output gets no snapshot.
@@ -384,9 +465,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                     held?.append(data)
                 } else if !dropsOutput {
                     attachGrid = nil
+                    offset = offset.map { $0 + UInt64(data.count) }
                     host.paneFeed(data)
                 }
-            case .snapshotStart:
+            case let .snapshotStart(start):
                 // The first snapshot comes over the cleared screen. One after
                 // a lost link comes over the old screen: clear it first.
                 if needsReset {
@@ -395,6 +477,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 }
                 dropsOutput = false
                 held = Data()
+                // The screen changes: no offset until the snapshot is drawn.
+                offset = nil
+                snapshotOffset = start.offset
             case .snapshotEnd:
                 let bytes = held ?? Data()
                 held = nil
@@ -417,6 +502,7 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 host.paneSnapshot(started: true)
                 if !bytes.isEmpty { host.paneFeed(bytes) }
                 host.paneSnapshot(started: false)
+                offset = snapshotOffset
             case let .lead(leader):
                 leads = leader
                 // A client that starts to lead sends its size.
@@ -446,32 +532,39 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 host.paneTitle(title)
             case let .cwd(url):
                 host.paneCwd(url)
-            case .resumed,
-                 .other:
+            case let .resumed(resumed):
+                // The bytes after the surface's offset follow: the screen
+                // and the scrollback stay.
+                needsReset = false
+                offset = resumed.offset
+            case .other:
                 break
             }
         }
         return Task.isCancelled
     }
 
-    /// Makes the session, or finds it. A session whose shell exited while no
-    /// app was there is ended and made again, as `zmx attach` did in v1.
-    private func createSession(on connection: ServerConnection, _ launch: Launch) async throws {
-        let grid = host.paneGrid()
+    /// Makes the session, or finds it. The server ends a session whose shell
+    /// exited while no client read its status and makes a new one
+    /// (`replace_exited`), as `zmx attach` did in v1.
+    private func createSession(on connection: any ServerLink, _ launch: Launch) async throws {
+        try await Self.create(on: connection, name: name, launch: launch, grid: host.paneGrid())
+    }
+
+    /// Makes the session `name` at the size `grid`, or finds it. A pane's
+    /// `PaneLink` calls it once for the pane, before any surface opens a
+    /// channel, so that two windows make one session.
+    static func create(on connection: any ServerLink, name: String, launch: Launch, grid: PaneGrid) async throws {
         let args = MactermProtocol.SessionCreate.Args(
             id: name,
             cwd: launch.cwd.map { ProtocolBin(Data($0.utf8)) },
             command: launch.argv.map { $0.map { ProtocolBin(Data($0.utf8)) } },
             cols: grid.cols,
             rows: grid.rows,
-            env: launch.env.map { ProtocolBin(Data($0.utf8)) }
+            env: launch.env.map { ProtocolBin(Data($0.utf8)) },
+            replaceExited: true
         )
-        do {
-            _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
-        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .exited {
-            _ = try await connection.call(MactermProtocol.SessionKill.self, .init(id: name))
-            _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
-        }
+        _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
     }
 
     /// The channel ended. The lead, the flags and the run status were this
@@ -492,10 +585,13 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return true
     }
 
-    private func uninstall() {
+    /// True when a channel was installed.
+    @discardableResult
+    private func uninstall() -> Bool {
         lock.lock()
-        channel = nil
-        lock.unlock()
+        defer { lock.unlock() }
+        defer { channel = nil }
+        return channel != nil
     }
 
     /// An attach went out. The input from before the first attach becomes

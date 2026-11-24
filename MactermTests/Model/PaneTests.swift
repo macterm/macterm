@@ -94,21 +94,6 @@ struct PaneTests {
         #expect(p.executionState == .idle)
     }
 
-    /// Two windows show the pane, each on its own channel. The end of one
-    /// channel (`idle`) does not stop the run that the other still shows.
-    @Test
-    func the_end_of_one_channel_keeps_the_run_of_another() {
-        let p = Pane(projectPath: "/", projectID: UUID())
-        let a = UUID()
-        let b = UUID()
-        p.receiveSessionStatus(status(.running), channel: a)
-        p.receiveSessionStatus(status(.running), channel: b)
-        p.receiveSessionStatus(status(.idle), channel: b)
-        #expect(p.executionState == .running)
-        p.receiveSessionStatus(status(.done), channel: a)
-        #expect(p.executionState == .idle)
-    }
-
     /// A pane with no run ignores a status that says none.
     @Test
     func a_done_status_with_no_run_changes_nothing() {
@@ -482,5 +467,30 @@ struct PaneTests {
         p.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
         p.applyForeground(nil)
         #expect(p.remoteForegroundCommand == "btop --utf-force")
+    }
+
+    /// A plain ssh shell runs in one surface. Every other surface shows the
+    /// notice, and no surface does while no plain shell runs.
+    @Test
+    func only_the_surfaces_that_do_not_run_a_plain_shell_show_the_notice() {
+        let p = Pane(projectPath: "/tmp", projectID: UUID())
+        let running = UUID()
+        let other = UUID()
+        #expect(!p.plainShellRunsElsewhere(than: running))
+        #expect(!p.plainShellRunsElsewhere(than: other))
+
+        p.plainShellSurfaceID = running
+        #expect(!p.plainShellRunsElsewhere(than: running))
+        #expect(p.plainShellRunsElsewhere(than: other))
+
+        // The window that ran it closed: a fresh shell runs in the other.
+        p.plainShellSurfaceID = other
+        #expect(p.plainShellRunsElsewhere(than: running))
+        #expect(!p.plainShellRunsElsewhere(than: other))
+
+        // The link ended the shell (lost or exited): no notice.
+        p.receiveLinkEvent(.plainShellRunsIn(nil))
+        #expect(!p.plainShellRunsElsewhere(than: running))
+        #expect(!p.plainShellRunsElsewhere(than: other))
     }
 }

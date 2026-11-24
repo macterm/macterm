@@ -604,8 +604,9 @@ final class AppState {
     /// Several windows may draw one pane. Each has its own surface, which is
     /// its own client of the session, so a surface that its window does not
     /// draw any more is a stray client: it is retired here. A pane keeps its
-    /// last surface (a warm view), shown or not. Idempotent and cheap: run it
-    /// where a window's selection changes.
+    /// last surface (a warm view), shown or not, and the surface that runs
+    /// its plain ssh shell (`Pane.plainShellSurfaceID`). Idempotent and
+    /// cheap: run it where a window's selection changes.
     private func settleWindowSelections() {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
@@ -624,6 +625,9 @@ final class AppState {
         for pane in allLivePanes() where registry.surfaces(of: pane).count > 1 {
             for surface in registry.surfaces(of: pane) where registry.surfaces(of: pane).count > 1 {
                 guard let windowID = surface.windowID else { continue }
+                // A plain ssh shell is its surface's: only the window, the
+                // tab or the pane ends it, not a tab switch.
+                if pane.plainShellSurfaceID == surface.id { continue }
                 if shown[windowID]?.contains(pane.id) != true { registry.retire(surface) }
             }
         }
@@ -1636,9 +1640,9 @@ final class AppState {
                 activeTabID: pinnedWorkspace.activeTabID
             ))
         }
-        // The pinned and the scratch rows are not projects of the model.
-        let selected = activeProjectID.flatMap { Project.isSynthetic($0) ? nil : $0 }
-        modelShadow.workspacesDidSave(inputs, activeProjectID: selected)
+        // The pinned and the scratch workspaces are hidden projects of the
+        // model, so a window can select them (design/010 §11).
+        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
     }
 
     // MARK: - Project

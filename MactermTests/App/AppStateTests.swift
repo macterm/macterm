@@ -1118,6 +1118,62 @@ struct AppStateTests {
         #expect(pane.attention == unseenFailure)
     }
 
+    /// The quick terminal's tab is not in `workspaces`. Its focused pane is
+    /// seen when the flags arrive while the panel is key, and the app need
+    /// not be active (the panel is non-activating).
+    @Test
+    func the_focused_pane_of_a_key_quick_terminal_is_seen_when_its_flags_arrive() throws {
+        let quick = QuickTerminalSplitState()
+        let state = AppState(
+            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+            projectFiles: makeProjectFileStore(),
+            quickTerminal: quick
+        )
+        state.isAppActive = { false }
+        var keyPaneIDs: Set<UUID> = []
+        state.paneIsInKeyWindow = { keyPaneIDs.contains($0.id) }
+        let pane = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+
+        pane.receiveAttention(unseenFailure)
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == unseenFailure)
+
+        keyPaneIDs = [pane.id]
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
+    /// The flags of a run end in the focused pane of a key quick terminal
+    /// clear, and its `.done` state with them. A split pane that is not
+    /// focused keeps its state and flags.
+    @Test
+    func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
+        let quick = QuickTerminalSplitState()
+        let state = AppState(
+            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+            projectFiles: makeProjectFileStore(),
+            quickTerminal: quick
+        )
+        state.paneIsInKeyWindow = { _ in true }
+        let focused = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+        quick.split(paneID: focused.id, direction: .horizontal, position: .second)
+        quick.focusPane(focused.id)
+        let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
+
+        for pane in [focused, other] {
+            pane.receiveAttention(unseenFailure)
+            #expect(pane.executionState == .done)
+            state.paneAttentionDidChange(paneID: pane.id)
+        }
+
+        #expect(focused.executionState == .idle)
+        #expect(focused.attention == MactermProtocol.Attention())
+        #expect(other.executionState == .done)
+        #expect(other.attention == unseenFailure)
+    }
+
     /// The session keeps the flags across a quit: the saved file has none.
     @Test
     func saved_workspaces_hold_no_attention() throws {

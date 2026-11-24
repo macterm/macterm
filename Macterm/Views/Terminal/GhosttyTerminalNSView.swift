@@ -385,9 +385,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSplitRequest: ((SplitDirection, SplitPosition) -> Void)?
     var onZoomRequest: (() -> Void)?
     var isZoomed: Bool = false
-    /// The tab shows more than one pane, so a pinch out can zoom this one.
-    var isSplit = false
-    private var pinchZoom = PinchZoomGesture()
     var onSearchStart: ((String?) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int?) -> Void)?
@@ -396,10 +393,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// Exit code (-1 unknown), duration in ns, and the command as typed
     /// at the prompt when libghostty has it (fork patch 0019), else nil.
     var onCommandFinished: ((Int16, UInt64, String?) -> Void)?
-    /// The session ended a run of the pane (`Pane.receiveSessionStatus`).
-    /// The window that draws the pane sets it, to mark the pane seen when
-    /// the user looks at it.
-    var onRunEnded: (() -> Void)?
     var onTerminalRender: (() -> Void)?
     var onBackgroundColorChange: ((NSColor) -> Void)?
     var onAdaptiveBackgroundChange: ((NSColor?) -> Void)?
@@ -412,18 +405,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// current total row count. Occlusion-independent — see
     /// `surfaceDidOutputActivity`.
     var onOutputActivity: ((UInt64) -> Void)?
-    /// The session's `state`: its shell's pid and its pty.
-    var onSessionState: ((MactermProtocol.State) -> Void)?
-    /// The session reports the pane's foreground (`PaneChannelEvent`).
-    var onSessionForeground: ((SessionForeground) -> Void)?
-    /// The session reports how the pane's pty reads input.
-    var onTtyMode: ((TerminalLineMode) -> Void)?
-    /// An OSC 133 mark that the session parsed.
-    var onSessionMark: ((MactermProtocol.Mark) -> Void)?
-    /// The session's run status.
-    var onSessionStatus: ((MactermProtocol.Status) -> Void)?
-    /// The session's attention flags (`PaneSessionHost.paneAttention`).
-    var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
     /// when the pointer leaves it. Drives the pane's hover-URL banner.
     var onLinkHover: ((String?) -> Void)?
@@ -549,6 +530,10 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     private(set) lazy var copyMode = CopyModeController { [weak self] action in
         self?.sendBindingAction(action)
     }
+
+    /// The zoom of the pane's picture: a pinch scales it, a two-finger
+    /// scroll pans it, and Reset Zoom ends it.
+    private(set) lazy var pictureZoom = PaneZoomController(view: self)
 
     /// The popover of Explain Output (`explainOutput`). Made on first use.
     var explainPopover: ExplainPopover {
@@ -683,7 +668,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
 
         // A remote pane runs from a channel on the host's link
-        // (`startRemoteChannel`). Without a server to ask (the unit-test
+        // (`prepareChannel`, through the pane's `PaneLink`). Without a server to ask (the unit-test
         // host) it keeps the fixed line below.
         let remoteChannel = remoteSpec != nil && SessionClient.liveBypass != .unitTestHost
         if remoteChannel {
@@ -801,10 +786,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             return
         }
 
-        if channelLaunch != nil {
-            startChannel(surface: surface)
-            NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
-        } else if remoteChannel {
+        if channelLaunch != nil || remoteChannel {
             startChannel(surface: surface)
         }
 
@@ -885,6 +867,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         stopChannel()
         // The selection dies with the surface; the mode must not outlive it.
         copyMode.reset()
+        pictureZoom.surfaceDidEnd()
         // A composition in flight has nowhere left to commit — drop it before
         // the surface goes, so a reattached surface starts uncomposed rather
         // than inheriting a preedit that can never be resolved.
@@ -1007,9 +990,11 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        if newSize != frame.size { pictureZoom.viewWillResize() }
         super.setFrameSize(newSize)
         if pendingSurfaceCreation { createSurface() }
         updateMetalLayerSize()
+        pictureZoom.viewDidResize()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -1043,6 +1028,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             CATransaction.commit()
         }
         ghostty_surface_set_content_scale(surface, scale, scale)
+        pictureZoom.contentScaleDidChange(to: CGFloat(scale))
         applySurfaceSize(scaledSize)
     }
 
@@ -1579,21 +1565,27 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
     }
 
-    /// A pinch out zooms this pane, and a pinch in unzooms it: the path of
-    /// the context menu's Zoom Pane. The pane under the pointer gets the
-    /// event, so it takes focus first.
+    /// A pinch scales the picture of the pane under the pointer
+    /// (`PaneZoomController`). It never changes the tile zoom (Zoom Pane):
+    /// one gesture has one action. libghostty reads no magnify event. The
+    /// pane takes focus at the start of the pinch, so that Reset Zoom acts
+    /// on it.
     override func magnify(with event: NSEvent) {
-        guard let direction = pinchZoom.track(phase: event.phase, magnification: event.magnification),
-              PinchZoomGesture.togglesZoom(direction, isZoomed: isZoomed, isSplit: isSplit)
-        else { return super.magnify(with: event) }
+        guard surface != nil else { return super.magnify(with: event) }
         onInteraction?()
-        if direction == .outward { window?.makeFirstResponder(self) }
-        onZoomRequest?()
+        if event.phase.contains(.began) || event.phase.isEmpty { window?.makeFirstResponder(self) }
+        pictureZoom.pinch(by: event.magnification, at: mousePoint(from: event))
     }
 
+    /// While the picture is zoomed, a two-finger scroll pans it first, and
+    /// scrolls the terminal only with what the pan cannot take at its edge.
+    /// A wheel that is not precise always scrolls.
     override func scrollWheel(with event: NSEvent) {
         onInteraction?()
-        forwardScrollWheel(event)
+        guard pictureZoom.isZoomed, event.hasPreciseScrollingDeltas else { return forwardScrollWheel(event) }
+        let leftover = pictureZoom.pan(by: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+        guard leftover != .zero else { return }
+        forwardScrollWheel(event, deltaX: leftover.width, deltaY: leftover.height)
     }
 
     /// Mirror of the core's scroll accumulator. See `ScrollbarSurface`.
@@ -1690,7 +1682,18 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             zoom.target = self
             menu.addItem(zoom)
         }
+        if pictureZoom.isZoomed {
+            if onZoomRequest == nil { menu.addItem(.separator()) }
+            let reset = NSMenuItem(title: String(localized: "Reset Zoom"), action: #selector(handleResetZoom), keyEquivalent: "")
+            reset.target = self
+            menu.addItem(reset)
+        }
         return menu
+    }
+
+    @objc
+    private func handleResetZoom() {
+        pictureZoom.reset()
     }
 
     @objc
@@ -2124,7 +2127,7 @@ extension GhosttyTerminalNSView {
 extension GhosttyTerminalNSView {
     /// Tells the session that the user saw the pane (`PaneSession.seen`).
     func sendSeen() {
-        channelRuntime?.route.seen()
+        channelRuntime?.route.input.seen()
     }
 
     /// The live terminal grid + cell/surface pixel dimensions
@@ -2139,7 +2142,7 @@ extension GhosttyTerminalNSView {
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }
-        runtime.route.claim(grid: nil)
+        runtime.route.input.claim(grid: nil)
         return true
     }
 

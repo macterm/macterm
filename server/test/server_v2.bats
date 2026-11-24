@@ -142,27 +142,64 @@ assert c.sessions() == {}
 PY
 }
 
-@test "server: an exit is an event, and the session keeps its status until a kill" {
+@test "server: an exit is an event, and the session keeps its status until a client reads it" {
   "$ZMX" server
   python3 - <<'PY'
+import time
 from v2client import ServerClient, alive, wait_dead
 c = ServerClient()
 s = c.call("session.create", id="e1", command=[b"/bin/sh", b"-c", b"sleep 0.3; exit 7"])["session"]
 ev = c.wait_event("session.exit")
 assert ev == {"id": "e1", "code": 7}, ev
+# The event is not a read: the session keeps the status.
+time.sleep(0.3)
+assert alive(s["pid"]), s
+
+# A create without replace_exited does not read it either.
+r = c.request("session.create", id="e1", command=[b"/bin/sh"])
+assert r["err"]["code"] == "exited", r
+assert alive(s["pid"]), s
+
+# An info that shows the status is a read: the server ends the session.
 info = c.call("session.info", id="e1")["session"]
 assert info["state"] == "exited" and info["code"] == 7, info
-assert alive(info["pid"]), info
-
-# Another client sees the same status.
-d = ServerClient()
-assert d.sessions()["e1"]["code"] == 7
-
-c.call("session.kill", id="e1")
-assert c.sessions() == {}
 wait_dead(info["pid"])
+assert c.sessions() == {}
 # One exit event for each session.
 assert len(c.events("session.exit")) == 1, c.events()
+
+# A list that shows the status is a read too.
+s = c.call("session.create", id="e2", command=[b"/bin/sh", b"-c", b"exit 3"])["session"]
+c.wait_event("session.exit", lambda a: a["id"] == "e2")
+d = ServerClient()
+assert d.sessions()["e2"]["code"] == 3
+wait_dead(s["pid"])
+assert c.sessions() == {}
+PY
+}
+
+@test "server: a create with replace_exited ends an exited session and starts a new one" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient, Client, alive, wait_dead
+c = ServerClient()
+old = c.call("session.create", id="r1", command=[b"/bin/sh", b"-c", b"exit 5"])["session"]
+c.wait_event("session.exit", lambda a: a["id"] == "r1")
+new = c.call("session.create", id="r1", command=[b"/bin/sh"], replace_exited=True)["session"]
+assert new["state"] == "running" and new["pid"] != old["pid"], (old, new)
+wait_dead(old["pid"])
+assert c.sessions()["r1"]["pid"] == new["pid"]
+a = Client("r1")
+a.attach()
+a.type("printf 'new-%s\\n' shell\r")
+a.wait_output("new-shell")
+a.close()
+
+# A running session is given out as it is.
+same = c.call("session.create", id="r1", command=[b"/bin/sh"], replace_exited=True)["session"]
+assert same["pid"] == new["pid"], same
+c.call("session.kill", id="r1")
+assert c.sessions() == {}
 PY
 }
 
@@ -199,12 +236,13 @@ assert got["run"]["state"] == "running" and got["run"]["pid"] == run["pid"], got
 assert got["done"]["state"] == "exited" and got["done"]["code"] == 3, got
 assert got["later"]["state"] == "exited" and got["later"]["code"] == 5, got
 
-# The new server ends them as the old one would have.
-for id in ("run", "done", "later"):
-    n.call("session.kill", id=id)
-assert n.sessions() == {}
-for s in (run, done, later):
+# The list read the exit status: the new server ends those sessions.
+for s in (done, later):
     wait_dead(s["pid"])
+assert sorted(n.sessions()) == ["run"], n.sessions()
+n.call("session.kill", id="run")
+assert n.sessions() == {}
+wait_dead(run["pid"])
 PY
 }
 

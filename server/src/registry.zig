@@ -32,6 +32,14 @@ const frame_max = server.frame_max;
 /// A server file of another build younger than this stays (`pruneBuilds`).
 const fresh_build_ms = 60_000;
 
+/// A `session.create` with `replace_exited` that waits until the exited
+/// session of its id is gone. `args` is the encoded `SessionCreate.Args`.
+pub const Replace = struct {
+    peer: u64,
+    re: u64,
+    args: []u8,
+};
+
 /// A request that waits for a session: a create, a kill, or an info or a list
 /// before the state came.
 pub const Waiter = struct {
@@ -63,11 +71,18 @@ pub const Entry = struct {
     announced: bool = false,
     /// The server sent `take`.
     taken: bool = false,
-    /// A client sent `session.kill`: the server takes the exit status.
+    /// The server ends the session (`session.kill`, a read status, a
+    /// replace): it takes the exit status.
     killing: bool = false,
     /// When SIGKILL goes, if the session has not ended.
     kill_deadline: ?i64 = null,
+    /// A client read the exit status (`statusRead`). The server ends the
+    /// session when its shell exits.
+    status_read: bool = false,
     waiters: std.ArrayList(Waiter) = .empty,
+    /// The creates that start a new session of this id when this one is
+    /// gone (`entryGone`).
+    replacing: std.ArrayList(Replace) = .empty,
 
     const State = struct {
         pid: i64,
@@ -259,7 +274,7 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
         e.exit = .{ .code = x.code, .signal = x.signal };
         std.log.info("server: session {s} exited code={?d} signal={?d}", .{ e.id, x.code, x.signal });
         announce(s, e);
-        if (e.killing) take(s, e);
+        if (e.killing) take(s, e) else if (e.status_read) endEntry(s, e);
     }
     // `lead` and later messages: not the server's.
 }
@@ -270,7 +285,7 @@ pub fn settle(s: *Server, e: *Entry) void {
     defer s.gpa.free(waiters);
     for (waiters) |w| switch (w.kind) {
         .create => peers.reply(s, w.peer, w.re, m.SessionCreate, .{ .session = e.info() }),
-        .info => peers.reply(s, w.peer, w.re, m.SessionInfo, .{ .session = e.info() }),
+        .info => replyInfo(s, w.peer, w.re, e),
         .kill, .list, .seen, .subscribe => wait(s, &e.waiters, w),
         // A session asked for its text or state answers, unless it was
         // refused: then its connection is closed.
@@ -331,6 +346,32 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
+    startReplacements(s, e);
+}
+
+/// The exited session is gone: each create that waited starts now.
+pub fn startReplacements(s: *Server, e: *Entry) void {
+    // A create here cannot add to this list: `e` is dead, so `findEntry`
+    // does not give it.
+    defer e.replacing.clearRetainingCapacity();
+    for (e.replacing.items) |r| {
+        defer s.gpa.free(r.args);
+        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
+        defer arena_state.deinit();
+        const args = msgpack.decodeSlice(m.SessionCreate.Args, arena_state.allocator(), r.args) catch {
+            peers.replyError(s, r.peer, r.re, .start_failed, "The server cannot read the request again.");
+            continue;
+        };
+        createFor(s, r.peer, r.re, args);
+    }
+}
+
+/// A client read the exit status of `e`: the server ends the session. The
+/// server is the one owner that ends a session whose shell exited.
+pub fn statusRead(s: *Server, e: *Entry) void {
+    if (e.status_read or e.refused or e.conn.dead) return;
+    e.status_read = true;
+    if (e.exit != null) endEntry(s, e);
 }
 
 pub fn writeEntry(s: *Server, e: *Entry) void {
@@ -498,29 +539,43 @@ pub fn spawnDone(s: *Server, sp: *Spawn) void {
 }
 
 pub fn create(s: *Server, p: *Peer, re: u64, args: m.SessionCreate.Args) void {
+    createFor(s, p.id, re, args);
+}
+
+fn createFor(s: *Server, peer: u64, re: u64, args: m.SessionCreate.Args) void {
     if (!session.validName(args.id))
-        return peers.replyError(s, p.id, re, .invalid_args, "A session id can have only letters, digits, '-', '_' and '.'. It cannot start with '.' or '-'.");
+        return peers.replyError(s, peer, re, .invalid_args, "A session id can have only letters, digits, '-', '_' and '.'. It cannot start with '.' or '-'.");
     if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
-        return peers.replyError(s, p.id, re, .invalid_args, "The folder must be an absolute path.");
+        return peers.replyError(s, peer, re, .invalid_args, "The folder must be an absolute path.");
     if (args.command) |command| for (command) |arg| if (std.mem.findScalar(u8, arg.bytes, 0) != null)
-        return peers.replyError(s, p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
+        return peers.replyError(s, peer, re, .invalid_args, "A command argument cannot hold a NUL byte.");
     if (args.env) |env| for (env) |entry| if (std.mem.findScalar(u8, entry.bytes, 0) != null or std.mem.findScalar(u8, entry.bytes, '=') == null)
-        return peers.replyError(s, p.id, re, .invalid_args, "An environment entry must be NAME=value with no NUL byte.");
+        return peers.replyError(s, peer, re, .invalid_args, "An environment entry must be NAME=value with no NUL byte.");
     if (args.cols == 0 or args.rows == 0)
-        return peers.replyError(s, p.id, re, .invalid_args, "The size must be at least 1 by 1.");
-    const waiter: Waiter = .{ .peer = p.id, .re = re, .kind = .create };
+        return peers.replyError(s, peer, re, .invalid_args, "The size must be at least 1 by 1.");
+    const waiter: Waiter = .{ .peer = peer, .re = re, .kind = .create };
     // The same id again: the session that the first request started.
     if (findEntry(s, args.id)) |e| {
-        // A session whose shell exited is not given out as a new one:
-        // the client ends it (`session.kill`) and asks again.
-        if (e.exit != null) return peers.replyError(s, p.id, re, .exited, "The session's shell exited. End the session first.");
-        if (e.listed()) return peers.reply(s, p.id, re, m.SessionCreate, .{ .session = e.info() });
+        // A session whose shell exited is not given out as a new one. With
+        // `replace_exited`, the server ends it and starts the new one when
+        // it is gone.
+        if (e.exit != null and !e.refused) {
+            if (!args.replace_exited) return peers.replyError(s, peer, re, .exited, "The session's shell exited. Send replace_exited to start a new session.");
+            const encoded = msgpack.encodeAlloc(s.gpa, args) catch
+                return peers.replyError(s, peer, re, .start_failed, "The server is out of memory.");
+            e.replacing.append(s.gpa, .{ .peer = peer, .re = re, .args = encoded }) catch {
+                s.gpa.free(encoded);
+                return peers.replyError(s, peer, re, .start_failed, "The server is out of memory.");
+            };
+            return endEntry(s, e);
+        }
+        if (e.listed()) return peers.reply(s, peer, re, m.SessionCreate, .{ .session = e.info() });
         return wait(s, &e.waiters, waiter);
     }
     for (s.spawns.items) |sp| if (std.mem.eql(u8, sp.id, args.id)) return wait(s, &sp.waiters, waiter);
     const sp = spawn(s, args.id, args) catch |err| {
         std.log.warn("server: cannot start session {s}: {s}", .{ args.id, @errorName(err) });
-        return peers.replyError(s, p.id, re, .start_failed, "The server cannot start a process.");
+        return peers.replyError(s, peer, re, .start_failed, "The server cannot start a process.");
     };
     wait(s, &sp.waiters, waiter);
 }
@@ -543,17 +598,17 @@ pub fn endSession(s: *Server, id: []const u8) void {
 }
 
 fn endEntry(s: *Server, e: *Entry) void {
-    const st = e.state.?;
     if (e.killing) return;
     e.killing = true;
     e.kill_deadline = s.now() + kill_grace_ms;
     if (e.exit != null) {
+        std.log.info("server: end exited session {s}", .{e.id});
         take(s, e);
     } else {
         // The session ends its shell itself: SIGHUP to the shell's process
         // group, then SIGKILL (`Session.end`). It alone knows if the shell
         // was reaped, so it never signals a pid that is used again.
-        std.log.info("server: kill session {s} pid={d}", .{ e.id, st.pid });
+        std.log.info("server: kill session {s} pid={?d}", .{ e.id, if (e.state) |st| st.pid else null });
         sendEntryPane(s, e, m.End, .{});
     }
 }
@@ -661,6 +716,19 @@ pub fn replyList(s: *Server, peer: u64, re: u64) void {
     var list = sessions(s) catch return;
     defer list.deinit(s.gpa);
     peers.reply(s, peer, re, m.SessionList, .{ .sessions = list.items });
+    listRead(s);
+}
+
+/// A reply listed every session (`sessions`): each `exited` state in it
+/// is a status read.
+pub fn listRead(s: *Server) void {
+    for (s.entries.items) |e| if (e.listed() and e.exit != null) statusRead(s, e);
+}
+
+/// `session.info`. An `exited` state in the reply is a status read.
+pub fn replyInfo(s: *Server, peer: u64, re: u64, e: *Entry) void {
+    peers.reply(s, peer, re, m.SessionInfo, .{ .session = e.info() });
+    if (e.exit != null) statusRead(s, e);
 }
 
 /// Every session that the server can say something true of, by id. The

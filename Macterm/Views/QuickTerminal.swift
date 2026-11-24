@@ -639,13 +639,6 @@ private struct QuickTerminalView: View {
             onFocusPane: { state.focusPane($0) },
             onSplit: { paneID, dir, position in state.split(paneID: paneID, direction: dir, position: position) },
             onClosePane: { state.closePane($0) },
-            onCommandFinished: { paneID in
-                guard QuickTerminalService.shared.panelRef?.isKeyWindow == true,
-                      state.focusedPaneID == paneID,
-                      let pane = state.tab.splitRoot.findPane(id: paneID)
-                else { return }
-                pane.markSeen()
-            },
             onAdaptiveBackgroundChange: { paneID, color in
                 state.setAdaptiveBackgroundColor(color, paneID: paneID)
             },

@@ -70,7 +70,7 @@ enum PaneChannelEvent: Equatable {
     }
 }
 
-/// One pane's channel on a `ServerConnection`: the surface's view of its
+/// One pane's channel on a `ServerLink`: the surface's view of its
 /// session. Output and the session's messages come through `events`, in
 /// order, and end when the channel or the connection ends. A caller writes
 /// input from a queue of its own: a write that the server does not take fails
@@ -78,9 +78,12 @@ enum PaneChannelEvent: Equatable {
 /// the events buffer without a limit until then.
 final class PaneChannel: @unchecked Sendable {
     let number: UInt32
+    /// The `epoch` of the session's `hello`, from the `channel.open` result.
+    /// Nil from a server that does not give it: the channel cannot resume.
+    let epoch: UInt64?
     let events: AsyncStream<PaneChannelEvent>
 
-    private weak var connection: ServerConnection?
+    private weak var connection: (any ServerLink)?
     let sink: Sink
 
     /// The reader thread's side: turns frames into events.
@@ -104,9 +107,10 @@ final class PaneChannel: @unchecked Sendable {
         }
     }
 
-    init(connection: ServerConnection, number: UInt32) {
+    init(connection: any ServerLink, number: UInt32, epoch: UInt64? = nil) {
         self.connection = connection
         self.number = number
+        self.epoch = epoch
         let (events, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
         self.events = events
         sink = Sink(continuation)

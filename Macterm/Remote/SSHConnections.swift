@@ -38,7 +38,7 @@ private let logger = Logger(subsystem: appBundleID, category: "SSHConnections")
 ///
 /// - A login that writes text and asks nothing for `SSHLoginNotice.delay`
 ///   (a host that waits for a log-in in the browser) reports ssh's last
-///   line to `onLoginNotice`, until the login ends or a question comes.
+///   line to `loginUI`, until the login ends or a question comes.
 ///
 /// Each new login writes a log line with the count for its host in this run
 /// (`ssh login: host=… logins=…`), so that the logins of a day can be
@@ -126,12 +126,11 @@ final class SSHConnections {
     private var cancelled: Set<pid_t> = []
     /// New logins for each host in this run.
     private(set) var logins: [String: Int] = [:]
-    /// Called when the ssh of a login exits, with its pid, so that a prompt
-    /// of its askpass that is still up goes away.
-    var onConnectionExit: ((pid_t) -> Void)?
-    /// Called with ssh's last line while a login waits with no question,
-    /// and with nil when that ends (`SSHLoginNotice`).
-    var onLoginNotice: ((_ host: String, _ pid: pid_t, _ line: String?) -> Void)?
+    /// The GUI's side of a login: its notices, and the end of its
+    /// questions when the ssh of a login exits. With none (before launch
+    /// sets it, and in tests), a login shows no notice and an install
+    /// question is declined.
+    weak var loginUI: (any LoginUI)?
     /// Questions that are open for each master.
     private var asking: [pid_t: Int] = [:]
 
@@ -506,7 +505,7 @@ final class SSHConnections {
         // The wait below ends the login when this ssh exits.
         process.terminationHandler = { [weak self] process in
             let pid = process.processIdentifier
-            Task { @MainActor in self?.onConnectionExit?(pid) }
+            Task { @MainActor in self?.loginUI?.cancel(sshPID: pid) }
         }
         do {
             try process.run()
@@ -524,14 +523,14 @@ final class SSHConnections {
         var shown: String?
         defer {
             asking[pid] = nil
-            if shown != nil { onLoginNotice?(destination, pid, nil) }
+            if shown != nil { loginUI?.showNotice(host: destination, sshPID: pid, line: nil) }
         }
         while !FileManager.default.fileExists(atPath: path) {
             // A quiet login shows nothing: the user may be away.
             let line = prompts ? notice.update(text: stderr.text, asking: asking[pid] != nil, now: .now) : nil
             if line != shown {
                 shown = line
-                onLoginNotice?(destination, pid, line)
+                loginUI?.showNotice(host: destination, sshPID: pid, line: line)
             }
             guard process.isRunning else {
                 // The ssh exits when it moves the master into the background,
@@ -615,7 +614,7 @@ struct SSHLoginNotice {
             return nil
         }
         let new = String(decoding: bytes.dropFirst(mark), as: UTF8.self)
-        let candidate = SSHLoginPrompts.displayText(new)
+        let candidate = SSHPrompt.displayText(new)
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .last { !$0.isEmpty && !$0.hasPrefix("Warning: ") && !$0.hasPrefix("** ") }
