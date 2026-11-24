@@ -70,7 +70,7 @@ struct ProjectSource: PaletteSource {
             category: category,
             score: score
         ) { [appState = context.appState] in
-            appState.showProjectScreen(project, in: nil)
+            appState.showLastTab(of: project)
         }
     }
 }

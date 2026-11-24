@@ -487,8 +487,6 @@ struct ControlProjectInfo: Codable, Equatable {
     var name: String
     var path: String
     var active: Bool
-    /// Whether a live workspace exists for the project this launch.
-    var loaded: Bool
     var tabCount: Int?
     /// The name of the project that holds this one (design 013), or empty
     /// at the top level.

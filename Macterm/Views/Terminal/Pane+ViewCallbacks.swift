@@ -1,21 +1,21 @@
 import AppKit
 
 extension Pane {
-    /// Connect the view's callbacks that feed the pane's own state: execution
-    /// tracking, attention flags, titles, notifications and project memory.
+    /// Connect the view's callbacks that feed the pane's own state: titles,
+    /// notifications and project memory.
     /// `PaneSurface.ensureNSView` calls this when it makes the view, so the callbacks work
     /// before any window draws the pane. A pane in a `tab new --no-focus` tab,
     /// or in a background tab that a launch warmed, otherwise recorded no
     /// submission and no output, and `pane list` showed its run as idle.
     /// The callbacks that need the window that draws the pane (focus, splits,
-    /// zoom, process exit, tab titles, links, the adaptive background, and
-    /// `onRunEnded`) stay in `TerminalSurface.configure`.
+    /// zoom, process exit, tab titles, links and the adaptive background)
+    /// stay in `TerminalSurface.configure`.
     ///
     /// The session's own messages (foreground, title, tty mode, marks,
-    /// state, attention) and its end come once, through the pane's
+    /// state, status, attention) and its end come once, through the pane's
     /// `PaneLink` (`receiveLinkEvent`), not through the views. Every surface
     /// of a pane parses the same output with libghostty, so the callbacks
-    /// that count what it reads (runs, notifications, project memory) act
+    /// that count what it reads (notifications, project memory) act
     /// only for the surface of the link's counting view
     /// (`PaneSurface.countsOutput`). `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
@@ -27,13 +27,6 @@ extension Pane {
             guard let surface = view?.owningSurface else { return }
             NotificationCenter.default.post(name: .terminalSurfaceSized, object: surface.id)
         }
-        // Order matters: `onInteraction` clears the tracker's in-place start
-        // arming that `onCommandSubmitted` sets, and the view calls them in
-        // that order. See `GhosttyTerminalNSView.onCommandSubmitted`.
-        view.onCommandSubmitted = { [weak self] hasContent in
-            self?.recordCommandSubmission(hasContent: hasContent)
-        }
-        view.canCarryCommandInput = { [weak self] in self?.allowsInPlaceOutputStart ?? false }
         // The surface half of the passthrough gate. The key responders decline
         // the event first; without this, `isAppShortcut` would still swallow it
         // here. Both consult `KeybindPassthrough` so they can't disagree.
@@ -60,38 +53,20 @@ extension Pane {
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
-        view.onProgressStarted = { [weak self] in
-            guard counts() else { return }
-            self?.markCommandRunning()
-        }
-        view.onProgressFinished = { [weak self, weak view] in
-            // Only a live run can end. Whether it failed is the session's
-            // flag (`Pane.attention`).
-            guard let self, counts(), executionState == .running else { return }
-            markProgressFinished()
-            view?.onRunEnded?()
-        }
-        view.onOutputActivity = { [weak self, weak view] total in
-            if let view {
-                AdaptiveTerminalChrome.shared.terminalDidOutput(view)
-                // A prompt is output: re-read the tty now rather than at the
-                // next idle poll, so the bubble is up before the user types.
-                PasswordPromptMonitor.shared.viewDidOutput(view)
-            }
-            guard let self, counts() else { return }
-            // The single activity source. Output heartbeats fire from the pty
-            // IO path regardless of occlusion, so they also reach background
-            // tabs (not a hidden remote pane, whose channel pauses), and they carry the row total so the tracker can tell
-            // growth from an in-place redraw. The session's foreground and
-            // tty mode reach the tracker on their own (`applyForeground`).
-            markOutputActivity(totalRows: total)
+        view.onOutputActivity = { [weak view] _ in
+            guard let view else { return }
+            AdaptiveTerminalChrome.shared.terminalDidOutput(view)
+            // A prompt is output: re-read the tty now rather than at the
+            // next idle poll, so the bubble is up before the user types.
+            PasswordPromptMonitor.shared.viewDidOutput(view)
         }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
             guard let self, counts() else { return }
             // A surface on a channel gets the shell's 133;D from the session
-            // (`receiveSessionMark`); a surface with no session has only this one.
+            // (`receiveSessionMark`); a surface with no session has only this
+            // one. The prompt gate and the title expiry read it.
             if view?.channelRuntime == nil {
-                notePromptReturned()
+                receiveSessionMark(MactermProtocol.Mark(kind: .end))
                 let duration = Double(durationNs) / 1_000_000_000
                 recordCommandEnd(
                     command: command,
@@ -101,8 +76,6 @@ extension Pane {
                     view: view
                 )
             }
-            markCommandFinished()
-            view?.onRunEnded?()
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             let durationSec = Double(durationNs) / 1_000_000_000
             let duration = Self.formatDuration(durationSec)
@@ -116,12 +89,11 @@ extension Pane {
     }
 
     /// A mark of the pane's session, once for the pane, from the link's
-    /// counting view (`view`): the command's start and its end for project
-    /// memory.
+    /// counting view (`view`): the prompt gate and the title expiry
+    /// (`receiveSessionMark(_:)`), and the command's start and its end for
+    /// project memory.
     func receiveSessionMark(_ mark: MactermProtocol.Mark, view: GhosttyTerminalNSView?) {
-        // OSC 133;D: the shell owns its prompt again. It feeds the title
-        // gate and the tracker's prompt hold.
-        if mark.kind == .end { notePromptReturned() }
+        receiveSessionMark(mark)
         switch mark.kind {
         case .output:
             commandStartedAt = Date()

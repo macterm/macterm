@@ -269,6 +269,22 @@ pub const Watch = struct {
         return now - at < submit_window_ms;
     }
 
+    /// The shell's group runs another program at `now`: the shell ran
+    /// `exec` (`exec sh` from zsh). The old shell's 133;D does not come. A
+    /// run that the marks started ends. The new shell can send no marks, so
+    /// a submission to it arms the foreground rule (`submitted`) until a
+    /// prompt mark comes. A shell that sent a prompt mark before this read
+    /// has marks: nothing changes.
+    pub fn shellReplaced(w: *Watch, now: i64) void {
+        w.now_ms = now;
+        if (w.status.state != .running or w.run_by != .mark) return;
+        w.has_marks = false;
+        w.at_input = false;
+        w.setCommand(null);
+        w.setOutputStart(false);
+        w.setStatus(.done, false);
+    }
+
     /// Output from `echo_ms` to `quiet_ms` after a submission to a raw
     /// program starts a run: the program replies.
     fn agentOutput(w: *Watch, now: i64) void {
@@ -1676,6 +1692,75 @@ test "events: with marks, a program that a nested shell starts runs until that s
     // A group that comes with no submission starts nothing.
     f.w.foreground(.{ .idle = false, .pgrp = 40 }, 20_000);
     try testing.expectEqual(.done, f.w.status.state);
+}
+
+test "events: an exec of the shell ends the run of its marks, and the new shell gets the foreground rule" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    // zsh (group 10, marks) runs `exec sh`: 133;C, and sh replaces zsh in
+    // its group.
+    f.w.foreground(.{ .pgrp = 10 }, 0);
+    f.feed("\x1b]133;A\x07$ \x1b]133;C\x07", 0);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.shellReplaced(500);
+    try testing.expectEqual(m.Status{ .state = .done }, f.w.status);
+    try testing.expectEqual(m.Attention{ .unseen = true }, f.w.attention);
+    // At sh's prompt (no marks), `sleep 4`: a new group runs until sh is
+    // back.
+    f.feed("sh$ ", 600);
+    f.w.submitted(1000);
+    try testing.expect(f.w.watchesForeground(1000));
+    f.w.foreground(.{ .idle = false, .pgrp = 30 }, 1050);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.foreground(.{ .pgrp = 10 }, 5050);
+    try testing.expectEqual(.done, f.w.status.state);
+    // A shell that sends marks again owns its runs again.
+    f.feed("\x1b]133;A\x07$ ", 6000);
+    f.w.submitted(7000);
+    try testing.expect(!f.w.watchesForeground(7000));
+}
+
+test "events: an exec of the shell keeps a run that the marks did not start" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    f.feed("\x1b]9;4;1;5\x07", 0);
+    try testing.expectEqual(.running, f.w.status.state);
+    f.w.shellReplaced(100);
+    try testing.expectEqual(.running, f.w.status.state);
+    // A program that a submission started (a shell with no marks).
+    var g: Fixture = undefined;
+    try g.init();
+    defer g.deinit();
+    g.w.foreground(.{ .pgrp = 10 }, 0);
+    g.w.submitted(100);
+    g.w.foreground(.{ .idle = false, .pgrp = 30 }, 150);
+    try testing.expectEqual(.running, g.w.status.state);
+    g.w.shellReplaced(200);
+    try testing.expectEqual(.running, g.w.status.state);
+}
+
+test "events: an exec seen after the new shell's prompt mark changes nothing" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    // `exec zsh` with another zsh: its prompt and input marks come before
+    // the read that sees the new program.
+    f.w.foreground(.{ .pgrp = 10 }, 0);
+    f.feed("\x1b]133;A\x07$ \x1b]133;C\x07", 0);
+    f.feed("\x1b]133;A\x07$ \x1b]133;B\x07", 100);
+    try testing.expectEqual(.done, f.w.status.state);
+    f.w.clearReady();
+    f.w.shellReplaced(400);
+    try testing.expect(f.w.has_marks);
+    try testing.expect(f.w.at_input);
+    const tags = try f.tags();
+    defer testing.allocator.free(tags);
+    try testing.expectEqual(0, tags.len);
+    // The new shell owns its runs: a submission arms no foreground rule.
+    f.w.submitted(500);
+    try testing.expect(!f.w.watchesForeground(500));
 }
 
 test "events: a submission to a program that ends arms nothing for the prompt hooks after it" {

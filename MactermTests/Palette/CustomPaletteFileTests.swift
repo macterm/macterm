@@ -267,6 +267,23 @@ struct CustomPaletteFileTests {
         #expect(CustomPaletteFile.conditionKeys == properties(defs["condition"]))
     }
 
+    /// `macterm mcp` serves the schema as `macterm://formats/palette`, and
+    /// its `examples` are what an agent copies: each one is a valid palette.
+    @Test
+    func the_schemas_examples_are_valid_palettes() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("assets/palette.schema.json")
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let examples = try #require(schema["examples"] as? [Any])
+        #expect(!examples.isEmpty)
+        for example in examples {
+            // JSON is YAML.
+            let text = try String(decoding: JSONSerialization.data(withJSONObject: example), as: UTF8.self)
+            _ = try Self.palette(text)
+        }
+    }
+
     @Test
     func every_mistake_is_named_with_its_node_and_field() {
         #expect(Self.invalidMessage("name: X\nrequires: [kubectl jq]\nnodes: { root: { items: [] } }")

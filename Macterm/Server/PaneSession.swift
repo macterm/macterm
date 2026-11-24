@@ -726,12 +726,14 @@ actor PaneSession: PaneInputRoute {
         _ = try await connection.call(MactermProtocol.SessionCreate.self, args)
     }
 
-    /// The channel ended. The lead and the flags were this channel's: the
-    /// next attach tells them again. The session sends its flags at an
-    /// attach only when one is set, so a copy kept here could stay wrong.
+    /// The channel ended. The lead, the flags and the run status were this
+    /// channel's: the next attach tells them again. The session sends its
+    /// flags and its status at an attach only when they are not clear, so a
+    /// copy kept here could stay wrong.
     private func channelEnded() {
         deliver { $0.paneLead(nil) }
         deliver { $0.paneAttention(MactermProtocol.Attention()) }
+        deliver { $0.paneStatus(MactermProtocol.Status(state: .idle)) }
     }
 
     private func install(_ channel: PaneChannel) -> Bool {

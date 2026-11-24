@@ -355,11 +355,6 @@ final class QuickTerminalSplitState {
     /// `AppState.adoptQuickTerminal`; a no-op until then.
     @ObservationIgnored
     var onStructureChange: () -> Void = {}
-    /// Fired when a run ends in a pane of the tab. Wired by
-    /// `AppState.adoptQuickTerminal` to `AppState.markSeenIfInKeyPanel`; a
-    /// no-op until then.
-    @ObservationIgnored
-    var onRunEnded: (UUID) -> Void = { _ in }
 
     var splitRoot: SplitNode { tab.splitRoot }
 
@@ -644,7 +639,6 @@ private struct QuickTerminalView: View {
             onFocusPane: { state.focusPane($0) },
             onSplit: { paneID, dir, position in state.split(paneID: paneID, direction: dir, position: position) },
             onClosePane: { state.closePane($0) },
-            onCommandFinished: { state.onRunEnded($0) },
             onAdaptiveBackgroundChange: { paneID, color in
                 state.setAdaptiveBackgroundColor(color, paneID: paneID)
             },

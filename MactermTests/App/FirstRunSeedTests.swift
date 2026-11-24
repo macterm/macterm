@@ -87,34 +87,25 @@ struct FirstRunSeedTests {
     // MARK: - Declarations
 
     @Test
-    func declarations_run_the_tutorial_as_bare_words() throws {
+    func the_pinned_row_runs_the_tutorial_as_bare_words() throws {
         // The `run:` is TYPED into the user's login shell, so it must stay
         // quoting-free — bare words tokenize identically in bash, zsh, fish
         // and nushell. Anything else belongs inside the app-side renderer.
-        for run in try [#require(pinnedRun), #require(projectRun)] {
-            #expect(run.hasPrefix(FirstRunSeed.command + " "))
-            #expect(
-                !run.contains(where: { "'\"\\;|&$`()<>".contains($0) }),
-                "run: must carry no shell metacharacters, got \(run)"
-            )
-        }
+        let run = try #require(pinnedRun)
+        #expect(run.hasPrefix(FirstRunSeed.command + " "))
+        #expect(
+            !run.contains(where: { "'\"\\;|&$`()<>".contains($0) }),
+            "run: must carry no shell metacharacters, got \(run)"
+        )
     }
 
     @Test
-    func declared_topics_are_ones_the_tutor_can_render() throws {
-        // The failure mode: a renamed topic in the declarations only, which
+    func the_pinned_topic_is_one_the_tutor_can_render() throws {
+        // The failure mode: a renamed topic in the declaration only, which
         // would print an error into the pane the tutorial is meant to teach in.
-        for run in try [#require(pinnedRun), #require(projectRun)] {
-            let topic = try String(#require(run.split(separator: " ").last))
-            #expect(Tutorial.Topic(rawValue: topic) != nil, "no tutorial topic named \(topic)")
-        }
-    }
-
-    @Test
-    func the_two_seeded_panes_teach_different_things() throws {
-        // A project pane and a pinned pane exist to explain different halves
-        // of the sidebar; the same topic in both would waste one of them.
-        #expect(try #require(pinnedRun) != #require(projectRun))
+        let run = try #require(pinnedRun)
+        let topic = try String(#require(run.split(separator: " ").last))
+        #expect(Tutorial.Topic(rawValue: topic) != nil, "no tutorial topic named \(topic)")
     }
 
     @Test
@@ -159,11 +150,11 @@ struct FirstRunSeedTests {
         #expect(project.name == URL(fileURLWithPath: ProjectPath.currentHome).lastPathComponent)
         #expect(project.path == ProjectPath.currentHome)
         #expect(state.activeProjectID == project.id)
-        // One tab whose pane carries the tutorial as its spawn-time command.
+        // One tab with a plain shell: no tutorial, no command.
         let ws = try #require(state.workspaces[project.id])
         #expect(ws.tabs.count == 1)
         let pane = try #require(ws.tabs.first?.splitRoot.allPanes().first)
-        #expect(pane.start == projectRun.map(PaneStartCommand.typed))
+        #expect(pane.start == nil)
         // And one pinned record — unloaded, so the materialize path builds it.
         #expect(state.pinnedRecords.count == 1)
         #expect(state.pinnedRecords.first?.declaration == FirstRunSeed.pinnedDeclaration)
@@ -213,11 +204,4 @@ struct FirstRunSeedTests {
     }
 
     private var pinnedRun: String? { pinnedLeaf?.run }
-
-    private var projectRun: String? {
-        guard let tab = FirstRunSeed.projectLayout.tabs.first,
-              case let .pane(leaf) = tab.layout
-        else { return nil }
-        return leaf.run
-    }
 }

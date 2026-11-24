@@ -59,7 +59,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -76,7 +76,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "{\n  \"projects\" : [\n    {\n      \"active\" : true,\n      \"id\" : \"P1\",\n      \"index\" : 1,\n      \"loaded\" : true,\n      \"name\" : \"api\",\n      \"path\" : \"\\\/tmp\\\/api\",\n      \"tabCount\" : 2\n    },\n    {\n      \"active\" : false,\n      \"id\" : \"P2\",\n      \"index\" : 2,\n      \"loaded\" : false,\n      \"name\" : \"web\",\n      \"path\" : \"me@box:\\\/srv\\\/web\"\n    }\n  ]\n}\n"
+    "stdout" : "{\n  \"projects\" : [\n    {\n      \"active\" : true,\n      \"id\" : \"P1\",\n      \"index\" : 1,\n      \"name\" : \"api\",\n      \"path\" : \"\\\/tmp\\\/api\",\n      \"tabCount\" : 2\n    },\n    {\n      \"active\" : false,\n      \"id\" : \"P2\",\n      \"index\" : 2,\n      \"name\" : \"web\",\n      \"path\" : \"me@box:\\\/srv\\\/web\",\n      \"tabCount\" : 1\n    }\n  ]\n}\n"
   },
   {
     "arguments" : [
@@ -101,7 +101,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -122,7 +122,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -166,7 +166,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -189,7 +189,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -211,7 +211,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs  \/tmp\/api\nproject:2     web  -  1 tab   me@box:\/srv\/web\n"
   },
   {
     "arguments" : [

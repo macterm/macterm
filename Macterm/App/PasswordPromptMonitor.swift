@@ -100,9 +100,8 @@ final class PasswordPromptMonitor {
             $0.isRemote ? nil : ProcessInspector.terminalLineMode(forPane: $0)
         }
 
-        /// Types a secret for an on-demand fill: the text path minus
-        /// command-submission evidence; ⌃U before and Return after only at a
-        /// verified read.
+        /// Types a secret for an on-demand fill (`sendSecret`); ⌃U before
+        /// and Return after only at a verified read.
         var typeSecret: @MainActor (GhosttyTerminalNSView, String, OnDemandPasswordFill) -> Void = { view, secret, plan in
             // ⌃U, the tty's line kill, so a half-typed line can't prefix it.
             if plan.isVerified { view.sendKey(keyCode: 32, mods: .control) }

@@ -856,12 +856,12 @@ extension AppStateDesktopWidgetsTests {
         let pane = try #require(widget.pane)
         _ = SurfaceRegistry.shared.ensureView(of: pane)
 
-        pane.notePromptReturned()
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .end))
         state.refreshDesktopWidgetRecipes(liveCommand: { _ in "/opt/homebrew/bin/starship prompt --status=0" })
         #expect(widget.command == "htop")
 
-        // A real submission hands the shell work; what runs then is it.
-        pane.recordCommandSubmission(hasContent: true)
+        // The shell starts a command (OSC 133;C); what runs then is it.
+        pane.receiveSessionMark(MactermProtocol.Mark(kind: .output))
         state.refreshDesktopWidgetRecipes(liveCommand: { _ in "tail -f dev.log" })
         #expect(widget.command == "tail -f dev.log")
     }
