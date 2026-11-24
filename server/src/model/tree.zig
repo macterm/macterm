@@ -1,6 +1,6 @@
 //! The split tree of one tab (design/010 §1) and the operations on it.
 //!
-//! A tree is a `Node`: a pane, or a split of two nodes. The operations here
+//! A tree is a `SplitNode`: a pane, or a split of two nodes. The operations here
 //! know nothing of tabs or projects. They never read pixels: a direction
 //! comes from the caller. Memory comes from the allocator that the caller
 //! gives, and the caller passes an arena (`Model` does). A removed split is
@@ -68,11 +68,11 @@ pub const Split = struct {
     id: SplitId,
     dir: Dir,
     ratio: f64 = 0.5,
-    first: Node,
-    second: Node,
+    first: SplitNode,
+    second: SplitNode,
 };
 
-pub const Node = union(enum) {
+pub const SplitNode = union(enum) {
     pane: Pane,
     split: *Split,
 };
@@ -81,25 +81,25 @@ pub const Error = error{OutOfMemory};
 
 // ── Reading ─────────────────────────────────────────────────────────────────
 
-pub fn findPane(node: *const Node, id: PaneId) ?*const Pane {
+pub fn findPane(node: *const SplitNode, id: PaneId) ?*const Pane {
     return switch (node.*) {
         .pane => |*p| if (p.id.eql(id)) p else null,
         .split => |s| findPane(&s.first, id) orelse findPane(&s.second, id),
     };
 }
 
-pub fn findPaneMut(node: *Node, id: PaneId) ?*Pane {
+pub fn findPaneMut(node: *SplitNode, id: PaneId) ?*Pane {
     return switch (node.*) {
         .pane => |*p| if (p.id.eql(id)) p else null,
         .split => |s| findPaneMut(&s.first, id) orelse findPaneMut(&s.second, id),
     };
 }
 
-pub fn contains(node: *const Node, id: PaneId) bool {
+pub fn contains(node: *const SplitNode, id: PaneId) bool {
     return findPane(node, id) != null;
 }
 
-pub fn findSplit(node: *const Node, id: SplitId) ?*Split {
+pub fn findSplit(node: *const SplitNode, id: SplitId) ?*Split {
     return switch (node.*) {
         .pane => null,
         .split => |s| if (s.id.eql(id)) s else findSplit(&s.first, id) orelse findSplit(&s.second, id),
@@ -108,14 +108,14 @@ pub fn findSplit(node: *const Node, id: SplitId) ?*Split {
 
 /// True when a pane or a split of the tree has the id `text`. Panes and
 /// splits share one namespace (`ids.zig`).
-pub fn hasNodeId(node: *const Node, text: []const u8) bool {
+pub fn hasNodeId(node: *const SplitNode, text: []const u8) bool {
     return switch (node.*) {
         .pane => |p| std.mem.eql(u8, p.id.text, text),
         .split => |s| std.mem.eql(u8, s.id.text, text) or hasNodeId(&s.first, text) or hasNodeId(&s.second, text),
     };
 }
 
-pub fn paneCount(node: *const Node) usize {
+pub fn paneCount(node: *const SplitNode) usize {
     return switch (node.*) {
         .pane => 1,
         .split => |s| paneCount(&s.first) + paneCount(&s.second),
@@ -123,7 +123,7 @@ pub fn paneCount(node: *const Node) usize {
 }
 
 /// The first pane in tree order (first before second).
-pub fn firstPane(node: *const Node) *const Pane {
+pub fn firstPane(node: *const SplitNode) *const Pane {
     return switch (node.*) {
         .pane => |*p| p,
         .split => |s| firstPane(&s.first),
@@ -131,7 +131,7 @@ pub fn firstPane(node: *const Node) *const Pane {
 }
 
 /// Appends every pane in tree order.
-pub fn collectPanes(a: Allocator, node: *const Node, out: *std.ArrayList(*const Pane)) Error!void {
+pub fn collectPanes(a: Allocator, node: *const SplitNode, out: *std.ArrayList(*const Pane)) Error!void {
     switch (node.*) {
         .pane => |*p| try out.append(a, p),
         .split => |s| {
@@ -142,7 +142,7 @@ pub fn collectPanes(a: Allocator, node: *const Node, out: *std.ArrayList(*const 
 }
 
 /// The pane ids in tree order.
-pub fn paneIds(a: Allocator, node: *const Node) Error![]const PaneId {
+pub fn paneIds(a: Allocator, node: *const SplitNode) Error![]const PaneId {
     var list: std.ArrayList(*const Pane) = .empty;
     try collectPanes(a, node, &list);
     const out = try a.alloc(PaneId, list.items.len);
@@ -153,7 +153,7 @@ pub fn paneIds(a: Allocator, node: *const Node) Error![]const PaneId {
 /// The pane after (or, with `backward`, before) `id` in tree order, wrapping
 /// at the ends. Null when `id` is not in the tree. A tree of one pane gives
 /// that pane.
-pub fn nextPane(a: Allocator, node: *const Node, id: PaneId, backward: bool) Error!?PaneId {
+pub fn nextPane(a: Allocator, node: *const SplitNode, id: PaneId, backward: bool) Error!?PaneId {
     const order = try paneIds(a, node);
     for (order, 0..) |candidate, i| {
         if (!candidate.eql(id)) continue;
@@ -166,7 +166,7 @@ pub fn nextPane(a: Allocator, node: *const Node, id: PaneId, backward: bool) Err
 // ── Copying ─────────────────────────────────────────────────────────────────
 
 /// A deep copy of `node` in `a`: every string and every split.
-pub fn clone(a: Allocator, node: Node) Error!Node {
+pub fn clone(a: Allocator, node: SplitNode) Error!SplitNode {
     switch (node) {
         .pane => |p| return .{ .pane = try clonePane(a, p) },
         .split => |s| {
@@ -199,7 +199,7 @@ pub fn clonePane(a: Allocator, p: Pane) Error!Pane {
 // ── Changing ────────────────────────────────────────────────────────────────
 
 /// The leaf that holds pane `id`, or null.
-fn leaf(node: *Node, id: PaneId) ?*Node {
+fn leaf(node: *SplitNode, id: PaneId) ?*SplitNode {
     return switch (node.*) {
         .pane => |p| if (p.id.eql(id)) node else null,
         .split => |s| leaf(&s.first, id) orelse leaf(&s.second, id),
@@ -211,9 +211,9 @@ fn leaf(node: *Node, id: PaneId) ?*Node {
 /// ratio 0.5.
 pub fn insertBeside(
     a: Allocator,
-    root: *Node,
+    root: *SplitNode,
     dest: PaneId,
-    node: Node,
+    node: SplitNode,
     split_id: SplitId,
     dir: Dir,
     position: Position,
@@ -235,8 +235,8 @@ pub fn insertBeside(
 /// the edge of the tab).
 pub fn insertAtRoot(
     a: Allocator,
-    root: *Node,
-    node: Node,
+    root: *SplitNode,
+    node: SplitNode,
     split_id: SplitId,
     dir: Dir,
     position: Position,
@@ -257,14 +257,14 @@ pub const Removal = enum { removed, only_pane, not_found };
 /// Takes pane `id` out of the tree: its sibling takes the place of their
 /// split. A tree with only that pane is left alone (`only_pane`): the caller
 /// closes the tab.
-pub fn remove(root: *Node, id: PaneId) Removal {
+pub fn remove(root: *SplitNode, id: PaneId) Removal {
     switch (root.*) {
         .pane => |p| return if (p.id.eql(id)) .only_pane else .not_found,
         .split => return if (removeIn(root, id)) .removed else .not_found,
     }
 }
 
-fn removeIn(node: *Node, id: PaneId) bool {
+fn removeIn(node: *SplitNode, id: PaneId) bool {
     const s = switch (node.*) {
         .pane => return false,
         .split => |s| s,
@@ -282,7 +282,7 @@ fn removeIn(node: *Node, id: PaneId) bool {
 
 /// Swaps the places of panes `x` and `y`. The shape and the ratios stay.
 /// False when one is not in the tree or they are the same pane.
-pub fn swap(root: *Node, x: PaneId, y: PaneId) bool {
+pub fn swap(root: *SplitNode, x: PaneId, y: PaneId) bool {
     if (x.eql(y)) return false;
     const px = findPaneMut(root, x) orelse return false;
     const py = findPaneMut(root, y) orelse return false;
@@ -291,7 +291,7 @@ pub fn swap(root: *Node, x: PaneId, y: PaneId) bool {
 }
 
 /// Sets the ratio of split `id`, clamped to `min_ratio`..`max_ratio`.
-pub fn setRatio(root: *Node, id: SplitId, ratio: f64) bool {
+pub fn setRatio(root: *SplitNode, id: SplitId, ratio: f64) bool {
     const s = findSplit(root, id) orelse return false;
     s.ratio = clampRatio(ratio);
     return true;
@@ -304,7 +304,7 @@ pub fn clampRatio(ratio: f64) f64 {
 
 /// The cells that a subtree gives along `dir`: a split on the same axis adds
 /// its two sides; a pane, or a split on the other axis, is one cell.
-pub fn tileUnits(node: *const Node, dir: Dir) usize {
+pub fn tileUnits(node: *const SplitNode, dir: Dir) usize {
     return switch (node.*) {
         .pane => 1,
         .split => |s| if (s.dir == dir) tileUnits(&s.first, dir) + tileUnits(&s.second, dir) else 1,
@@ -313,7 +313,7 @@ pub fn tileUnits(node: *const Node, dir: Dir) usize {
 
 /// Sets every ratio so that the panes along each axis share the space
 /// evenly (v1 `rebalanced`).
-pub fn rebalance(node: *Node) void {
+pub fn rebalance(node: *SplitNode) void {
     const s = switch (node.*) {
         .pane => return,
         .split => |s| s,
@@ -334,7 +334,7 @@ pub fn rebalance(node: *Node) void {
 /// unknown source.
 pub fn makeGrid(
     a: Allocator,
-    root: *Node,
+    root: *SplitNode,
     source: PaneId,
     rows: usize,
     columns: usize,

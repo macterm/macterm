@@ -89,7 +89,7 @@ fn typeDef(name: []const u8) metadata.TypeDef {
 }
 
 /// The schema of a wire type (`Field.type`). A named type goes into `defs`
-/// once, so that a tree that holds itself (`Node`) ends.
+/// once, so that a tree that holds itself (`SplitNode`) ends.
 fn schemaOf(arena: std.mem.Allocator, wire: []const u8, defs: *ObjectMap) error{OutOfMemory}!Value {
     var o: ObjectMap = .empty;
     if (wire[0] == '[') {
@@ -466,9 +466,9 @@ test "describe puts named types in $defs, and a tree that holds itself ends" {
     const a = arena_state.allocator();
     const d = (try describe(a, find("tab.create").?)).object;
     const root = d.get("args").?.object.get("properties").?.object.get("root").?.object;
-    try testing.expectEqualStrings("#/$defs/Node", root.get("$ref").?.string);
+    try testing.expectEqualStrings("#/$defs/SplitNode", root.get("$ref").?.string);
     const defs = d.get("$defs").?.object;
-    const node = defs.get("Node").?.object.get("oneOf").?.array.items;
+    const node = defs.get("SplitNode").?.object.get("oneOf").?.array.items;
     try testing.expectEqualStrings("pane", node[0].object.get("properties").?.object.get("t").?.object.get("const").?.string);
     try testing.expect(defs.get("Split") != null);
     const port = (try describe(a, find("link.open").?)).object.get("result").?.object.get("properties").?.object.get("port").?.object;
@@ -521,14 +521,14 @@ test "fromJson reads a tree, and toJson writes it back the same" {
         \\  "second": {"t": "pane", "a": {"id": "p2", "session": "macterm-2"}}}}
     ;
     var fault: Fault = .{};
-    const Node = @FieldType(m.TabCreate.Args, "root");
-    const node = fromJson(Node, a, try parse(a, text), &fault) catch |err| {
+    const SplitNode = @FieldType(m.TabCreate.Args, "root");
+    const node = fromJson(SplitNode, a, try parse(a, text), &fault) catch |err| {
         std.debug.print("{s}: {s}\n", .{ fault.path.items, fault.message });
         return err;
     };
     try testing.expectEqual(.split, std.meta.activeTag(node));
     // Through the wire and back, as `api call` sends it.
-    const decoded = try msgpack.decodeSlice(Node, a, try msgpack.encodeAlloc(a, node));
+    const decoded = try msgpack.decodeSlice(SplitNode, a, try msgpack.encodeAlloc(a, node));
     const back = try toJson(a, decoded);
     const split = back.object.get("a").?.object;
     try testing.expectEqual(0.25, split.get("ratio").?.float);
@@ -536,14 +536,14 @@ test "fromJson reads a tree, and toJson writes it back the same" {
 
     // A union takes `t` and `a` only, and a payload case needs `a`.
     fault = .{};
-    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"pane\", \"a\": {\"id\": \"p1\", \"session\": \"s\"}, \"x\": 1}"), &fault));
+    try testing.expectError(error.Invalid, fromJson(SplitNode, a, try parse(a, "{\"t\": \"pane\", \"a\": {\"id\": \"p1\", \"session\": \"s\"}, \"x\": 1}"), &fault));
     try testing.expectEqualStrings(".x", fault.path.items);
     fault = .{};
-    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"pane\"}"), &fault));
+    try testing.expectError(error.Invalid, fromJson(SplitNode, a, try parse(a, "{\"t\": \"pane\"}"), &fault));
     try testing.expectEqualStrings(".a", fault.path.items);
     try testing.expectEqualStrings("expected a value: the key is required", fault.message);
     fault = .{};
-    try testing.expectError(error.Invalid, fromJson(Node, a, try parse(a, "{\"t\": \"leaf\", \"a\": {}}"), &fault));
+    try testing.expectError(error.Invalid, fromJson(SplitNode, a, try parse(a, "{\"t\": \"leaf\", \"a\": {}}"), &fault));
     try testing.expectEqualStrings(".t", fault.path.items);
 }
 
