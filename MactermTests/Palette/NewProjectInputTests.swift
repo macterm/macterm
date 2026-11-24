@@ -78,7 +78,7 @@ struct NewProjectInputTests {
         let (context, _) = makeContext()
 
         #expect(NewProjectInput.commit("", context: context) == .refused("Type the path of a folder."))
-        #expect(NewProjectInput.commit(file.path, context: context) == .refused("No folder at \(file.path)."))
+        #expect(NewProjectInput.commit(file.path, context: context) == .refused("There is no folder at \(file.path)."))
         #expect(NewProjectInput.commit(folder.path + "/missing", context: context) != .done)
         #expect(NewProjectInput.commit("api", context: context) != .done, "a relative path names no folder")
         #expect(context.projectStore.projects.isEmpty)

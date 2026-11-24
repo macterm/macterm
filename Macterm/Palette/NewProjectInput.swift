@@ -56,7 +56,7 @@ enum NewProjectInput {
               FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
               isDirectory.boolValue
         else {
-            return .refused(String(localized: "No folder at \(typed)."))
+            return .refused(String(localized: "There is no folder at \(typed)."))
         }
         let project = context.projectStore.findOrCreate(name: (path as NSString).lastPathComponent, path: path)
         select(project, appState: context.appState)

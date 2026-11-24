@@ -110,8 +110,9 @@ struct InputPaletteScopeTests {
             pill: PalettePill(title: "Pick", icon: "folder"),
             prompt: "Path",
             actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in ran += 1 }],
-            completions: { _ in [PaletteCompletion(title: "notes", value: "notes/")] }
-        ) { _, _ in .done }
+            completions: { _ in [PaletteCompletion(title: "notes", value: "notes/")] },
+            commit: { _, _ in .done }
+        )
         let scope = InputPaletteScope(input: input)
         let context = makeContext()
 
