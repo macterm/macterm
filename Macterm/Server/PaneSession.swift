@@ -323,9 +323,9 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         var reconnected = false
         var tries = 0
         while !Task.isCancelled {
-            let link: any ServerLink
+            let channels: any PaneChannelOpener
             do {
-                link = try await endpoint.connection()
+                channels = try await endpoint.paneChannels()
             } catch {
                 if !(error is CancellationError), !Task.isCancelled {
                     logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
@@ -341,8 +341,8 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 // Only the first attach makes the session. A session that is
                 // gone later ended: the server ends a session whose shell
                 // exited, and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: link, launch) }
-                let channel = try await link.openChannel(session: name)
+                if firstAttach, let launch { try await createSession(on: endpoint.connection(), launch) }
+                let channel = try await channels.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()
                     return
@@ -376,6 +376,12 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
             } catch is CancellationError {
                 return
             } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
+                host.paneExited(code: nil, signal: nil)
+                return
+            } catch is SessionSocket.Gone where !firstAttach {
+                // The session's socket has no listener: the session ended
+                // with no exit status (killed, or crashed), as a relay's
+                // channel ends with an empty `exit`.
                 host.paneExited(code: nil, signal: nil)
                 return
             } catch {

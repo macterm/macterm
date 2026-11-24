@@ -64,40 +64,7 @@ final class ServerConnection: @unchecked Sendable {
     static func handshake(fd: Int32, peerPID: pid_t?, timeout: TimeInterval, buffered: Data = Data()) throws -> ServerConnection {
         do {
             var reader = FrameReader(fd: fd, buffer: buffered)
-            setReceiveTimeout(fd, seconds: timeout)
-            let mine = MactermProtocol.Hello(
-                level: MactermProtocol.level,
-                minLevel: MactermProtocol.minLevel,
-                build: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
-                role: .gui,
-                epoch: 0,
-                caps: []
-            )
-            try write(fd, ProtocolControl.hello(mine))
-            // The server sends its `hello` at the accept. When it refuses
-            // this build, a `refuse` follows after our `hello`: the same
-            // check is done here, from its `min_level`.
-            let theirs: MactermProtocol.Hello
-            do {
-                guard case let .hello(hello) = try ProtocolControl.decode(reader.next().body) else {
-                    throw ServerClientError.protocolError
-                }
-                theirs = hello
-            } catch ServerClientError.disconnected {
-                throw ServerClientError.noAnswer
-            }
-            guard mine.level >= theirs.minLevel else {
-                throw ServerClientError.refused(needsLevel: theirs.minLevel)
-            }
-            guard min(mine.level, theirs.level) >= MactermProtocol.minLevel else {
-                try? write(fd, ProtocolControl.refuse(.init(reason: "level_too_low", needsLevel: MactermProtocol.minLevel)))
-                throw ServerClientError.serverTooOld(level: theirs.level)
-            }
-            setReceiveTimeout(fd, seconds: 0)
-            // A server that stops reading must not hold a writer for ever:
-            // the write fails, and the connection counts as lost.
-            var sendTimeout = timeval(tv_sec: 10, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, socklen_t(MemoryLayout<timeval>.size))
+            let theirs = try greet(fd: fd, reader: &reader, timeout: timeout)
             let connection = ServerConnection(fd: fd, hello: theirs, pid: peerPID)
             connection.startReading(reader)
             return connection
@@ -105,6 +72,49 @@ final class ServerConnection: @unchecked Sendable {
             Darwin.close(fd)
             throw error
         }
+    }
+
+    /// Sends this build's `hello` as the GUI on `fd` and reads the peer's:
+    /// a server's, or a session's (`SessionSocket`). Throws when the two
+    /// levels do not meet, and `noAnswer` when the peer closes first. Then
+    /// a write that the peer does not take fails after 10 s. The caller
+    /// keeps `fd`.
+    static func greet(fd: Int32, reader: inout FrameReader, timeout: TimeInterval) throws -> MactermProtocol.Hello {
+        setReceiveTimeout(fd, seconds: timeout)
+        let mine = MactermProtocol.Hello(
+            level: MactermProtocol.level,
+            minLevel: MactermProtocol.minLevel,
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            role: .gui,
+            epoch: 0,
+            caps: []
+        )
+        try write(fd, ProtocolControl.hello(mine))
+        // The peer sends its `hello` at the accept. When it refuses this
+        // build, a `refuse` follows after our `hello`: the same check is
+        // done here, from its `min_level`.
+        let theirs: MactermProtocol.Hello
+        do {
+            guard case let .hello(hello) = try ProtocolControl.decode(reader.next().body) else {
+                throw ServerClientError.protocolError
+            }
+            theirs = hello
+        } catch ServerClientError.disconnected {
+            throw ServerClientError.noAnswer
+        }
+        guard mine.level >= theirs.minLevel else {
+            throw ServerClientError.refused(needsLevel: theirs.minLevel)
+        }
+        guard min(mine.level, theirs.level) >= MactermProtocol.minLevel else {
+            try? write(fd, ProtocolControl.refuse(.init(reason: "level_too_low", needsLevel: MactermProtocol.minLevel)))
+            throw ServerClientError.serverTooOld(level: theirs.level)
+        }
+        setReceiveTimeout(fd, seconds: 0)
+        // A peer that stops reading must not hold a writer for ever: the
+        // write fails, and the connection counts as lost.
+        var sendTimeout = timeval(tv_sec: 10, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, socklen_t(MemoryLayout<timeval>.size))
+        return theirs
     }
 
     private init(fd: Int32, hello: MactermProtocol.Hello, pid: pid_t?) {
@@ -152,7 +162,7 @@ final class ServerConnection: @unchecked Sendable {
     /// returned object. The pane sends `attach` first, to get output.
     func openChannel(session: String) async throws -> PaneChannel {
         let result = try await call(MactermProtocol.ChannelOpen.self, .init(session: session))
-        let channel = PaneChannel(connection: self, number: result.channel, epoch: result.epoch)
+        let channel = PaneChannel(transport: self, number: result.channel, epoch: result.epoch)
         guard register(channel.sink, as: result.channel) else {
             channel.sink.finish()
             throw ServerClientError.disconnected
@@ -367,16 +377,26 @@ enum ServerClientError: Error, Equatable {
 
 extension ServerConnection {
     private static func openSocket(path: String) throws -> Int32 {
+        do {
+            return try connectSocket(path: path)
+        } catch {
+            throw ServerClientError.noAnswer
+        }
+    }
+
+    /// A stream socket connected to `path`. Throws the `errno` of the
+    /// failure: `ENOENT` or `ECONNREFUSED` when nothing listens there.
+    static func connectSocket(path: String) throws(SocketConnectError) -> Int32 {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let capacity = MemoryLayout.size(ofValue: address.sun_path)
-        guard path.utf8.count < capacity else { throw ServerClientError.noAnswer }
+        guard path.utf8.count < capacity else { throw SocketConnectError(code: ENAMETOOLONG) }
         withUnsafeMutableBytes(of: &address.sun_path) { buffer in
             buffer.copyBytes(from: path.utf8)
             buffer[path.utf8.count] = 0
         }
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw ServerClientError.noAnswer }
+        guard fd >= 0 else { throw SocketConnectError(code: errno) }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
@@ -386,8 +406,9 @@ extension ServerConnection {
             }
         }
         guard result == 0 else {
+            let code = errno
             Darwin.close(fd)
-            throw ServerClientError.noAnswer
+            throw SocketConnectError(code: code)
         }
         return fd
     }
@@ -405,13 +426,13 @@ extension ServerConnection {
         return pid
     }
 
-    private static func write(_ fd: Int32, _ message: ProtocolControl) throws {
+    static func write(_ fd: Int32, _ message: ProtocolControl) throws {
         guard let body = message.encoded() else { return }
         let data = try ProtocolFrame(channel: ProtocolFrame.controlChannel, kind: .msg, body: body).encoded()
         try writeAll(fd, data)
     }
 
-    private static func writeAll(_ fd: Int32, _ data: Data) throws {
+    static func writeAll(_ fd: Int32, _ data: Data) throws {
         try data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
             guard let base = buffer.baseAddress else { return }
             var offset = 0
@@ -427,8 +448,13 @@ extension ServerConnection {
     }
 }
 
+/// The `errno` of a socket that did not connect.
+struct SocketConnectError: Error, Equatable {
+    var code: Int32
+}
+
 /// Reads whole frames from a socket.
-private struct FrameReader {
+struct FrameReader {
     let fd: Int32
     var buffer = Data()
 

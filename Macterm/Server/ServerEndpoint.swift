@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: appBundleID, category: "ServerEndpoint")
 /// One connection to a server, as a pane and a session list use it.
 /// `ServerConnection` is the connection that the app runs. The unit tests
 /// use an in-memory link that speaks frames (`FakeServerLink`).
-protocol ServerLink: AnyObject, Sendable {
+protocol ServerLink: PaneChannelOpener, PaneChannelTransport {
     /// False once the connection ended.
     var isOpen: Bool { get }
     /// Sends one request and waits for its response. A response with `err`
@@ -25,6 +25,14 @@ protocol ServerLink: AnyObject, Sendable {
 }
 
 extension ServerConnection: ServerLink {}
+
+extension ServerLink {
+    /// Asks the server to end the channel, then forgets it.
+    func closeChannel(_ number: UInt32) async {
+        _ = try? await call(MactermProtocol.ChannelClose.self, .init(channel: number))
+        releaseChannel(number)
+    }
+}
 
 /// The longest wait for one reply. A kill waits for the session to end:
 /// the server gives it 3 s before SIGKILL.
@@ -122,6 +130,11 @@ protocol ServerEndpoint: AnyObject, Sendable {
     /// A connection that is up. Throws when the endpoint has none to give:
     /// the pane is then gone from this endpoint.
     func connection() async throws -> any ServerLink
+    /// What a pane's view opens its channel with. Throws when the endpoint
+    /// has none to give: the pane is then gone from this endpoint. The
+    /// default is `connection()`, which relays the channel. The local
+    /// endpoint gives the sessions' own sockets (`SessionSockets`).
+    func paneChannels() async throws -> any PaneChannelOpener
     /// Every session, or nil when the server cannot be reached.
     func list() async -> [SessionInfo]?
     /// Ends a session and takes its exit status. A session that is not there
@@ -133,6 +146,10 @@ protocol ServerEndpoint: AnyObject, Sendable {
 }
 
 extension ServerEndpoint {
+    func paneChannels() async throws -> any PaneChannelOpener {
+        try await connection()
+    }
+
     func list() async -> [SessionInfo]? {
         do {
             let link = try await connection()

@@ -101,7 +101,7 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
             methods.append(MactermProtocol.ChannelOpen.name)
             let number = nextChannel
             nextChannel += 1
-            let channel = PaneChannel(connection: self, number: number, epoch: epoch)
+            let channel = PaneChannel(transport: self, number: number, epoch: epoch)
             channels[number] = channel
             sessions[session] = number
             return channel

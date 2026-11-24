@@ -97,6 +97,27 @@ actor LocalSessions: ServerEndpoint {
         }
     }
 
+    /// The sessions' own sockets: a local pane's bytes never pass through
+    /// the server (design/001). Throws when there is no bundled server.
+    nonisolated func paneChannels() async throws -> any PaneChannelOpener {
+        guard let server else { throw ServerClientError.noAnswer }
+        return SessionSockets(directory: server.directory) { [weak self] session in
+            Task { await self?.exitRead(session) }
+        }
+    }
+
+    /// A pane's channel read the exit of `session` from the session's own
+    /// socket. `session.info` tells the server, which then ends the session
+    /// (`registry.statusRead`). A server that is down reads it at its next
+    /// list.
+    private func exitRead(_ session: String) async {
+        do {
+            _ = try await call(MactermProtocol.SessionInfo.self, .init(id: session))
+        } catch {
+            logger.info("session info \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// The connection to the server, made when there is none or when the
     /// last one ended. A pane opens its channel on it. It tries again for a
     /// few seconds before it gives up.
