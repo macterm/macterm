@@ -552,9 +552,10 @@ final class AppState {
     }
 
     /// Show the project screen of `project` in `window` (the key window when
-    /// nil), also when the project has tabs: what a click on a project row,
-    /// a palette project row and CLI `project select` do. The project's tabs
-    /// stay; a selection of one of them shows it.
+    /// nil), also when the project has tabs: what a click on a sidebar
+    /// project row and CLI `project select` do. The project's tabs stay; a
+    /// selection of one of them shows it. A palette project row shows the
+    /// last tab (`showLastTab(of:in:)`).
     func showProjectScreen(_ project: Project, in window: WindowState?) {
         selectProject(project, in: window)
         guard let target = window ?? keyWindow, target.activeProjectID == project.id,
@@ -563,6 +564,20 @@ final class AppState {
         target.showsProjectScreen = true
         settleWindowSelections()
         persistWindows()
+    }
+
+    /// Show `project` in `window` (the key window when nil) at the tab the
+    /// window last showed there (`WindowState.activeTabIDs`), else the
+    /// workspace's active tab: what a palette project row does. A project
+    /// with no tabs shows its project screen. Not a flag of
+    /// `showProjectScreen`: the sidebar row and CLI `project select` keep the
+    /// project screen.
+    func showLastTab(of project: Project, in window: WindowState?) {
+        selectProject(project, in: window)
+        guard let target = window ?? keyWindow, target.activeProjectID == project.id else { return }
+        endProjectScreen(in: target)
+        settleWindowSelections()
+        if target.id == keyWindowID { claimLeadershipForKeyWindow() }
     }
 
     /// Whether the key window shows the project screen. A command that acts on

@@ -1353,6 +1353,73 @@ struct WindowStateTests {
         #expect(ws.tabs.count == 2, "the tabs stay")
     }
 
+    /// The palette row of `project`, run as the palette runs it.
+    private func runPaletteRow(of project: Project, in state: AppState) throws {
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
+        store.add(project)
+        let item = try #require(ProjectSource().items(
+            query: project.name,
+            context: PaletteContext(appState: state, projectStore: store)
+        ).first)
+        item.action()
+    }
+
+    @Test
+    func a_palette_project_row_shows_the_last_tab_of_the_project() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        state.selectProject(other, in: window)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(window.activeProjectID == project.id)
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1], "the tab the window last showed")
+    }
+
+    @Test
+    func a_palette_project_row_ends_the_project_screen_of_the_same_project() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1])
+    }
+
+    @Test
+    func a_palette_project_row_shows_the_project_screen_of_a_project_with_no_tabs() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        for tab in ws.tabs {
+            state.closeTab(tab.id, projectID: project.id)
+        }
+        #expect(ws.tabs.isEmpty)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        state.selectProject(other, in: window)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(window.activeProjectID == project.id)
+        #expect(state.selectedTab(for: project.id, in: window) == nil, "the window shows the project screen")
+    }
+
+    @Test
+    func a_sidebar_project_row_still_shows_the_project_screen_after_a_palette_switch() throws {
+        let state = makeAppState()
+        let (project, _, window) = try keyWindowOnTwoTabs(state)
+        try runPaletteRow(of: project, in: state)
+
+        state.showProjectScreen(project, in: window)
+
+        #expect(window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) == nil)
+    }
+
     @Test
     func tab_and_pane_commands_do_nothing_on_the_project_screen() throws {
         let state = makeAppState()
