@@ -283,7 +283,6 @@ pub fn writeUsageError(w: *std.Io.Writer, path: []const *const Command, message:
     try w.writeAll(" --help' for more information.\n");
 }
 
-/// The `--help` text of the last command of `path`.
 /// Writes text as the help writes a discussion: a line that starts with a
 /// space as it is, another line wrapped at the width of the help.
 pub fn writeText(w: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
@@ -296,6 +295,7 @@ pub fn writeText(w: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
     }
 }
 
+/// The `--help` text of the last command of `path`.
 pub fn writeHelp(w: *std.Io.Writer, path: []const *const Command) std.Io.Writer.Error!void {
     const c = path[path.len - 1];
     // The last word of the overview may end at column 80, and every other

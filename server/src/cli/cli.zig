@@ -154,7 +154,7 @@ const session_command: Command = .{
 /// the notice of `skills` print it, so the two cannot disagree. Each command
 /// is one line, so that it copies whole.
 const mcp_setup =
-    \\To add the server to an agent, run the command for that agent. Outside a Macterm pane, `macterm` is /Applications/Macterm.app/Contents/Resources/bin/macterm. Write that full path in the agent's config.
+    \\To add the server to an agent, run the command for that agent:
     \\
     \\  Claude Code:
     \\    claude mcp add --scope user macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp
@@ -165,13 +165,13 @@ const mcp_setup =
     \\  OpenCode, in opencode.json:
     \\    "mcp": {"macterm": {"type": "local", "command": ["/Applications/Macterm.app/Contents/Resources/bin/macterm", "mcp"]}}
     \\
-    \\Other agents (Cursor and others) take the same command and the argument `mcp` as a stdio server in their MCP config.
+    \\For other agents (for example Cursor), add `/Applications/Macterm.app/Contents/Resources/bin/macterm mcp` to their MCP config as a stdio server.
 ;
 
 /// The notice that `skills` prints in place of the skills, for one release
 /// before the verb goes (design 014 §3).
 const skills_notice =
-    \\Macterm skills are replaced by an MCP server, `macterm mcp`. Remove the Macterm skills from the skills folder of your agent, then add the server.
+    \\An MCP server, `macterm mcp`, replaces the Macterm skills. Remove the Macterm skills from the skills folder of your agent. Then add the server.
     \\
     \\
 ++ mcp_setup;
@@ -180,9 +180,7 @@ const skills_command: Command = .{
     .name = "skills",
     .abstract = "Show how to add the MCP server that replaces the skills for AI coding agents.",
     .discussion = skills_notice,
-    // A script or an agent may still pass a skill name, `--list` or
-    // `--json`: it gets the notice, not a usage error.
-    .arguments = &.{.{ .name = "ignored", .abstract = "Ignored. A skill name, --list and --json are accepted for earlier scripts.", .optional = true, .repeating = true, .unrecognized = true }},
+    .arguments = &.{.{ .name = "ignored", .abstract = "Ignored, so that an earlier script that gives a skill name, --list or --json gets this notice.", .optional = true, .repeating = true, .unrecognized = true }},
 };
 
 /// `skills`: the notice, on stdout with exit 0, so that a script that pipes
@@ -1642,9 +1640,17 @@ test "skills prints the notice with exit 0 and no server, whatever the arguments
 
     var notice: std.Io.Writer.Allocating = .init(arena);
     try command.writeText(&notice.writer, skills_notice);
-    try testing.expect(std.mem.startsWith(u8, notice.written(), "Macterm skills are replaced by an MCP server, `macterm mcp`."));
+    try testing.expect(std.mem.startsWith(u8, notice.written(), "An MCP server, `macterm mcp`, replaces the Macterm skills."));
     // Each command line of the setup is one line, so that it copies whole.
-    try testing.expect(std.mem.indexOf(u8, notice.written(), "\n    claude mcp add --scope user macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp\n") != null);
+    for ([_][]const u8{
+        "claude mcp add --scope user macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "codex mcp add macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "gemini mcp add -s user macterm /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "\"mcp\": {\"macterm\": {\"type\": \"local\", \"command\": [\"/Applications/Macterm.app/Contents/Resources/bin/macterm\", \"mcp\"]}}",
+    }) |line| {
+        const at = std.mem.indexOf(u8, notice.written(), try std.mem.concat(arena, u8, &.{ "\n    ", line, "\n" }));
+        try testing.expect(at != null);
+    }
 
     // The words of v1 still parse, so a script gets the notice, not a usage error.
     for ([_][]const []const u8{ &.{"skills"}, &.{ "skills", "macterm-panes" }, &.{ "skills", "--list" }, &.{ "skills", "--json" }, &.{ "skills", "--list", "--json" }, &.{ "skills", "nope" } }) |words| {
