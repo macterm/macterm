@@ -142,6 +142,10 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     private var grid = PaneGrid(cols: 80, rows: 24)
     /// The pane's link. Set on the main actor before the first message.
     @MainActor weak var link: PaneLink?
+    /// The session sends `notification` (the `notification` cap of its
+    /// `hello`). False until a channel opens, and for a session of an older
+    /// build.
+    @MainActor private(set) var sessionSendsNotifications = false
 
     /// `view` is nil only in a test, which reads the link's events.
     init(view: GhosttyTerminalNSView?) {
@@ -218,7 +222,7 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         guard let path = Self.path(ofCwdURL: url) else { return }
         DispatchQueue.main.async { [self] in
             MainActor.assumeIsolated {
-                guard let link, link.counts(self) else { return }
+                guard let link, link.readsMessages(from: self) else { return }
                 link.receiveCwd(path)
             }
         }
@@ -236,11 +240,26 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneMark(_ mark: MactermProtocol.Mark) {
-        toLink(.mark(mark, self))
+        toLink(.mark(mark))
     }
 
     func paneStatus(_ status: MactermProtocol.Status) {
         toLink(.status(status))
+    }
+
+    func paneChannelOpened(caps: [String]) {
+        let sends = caps.contains("notification")
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated { sessionSendsNotifications = sends }
+        }
+    }
+
+    func paneNotification(title: Data, body: Data) {
+        toLink(.notification(title: String(decoding: title, as: UTF8.self), body: String(decoding: body, as: UTF8.self)))
+    }
+
+    func paneBell() {
+        toLink(.bell)
     }
 
     /// The path of an OSC 7 URL: what follows the host. A `file://` URL has
@@ -278,8 +297,9 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         }
     }
 
-    /// The channel could not come back. It counts only from the counting
-    /// view: another window's channel that fails alone is a detach.
+    /// The channel could not come back. It ends the pane only from the
+    /// channel that the link reads: another window's channel that fails
+    /// alone is a detach.
     func paneGone() {
         toLink(.ended)
     }

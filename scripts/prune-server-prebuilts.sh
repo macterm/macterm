@@ -17,6 +17,12 @@
 # its manifest is there. When the script cannot find the key of main or of an
 # open pull request, it removes nothing (fail closed).
 #
+# Of a build that it keeps, it removes the assets that no complete manifest
+# names and that are older than $ORPHAN_HOURS hours: the files of a run that
+# stopped before its manifest (build-server.sh). The age keeps the files of a
+# run that still uploads. When the key has no complete manifest, or when it
+# cannot read one, it removes nothing of that key.
+#
 # The key of a commit comes from that commit's own scripts/build-server.sh, so
 # a change to the list of sources gives the key that CI gave that commit.
 #
@@ -26,6 +32,8 @@ set -euo pipefail
 
 RELEASE="server-prebuilt"
 KEEP_DAYS=14
+# Longer than the job Build of server-build.yml can run.
+ORPHAN_HOURS=2
 
 dry_run=false
 case "${1:-}" in
@@ -82,21 +90,60 @@ for pr in $prs; do
   fi
 done
 
-# The cutoff as the API writes times, so that a string compare is a time compare.
+# The cutoffs as the API writes times, so that a string compare is a time compare.
 cutoff="$(date -u -d "-$KEEP_DAYS days" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null ||
   date -u -v-"$KEEP_DAYS"d +%Y-%m-%dT%H:%M:%SZ)"
+orphan_cutoff="$(date -u -d "-$ORPHAN_HOURS hours" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null ||
+  date -u -v-"$ORPHAN_HOURS"H +%Y-%m-%dT%H:%M:%SZ)"
 
 release_id="$(gh api "repos/$REPO/releases/tags/$RELEASE" --jq .id)"
-# One line for each asset: key, created_at, id, name. The manifest sorts first
-# in its build, so it is removed first.
+# One line for each asset: key, created_at, id, name, state. The manifest
+# sorts first in its build, so it is removed first.
 gh api --paginate "repos/$REPO/releases/$release_id/assets?per_page=100" \
-  --jq '.[] | "\(.created_at) \(.id) \(.name)"' |
+  --jq '.[] | "\(.created_at) \(.id) \(.name) \(.state)"' |
   awk '{
     if (match($3, /^macterm-[0-9a-f]+-/) == 0) next
     key = substr($3, 9, RLENGTH - 9)
-    first = ($3 ~ /-server\.json$/) ? 0 : 1
-    print key, first, $1, $2, $3
+    first = ($3 ~ /-server(-[^ ]+)?\.json$/) ? 0 : 1
+    print key, first, $1, $2, $3, $4
   }' | sort -k1,1 -k2,2n > "$work/assets"
+
+# Removes one asset. Another run can remove it first. That is not an error.
+remove_asset() {
+  local id="$1" name="$2"
+  echo "Remove $name"
+  removed=$((removed + 1))
+  if [[ "$dry_run" != true ]]; then
+    gh api -X DELETE "repos/$REPO/releases/assets/$id" > /dev/null ||
+      echo "::warning::Cannot remove $name"
+  fi
+}
+
+# Removes the assets of a kept build that no complete manifest names and
+# that are older than the orphan cutoff.
+remove_orphans() {
+  local key="$1" dir="$work/manifests-$key" names="$work/names-$key"
+  mkdir -p "$dir"
+  : > "$names"
+  local first created id name state
+  while read -r _ first created id name state; do
+    [[ "$first" == 0 && "$state" == uploaded ]] || continue
+    if ! gh release download "$RELEASE" --repo "$REPO" --dir "$dir" --pattern "$name" < /dev/null ||
+      ! jq -r '.files[].file' "$dir/$name" >> "$names"; then
+      echo "::warning::Cannot read $name. No asset of $key is removed."
+      return 0
+    fi
+    echo "$name" >> "$names"
+  done < <(awk -v k="$key" '$1 == k' "$work/assets")
+  # A build with no complete manifest is of an older form, or is still in
+  # its upload. Its age decides, as for a whole build.
+  [[ -s "$names" ]] || return 0
+  while read -r _ _ created id name _; do
+    [[ "$created" < "$orphan_cutoff" ]] || continue
+    grep -qxF "$name" "$names" && continue
+    remove_asset "$id" "$name"
+  done < <(awk -v k="$key" '$1 == k' "$work/assets")
+}
 
 # The newest asset of each key.
 awk '{ if ($3 > newest[$1]) newest[$1] = $3 } END { for (k in newest) print k, newest[k] }' \
@@ -113,18 +160,13 @@ while read -r key newest; do
     echo "Keep $key (new, $newest)"
   else
     removed_builds=$((removed_builds + 1))
-    while read -r _ _ _ id name; do
-      echo "Remove $name"
-      removed=$((removed + 1))
-      if [[ "$dry_run" != true ]]; then
-        # Another run can remove it first. That is not an error.
-        gh api -X DELETE "repos/$REPO/releases/assets/$id" > /dev/null ||
-          echo "::warning::Cannot remove $name"
-      fi
+    while read -r _ _ _ id name _; do
+      remove_asset "$id" "$name"
     done < <(awk -v k="$key" '$1 == k' "$work/assets")
     continue
   fi
   kept_builds=$((kept_builds + 1))
+  remove_orphans "$key"
 done < "$work/newest"
 
 echo "Assets: $total before, $((total - removed)) after. Builds: $kept_builds kept, $removed_builds removed."

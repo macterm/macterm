@@ -39,6 +39,13 @@ protocol PaneSessionHost: AnyObject, Sendable {
     func paneStatus(_ status: MactermProtocol.Status)
     /// The pty's line modes, when the session was asked for them.
     func paneTtyMode(_ mode: MactermProtocol.TtyMode)
+    /// A channel to the session opened. `caps` are the session's: what it
+    /// sends (`notification`).
+    func paneChannelOpened(caps: [String])
+    /// A desktop notification (OSC 9, OSC 777), once for each message.
+    func paneNotification(title: Data, body: Data)
+    /// The bell (BEL). The session coalesces bells.
+    func paneBell()
     /// The session's attention flags: at an attach when one is set, and at
     /// each change (design/004 §6). All clear when the channel ends.
     func paneAttention(_ flags: MactermProtocol.Attention)
@@ -84,6 +91,9 @@ extension PaneSessionHost {
     func paneCwd(_: Data) {}
     func paneMark(_: MactermProtocol.Mark) {}
     func paneStatus(_: MactermProtocol.Status) {}
+    func paneChannelOpened(caps _: [String]) {}
+    func paneNotification(title _: Data, body _: Data) {}
+    func paneBell() {}
     func paneAttention(_: MactermProtocol.Attention) {}
     func paneLead(_: Bool?) {}
     func paneLinkLost() {}
@@ -488,6 +498,8 @@ actor PaneSession: PaneInputRoute {
                     setPaused(channel, true)
                     await pausing?.value
                 }
+                let caps = channel.caps
+                deliver { $0.paneChannelOpened(caps: caps) }
                 let grid = host.paneGrid()
                 let resuming = matchingResumePoint(channel)
                 try sendAttach(channel, grid, resume: resuming)
@@ -677,6 +689,10 @@ actor PaneSession: PaneInputRoute {
                 deliver { $0.paneTitle(title) }
             case let .cwd(url):
                 deliver { $0.paneCwd(url) }
+            case let .notification(title, body):
+                deliver { $0.paneNotification(title: title, body: body) }
+            case .bell:
+                deliver { $0.paneBell() }
             case .skipped:
                 // The channel dropped output that the surface did not get.
                 // The screen shows no known offset until the snapshot.
