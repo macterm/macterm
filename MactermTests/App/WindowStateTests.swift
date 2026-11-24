@@ -1371,6 +1371,9 @@ struct WindowStateTests {
         let (project, ws, window) = try keyWindowOnTwoTabs(state)
         let other = Project(name: "q", path: "/tmp", sortOrder: 1)
         state.selectProject(other, in: window)
+        // The workspace's active tab moves while the window is away, so the
+        // window's own record and the workspace disagree.
+        ModelWriter.tabSelect(ws.tabs[0].id, in: ws)
 
         try runPaletteRow(of: project, in: state)
 
@@ -1405,7 +1408,8 @@ struct WindowStateTests {
         try runPaletteRow(of: project, in: state)
 
         #expect(window.activeProjectID == project.id)
-        #expect(state.selectedTab(for: project.id, in: window) == nil, "the window shows the project screen")
+        #expect(state.selectedTab(for: project.id, in: window) == nil, "the window shows EmptyProjectView")
+        #expect(ws.tabs.isEmpty, "the palette makes no tab")
     }
 
     @Test

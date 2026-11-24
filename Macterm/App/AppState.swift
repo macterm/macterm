@@ -555,7 +555,7 @@ final class AppState {
     /// nil), also when the project has tabs: what a click on a sidebar
     /// project row and CLI `project select` do. The project's tabs stay; a
     /// selection of one of them shows it. A palette project row shows the
-    /// last tab (`showLastTab(of:in:)`).
+    /// last tab (`showLastTab(of:)`).
     func showProjectScreen(_ project: Project, in window: WindowState?) {
         selectProject(project, in: window)
         guard let target = window ?? keyWindow, target.activeProjectID == project.id,
@@ -566,18 +566,18 @@ final class AppState {
         persistWindows()
     }
 
-    /// Show `project` in `window` (the key window when nil) at the tab the
-    /// window last showed there (`WindowState.activeTabIDs`), else the
-    /// workspace's active tab: what a palette project row does. A project
-    /// with no tabs shows its project screen. Not a flag of
-    /// `showProjectScreen`: the sidebar row and CLI `project select` keep the
-    /// project screen.
-    func showLastTab(of project: Project, in window: WindowState?) {
-        selectProject(project, in: window)
-        guard let target = window ?? keyWindow, target.activeProjectID == project.id else { return }
-        endProjectScreen(in: target)
+    /// Show `project` in the key window at the tab that the window last
+    /// showed there (`WindowState.activeTabIDs`), else the workspace's active
+    /// tab: what a palette project row does. A project with no tabs shows
+    /// `EmptyProjectView`. This is a function of its own and not a Bool
+    /// parameter of `showProjectScreen`, because the sidebar row and CLI
+    /// `project select` show the project screen.
+    func showLastTab(of project: Project) {
+        selectProject(project)
+        guard let key = keyWindow, key.activeProjectID == project.id else { return }
+        endProjectScreen(in: key)
         settleWindowSelections()
-        if target.id == keyWindowID { claimLeadershipForKeyWindow() }
+        claimLeadershipForKeyWindow()
     }
 
     /// Whether the key window shows the project screen. A command that acts on
