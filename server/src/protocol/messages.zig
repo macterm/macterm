@@ -77,16 +77,20 @@ pub const Hello = struct {
     min_level: u32,
     build: []const u8,
     role: Role,
-    /// A random id for each server start. A new epoch tells a client that
-    /// the server restarted.
     epoch: u64,
-    /// What the build or its platform can do apart from its level (`tcc`,
-    /// `password-tty`). A peer ignores a cap it does not know.
     caps: []const []const u8,
-    /// The build key (`scripts/build-server.sh`): lowercase hex. Null for a
-    /// build with no key (a development build). `build` is text for people;
-    /// two builds are the same build only when their keys are equal.
+    /// `scripts/build-server.sh` makes the key.
     build_key: ?[]const u8 = null,
+
+    pub const field_doc = .{
+        .level = "The highest protocol level that the sender speaks.",
+        .min_level = "The lowest protocol level that the sender accepts.",
+        .build = "The build of the sender, as text for people.",
+        .role = "What the sender is: gui, cli, server or session.",
+        .epoch = "A random id for each start of the sender. A new epoch tells a client that the server started again.",
+        .caps = "What the build or its platform can do apart from its level (tcc, password-tty). A peer ignores a cap that it does not know.",
+        .build_key = "The build key, in lowercase hex. Two builds are the same build only when their keys are equal. Null for a build with no key (a development build).",
+    };
 };
 
 /// Sent in place of any other message when the peer speaks too low a level.
@@ -96,10 +100,13 @@ pub const Refuse = struct {
     pub const since = 1;
     pub const senders = everyone;
 
-    /// A code, not text for people: `level_too_low`.
     reason: []const u8,
-    /// The lowest level that the sender accepts.
     needs_level: u32,
+
+    pub const field_doc = .{
+        .reason = "Why the sender refuses, as a code and not text for people: level_too_low or build_mismatch.",
+        .needs_level = "The lowest protocol level that the sender accepts.",
+    };
 };
 
 pub const Negotiation = union(enum) {
@@ -134,27 +141,39 @@ pub fn negotiate(mine: Hello, theirs: Hello) Negotiation {
 pub const Request = struct {
     id: u64,
     m: []const u8,
-    /// The method's `Args`. Null for an empty argument map.
     a: ?Raw = null,
+
+    pub const field_doc = .{
+        .id = "The id of the request. It is unique for the connection epoch of the client.",
+        .m = "The name of the method.",
+        .a = "The arguments of the method. Null for an empty argument map.",
+    };
 };
 
 /// `{re, ok}` or `{re, err}`: exactly one of the two. `decodeControl`
 /// refuses a response with both or neither.
 pub const Response = struct {
     re: u64,
-    /// The method's `Result`.
     ok: ?Raw = null,
     err: ?ErrorInfo = null,
+
+    pub const field_doc = .{
+        .re = "The id of the request that this response answers.",
+        .ok = "The result of the method. Null when the request failed.",
+        .err = "The error. Null when the request worked.",
+    };
 };
 
 pub const ErrorInfo = struct {
-    /// An `ErrorCode` tag. A receiver reads a code that it does not know as
-    /// an error with no special handling.
     code: []const u8,
     message: []const u8,
-    /// The level that the request needs, when the error is that the peer
-    /// speaks a lower one.
     level: ?u32 = null,
+
+    pub const field_doc = .{
+        .code = "The error code. A receiver reads a code that it does not know as an error with no special handling.",
+        .message = "The error, as text for people.",
+        .level = "The protocol level that the request needs, when the peer speaks a lower one.",
+    };
 };
 
 /// The codes of `ErrorInfo.code`. The add-only rule holds: never remove or
@@ -182,19 +201,27 @@ pub const ErrorCode = enum {
 pub const Event = struct {
     e: []const u8,
     a: ?Raw = null,
+
+    pub const field_doc = .{
+        .e = "The name of the event.",
+        .a = "The fields of the event. Null when the event has none.",
+    };
 };
 
 /// One consistent state: the receiver applies all of its events at once.
 pub const EventBatch = struct {
     pub const field_since = .{ .cause = 3 };
 
-    /// Counts batches within one epoch.
     seq: u64,
     ev: []const Event,
-    /// The id of the request that caused the batch, only on the connection
-    /// that sent the request (design/010 §3). Null on every other
-    /// connection, and in a batch that `control.resume` sends again.
+    /// design/010 §3.
     cause: ?u64 = null,
+
+    pub const field_doc = .{
+        .seq = "The number of the batch in the epoch of the server.",
+        .ev = "The events of the batch. The receiver applies them all at once.",
+        .cause = "The id of the request that caused the batch, only on the connection that sent the request. Null on every other connection, and in a batch that control.resume sends again.",
+    };
 };
 
 // ── Methods ─────────────────────────────────────────────────────────────────
@@ -1353,6 +1380,12 @@ pub const SessionExit = struct {
     id: []const u8,
     code: ?u8 = null,
     signal: ?u8 = null,
+
+    pub const field_doc = .{
+        .id = "The id of the session.",
+        .code = "The exit code, when the shell exited.",
+        .signal = "The signal number, when a signal ended the shell.",
+    };
 };
 
 /// A pane's attention flags changed (the session's `attention` message,
@@ -1366,6 +1399,13 @@ pub const PaneAttention = struct {
     unseen: bool,
     failed: bool,
     bell: bool,
+
+    pub const field_doc = .{
+        .id = "The id of the session of the pane.",
+        .unseen = "True: a run ended, or the bell rang, and no client showed the pane since.",
+        .failed = "True with unseen: the run that ended failed.",
+        .bell = "True: the bell rang and no client showed the pane since.",
+    };
 };
 
 /// Every event type. A new event goes here. Each one declares `name`,
@@ -1391,6 +1431,20 @@ pub const ProjectInfo = struct {
     removable: bool = true,
     alias: ?[]const u8 = null,
 
+    pub const field_doc = .{
+        .id = "The id of the project.",
+        .name = "The name of the project.",
+        .path = "A local path, or user@host:dir. Can be empty.",
+        .color = "The color tag of the project. Null when the project has none.",
+        .sort_order = "Orders the projects that have the same parent.",
+        .created_at = "When the project was made, in Unix time in milliseconds.",
+        .parent = "The project that holds it. Null or empty is the top level.",
+        .sidebar = "Where the sidebar shows the project: tree, top, bottom or none. It never changes.",
+        .single_tab = "True: the project holds at most one tab. It never changes.",
+        .removable = "True: project.remove can remove the project. It never changes.",
+        .alias = "One short word that finds the project: pinned, for example. It is unique, and never changes.",
+    };
+
     pub fn of(p: model.Project) ProjectInfo {
         return .{
             .id = p.id,
@@ -1415,6 +1469,10 @@ pub const ProjectChanged = struct {
     pub const senders = everyone;
 
     project: ProjectInfo,
+
+    pub const field_doc = .{
+        .project = "The project, without its tabs.",
+    };
 };
 
 pub const ProjectRemoved = struct {
@@ -1423,6 +1481,10 @@ pub const ProjectRemoved = struct {
     pub const senders = everyone;
 
     id: ProjectId,
+
+    pub const field_doc = .{
+        .id = "The id of the project that was removed.",
+    };
 };
 
 /// The order of the children of `parent` (the top level when null).
@@ -1433,6 +1495,11 @@ pub const ProjectOrder = struct {
 
     parent: ?ProjectId = null,
     ids: []const ProjectId,
+
+    pub const field_doc = .{
+        .parent = "The project whose children are in ids. Null is the top level.",
+        .ids = "Each child project, in its order.",
+    };
 };
 
 /// A tab was made or changed: the whole tab with its tree.
@@ -1444,6 +1511,12 @@ pub const TabChanged = struct {
     project: ProjectId,
     tab: model.Tab,
     zoomed: ?PaneId = null,
+
+    pub const field_doc = .{
+        .project = "The project of the tab.",
+        .tab = "The whole tab, with its split tree.",
+        .zoomed = "The zoomed pane of the tab. Null when no pane is zoomed.",
+    };
 };
 
 pub const TabRemoved = struct {
@@ -1453,6 +1526,11 @@ pub const TabRemoved = struct {
 
     project: ProjectId,
     id: TabId,
+
+    pub const field_doc = .{
+        .project = "The project of the tab.",
+        .id = "The id of the tab that was removed.",
+    };
 };
 
 /// The tabs of a project, their order or its active tab changed.
@@ -1464,6 +1542,12 @@ pub const TabOrder = struct {
     project: ProjectId,
     ids: []const TabId,
     active_tab: ?TabId = null,
+
+    pub const field_doc = .{
+        .project = "The project of the tabs.",
+        .ids = "Each tab of the project, in its order.",
+        .active_tab = "The tab that the project shows.",
+    };
 };
 
 pub const SelectionChanged = struct {
@@ -1472,6 +1556,10 @@ pub const SelectionChanged = struct {
     pub const senders = everyone;
 
     active_project: ?ProjectId = null,
+
+    pub const field_doc = .{
+        .active_project = "The project that is selected.",
+    };
 };
 
 /// A pane left the model (`RemovedPane`).
@@ -1483,6 +1571,12 @@ pub const PaneRemoved = struct {
     id: PaneId,
     session: []const u8,
     host: ?[]const u8 = null,
+
+    pub const field_doc = .{
+        .id = "The id of the pane.",
+        .session = "The id of the session of the pane.",
+        .host = "The host of the session. Null for a pane of this Mac.",
+    };
 };
 
 pub const events = .{
@@ -1532,6 +1626,11 @@ pub fn decodeResult(
 pub const PaneMessage = struct {
     t: []const u8,
     a: ?Raw = null,
+
+    pub const field_doc = .{
+        .t = "The name of the pane message. A receiver ignores a name that it does not know.",
+        .a = "The fields of the message. Null when the message has none.",
+    };
 };
 
 /// The channel of the pane on a direct session socket.
@@ -1546,18 +1645,24 @@ pub const State = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// The session process.
     pid: i64,
-    /// The shell (or the command) that the session started. Its parent is
-    /// the session, so the session reads its exit status.
+    /// Its parent is the session, so the session reads its exit status.
     shell_pid: i64,
-    /// The path of the pty's slave side. Not UTF-8 on every system.
     pty: msgpack.Bin,
     cols: u16,
     rows: u16,
-    /// The clients that sent `attach`. The session sends `state` again to
-    /// its other connections (the server's) each time this count changes.
+    /// The session sends `state` again to its other connections (the
+    /// server's) each time this count changes.
     clients: ?u16 = null,
+
+    pub const field_doc = .{
+        .pid = "The pid of the session process.",
+        .shell_pid = "The pid of the shell, or of the command, that the session started.",
+        .pty = "The path of the slave side of the pty. Not UTF-8 on every system.",
+        .cols = "The width of the terminal in cells.",
+        .rows = "The height of the terminal in cells.",
+        .clients = "The number of clients that sent attach.",
+    };
 };
 
 /// The first message of a client that shows the pane: its size. When the
@@ -1573,19 +1678,24 @@ pub const Attach = struct {
     rows: u16,
     xpixel: u16 = 0,
     ypixel: u16 = 0,
-    /// The client wants `foreground` messages. The session reads the pty's
-    /// foreground only while a client that asked for them is connected.
     foreground: bool = false,
-    /// The client wants `tty_mode` messages. The session reads the pty's line
-    /// modes only while a client that asked for them is connected.
     tty: bool = false,
-    /// A client that lost its link asks to resume (design/003 §7): the
-    /// `epoch` of the session's `hello` and the offset after the last output
-    /// byte that it got. If the session still holds the output after that
+    /// design/003 §7. If the session still holds the output after the
     /// offset, it answers with `Resumed` and the missing bytes, and no
-    /// snapshot. Otherwise it sends a snapshot. Both fields or none.
+    /// snapshot. Otherwise it sends a snapshot.
     resume_epoch: ?u64 = null,
     resume_offset: ?u64 = null,
+
+    pub const field_doc = .{
+        .cols = "The width of the terminal in cells.",
+        .rows = "The height of the terminal in cells.",
+        .xpixel = "The width of the terminal in pixels. 0 when the client does not know it.",
+        .ypixel = "The height of the terminal in pixels. 0 when the client does not know it.",
+        .foreground = "True: the client wants foreground messages. The session reads the foreground of the pty only while a client that asked for them is connected.",
+        .tty = "True: the client wants tty_mode messages. The session reads the line modes of the pty only while a client that asked for them is connected.",
+        .resume_epoch = "To resume after a lost link: the epoch of the hello of the session. Send both resume fields or none.",
+        .resume_offset = "To resume after a lost link: the offset after the last output byte that the client got. Send both resume fields or none.",
+    };
 
     pub const field_since = .{ .resume_epoch = 2, .resume_offset = 2, .tty = 3 };
 };
@@ -1600,6 +1710,13 @@ pub const Resize = struct {
     rows: u16,
     xpixel: u16 = 0,
     ypixel: u16 = 0,
+
+    pub const field_doc = .{
+        .cols = "The width of the terminal in cells.",
+        .rows = "The height of the terminal in cells.",
+        .xpixel = "The width of the terminal in pixels. 0 when the client does not know it.",
+        .ypixel = "The height of the terminal in pixels. 0 when the client does not know it.",
+    };
 };
 
 /// The client takes leadership without input (zmx 0003). It then sends its
@@ -1620,6 +1737,10 @@ pub const Lead = struct {
     pub const senders = from_session;
 
     leader: bool,
+
+    pub const field_doc = .{
+        .leader = "True: the client leads, and its size is the size of the pty.",
+    };
 };
 
 /// The `bytes` frames up to `SnapshotEnd` are a snapshot of the terminal,
@@ -1631,10 +1752,12 @@ pub const SnapshotStart = struct {
     pub const senders = from_session;
 
     scrollback: bool,
-    /// The output offset that the screen in this snapshot shows: the output
-    /// bytes that follow it start here. A client that counts the output
-    /// bytes it gets takes this as its offset (`Attach.resume_offset`).
     offset: ?u64 = null,
+
+    pub const field_doc = .{
+        .scrollback = "True: the snapshot holds the scrollback. False after dropped output: it holds the screen only, and clears the old screen first.",
+        .offset = "The output offset that the screen in this snapshot shows: the output bytes that follow start here. A client that counts its output bytes takes this as its offset.",
+    };
 
     pub const field_since = .{ .offset = 2 };
 };
@@ -1648,8 +1771,11 @@ pub const Resumed = struct {
     pub const since = 2;
     pub const senders = from_session;
 
-    /// The offset of the first byte that follows. The client's own offset.
     offset: u64,
+
+    pub const field_doc = .{
+        .offset = "The offset of the first output byte that follows. It is the offset of the client.",
+    };
 };
 
 pub const SnapshotEnd = struct {
@@ -1665,10 +1791,13 @@ pub const Exit = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// The exit code, when the shell exited.
     code: ?u8 = null,
-    /// The signal number, when a signal ended the shell.
     signal: ?u8 = null,
+
+    pub const field_doc = .{
+        .code = "The exit code, when the shell exited.",
+        .signal = "The signal number, when a signal ended the shell.",
+    };
 };
 
 /// The client has the exit status. The session then ends.
@@ -1724,8 +1853,11 @@ pub const Title = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// As the program sent it. Not UTF-8 on every program.
     title: msgpack.Bin,
+
+    pub const field_doc = .{
+        .title = "The title, as the program sent it. Not UTF-8 from every program.",
+    };
 };
 
 /// The working directory that the shell reports (OSC 7).
@@ -1734,9 +1866,11 @@ pub const Cwd = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// The OSC 7 payload as the shell sent it: usually a `file://` URL,
-    /// percent-encoded. The receiver decodes it.
     url: msgpack.Bin,
+
+    pub const field_doc = .{
+        .url = "The OSC 7 payload, as the shell sent it: usually a percent-encoded file:// URL. The receiver decodes it.",
+    };
 };
 
 /// The process group that holds the pty (zmx 0010). Sent when the group or
@@ -1746,15 +1880,17 @@ pub const Foreground = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// The group is the session's own shell.
     idle: bool,
-    /// `comm` is in the host's `/etc/shells`. Null when the host has none.
     shell: ?bool = null,
-    /// The process name: the executable path on macOS, the kernel `comm` on
-    /// Linux.
     comm: msgpack.Bin,
-    /// The command line, its arguments joined by spaces.
     args: msgpack.Bin,
+
+    pub const field_doc = .{
+        .idle = "True: the foreground group is the own shell of the session.",
+        .shell = "True: comm is in /etc/shells of the host. Null when the host has no /etc/shells.",
+        .comm = "The name of the process: the executable path on macOS, the kernel comm on Linux.",
+        .args = "The command line, with its arguments joined by spaces.",
+    };
 };
 
 /// The server asks the session for one key press (`session.key`). The
@@ -1765,6 +1901,10 @@ pub const Key = struct {
     pub const senders = from_client;
 
     chord: []const u8,
+
+    pub const field_doc = .{
+        .chord = "The key press, in the keybind grammar of the app: ctrl+c, for example.",
+    };
 };
 
 /// The server asks for the terminal's text (`session.history`). The session
@@ -1775,6 +1915,10 @@ pub const HistoryRead = struct {
     pub const senders = from_client;
 
     scrollback: bool = false,
+
+    pub const field_doc = .{
+        .scrollback = "True: the text includes the scrollback. False: the screen only.",
+    };
 };
 
 pub const History = struct {
@@ -1784,6 +1928,11 @@ pub const History = struct {
 
     text: msgpack.Bin,
     truncated: bool = false,
+
+    pub const field_doc = .{
+        .text = "The text of the terminal.",
+        .truncated = "True: the text was too long, and only its end is here.",
+    };
 };
 
 /// The server asks for the terminal's state (`session.inspect`). The session
@@ -1800,6 +1949,10 @@ pub const Inspect = struct {
     pub const senders = from_session;
 
     terminal: TerminalState,
+
+    pub const field_doc = .{
+        .terminal = "The state of the terminal of the session.",
+    };
 };
 
 /// How the pty reads input (`termios` `ICANON` and `ECHO`). A password read
@@ -1812,6 +1965,11 @@ pub const TtyMode = struct {
 
     canonical: bool,
     echo: bool,
+
+    pub const field_doc = .{
+        .canonical = "True: the pty reads input one line at a time (ICANON).",
+        .echo = "True: the pty echoes input (ECHO).",
+    };
 };
 
 pub const MarkKind = enum {
@@ -1836,15 +1994,17 @@ pub const Mark = struct {
     pub const field_since = .{ .output_tail = 3 };
 
     kind: MarkKind,
-    /// For `output` and `end`: the command line. The shell's own text when
-    /// it sent one, else the input cells of the prompt. Null when there is
-    /// neither.
     command: ?msgpack.Bin = null,
-    /// For `end`: the exit code, when the shell sent one.
     exit_code: ?i32 = null,
-    /// For `end` with a nonzero exit code: the last rows of the command's output,
-    /// as text (`events.outputTail`). Null when there is no output.
+    /// `events.outputTail` makes it.
     output_tail: ?msgpack.Bin = null,
+
+    pub const field_doc = .{
+        .kind = "The step: prompt, input, output or end.",
+        .command = "For output and end: the command line. It is the text of the shell when the shell sent one, else the input cells of the prompt. Null when there is neither.",
+        .exit_code = "For end: the exit code, when the shell sent one.",
+        .output_tail = "For end with a nonzero exit code: the last rows of the output of the command, as text. Null when there is no output.",
+    };
 };
 
 pub const ProgressState = enum {
@@ -1863,8 +2023,12 @@ pub const Progress = struct {
     pub const senders = from_session;
 
     state: ProgressState,
-    /// 0 to 100, when the program sent one.
     percent: ?u8 = null,
+
+    pub const field_doc = .{
+        .state = "The state of the progress report: remove, set, error, indeterminate or pause.",
+        .percent = "The progress, from 0 to 100. Null when the program sent none.",
+    };
 };
 
 /// The program rang the bell (BEL).
@@ -1901,9 +2065,14 @@ pub const Status = struct {
     pub const senders = from_session;
 
     state: RunState,
-    /// With `done`: a progress report said error (v1's red dot). The exit
-    /// code does not count: it judges the command, not the run.
+    /// v1's red dot. The exit code does not count: it judges the command,
+    /// not the run.
     failed: bool = false,
+
+    pub const field_doc = .{
+        .state = "The run state of the pane: idle (no command ran yet), running or done.",
+        .failed = "True with done: a progress report said error.",
+    };
 };
 
 /// What the pane shows that the user did not see yet (design/004 §6). The
@@ -1918,12 +2087,15 @@ pub const Attention = struct {
     pub const since = 1;
     pub const senders = from_session;
 
-    /// A run ended, or the bell rang, and no client showed the pane since.
     unseen: bool = false,
-    /// With `unseen`: the ended run failed (`Status.failed`).
     failed: bool = false,
-    /// The bell rang and no client showed the pane since.
     bell: bool = false,
+
+    pub const field_doc = .{
+        .unseen = "True: a run ended, or the bell rang, and no client showed the pane since.",
+        .failed = "True with unseen: the run that ended failed.",
+        .bell = "True: the bell rang and no client showed the pane since.",
+    };
 };
 
 /// A client showed the pane to the user: clear the attention flags. The
@@ -1959,25 +2131,23 @@ pub const ProgramNeed = enum {
 
 /// One record of a program's status (OSC 7501).
 pub const ProgramRecord = struct {
-    /// The record's id: names joined by `/`, where `a/b` is a child of `a`.
-    /// Empty for the root record, which is the program itself.
     id: []const u8 = "",
     state: ProgramState,
-    /// With `blocked`: what the program needs.
     kind: ?ProgramNeed = null,
-    /// With `working` or `blocked`: 0 to 100. Null when the program gave
-    /// none.
     progress: ?u8 = null,
-    /// A stable name for the program (`cargo`, `claude-code`). A record that
-    /// gave none has the `app` of its nearest ancestor that gave one, the
-    /// root record included.
     app: ?[]const u8 = null,
-    /// A short label for the record, decoded. UTF-8 with no control
-    /// characters; still the program's text.
     title: ?[]const u8 = null,
-    /// One line that says what the record does or waits for, decoded. As
-    /// `title`.
     msg: ?[]const u8 = null,
+
+    pub const field_doc = .{
+        .id = "The id of the record: names joined by /, where a/b is a child of a. Empty for the root record, which is the program itself.",
+        .state = "The state of the record: idle, working, done, blocked or error.",
+        .kind = "With blocked: what the program needs: permission, question or auth.",
+        .progress = "With working or blocked: the progress, from 0 to 100. Null when the program gave none.",
+        .app = "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one.",
+        .title = "A short label for the record, decoded: UTF-8 with no control characters. It is still the text of the program.",
+        .msg = "One line that says what the record does or waits for, decoded as title.",
+    };
 };
 
 /// Every record of the program status protocol (OSC 7501) that the pane
@@ -1997,6 +2167,10 @@ pub const ProgramStatus = struct {
     pub const senders = from_session;
 
     records: []const ProgramRecord,
+
+    pub const field_doc = .{
+        .records = "Every record that the pane holds now, oldest first. An empty list clears them all.",
+    };
 };
 
 /// The most records that a pane keeps (the protocol requires 64 or more).
