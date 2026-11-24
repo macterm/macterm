@@ -86,7 +86,8 @@ final class PlainShell: PaneInputRoute, @unchecked Sendable {
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             let count = read(primaryFD, &buffer, buffer.count)
             guard count > 0 else { return }
-            let bytes = announcement.withLock { $0.consume(Data(buffer[0 ..< count])) }
+            let chunk = Data(buffer[0 ..< count])
+            let bytes = announcement.withLock { $0.consume(chunk) }
             if !bytes.isEmpty { host?.paneFeed(bytes) }
         }
         reader.setCancelHandler { close(primaryFD) }

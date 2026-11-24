@@ -2096,13 +2096,11 @@ final class AppState {
         let ask = askPlainShellNeedsConfirmClose
         Task { @MainActor in
             var answers: [UUID: Bool] = [:]
-            await withTaskGroup(of: (UUID, Bool?).self) { group in
-                for pane in plain {
-                    group.addTask { @MainActor in await (pane.id, ask(pane)) }
-                }
-                for await (id, answer) in group {
-                    if let answer { answers[id] = answer }
-                }
+            for pane in plain {
+                guard let answer = await ask(pane) else { continue }
+                answers[pane.id] = answer
+                // One busy pane is the verdict: ask no more hosts.
+                if answer { break }
             }
             decide(self.closeNeedsConfirmation(closing, plainAnswers: answers))
         }
