@@ -27,9 +27,9 @@ final class PaneSurface: Identifiable {
     var windowID: UUID? { host.windowID }
 
     let searchState = TerminalSearchState()
-    /// What the copy-mode pill says (`Copy Mode`, `Select Mode`), nil while the
-    /// mode is off. The view's `CopyModeController` owns the mode and reports
-    /// it here. Live UI state only — never persisted.
+    /// What the copy-mode pill says (`CopyModeKeymap.label(for:)`), nil
+    /// while the mode is off. The view's `CopyModeController` owns the mode
+    /// and reports it here. Live UI state only — never persisted.
     var copyModeLabel: String?
     /// The surface is read-only (ghostty's `toggle_readonly`): libghostty sends
     /// no input to the pty. Drives the Read-Only pill. A new surface starts
@@ -85,17 +85,6 @@ final class PaneSurface: Identifiable {
     fileprivate init(pane: Pane, host: SurfaceHost) {
         self.pane = pane
         self.host = host
-    }
-
-    /// Whether this surface's libghostty callbacks count what it parses for
-    /// the pane (runs, notifications, project memory). Every surface parses
-    /// the same output, so one counts: the pane's link decides
-    /// (`PaneLink.counts`), and a plain ssh shell counts in the view that
-    /// shows it. A surface with no session counts its own output. Each
-    /// callback asks when it fires (`Pane.connectViewCallbacks`).
-    var countsOutput: Bool {
-        guard let host = nsView?.channelRuntime?.host, let link = host.link else { return true }
-        return link.showsPlainShell(in: host) ?? link.counts(host)
     }
 
     /// The live terminal NSView. Created lazily the first time it's requested,

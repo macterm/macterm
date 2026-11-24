@@ -7,7 +7,8 @@ name: Server Build
 # setup installs it from there.
 #
 # The build key is the hash of the server's sources (build-server.sh). Each
-# build has a manifest, `macterm-<key>-server.json`, with the SHA-256 of each
+# build has a manifest, `macterm-<key>-server.json` (with the tag of its run
+# in the release, build-server.sh stage), with the SHA-256 of each
 # tarball; `build-server.sh verify` checks a build against it.
 # With the input `prebuilt`, the Linux job Find Prebuilt downloads the build
 # of the key from the `server-prebuilt` release. When it finds the build, the
@@ -72,11 +73,8 @@ jobs:
         env:
           KEY: ${{ steps.key.outputs.key }}
         run: |
-          mkdir -p build/server
           found=false
-          if gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" \
-              --dir build/server --pattern "macterm-$KEY-*" &&
-            scripts/build-server.sh verify build/server "$KEY"; then
+          if scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" build/server > /dev/null; then
             found=true
           fi
           if [[ "$found" != true ]]; then
@@ -127,9 +125,11 @@ jobs:
           test "$(scripts/build-server.sh key)" = "$KEY"
           scripts/build-server.sh build build/server
 
-      # Never replaces an asset: an app that is out carries the checksums of
-      # what the release serves. Two runs of one key can both build it;
-      # the second finds the first's assets and keeps them.
+      # Never replaces or removes an asset: an app that is out carries the
+      # checksums of what the release serves. Every file of the build has the
+      # run in its name (build-server.sh stage), so no two runs write the same
+      # asset. The manifest goes last. A run that stops before it leaves
+      # tarballs that no manifest names, and prune removes them later.
       - name: Upload the Prebuilt
         id: upload
         if: >-
@@ -144,39 +144,42 @@ jobs:
               --notes "Builds of server/ for scripts/setup.sh, named by build key. CI adds them. It keeps the builds of main, of open pull requests and of the last 14 days, and removes the others. They are not a release of Macterm." \
               || gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null
           fi
-          # The manifest goes last: a build in the release is complete once
-          # its manifest is there.
-          for file in build/server/macterm-"$KEY"-*.tar.gz build/server/macterm-"$KEY"-server.json; do
-            if ! gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" "$file" 2> upload.err; then
-              if grep -qi "already exists" upload.err; then
-                echo "$(basename "$file") is already in the release"
-              else
-                cat upload.err >&2
-                exit 1
-              fi
-            fi
-          done
+          # A build of the key that is there already is the served build.
+          # The release workflows build without the prebuilt and come here.
+          served="$RUNNER_TEMP/served"
+          rm -rf "$served"
+          if scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" "$served" > /dev/null; then
+            echo "The release has a build of $KEY. Nothing to upload."
+            exit 0
+          fi
+          rm -rf "$served"
+          tag="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          staged="$RUNNER_TEMP/staged"
+          rm -rf "$staged"
+          scripts/build-server.sh stage build/server "$tag" "$staged"
+          gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" "$staged"/macterm-"$KEY"-*.tar.gz
+          gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" "$staged/macterm-$KEY-server-$tag.json"
 
       # The app bundles the builds of build/server, so they must be the bytes
-      # that the release serves. When another run uploaded the key first,
-      # take its whole build. The summary says if the two builds were the
-      # same bytes.
+      # that the release serves: the first complete build of the key that
+      # verifies (build-server.sh download). That can be the build of another
+      # run. The summary says if the two builds are the same bytes.
       - name: Use the Served Build
         if: steps.upload.outcome == 'success'
         run: |
           served="$RUNNER_TEMP/served"
-          rm -rf "$served"
-          mkdir -p "$served"
-          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir "$served" \
-            --pattern "macterm-$KEY-*"
-          scripts/build-server.sh verify "$served" "$KEY"
-          if cmp -s "$served/macterm-$KEY-server.json" "build/server/macterm-$KEY-server.json"; then
+          if [[ ! -d "$served" ]]; then
+            manifest="$(scripts/build-server.sh download "$GITHUB_REPOSITORY" "$RELEASE" "$KEY" "$served")"
+            echo "The served build is $manifest" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          sums() { jq -S '[.files[].sha256]' "$1/macterm-$KEY-server.json"; }
+          if [[ "$(sums "$served")" == "$(sums build/server)" ]]; then
             echo "This build is the served build" | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "The served build has other bytes; using it" | tee -a "$GITHUB_STEP_SUMMARY"
-            rm -rf build/server
-            cp -R "$served" build/server
           fi
+          rm -rf build/server
+          cp -R "$served" build/server
 
       - uses: actions/upload-artifact@v7
         with:
