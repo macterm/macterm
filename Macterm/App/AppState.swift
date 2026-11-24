@@ -606,8 +606,7 @@ final class AppState {
     /// draw any more is a stray client: it is retired here. A pane keeps its
     /// last surface (a warm view), shown or not, and the surface that runs
     /// its plain ssh shell (`Pane.plainShellSurfaceID`). Idempotent and
-    /// cheap: run it
-    /// where a window's selection changes.
+    /// cheap: run it where a window's selection changes.
     private func settleWindowSelections() {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {

@@ -113,8 +113,10 @@ final class RemotePaneDriver {
     /// The view that runs the plain shell changed: its host, or nil when no
     /// view runs one. The pane covers its other views with a notice.
     var onPlainOwner: ((any PaneSessionHost)?) -> Void = { _ in }
-    /// The plain shell's output, for every ready view.
+    /// The plain shell's output, for its owner.
     private let plainOutput = PlainOutput()
+    /// Tells the exit of the plain shell that runs from one that ended.
+    private var plainRuns = 0
     /// The end of the session or the plain shell that runs.
     private var ending: CheckedContinuation<End, Never>?
     /// Input that waits for the first session: a layout's `initial_input`,
@@ -276,6 +278,9 @@ final class RemotePaneDriver {
                 end = await runChannel(link: link, create: create)
             }
             teardown()
+            // The driver stopped while the session's reading ended: it says
+            // nothing to the host.
+            guard !Task.isCancelled else { return }
             switch end {
             case .done:
                 return
@@ -373,8 +378,10 @@ final class RemotePaneDriver {
         // would blur a view.
         each { $0.paneLead(nil) }
         let grid = views.first(where: \.ready)?.host.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
+        plainRuns += 1
+        let run = plainRuns
         let shell = PlainShell(arguments: arguments, grid: grid, host: plainOutput) { [weak self] status in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.plainExited(status) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.plainExited(status, run: run) } }
         }
         guard let shell else {
             each { $0.paneFeed(Data(Self.paneText("Macterm cannot start ssh.").utf8)) }
@@ -413,8 +420,8 @@ final class RemotePaneDriver {
         plainOutput.set(owner: owner.host)
     }
 
-    private func plainExited(_ status: Int32) {
-        guard case .plain = state else { return }
+    private func plainExited(_ status: Int32, run: Int) {
+        guard run == plainRuns, case .plain = state else { return }
         // ssh exits 255 when the connection stops: the pane waits. Any other
         // status is the shell's: the pane ends.
         let code = (status >> 8) & 0xFF

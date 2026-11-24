@@ -391,11 +391,17 @@ final class SurfaceRegistry {
     }
 
     /// The surface for the callers with no host in hand (the CLI, intents,
-    /// persistence and previews): the one in the key window, else one in a
-    /// visible window, else the first that has a view, else the first.
+    /// persistence and previews): the one that runs the pane's plain ssh
+    /// shell, because only it has the shell's screen and keys
+    /// (`Pane.plainShellSurfaceID`); else the one in the key window, else
+    /// one in a visible window, else the first that has a view, else the
+    /// first.
     func preferredSurface(of pane: Pane) -> PaneSurface {
         let all = surfaces(of: pane)
         let live = all.filter { $0.nsView != nil }
+        if let owner = pane.plainShellSurfaceID, let surface = all.first(where: { $0.id == owner }) {
+            return surface
+        }
         return live.first { $0.nsView?.window?.isKeyWindow == true }
             ?? live.first { $0.nsView?.window?.isVisible == true }
             ?? live.first

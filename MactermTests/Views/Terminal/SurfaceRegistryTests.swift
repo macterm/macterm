@@ -29,6 +29,20 @@ struct SurfaceRegistryTests {
         #expect(registry.surfaces(of: pane).count == 1)
     }
 
+    /// Only the surface that runs a plain ssh shell has its screen and its
+    /// keys: the CLI and the previews take it, whichever window is key.
+    @Test
+    func the_surface_that_runs_a_plain_shell_is_the_preferred_one() {
+        let pane = makePane()
+        let first = registry.surface(for: pane, in: .window(UUID()))
+        let second = registry.surface(for: pane, in: .window(UUID()))
+        #expect(registry.preferredSurface(of: pane) === first)
+        pane.plainShellSurfaceID = second.id
+        #expect(registry.preferredSurface(of: pane) === second)
+        pane.plainShellSurfaceID = nil
+        #expect(registry.preferredSurface(of: pane) === first)
+    }
+
     @Test
     func each_window_gets_its_own_surface() {
         let pane = makePane()
