@@ -2261,7 +2261,9 @@ final class AppState {
         guard let project = store.row(projectID) else { return }
         let inside = store.descendants(of: projectID).map(\.id)
         guard !inside.isEmpty else {
-            let removal = { [weak self] in self?.removeProject(projectID, keepingInside: true, store: store) }
+            let removal: @MainActor () -> Void = { [weak self] in
+                self?.removeProject(projectID, keepingInside: true, store: store)
+            }
             guard closeNeedsConfirmation(projectID: projectID) else {
                 removal()
                 return
@@ -2279,13 +2281,14 @@ final class AppState {
         let count = inside.count
         let message = closeNeedsConfirmation(projectIDs: [projectID] + inside, tabs: [])
             ? String(localized: """
-            This project contains \(count) projects, and a process is still running. Remove All removes them \
-            and ends every process in their tabs. Keep Inside Projects removes only this project and moves \
-            the projects inside to its place.
+            This project contains \(count) projects, and a process is still running. Remove All removes this \
+            project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes \
+            only this project and moves the projects inside to its place.
             """)
             : String(localized: """
-            This project contains \(count) projects. Remove All removes them and ends every process in their \
-            tabs. Keep Inside Projects removes only this project and moves the projects inside to its place.
+            This project contains \(count) projects. Remove All removes this project and the projects inside, \
+            and ends every process in their tabs. Keep Inside Projects removes only this project and moves the \
+            projects inside to its place.
             """)
         present(PendingDialog(
             kind: .removeProject(projectID),

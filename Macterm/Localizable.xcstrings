@@ -2103,18 +2103,18 @@
         }
       }
     },
-    "Change the order in the menu of a row. Each group of the sidebar has a section below." : {
+    "Change the order in the menu of a row." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "행 메뉴에서 순서를 변경하십시오. 사이드바의 각 그룹은 아래에 별도의 섹션이 있습니다."
+            "value" : "행 메뉴에서 순서를 변경하십시오."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在行的菜单中更改顺序。侧边栏的每个分组在下方都有自己的部分。"
+            "value" : "在行的菜单中更改顺序。"
           }
         }
       }
@@ -2227,6 +2227,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择文件…"
+          }
+        }
+      }
+    },
+    "Choose Folder…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 선택…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文件夹…"
           }
         }
       }
@@ -4393,6 +4409,22 @@
         }
       }
     },
+    "Keep Inside Projects" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "안의 프로젝트 유지"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留内部项目"
+          }
+        }
+      }
+    },
     "Key" : {
       "localizations" : {
         "ko" : {
@@ -5414,19 +5446,34 @@
         }
       }
     },
-    "Move Out" : {
-      "comment" : "Sidebar menu item for a project group",
+    "Move Into Project" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "그룹에서 꺼내기"
+            "value" : "프로젝트 안으로 이동"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "移出分组"
+            "value" : "移入项目"
+          }
+        }
+      }
+    },
+    "Move Out of Project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 밖으로 이동"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移出项目"
           }
         }
       }
@@ -5543,23 +5590,6 @@
         }
       }
     },
-    "Move to Group" : {
-      "comment" : "Sidebar menu item for a project group",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "그룹으로 이동"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移到分组"
-          }
-        }
-      }
-    },
     "Move to Project" : {
       "localizations" : {
         "ko" : {
@@ -5624,23 +5654,6 @@
         }
       }
     },
-    "New Group" : {
-      "comment" : "Sidebar menu item for a project group",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로운 그룹"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建分组"
-          }
-        }
-      }
-    },
     "New Password" : {
       "localizations" : {
         "ko" : {
@@ -5669,6 +5682,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新建项目"
+          }
+        }
+      }
+    },
+    "New Project Inside" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "안에 새로운 프로젝트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在其中新建项目"
           }
         }
       }
@@ -8145,6 +8174,22 @@
         }
       }
     },
+    "Remove All" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모두 제거"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部移除"
+          }
+        }
+      }
+    },
     "Remove Current Project" : {
       "localizations" : {
         "ko" : {
@@ -8157,23 +8202,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "移除当前项目"
-          }
-        }
-      }
-    },
-    "Remove Group" : {
-      "comment" : "Sidebar menu item for a project group",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "그룹 제거"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除分组"
           }
         }
       }
@@ -8290,19 +8318,18 @@
         }
       }
     },
-    "Remove the group “%@”?" : {
-      "comment" : "Title of the question before a sidebar group and its projects are removed",
+    "Remove the project “%@”?" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” 그룹을 제거하시겠습니까?"
+            "value" : "“%@” 프로젝트를 제거하시겠습니까?"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要移除分组“%@”吗？"
+            "value" : "要移除项目“%@”吗？"
           }
         }
       }
@@ -8383,23 +8410,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新命名当前标签页"
-          }
-        }
-      }
-    },
-    "Rename Group" : {
-      "comment" : "Sidebar menu item for a project group",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "그룹 이름 변경"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新命名分组"
           }
         }
       }
@@ -11148,40 +11158,6 @@
         }
       }
     },
-    "This group contains %lld projects. Macterm removes them and stops all processes in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group." : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This group contains %lld project. Macterm removes it and stops all processes in its tabs. To keep the project, cancel and select Ungroup in the menu of the group."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This group contains %lld projects. Macterm removes them and stops all processes in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group."
-                }
-              }
-            }
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 그룹에는 프로젝트 %lld개가 있습니다. Macterm은 이 프로젝트를 제거하고 탭의 모든 프로세스를 종료합니다. 프로젝트를 유지하려면 취소하고 그룹 메뉴에서 그룹 해제를 선택하십시오."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此分组包含 %lld 个项目。Macterm 会移除这些项目，并结束其标签页中的所有进程。要保留这些项目，请取消，然后在分组菜单中选择“取消分组”。"
-          }
-        }
-      }
-    },
     "This link opens in the default application. Continue only if you know and trust the destination." : {
       "localizations" : {
         "ko" : {
@@ -11287,6 +11263,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此面板的文件已不存在"
+          }
+        }
+      }
+    },
+    "This project contains %lld projects, and a process is still running. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This project contains %lld project, and a process is still running. Remove All removes this project and the project inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the project inside to its place."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This project contains %lld projects, and a process is still running. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place."
+                }
+              }
+            }
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트에는 프로젝트 %lld개가 있고 프로세스가 아직 실행 중입니다. 모두 제거는 이 프로젝트와 안의 프로젝트를 제거하고 탭의 모든 프로세스를 종료합니다. 안의 프로젝트 유지는 이 프로젝트만 제거하고 안의 프로젝트를 그 자리로 이동합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目包含 %lld 个项目，且仍有进程正在运行。“全部移除”会移除此项目及其内部项目，并结束其标签页中的所有进程。“保留内部项目”只移除此项目，并将内部项目移到它的位置。"
+          }
+        }
+      }
+    },
+    "This project contains %lld projects. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This project contains %lld project. Remove All removes this project and the project inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the project inside to its place."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "This project contains %lld projects. Remove All removes this project and the projects inside, and ends every process in their tabs. Keep Inside Projects removes only this project and moves the projects inside to its place."
+                }
+              }
+            }
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트에는 프로젝트 %lld개가 있습니다. 모두 제거는 이 프로젝트와 안의 프로젝트를 제거하고 탭의 모든 프로세스를 종료합니다. 안의 프로젝트 유지는 이 프로젝트만 제거하고 안의 프로젝트를 그 자리로 이동합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目包含 %lld 个项目。“全部移除”会移除此项目及其内部项目，并结束其标签页中的所有进程。“保留内部项目”只移除此项目，并将内部项目移到它的位置。"
           }
         }
       }
@@ -11642,23 +11686,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不可用"
-          }
-        }
-      }
-    },
-    "Ungroup" : {
-      "comment" : "Sidebar menu item for a project group",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "그룹 해제"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取消分组"
           }
         }
       }
@@ -12612,30 +12639,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示“%@”的密码"
-          }
-        }
-      }
-    },
-    "sidebar.group.defaultName" : {
-      "comment" : "Name of a new sidebar group",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "New Group"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로운 그룹"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建分组"
           }
         }
       }
