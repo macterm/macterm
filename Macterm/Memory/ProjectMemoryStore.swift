@@ -67,13 +67,11 @@ final class ProjectMemoryStore {
         scheduleSave(projectID)
     }
 
-    /// Adds an entry in the order of `finishedAt`. A failure is recorded
-    /// after its screen read (`ProjectMemory.screenReadDelay`), so a success
-    /// that ended after it can be recorded first.
+    /// Adds an entry at the end. Each one is recorded at its command's end,
+    /// so the list is in the order of the ends.
     func append(_ entry: MemoryEntry, to projectID: UUID) {
         var list = entries(for: projectID)
-        let index = list.lastIndex { $0.finishedAt <= entry.finishedAt }.map { $0 + 1 } ?? 0
-        list.insert(entry, at: index)
+        list.append(entry)
         if list.count > Self.capacity { list.removeFirst(list.count - Self.capacity) }
         entries[projectID] = list
         scheduleSave(projectID)

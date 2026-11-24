@@ -1,5 +1,4 @@
 import AppKit
-import GhosttyKit
 
 extension Pane {
     /// Connect the view's callbacks that feed the pane's own state: execution
@@ -98,6 +97,7 @@ extension Pane {
                     command: command,
                     exitCode: exitCode < 0 ? nil : Int(exitCode),
                     startedAt: Date().addingTimeInterval(-duration),
+                    outputTail: nil,
                     view: view
                 )
             }
@@ -127,7 +127,13 @@ extension Pane {
             commandStartedAt = Date()
         case .end:
             let command = mark.command.map { String(decoding: $0.bytes, as: UTF8.self) }
-            recordCommandEnd(command: command, exitCode: mark.exitCode.map(Int.init), startedAt: commandStartedAt, view: view)
+            recordCommandEnd(
+                command: command,
+                exitCode: mark.exitCode.map(Int.init),
+                startedAt: commandStartedAt,
+                outputTail: mark.outputTail.map { String(decoding: $0.bytes, as: UTF8.self) },
+                view: view
+            )
             commandStartedAt = nil
         case .prompt,
              .input,
@@ -137,9 +143,15 @@ extension Pane {
     }
 
     /// Hands a finished command to project memory (off unless the user
-    /// turned it on, macOS 26+). The screen is read only for a failure's
-    /// output tail, and not while a password prompt owns its last line.
-    private func recordCommandEnd(command: String?, exitCode: Int?, startedAt: Date?, view: GhosttyTerminalNSView?) {
+    /// turned it on, macOS 26+). A failure's output tail comes from the
+    /// session's end mark: nothing reads the screen.
+    private func recordCommandEnd(
+        command: String?,
+        exitCode: Int?,
+        startedAt: Date?,
+        outputTail: String?,
+        view: GhosttyTerminalNSView?
+    ) {
         let end = CommandEnd(
             paneID: id,
             projectID: projectID,
@@ -147,13 +159,10 @@ extension Pane {
             exitCode: exitCode,
             directory: view?.currentPwd,
             startedAt: startedAt,
-            finishedAt: Date()
+            finishedAt: Date(),
+            outputTail: outputTail
         )
-        ProjectMemory.shared.commandEnded(end) { [weak view] in
-            guard let view else { return nil }
-            let phase = PasswordPromptMonitor.shared.state(for: view).phase
-            return ["sighted", "prompting"].contains(phase) ? nil : view.readText(area: GHOSTTY_POINT_ACTIVE)
-        }
+        ProjectMemory.shared.commandEnded(end)
     }
 
     private static func formatDuration(_ seconds: Double) -> String {

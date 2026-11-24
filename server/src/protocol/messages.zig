@@ -1518,6 +1518,7 @@ pub const Mark = struct {
     pub const name = "mark";
     pub const since = 1;
     pub const senders = from_session;
+    pub const field_since = .{ .output_tail = 3 };
 
     kind: MarkKind,
     /// For `output` and `end`: the command line. The shell's own text when
@@ -1526,6 +1527,9 @@ pub const Mark = struct {
     command: ?msgpack.Bin = null,
     /// For `end`: the exit code, when the shell sent one.
     exit_code: ?i32 = null,
+    /// For `end` with a nonzero exit code: the last rows of the command's output,
+    /// as text (`events.outputTail`). Null when there is no output.
+    output_tail: ?msgpack.Bin = null,
 };
 
 pub const ProgressState = enum {

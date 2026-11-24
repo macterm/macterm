@@ -102,7 +102,13 @@ struct ProjectMemoryTests {
 
     // MARK: - Recording
 
-    private func end(_ command: String?, exit: Int?, startedAt: Date? = nil, directory: String? = "/app") -> CommandEnd {
+    private func end(
+        _ command: String?,
+        exit: Int?,
+        startedAt: Date? = nil,
+        directory: String? = "/app",
+        outputTail: String? = nil
+    ) -> CommandEnd {
         CommandEnd(
             paneID: UUID(),
             projectID: UUID(),
@@ -110,31 +116,26 @@ struct ProjectMemoryTests {
             exitCode: exit,
             directory: directory,
             startedAt: startedAt,
-            finishedAt: now
+            finishedAt: now,
+            outputTail: outputTail
         )
     }
 
     @Test
-    func the_command_comes_from_the_end_and_the_screen_gives_only_a_matching_tail() throws {
-        let screen = """
-        app % make test
-        FAIL checkout
-        app %
-        """
+    func the_command_and_the_tail_come_from_the_end() throws {
         let reported = try #require(ProjectMemory.reportedCommand("make test  "))
         #expect(reported == "make test")
 
-        // The screen shows the same command: its tail is kept.
         let entry = try #require(ProjectMemory.makeEntry(
-            end("make test  ", exit: 1, startedAt: now.addingTimeInterval(-3)), screen: screen
+            end("make test  ", exit: 1, startedAt: now.addingTimeInterval(-3), outputTail: "FAIL checkout")
         ))
         #expect(entry.command == "make test")
         #expect(entry.directory == "/app")
         #expect(entry.failureTail == "FAIL checkout")
         #expect(entry.startedAt == now.addingTimeInterval(-3))
 
-        // Another command on the screen: the end's command stays, with no tail.
-        let other = try #require(ProjectMemory.makeEntry(end("make lint", exit: 1), screen: screen))
+        // A failure whose session sent no output has no tail.
+        let other = try #require(ProjectMemory.makeEntry(end("make lint", exit: 1)))
         #expect(other.command == "make lint")
         #expect(other.failureTail == nil)
 
@@ -143,61 +144,46 @@ struct ProjectMemoryTests {
     }
 
     @Test
-    func a_failure_keeps_a_redacted_tail_of_its_output() throws {
-        let screen = """
-        app % API_TOKEN=abc ./deploy
-        connecting with API_TOKEN=abc
-        error: rejected
-        app %
-        """
-        let entry = try #require(ProjectMemory.makeEntry(end("API_TOKEN=abc ./deploy", exit: 1), screen: screen))
+    func a_failure_keeps_a_redacted_capped_tail_of_its_output() throws {
+        let output = "connecting with API_TOKEN=abc\nerror: rejected"
+        let entry = try #require(ProjectMemory.makeEntry(end("API_TOKEN=abc ./deploy", exit: 1, outputTail: output)))
         #expect(entry.command == "API_TOKEN=••• ./deploy")
         #expect(entry.failureTail == "connecting with API_TOKEN=•••\nerror: rejected")
         #expect(entry.outcome == .failure)
+
+        // The session sends more rows than the entry keeps.
+        let long = (1 ... 30).map { "line \($0)" }.joined(separator: "\n")
+        let capped = try #require(ProjectMemory.makeEntry(end("make", exit: 2, outputTail: long)))
+        #expect(capped.failureTail == MemoryEntry.tail(of: long))
+        #expect(capped.failureTail?.hasSuffix("line 30") == true)
+        #expect(capped.failureTail?.contains("line 1\n") == false)
     }
 
     @Test
     func a_success_keeps_no_output() throws {
-        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0), screen: "app % make\nbuilt\napp %"))
+        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0, outputTail: "built")))
         #expect(entry.command == "make")
         #expect(entry.failureTail == nil)
     }
 
-    /// The screen never names the command: an end with no command is not
-    /// recorded, whatever the screen shows.
     @Test
     func an_end_with_no_command_is_not_recorded() {
-        #expect(ProjectMemory.makeEntry(end(nil, exit: 0), screen: "app % make\nbuilt\napp %") == nil)
-        #expect(ProjectMemory.makeEntry(end("  ", exit: 1), screen: nil) == nil)
-    }
-
-    /// `clear` wipes the screen, so after it only the new prompt is left.
-    /// The end has the command all the same.
-    @Test
-    func a_command_that_clears_the_screen_is_recorded_from_its_end() throws {
-        let entry = try #require(ProjectMemory.makeEntry(end("clear", exit: 0), screen: "~/app on main\n❯"))
-        #expect(entry.command == "clear")
-    }
-
-    @Test
-    func a_right_prompt_on_the_screen_keeps_the_output() throws {
-        let screen = "~/app> make test        11:23:45 AM\nerror: 1 failed\n~/app>"
-        let entry = try #require(ProjectMemory.makeEntry(end("make test", exit: 2), screen: screen))
-        #expect(entry.command == "make test")
-        #expect(entry.failureTail == "error: 1 failed")
+        #expect(ProjectMemory.makeEntry(end(nil, exit: 1, outputTail: "error")) == nil)
+        #expect(ProjectMemory.makeEntry(end("  ", exit: 1)) == nil)
     }
 
     @Test
     func a_command_with_a_leading_space_is_recorded_and_redacted() throws {
-        let entry = try #require(ProjectMemory.makeEntry(end(" export TOKEN=abc", exit: 0), screen: nil))
+        let entry = try #require(ProjectMemory.makeEntry(end(" export TOKEN=abc", exit: 0)))
         #expect(entry.command == "export TOKEN=\(MemoryRedaction.mask)")
-        let failure = try #require(ProjectMemory.makeEntry(end(" make", exit: 1), screen: "app %  make\nerror\napp %"))
+        let failure = try #require(ProjectMemory.makeEntry(end(" make", exit: 1, outputTail: "error")))
         #expect(failure.command == "make")
+        #expect(failure.failureTail == "error")
     }
 
     @Test
     func an_end_with_no_start_has_no_duration() throws {
-        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0), screen: nil))
+        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0)))
         #expect(entry.duration == 0)
         #expect(end("make", exit: 0, startedAt: now.addingTimeInterval(-2.5)).duration == 2.5)
         // A clock that went back gives no negative duration.
