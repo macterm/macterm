@@ -763,22 +763,6 @@
         }
       }
     },
-    "A process is still running in this project. Removing it ends every process in its tabs." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 프로젝트에서 프로세스가 아직 실행 중입니다. 제거하면 탭의 모든 프로세스가 종료됩니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此项目中仍有进程正在运行。移除项目会结束其标签页中的所有进程。"
-          }
-        }
-      }
-    },
     "A process is still running in this session. Restarting the session ends it." : {
       "localizations" : {
         "ko" : {
@@ -4389,22 +4373,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跳到顶部"
-          }
-        }
-      }
-    },
-    "Keep Inside Projects" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "내부 프로젝트 유지"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保留内部项目"
           }
         }
       }
@@ -8158,22 +8126,6 @@
         }
       }
     },
-    "Remove All" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "모두 제거"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部移除"
-          }
-        }
-      }
-    },
     "Remove Current Project" : {
       "localizations" : {
         "ko" : {
@@ -8266,22 +8218,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要移除布局文件吗？"
-          }
-        }
-      }
-    },
-    "Remove project with running processes?" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "실행 중인 프로세스가 있는 프로젝트를 제거하시겠습니까?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要移除有进程正在运行的项目吗？"
           }
         }
       }
@@ -11300,21 +11236,51 @@
         }
       }
     },
-    "This project contains %lld projects, and a process is still running. Remove All also removes them. Keep Inside Projects moves them to the place of this project." : {
+    "This project contains %lld tabs and %lld nested projects." : {
       "localizations" : {
         "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This project contains %lld project, and a process is still running. Remove All also removes it. Keep Inside Projects moves it to the place of this project."
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This project contains %#@tabs@ and %#@projects@."
+          },
+          "substitutions" : {
+            "projects" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested project"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested projects"
+                    }
+                  }
                 }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This project contains %lld projects, and a process is still running. Remove All also removes them. Keep Inside Projects moves them to the place of this project."
+              }
+            },
+            "tabs" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tab"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tabs"
+                    }
+                  }
                 }
               }
             }
@@ -11323,32 +11289,62 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 프로젝트에는 프로젝트 %lld개가 있고 프로세스가 아직 실행 중입니다. 모두 제거는 이 프로젝트들도 제거합니다. 내부 프로젝트 유지는 이 프로젝트들을 이 프로젝트의 자리로 이동합니다."
+            "value" : "이 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此项目包含 %lld 个项目，且仍有进程正在运行。“全部移除”也会移除这些项目。“保留内部项目”会将它们移到此项目的位置。"
+            "value" : "此项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。"
           }
         }
       }
     },
-    "This project contains %lld projects. Remove All also removes them. Keep Inside Projects moves them to the place of this project." : {
+    "This project contains %lld tabs and %lld nested projects. A process is still running." : {
       "localizations" : {
         "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This project contains %lld project. Remove All also removes it. Keep Inside Projects moves it to the place of this project."
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This project contains %#@tabs@ and %#@projects@. A process is still running."
+          },
+          "substitutions" : {
+            "projects" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested project"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg nested projects"
+                    }
+                  }
                 }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "This project contains %lld projects. Remove All also removes them. Keep Inside Projects moves them to the place of this project."
+              }
+            },
+            "tabs" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tab"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg tabs"
+                    }
+                  }
                 }
               }
             }
@@ -11357,13 +11353,13 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 프로젝트에는 프로젝트 %lld개가 있습니다. 모두 제거는 이 프로젝트들도 제거합니다. 내부 프로젝트 유지는 이 프로젝트들을 이 프로젝트의 자리로 이동합니다."
+            "value" : "이 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다. 프로세스가 아직 실행 중입니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此项目包含 %lld 个项目。“全部移除”也会移除这些项目。“保留内部项目”会将它们移到此项目的位置。"
+            "value" : "此项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
           }
         }
       }
