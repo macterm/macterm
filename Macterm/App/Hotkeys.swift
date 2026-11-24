@@ -159,11 +159,15 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
         case .resizePaneDown: "cmd+shift+j"
         case .resizePaneUp: "cmd+shift+k"
         case .resizePaneRight: "cmd+shift+l"
-        // The arrow row of the same families: ⌃←/⌃→ step the tab through the
-        // sidebar's list (it runs top to bottom), and ⌘⌃ + an arrow moves the
-        // pane the way ⌘⌃ + h/j/k/l moves focus.
-        case .moveTabUp: "ctrl+left"
-        case .moveTabDown: "ctrl+right"
+        // ⌃⇧[/⌃⇧] move the tab through the sidebar's list (it runs top to
+        // bottom), beside ⌃[/⌃] that step through it. No ghostty default binds
+        // either chord. Like every ⇧ + symbol binding, the key matches by its
+        // US-ANSI position when ⇧ makes it type a character that is not a key
+        // token (`eventToken`), so on some layouts it is not the key that
+        // types [ or ]. ⌘⌃ + an arrow moves the pane the way ⌘⌃ + h/j/k/l
+        // moves focus.
+        case .moveTabUp: "ctrl+shift+["
+        case .moveTabDown: "ctrl+shift+]"
         case .movePaneLeft: "cmd+ctrl+left"
         case .movePaneDown: "cmd+ctrl+down"
         case .movePaneUp: "cmd+ctrl+up"
