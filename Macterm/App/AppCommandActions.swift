@@ -44,6 +44,7 @@ extension AppCommand {
              .capturePane,
              .copyMode,
              .readOnlyMode,
+             .resetZoom,
              .restartSession,
              .explainOutput,
              .autofillPassword,
@@ -259,6 +260,13 @@ extension AppCommand {
                   let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.sendBindingAction("toggle_readonly") }
+        case .resetZoom:
+            // The zoom of the focused pane's picture. At 1x there is nothing
+            // to reset.
+            guard let projectID, let pane = ctx.appState.focusedPane(for: projectID),
+                  let view = SurfaceRegistry.shared.view(of: pane), view.pictureZoom.isZoomed
+            else { return nil }
+            return { view.pictureZoom.reset() }
         case .restartSession:
             // The active tab, when one of its sessions runs an older build
             // than the app. Without one there is nothing to restart.

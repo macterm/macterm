@@ -116,8 +116,8 @@ def test_a_failed_command_is_recorded_with_its_secrets_masked(app, live_pane, re
 
 def test_nothing_is_recorded_while_memory_is_off(app, live_pane, recording):
     """Absence is proven with a later command: once a run made after
-    recording is back on is in the log, the earlier run's screen read is long
-    past, so a missing entry for it is a real refusal, not a slow write."""
+    recording is back on is in the log, the earlier run's end is long past,
+    so a missing entry for it is a real refusal, not a slow write."""
     app.cli("project", "memory", recording["id"], "--set", "off")
     nonce = uuid.uuid4().hex[:12]
     off = _script(START + f"printf 'off-{nonce}\\n'\nprintf '\\033]133;D;0\\007'\n")

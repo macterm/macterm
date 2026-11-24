@@ -84,11 +84,12 @@ extension PaneSessionHost {
     func paneInputUndelivered(_: Data) {}
 }
 
-/// One pane's session on a server, local or on a host: it makes the session
-/// when a `launch` is given, opens a channel, attaches, and feeds the host
-/// from the channel. Input, claims and sizes go back on the same channel, in
-/// order, from a queue of its own, so a stalled server never blocks the
-/// caller.
+/// One surface's view channel on a pane's session, local or on a host: it
+/// makes the session when a `launch` is given, opens a channel, attaches,
+/// and feeds the host from the channel. A pane's `PaneLink` makes the
+/// session once (`create`) and gives its views no launch. Input, claims
+/// and sizes go back on the same channel, in order, from a queue of its
+/// own, so a stalled server never blocks the caller.
 ///
 /// One rule for a lost link: a channel that ends with no exit reports
 /// `paneLinkLost`, and the session asks its endpoint for a connection again,
@@ -547,7 +548,13 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
     /// exited while no client read its status and makes a new one
     /// (`replace_exited`), as `zmx attach` did in v1.
     private func createSession(on connection: any ServerLink, _ launch: Launch) async throws {
-        let grid = host.paneGrid()
+        try await Self.create(on: connection, name: name, launch: launch, grid: host.paneGrid())
+    }
+
+    /// Makes the session `name` at the size `grid`, or finds it. A pane's
+    /// `PaneLink` calls it once for the pane, before any surface opens a
+    /// channel, so that two windows make one session.
+    static func create(on connection: any ServerLink, name: String, launch: Launch, grid: PaneGrid) async throws {
         let args = MactermProtocol.SessionCreate.Args(
             id: name,
             cwd: launch.cwd.map { ProtocolBin(Data($0.utf8)) },

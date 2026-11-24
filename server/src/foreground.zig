@@ -171,7 +171,36 @@ pub fn readProcess(gpa: std.mem.Allocator, pid: lib_posix.pid_t, comm_buf: []u8,
     }
 }
 
+/// The parent of `pid`, or null when it cannot be read. On macOS only: a
+/// session finds the shell under login(1) with it, and only macOS starts a
+/// shell that way.
+pub fn parentPid(pid: lib_posix.pid_t) ?lib_posix.pid_t {
+    if (builtin.os.tag != .macos) return null;
+    var info: macos.ShortBsdInfo = undefined;
+    const n = macos.proc_pidinfo(@intCast(pid), macos.PROC_PIDT_SHORTBSDINFO, 0, &info, @sizeOf(macos.ShortBsdInfo));
+    if (n != @sizeOf(macos.ShortBsdInfo) or info.pid != pid) return null;
+    return @intCast(info.ppid);
+}
+
 const macos = struct {
+    const PROC_PIDT_SHORTBSDINFO: c_int = 13;
+    /// `struct proc_bsdshortinfo` of <sys/proc_info.h>.
+    const ShortBsdInfo = extern struct {
+        pid: u32,
+        ppid: u32,
+        pgid: u32,
+        status: u32,
+        comm: [16]u8,
+        flags: u32,
+        uid: u32,
+        gid: u32,
+        ruid: u32,
+        rgid: u32,
+        svuid: u32,
+        svgid: u32,
+        rfu: u32,
+    };
+    extern "c" fn proc_pidinfo(pid: c_int, flavor: c_int, arg: u64, buffer: *anyopaque, buffersize: c_int) c_int;
     const CTL_KERN: c_int = 1;
     const KERN_PROCARGS2: c_int = 49;
     extern "c" fn proc_pidpath(pid: c_int, buffer: [*]u8, buffersize: u32) c_int;
@@ -317,6 +346,11 @@ test "foreground: parseProcArgs2 cuts at the output buffer" {
     var out: [5]u8 = undefined;
     try testing.expectEqualStrings("x abc", parseProcArgs2(raw[0 .. 4 + rest.len], &out, ' '));
     try testing.expectEqualStrings("", parseProcArgs2("ab", &out, ' '));
+}
+
+test "foreground: parentPid reads the parent of this process" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+    try testing.expectEqual(std.c.getppid(), parentPid(std.c.getpid()).?);
 }
 
 test "foreground: joinCmdline turns NUL separators into spaces" {

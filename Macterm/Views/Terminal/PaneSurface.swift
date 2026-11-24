@@ -87,12 +87,16 @@ final class PaneSurface: Identifiable {
         self.host = host
     }
 
-    /// Whether this surface's libghostty callbacks feed the pane: the first
-    /// surface of the pane. Every surface parses the same output, so only one
-    /// may count runs and notifications. Each callback asks when it fires
-    /// (`Pane.connectViewCallbacks`), so the next surface takes over when the
-    /// first one goes.
-    var isFeed: Bool { SurfaceRegistry.shared.isFeed(self) }
+    /// Whether this surface's libghostty callbacks count what it parses for
+    /// the pane (runs, notifications, project memory). Every surface parses
+    /// the same output, so one counts: the pane's link decides
+    /// (`PaneLink.counts`), and a plain ssh shell counts in the view that
+    /// shows it. A surface with no session counts its own output. Each
+    /// callback asks when it fires (`Pane.connectViewCallbacks`).
+    var countsOutput: Bool {
+        guard let host = nsView?.channelRuntime?.host, let link = host.link else { return true }
+        return link.showsPlainShell(in: host) ?? link.counts(host)
+    }
 
     /// The live terminal NSView. Created lazily the first time it's requested,
     /// destroyed explicitly with the pane or when its window goes. Owning the
@@ -262,12 +266,6 @@ final class PaneSurface: Identifiable {
         view.onBackgroundColorChange = nil
         view.onAdaptiveBackgroundChange = nil
         view.onOutputActivity = nil
-        view.onSessionState = nil
-        view.onSessionForeground = nil
-        view.onTtyMode = nil
-        view.onSessionMark = nil
-        view.onSessionStatus = nil
-        view.onAttention = nil
         view.onScrollbarUpdate = nil
         view.onLinkHover = nil
         view.onReadOnlyChange = nil
@@ -393,11 +391,17 @@ final class SurfaceRegistry {
     }
 
     /// The surface for the callers with no host in hand (the CLI, intents,
-    /// persistence and previews): the one in the key window, else one in a
-    /// visible window, else the first that has a view, else the first.
+    /// persistence and previews): the one that runs the pane's plain ssh
+    /// shell, because only it has the shell's screen and keys
+    /// (`Pane.plainShellSurfaceID`); else the one in the key window, else
+    /// one in a visible window, else the first that has a view, else the
+    /// first.
     func preferredSurface(of pane: Pane) -> PaneSurface {
         let all = surfaces(of: pane)
         let live = all.filter { $0.nsView != nil }
+        if let owner = pane.plainShellSurfaceID, let surface = all.first(where: { $0.id == owner }) {
+            return surface
+        }
         return live.first { $0.nsView?.window?.isKeyWindow == true }
             ?? live.first { $0.nsView?.window?.isVisible == true }
             ?? live.first
@@ -418,11 +422,6 @@ final class SurfaceRegistry {
     /// The preferred surface's scroll view, made if it has none.
     func ensureScrollView(of pane: Pane) -> SurfaceScrollView {
         preferredSurface(of: pane).ensureScrollView()
-    }
-
-    /// Whether `surface` is its pane's feed.
-    func isFeed(_ surface: PaneSurface) -> Bool {
-        entries[surface.pane.id]?.surfaces.first === surface
     }
 
     /// A new libghostty view for one of the pane's surfaces.
@@ -469,7 +468,7 @@ final class SurfaceRegistry {
 
     /// Destroy and drop one surface while another remains. A client that goes
     /// ends only its own channel: the session is the pane's, never the
-    /// surface's. When the first surface goes, the next one becomes the feed.
+    /// surface's.
     func retire(_ surface: PaneSurface) {
         let pane = surface.pane
         guard var all = entries[pane.id]?.surfaces, all.count > 1,

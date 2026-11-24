@@ -381,8 +381,8 @@ struct RemoteHostTests {
             return try await host.attachment(for: pane.sessionName, pane: pane, directory: directory, prompts: prompts)
         }
 
-        func driver(_ pane: Pane, _ view: RecordingPaneHost) -> RemotePaneDriver {
-            RemotePaneDriver(name: pane.sessionName, surface: view, hosts: hosts, slowConnectAfter: .seconds(60))
+        func driver(_ pane: Pane, _ view: RecordingPaneHost) -> OneViewDriver {
+            OneViewDriver(name: pane.sessionName, surface: view, hosts: hosts, slowConnectAfter: .seconds(60))
         }
 
         /// Leaves no session and no server behind.
