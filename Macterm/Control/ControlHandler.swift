@@ -86,23 +86,23 @@ final class ControlHandler {
         case "project.create": return try await projectCreate(args)
         case "project.select": return try projectSelect(args)
         case "project.rename": return try projectRename(args)
-        case "project.remove": return try projectRemove(args)
+        case "project.remove": return try await projectRemove(args)
         case "tab.list": return try tabList(args)
         case "tab.new": return try tabNew(args)
         case "tab.select": return try tabSelect(args)
         case "tab.move": return try tabMove(args)
         case "tab.rename": return try tabRename(args)
-        case "tab.close": return try tabClose(args)
+        case "tab.close": return try await tabClose(args)
         case "window.list": return windowList()
         case "window.new": return windowNew()
         case "window.close": return try windowClose(args)
         case "window.focus": return try windowFocus(args)
         case "pane.list": return try paneList(args)
-        case "pane.inspect": return try paneInspect(args)
+        case "pane.inspect": return try await paneInspect(args)
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
         case "pane.focus": return try paneFocus(args)
-        case "pane.close": return try paneClose(args)
+        case "pane.close": return try await paneClose(args)
         case "pane.run": return try paneRun(args)
         case "pane.key": return try paneKey(args)
         case "pane.zoom": return try paneZoom(args)
@@ -433,8 +433,9 @@ final class ControlHandler {
     /// Read-only terminal-core snapshot for a single pane (#165). Needs a live
     /// surface: a never-shown pane has no dimensions to report, so it's the
     /// same `no_surface` contract `pane.run` uses.
-    private func paneInspect(_ args: ControlArgs) throws -> ControlData {
+    private func paneInspect(_ args: ControlArgs) async throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
+        let needsConfirmQuit = await !appState.panesThatNeedConfirmClose([pane]).isEmpty
         guard let view = SurfaceRegistry.shared.view(of: pane), let size = view.surfaceSize else {
             throw ControlError(
                 code: .noSurface,
@@ -466,11 +467,12 @@ final class ControlHandler {
             foregroundPID: pid,
             foregroundArgv: argv,
             processExited: view.processExited,
-            // The pane-level signal, not the raw surface one — `pane inspect`
+            // The pane-level verdict, not the raw surface one — `pane inspect`
             // must report exactly what the close guards read, and for a
             // remote pane the surface's own verdict is meaningless (the local
-            // ssh client reads as a perpetually running program).
-            needsConfirmQuit: pane.needsConfirmClose,
+            // ssh client reads as a perpetually running program). For a
+            // plain shell, the host answers (`AppState.judgeClose`).
+            needsConfirmQuit: needsConfirmQuit,
             readOnly: SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly
         )
         return ControlData(inspect: inspect)
@@ -701,9 +703,9 @@ final class ControlHandler {
     /// sessions end. Files on disk (the project directory, its layout
     /// declaration) stay. The app asks before it removes a project that
     /// holds anything; the CLI refuses with a typed `busy` error only when a
-    /// process runs, and `--force` removes anyway. Same contract as
-    /// `tab.close`.
-    private func projectRemove(_ args: ControlArgs) throws -> ControlData {
+    /// process runs (never a dialog the CLI cannot answer), and `--force`
+    /// removes anyway. Same contract as `tab.close`.
+    private func projectRemove(_ args: ControlArgs) async throws -> ControlData {
         guard let selector = args.project, !selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ControlError(
                 code: .badRequest,
@@ -711,20 +713,28 @@ final class ControlHandler {
                 action: "run `macterm project list` for targets"
             )
         }
-        let project = try resolveProject(selector)
+        var project = try resolveProject(selector)
         // See `projectRename` — a sentinel is reachable only through this
         // selector, and tearing its workspace down is never valid.
         if Project.isSynthetic(project.id) {
             throw ControlError(code: .badRequest, message: "the \(project.name) section cannot be removed")
         }
 
-        let removed = appState.projectsRemoved(with: [project.id], store: projectStore)
-        if appState.closeNeedsConfirmation(projectIDs: removed, tabs: []), args.force != true {
-            throw ControlError(
-                code: .busy,
-                message: "a pane in that project or in a project inside it has a running program (removing kills its sessions)",
-                action: "re-run with --force to remove anyway"
-            )
+        // The same verdict `AppState.requestRemoveProject` waits for before
+        // it decides to ask, so the CLI refuses exactly when the app would
+        // have asked about a running process.
+        if args.force != true {
+            let removed = appState.projectsRemoved(with: [project.id], store: projectStore)
+            let busy = await appState.judgeClose(removed.flatMap(appState.panes(inProject:)))
+            // The wait for a host can end after the project changed or went.
+            project = try resolveProject(project.id.uuidString)
+            if busy {
+                throw ControlError(
+                    code: .busy,
+                    message: "a pane in that project or in a project inside it has a running program (removing kills its sessions)",
+                    action: "re-run with --force to remove anyway"
+                )
+            }
         }
 
         appState.removeProject(project.id, store: projectStore)
@@ -830,7 +840,7 @@ final class ControlHandler {
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
     }
 
-    private func tabClose(_ args: ControlArgs) throws -> ControlData {
+    private func tabClose(_ args: ControlArgs) async throws -> ControlData {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.close requires a tab selector")
         }
@@ -842,7 +852,7 @@ final class ControlHandler {
         // removal path.) The UI stages a confirmation dialog for busy tabs; a
         // headless caller gets a typed `busy` error instead — never a dialog
         // the CLI can't answer. Mirror-aware, like the app's own guard.
-        if appState.closeNeedsConfirmation(tab: tab), args.force != true {
+        if args.force != true, await appState.judgeClose(tab.splitRoot.allPanes()) {
             throw ControlError(
                 code: .busy,
                 message: "a pane in that tab has a running program (closing kills its session)",
@@ -933,14 +943,14 @@ final class ControlHandler {
         return ControlData(panes: [paneInfo(pane, in: target.tab, workspace: workspace)])
     }
 
-    private func paneClose(_ args: ControlArgs) throws -> ControlData {
+    private func paneClose(_ args: ControlArgs) async throws -> ControlData {
         let (project, workspace) = try resolveWorkspace(args)
         guard args.pane != nil || args.session != nil else {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
         let target = try resolvePane(args, in: workspace)
-        // The app's own guard (AppState.closeNeedsConfirmation).
-        if appState.closeNeedsConfirmation([target.pane]), args.force != true {
+        // The app's own verdict (AppState.judgeClose).
+        if args.force != true, await appState.judgeClose([target.pane]) {
             throw ControlError(
                 code: .busy,
                 message: "that pane has a running program (closing kills its session)",
