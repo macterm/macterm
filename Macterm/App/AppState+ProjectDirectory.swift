@@ -4,9 +4,10 @@ import Foundation
 /// folder. Open panes and their sessions stay where they are; a new tab
 /// that starts in the project's folder starts in the new one.
 extension AppState {
-    /// The pill of the screen, and the glyph of its palette row.
+    /// The pill of the screen. An input screen's pill has no glyph, so its
+    /// palette row has none either.
     static var changeProjectDirectoryPill: PalettePill {
-        PalettePill(title: AppCommand.changeProjectDirectory.title, icon: "folder")
+        PalettePill(title: AppCommand.changeProjectDirectory.title)
     }
 
     /// The palette screen of Change Project Directory for `project`: a typed
@@ -63,7 +64,8 @@ extension AppState {
 
     /// Set the folder of a local project to `path` (`~` expands). Refused,
     /// with the reason for the user, when the project is remote or gone, or
-    /// when `path` is not a folder on this Mac.
+    /// when `path` is not a folder on this Mac. The reason names the path as
+    /// the user typed it (`~` stays `~`).
     func setProjectDirectory(_ projectID: UUID, to path: String, projectStore: ProjectStore) -> PaletteCommit {
         guard let project = projectStore.projects.first(where: { $0.id == projectID }) else {
             return .refused(String(localized: "The project is not available"))
@@ -78,10 +80,12 @@ extension AppState {
         let expanded = (trimmed as NSString).expandingTildeInPath
         var isDirectory: ObjCBool = false
         guard expanded.hasPrefix("/"),
-              FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
-              isDirectory.boolValue
+              FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory)
         else {
-            return .refused(String(localized: "No folder at \(trimmed)"))
+            return .refused(String(localized: "Path \(trimmed) doesn't exist"))
+        }
+        guard isDirectory.boolValue else {
+            return .refused(String(localized: "\(trimmed) is not a directory"))
         }
         projectStore.setPath(id: projectID, to: expanded)
         return .done

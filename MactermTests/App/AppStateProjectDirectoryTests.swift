@@ -84,12 +84,14 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { nil }
         )
         let input = try #require(made)
-        #expect(input.commit(root + "/missing") == .refused("No folder at \(root)/missing"))
-        #expect(input.commit("relative/path") == .refused("No folder at relative/path"))
+        #expect(input.commit(root + "/missing") == .refused("Path \(root)/missing doesn't exist"))
+        #expect(input.commit("relative/path") == .refused("Path relative/path doesn't exist"))
+        let missingUnderHome = "~/macterm-no-such-folder-\(UUID().uuidString)"
+        #expect(input.commit(missingUnderHome) == .refused("Path \(missingUnderHome) doesn't exist"), "the reason keeps ~")
         #expect(input.commit("  ") == .refused("Type a folder path"))
         let file = root + "/file.txt"
         try "x".write(toFile: file, atomically: true, encoding: .utf8)
-        #expect(input.commit(file) == .refused("No folder at \(file)"), "a file is not a folder")
+        #expect(input.commit(file) == .refused("\(file) is not a directory"), "a file is not a folder")
         #expect(path(of: fixture) == root)
     }
 
@@ -138,9 +140,9 @@ struct AppStateProjectDirectoryTests {
             Issue.record("the command opens an input screen")
             return
         }
-        #expect(input.pill.title == "Change Project Directory")
+        #expect(input.pill == PalettePill(title: "Change Project Directory"), "an input screen's pill has no glyph")
         #expect(AppCommand.changeProjectDirectory.opensPaletteScreen, "its chord is answered with the palette up")
-        #expect(AppCommand.changeProjectDirectory.paletteIcon == "folder")
+        #expect(AppCommand.changeProjectDirectory.paletteIcon == nil)
 
         let item = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
             .first { $0.title == AppCommand.changeProjectDirectory.title }
@@ -159,7 +161,7 @@ struct AppStateProjectDirectoryTests {
         let muted = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
             .first { $0.title == AppCommand.changeProjectDirectory.title }
         #expect(muted?.isEnabled == false)
-        #expect(muted?.icon == "folder", "the muted row keeps the screen's glyph")
+        #expect(muted?.icon == nil, "an input screen has no glyph")
         #expect(fixture.state.setProjectDirectory(fixture.project.id, to: "/tmp", projectStore: fixture.store) == .refused(reason))
         #expect(path(of: fixture) == "devbox:~/proj")
     }

@@ -794,10 +794,16 @@ private struct PaletteScopePill: View {
     let isCurrent: Bool
 
     var body: some View {
-        Label {
-            Text(pill.title)
-        } icon: {
-            PaletteIconImage(icon: pill.icon, side: 14)
+        Group {
+            if let icon = pill.icon {
+                Label {
+                    Text(pill.title)
+                } icon: {
+                    PaletteIconImage(icon: icon, side: 14)
+                }
+            } else {
+                Text(pill.title)
+            }
         }
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)

@@ -188,6 +188,22 @@
         }
       }
     },
+    "%@ is not a directory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 디렉토리가 아닙니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是目录"
+          }
+        }
+      }
+    },
     "%@ is not a project, so it has no insights." : {
       "localizations" : {
         "ko" : {
@@ -6107,22 +6123,6 @@
         }
       }
     },
-    "No folder at %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@에 폴더 없음"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 处没有文件夹"
-          }
-        }
-      }
-    },
     "No keybinds match “%@”." : {
       "localizations" : {
         "ko" : {
@@ -7392,6 +7392,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "路径"
+          }
+        }
+      }
+    },
+    "Path %@ doesn't exist" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "경로 %@이(가) 없습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路径 %@ 不存在"
           }
         }
       }

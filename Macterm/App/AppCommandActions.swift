@@ -471,11 +471,10 @@ extension AppCommand {
     }
 
     /// The glyph of the command's palette row, also when the row is muted:
-    /// the pill glyph of the screen that it opens.
-    @MainActor
+    /// the pill glyph of the built-in screen that it opens. An input screen
+    /// has none.
     var paletteIcon: PaletteIcon? {
-        if self == .changeProjectDirectory { return AppState.changeProjectDirectoryPill.icon }
-        return paletteScope?.pill.icon
+        paletteScope?.pill.icon
     }
 
     /// The palette screen that this command opens now: a built-in screen
