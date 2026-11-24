@@ -167,7 +167,19 @@ struct AdaptiveIconRendererTests {
             element: AdaptiveIcon.crossElement,
             color: .init(red: 0, green: 1, blue: 0)
         )]
-        let result = await AdaptiveIconRenderer.render(request)
+        // DIAGNOSTIC (issue 0576, removed before merge): time three runs.
+        let clock = ContinuousClock()
+        var times: [String] = []
+        var result: Result<Data, AdaptiveIconRenderer.Failure> = .failure(.timedOut)
+        for _ in 0 ..< 3 {
+            let started = clock.now
+            result = await AdaptiveIconRenderer.render(request, timeout: 120)
+            times.append("\(started.duration(to: clock.now)) \(result.map { _ in "ok" })")
+        }
+        let started = clock.now
+        let echo = await AdaptiveIconRenderer.render(Self.request, helper: URL(fileURLWithPath: "/bin/echo"), timeout: 120)
+        times.append("echo \(started.duration(to: clock.now)) \(echo)")
+        throw RenderSummary(text: "DIAG0576 " + times.joined(separator: " | "))
         let png = try result.get()
         let image = try #require(NSBitmapImageRep(data: png))
         // The body fills 824/1024 of the canvas: the corner is empty, and the
