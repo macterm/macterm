@@ -409,7 +409,7 @@ struct CommandPalettePanel: View {
             // wipe.
             if let inputScope, inputScope.isFirstShow {
                 inputScope.isFirstShow = false
-                DispatchQueue.main.async { selectFieldText() }
+                selectFieldText(once: query)
             }
         }
         .onChange(of: availability.unavailable) {
@@ -545,6 +545,26 @@ struct CommandPalettePanel: View {
               let editor = window.fieldEditor(false, for: nil)
         else { return }
         editor.selectAll(nil)
+    }
+
+    /// Select `text` in the field when the field shows it. A screen entered
+    /// from a row of the palette sets its value in the query, and SwiftUI
+    /// writes it into the field only at the end of the run-loop turn. A
+    /// selection made before that is lost, because the write puts the cursor
+    /// at the end. The select therefore waits, one main-queue turn at a time,
+    /// until the field editor holds `text`, and stops when the user changed
+    /// the query or after `attempts` turns.
+    private func selectFieldText(once text: String, attempts: Int = 5) {
+        DispatchQueue.main.async {
+            guard !text.isEmpty, query == text,
+                  let editor = NSApp.keyWindow?.fieldEditor(false, for: nil)
+            else { return }
+            if editor.string == text {
+                editor.selectAll(nil)
+            } else if attempts > 1 {
+                selectFieldText(once: text, attempts: attempts - 1)
+            }
+        }
     }
 
     /// Tab autocompletes the input with the top result. Commands and projects
