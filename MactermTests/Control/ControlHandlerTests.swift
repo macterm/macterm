@@ -1421,6 +1421,16 @@ struct ControlHandlerTests {
     }
 
     @Test
+    func tab_close_refuses_a_tab_whose_plain_shell_its_host_calls_busy() async throws {
+        let fx = try plainShellProject(answer: true)
+        let response = await fx.handler.handle(request(
+            "tab.close", args: ControlArgs(project: fx.project.name, tab: "tab:1")
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(fx.state.workspaces[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } == true)
+    }
+
+    @Test
     func project_remove_refuses_a_plain_shell_that_its_host_calls_busy() async throws {
         let fx = try plainShellProject(answer: true)
         let response = await fx.handler.handle(request(

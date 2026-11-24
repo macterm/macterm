@@ -98,7 +98,7 @@ final class ControlHandler {
         case "window.close": return try windowClose(args)
         case "window.focus": return try windowFocus(args)
         case "pane.list": return try paneList(args)
-        case "pane.inspect": return try paneInspect(args)
+        case "pane.inspect": return try await paneInspect(args)
         case "pane.dump": return try paneDump(args)
         case "pane.split": return try paneSplit(args)
         case "pane.focus": return try paneFocus(args)
@@ -433,8 +433,9 @@ final class ControlHandler {
     /// Read-only terminal-core snapshot for a single pane (#165). Needs a live
     /// surface: a never-shown pane has no dimensions to report, so it's the
     /// same `no_surface` contract `pane.run` uses.
-    private func paneInspect(_ args: ControlArgs) throws -> ControlData {
+    private func paneInspect(_ args: ControlArgs) async throws -> ControlData {
         let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
+        let needsConfirmQuit = await !appState.panesThatNeedConfirmClose([pane]).isEmpty
         guard let view = SurfaceRegistry.shared.view(of: pane), let size = view.surfaceSize else {
             throw ControlError(
                 code: .noSurface,
@@ -466,11 +467,12 @@ final class ControlHandler {
             foregroundPID: pid,
             foregroundArgv: argv,
             processExited: view.processExited,
-            // The pane-level signal, not the raw surface one — `pane inspect`
+            // The pane-level verdict, not the raw surface one — `pane inspect`
             // must report exactly what the close guards read, and for a
             // remote pane the surface's own verdict is meaningless (the local
-            // ssh client reads as a perpetually running program).
-            needsConfirmQuit: pane.needsConfirmClose,
+            // ssh client reads as a perpetually running program). For a
+            // plain shell, the host answers (`AppState.judgeClose`).
+            needsConfirmQuit: needsConfirmQuit,
             readOnly: SurfaceRegistry.shared.preferredSurface(of: pane).isReadOnly
         )
         return ControlData(inspect: inspect)
@@ -711,7 +713,7 @@ final class ControlHandler {
                 action: "run `macterm project list` for targets"
             )
         }
-        let project = try resolveProject(selector)
+        var project = try resolveProject(selector)
         // See `projectRename` — a sentinel is reachable only through this
         // selector, and tearing its workspace down is never valid.
         if Project.isSynthetic(project.id) {
@@ -721,12 +723,17 @@ final class ControlHandler {
         // The same verdict `AppState.requestRemoveProject` waits for before
         // it decides to stage its dialog, so the CLI refuses exactly when the
         // app would have asked.
-        if args.force != true, await appState.judgeClose(appState.panes(inProject: project.id)) {
-            throw ControlError(
-                code: .busy,
-                message: "a pane in that project has a running program (removing kills its sessions)",
-                action: "re-run with --force to remove anyway"
-            )
+        if args.force != true {
+            let busy = await appState.judgeClose(appState.panes(inProject: project.id))
+            // The wait for a host can end after the project changed or went.
+            project = try resolveProject(project.id.uuidString)
+            if busy {
+                throw ControlError(
+                    code: .busy,
+                    message: "a pane in that project has a running program (removing kills its sessions)",
+                    action: "re-run with --force to remove anyway"
+                )
+            }
         }
 
         appState.removeProject(project.id)

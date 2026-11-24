@@ -338,7 +338,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeSelection)
 
         // An unknown project has no panes and so nothing to confirm.
-        #expect(!state.closeNeedsConfirmation(state.panes(inProject: UUID())))
+        #expect(state.panes(inProject: UUID()).isEmpty)
     }
 
     @Test
@@ -1444,9 +1444,19 @@ struct AppStateTests {
     func the_quit_rows_wait_for_every_host() async throws {
         let fx = try plainShellTab(answer: true)
         let panes = fx.tab.splitRoot.allPanes()
-        fx.state.paneNeedsConfirmClose = { _ in false }
+        let slow = try #require(panes.first { $0.id != fx.target })
+        // Both panes run a plain shell. The first answer is busy, and the
+        // second host answers idle later: a stop at the first busy answer
+        // would give the slow pane the surface's busy reading.
+        fx.state.paneRunsPlainShell = { _ in true }
+        fx.state.askPlainShellNeedsConfirmClose = { pane, _ in
+            if pane.id == fx.target { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+            return false
+        }
         let rows = await fx.state.panesThatNeedConfirmClose(panes)
         #expect(rows.map(\.id) == [fx.target])
+        #expect(!rows.contains { $0.id == slow.id })
     }
 
     // MARK: - applyLayout

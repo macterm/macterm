@@ -2108,7 +2108,7 @@ final class AppState {
     /// `target` names the request: a second request for a target that is
     /// still judged does nothing.
     func judgeClose(_ closing: [Pane], target: String, _ decide: @escaping @MainActor (Bool) -> Void) {
-        let plain = closing.filter(paneRunsPlainShell)
+        let plain = plainShellsToAsk(closing)
         guard !plain.isEmpty else {
             decide(closeNeedsConfirmation(closing))
             return
@@ -2125,7 +2125,7 @@ final class AppState {
     /// the Close Tab intent. It never stores a verdict: each call asks the
     /// hosts again.
     func judgeClose(_ closing: [Pane]) async -> Bool {
-        let plain = closing.filter(paneRunsPlainShell)
+        let plain = plainShellsToAsk(closing)
         guard !plain.isEmpty else { return closeNeedsConfirmation(closing) }
         let answers = await withCheckedContinuation { continuation in
             askPlainShells(plain, stopAtBusy: true) { continuation.resume(returning: $0) }
@@ -2145,6 +2145,14 @@ final class AppState {
             }
         }
         return panes.filter { answers[$0.id] ?? paneNeedsConfirmClose($0) }
+    }
+
+    /// The plain shells of `closing` whose verdict counts. A pane whose
+    /// session the close keeps (`pendingPinnedSessionNames`) is not asked,
+    /// so its busy answer cannot stop the wait for the others.
+    private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
+        let retained = pendingPinnedSessionNames()
+        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
     }
 
     /// Asks the host of each plain shell in `plain` whether the shell is
