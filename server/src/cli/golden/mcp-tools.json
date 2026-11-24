@@ -877,7 +877,7 @@
     },
     {
       "name": "session_send",
-      "description": "Types text into a session as it is. With submit, a newline follows. Type only into a session that you created or that the user named. To know when a command is done, type a unique marker after it and read session_history until the marker shows.",
+      "description": "Types text into a session as it is. With submit, a newline follows. Type only into a session that you created or that the user named.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1127,7 +1127,7 @@
     },
     {
       "name": "session_kill",
-      "description": "Ends a session and its shell. Read session_inspect first. If busy is true, ask the user.",
+      "description": "Ends a session and its shell. Read session_inspect first. If busy is not false, ask the user.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1282,7 +1282,7 @@
     },
     {
       "name": "project_remove",
-      "description": "Removes a project that holds no projects, with its tabs. Read session_inspect first. If busy is true, ask the user.",
+      "description": "Removes a project that holds no projects, with its tabs. Read session_inspect first. If busy is not false, ask the user.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1514,7 +1514,7 @@
     },
     {
       "name": "tab_close",
-      "description": "Closes a tab. Read session_inspect first. If busy is true, ask the user.",
+      "description": "Closes a tab. Read session_inspect first. If busy is not false, ask the user.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1768,7 +1768,7 @@
     },
     {
       "name": "pane_close",
-      "description": "Closes a pane. The last pane of a tab closes the tab. Read session_inspect first. If busy is true, ask the user.",
+      "description": "Closes a pane. The last pane of a tab closes the tab. Read session_inspect first. If busy is not false, ask the user.",
       "inputSchema": {
         "type": "object",
         "properties": {

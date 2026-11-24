@@ -4,6 +4,14 @@
 
 load test_helper
 
+# The teardown of test_helper, and the end of a background mcp process that
+# a failed test left.
+eval "helper_$(declare -f teardown)"
+teardown() {
+  [ -n "${mcp_pid:-}" ] && kill "$mcp_pid" 2>/dev/null
+  helper_teardown
+}
+
 # Sends each argument as one message to a new `macterm mcp` and prints the
 # replies, one on each line.
 mcp() {
@@ -59,7 +67,7 @@ call() {
   # The first call finds no server; the second call connects again.
   mkfifo "$RT/in"
   "$ZMX" mcp <"$RT/in" >"$RT/out" &
-  pid=$!
+  mcp_pid=$!
   exec 7>"$RT/in"
   printf '%s\n' "$(call session_list '{}')" >&7
   wait_lines 1
@@ -69,7 +77,7 @@ call() {
   printf '%s\n' "$(call session_list '{}')" >&7
   wait_lines 2
   exec 7>&-
-  wait "$pid"
+  wait "$mcp_pid"
   second=$(sed -n 2p "$RT/out")
   [ "$(printf '%s\n' "$second" | jq_py 'r["result"]["isError"]')" = "False" ]
   [ "$(printf '%s\n' "$second" | jq_py '[s["id"] for s in r["result"]["structuredContent"]["sessions"]]')" = "['mcp0']" ]
@@ -95,7 +103,7 @@ call() {
   "$ZMX" __create-session mcp2 -- /bin/sh
   run mcp "$(call session_info '{"id":"nope"}')"
   [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["isError"]')" = "True" ]
-  [[ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" == *"(not_found)" ]]
+  [[ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" == *"(not_found)" ]] || false
   run mcp "$(call session_send '{"id":"mcp2"}')"
   [ "$(printf '%s\n' "$output" | jq_py 'r["result"]["content"][0]["text"]')" = "arguments.text: expected a value: the key is required" ]
   run mcp "$(call server_exit '{}')"

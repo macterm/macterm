@@ -91,7 +91,7 @@ pub fn schema(arena: std.mem.Allocator, type_name: []const u8) error{OutOfMemory
     return root;
 }
 
-pub fn typeDef(name: []const u8) metadata.TypeDef {
+fn typeDef(name: []const u8) metadata.TypeDef {
     for (metadata.metadata.types) |t| if (std.mem.eql(u8, t.name, name)) return t;
     // `build` collects every type that a method holds.
     unreachable;
