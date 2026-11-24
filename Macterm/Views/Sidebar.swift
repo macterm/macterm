@@ -185,6 +185,31 @@ enum TabSlotDropItem: Transferable {
     }
 }
 
+/// The union that the `ForEach` of the projects inside a project accepts
+/// while the gap guard is on (`SidebarPresentationState.hasProjectDropSlots`):
+/// a project goes to the drop slot, and a tab or a pane goes after the last
+/// tab of that project.
+enum ProjectSlotDropItem: Transferable {
+    case tab(MovableTab)
+    case project(MovableProject)
+    case pane(MovablePane)
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(importedContentType: .mactermTab) { data in
+            try .tab(JSONDecoder().decode(MovableTab.self, from: data))
+        }
+        DataRepresentation(importedContentType: .mactermProject) { data in
+            try .project(JSONDecoder().decode(MovableProject.self, from: data))
+        }
+        DataRepresentation(importedContentType: .mactermPaneID) { data in
+            guard let pane = MovablePane(payload: data) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            return .pane(pane)
+        }
+    }
+}
+
 struct SidebarContent: View {
     @Environment(AppState.self)
     private var appState
@@ -249,9 +274,21 @@ struct SidebarContent: View {
                 }
             }
             // The project tree (design 013): each project is a disclosure
-            // of its tabs and then of the projects inside it.
-            ForEach(SidebarTree.nodes(in: projectStore)) { node in
-                projectSection(node)
+            // of its tabs and then of the projects inside it. A project
+            // dropped among the top-level rows goes to that slot. Only with
+            // the gap guard: see the notes at the end of this body.
+            let nodes = SidebarTree.nodes(in: projectStore)
+            if presentation.hasProjectDropSlots, !nodes.isEmpty {
+                ForEach(nodes) { node in
+                    projectSection(node)
+                }
+                .dropDestination(for: MovableProject.self) { items, offset in
+                    receiveProjectSlotDrop(items, into: nil, at: offset)
+                }
+            } else {
+                ForEach(nodes) { node in
+                    projectSection(node)
+                }
             }
             // Scratch tabs (#665) live below every project as flat rows, the
             // mirror of the pinned rows above: no header, and no separator.
@@ -279,12 +316,16 @@ struct SidebarContent: View {
                     }
                 }
             }
-            // Project reordering is a `MovableProject` drag from one header
-            // onto another (see `projectHeader`); the context menus' Move
-            // Up/Down are the fallback for precision moves. There is NO
-            // insertion-line path for projects — every native mechanism is
-            // broken at this outline level, each verified live, so don't
-            // re-attempt them:
+            // A project drag lands in one of two places: on a header, inside
+            // that project (see `projectHeader`), or in a drop slot among
+            // projects, the gap (the project `ForEach`s). The slots exist only
+            // while `OutlineGapDropGuard` is on the outline view
+            // (`hasProjectDropSlots`). AppKit proposes the slots between tab
+            // rows for a project drag; the guard moves each proposal to the
+            // nearest project slot and never proposes a slot that SwiftUI
+            // crashes on (an item with no rows, a closed item). Without the
+            // guard there is no insertion path for projects, for these
+            // reasons, each verified live:
             // - `.onMove` puts the List in reorder mode and hijacks the tab
             //   rows' `.draggable` (tab drag-and-drop never fired).
             // - `.dropDestination(for:)` on this OUTER ForEach (whose rows
@@ -293,11 +334,10 @@ struct SidebarContent: View {
             //   (OutlineListCoordinator.outlineView(_:acceptDrop:…) →
             //   HeterogeneousCollection.element(at:) assertion; macOS 27).
             //   The insertion LINE renders fine during the hover — it is the
-            //   accept that dies, so it can't even be risked as a cosmetic.
-            //   The tab ForEach below can use the same API because its rows
-            //   are one level down in the outline. The nested ForEach of
-            //   child projects in `projectSection` takes tab and pane drops
-            //   only, and only while its rows are visible.
+            //   accept that dies. A fake drag on a hosted List
+            //   (`SidebarDragFeedbackTests`) drops at the guard's slots with
+            //   no crash; SwiftUI crashes on a slot in an item with no rows,
+            //   which the guard never proposes.
             // - A List-level catch-all never fires: the outline view claims
             //   every drag over the sidebar, so unhandled drops don't bubble
             //   to enclosing views.
@@ -416,8 +456,14 @@ struct SidebarContent: View {
             }
         }
         // A drag over the rows opens a gap at the drop slot, as in the
-        // Finder sidebar, in place of the insertion line.
-        .background { SidebarDragFeedback() }
+        // Finder sidebar, in place of the insertion line. A project drag
+        // opens it only at the slots of projects.
+        .background {
+            SidebarDragFeedback(
+                branchTypes: [NSPasteboard.PasteboardType(UTType.mactermProject.identifier)],
+                isGuarded: $presentation.hasProjectDropSlots
+            )
+        }
     }
 
     /// Folders dropped on the sidebar: a project each, the last selected in
@@ -536,18 +582,36 @@ struct SidebarContent: View {
                 } else {
                     tabRows(tabs, of: project)
                 }
-                if open, !node.children.isEmpty {
+                if open, !node.children.isEmpty, presentation.hasProjectDropSlots {
+                    childSections(node, open: open)
+                        // A project dropped among these rows goes inside this
+                        // project, at that slot (see the notes in `body`). A
+                        // tab or a pane goes after the last tab, as below.
+                        .dropDestination(for: ProjectSlotDropItem.self) { items, offset in
+                            for item in items {
+                                switch item {
+                                case let .project(dragged):
+                                    receiveProjectSlotDrop([dragged], into: project.id, at: offset)
+                                case let .tab(tab):
+                                    receiveSlotDrop([.tab(tab)], into: project, at: tabCount(of: project))
+                                case let .pane(pane):
+                                    receiveSlotDrop([.pane(pane)], into: project, at: tabCount(of: project))
+                                }
+                            }
+                        }
+                } else if open, !node.children.isEmpty {
                     childSections(node, open: open)
                         // The outline gives the line between the last tab and
                         // the first project inside to this `ForEach`, not to
                         // the tab `ForEach` (ui-review 0522). A tab or a pane
                         // dropped among these rows goes after the last tab.
-                        // Tabs and panes only: a project drop on a `ForEach`
-                        // of disclosures crashes (see the notes in `body`).
+                        // Tabs and panes only: without the gap guard, a
+                        // project drop on a `ForEach` of disclosures crashes
+                        // (see the notes in `body`).
                         .dropDestination(for: TabSlotDropItem.self) { items, _ in
                             // An explicit slot: nil does not reorder a tab of
                             // this project (`receiveTabDrop`).
-                            receiveSlotDrop(items, into: project, at: appState.workspaces[project.id]?.tabs.count ?? 0)
+                            receiveSlotDrop(items, into: project, at: tabCount(of: project))
                         }
                 } else {
                     childSections(node, open: open)
@@ -568,6 +632,18 @@ struct SidebarContent: View {
     private func childSections(_ node: SidebarNode, open: Bool) -> some DynamicViewContent {
         ForEach(node.children) { child in
             projectSection(child, parentsOpen: open)
+        }
+    }
+
+    private func tabCount(of project: Project) -> Int {
+        appState.workspaces[project.id]?.tabs.count ?? 0
+    }
+
+    /// Projects dropped in a drop slot among the projects of `parent` (nil:
+    /// the top level). Each one goes to the slot, in drag order.
+    private func receiveProjectSlotDrop(_ items: [MovableProject], into parent: UUID?, at offset: Int) {
+        for (index, item) in items.enumerated() {
+            SidebarTree.drop(item.projectID, into: parent, at: offset + index, in: projectStore)
         }
     }
 
@@ -615,9 +691,8 @@ struct SidebarContent: View {
         // drag over the row before the tab ForEach's insertion mechanism sees
         // it (SwiftUI routes a drag to the topmost target by geometry with no
         // type fall-through), which kills the native drop feedback and broke
-        // tab reordering outright when tried. The cost is that a PROJECT drag
-        // over an expanded section's tab rows has nothing to land on — drop
-        // it on a project header instead. The drop slot won.
+        // tab reordering outright when tried. A PROJECT drag over these rows
+        // lands in the nearest project drop slot (`OutlineGapDropGuard`).
     }
 
     private func projectHeader(project: Project) -> some View {

@@ -17,18 +17,28 @@ private let logger = Logger(subsystem: appBundleID, category: "SidebarDragFeedba
 /// the collapsed native sidebar are in one window. Each of them has its own
 /// outline view.
 ///
-/// The style is set only after `OutlineGapExitGuard` is in place. Without
+/// The style is set only after `OutlineGapDropGuard` is in place. Without
 /// the guard, a drag that leaves the outline view crashes SwiftUI.
+/// `isGuarded` is true while the guard is in place. The List adds the drop
+/// slots of projects only then: the guard moves a project proposal to a slot
+/// that a project `ForEach` owns, so the gap opens where the project lands.
 ///
-/// The drop handlers do not change. The same `.dropDestination`s get the same
-/// offsets. A folder from Finder shows no gap, because
-/// `SidebarFolderDropTarget` takes that drag above the outline view.
+/// A folder from Finder shows no gap, because `SidebarFolderDropTarget` takes
+/// that drag above the outline view.
 struct SidebarDragFeedback: NSViewRepresentable {
+    /// The pasteboard types that only the rows of projects take.
+    var branchTypes: Set<NSPasteboard.PasteboardType> = []
+    @Binding var isGuarded: Bool
+
     func makeNSView(context _: Context) -> ProbeView {
         ProbeView()
     }
 
     func updateNSView(_ view: ProbeView, context _: Context) {
+        view.branchTypes = branchTypes
+        view.onGuardChange = { guarded in
+            if isGuarded != guarded { isGuarded = guarded }
+        }
         view.scheduleApply()
     }
 
@@ -43,6 +53,8 @@ struct SidebarDragFeedback: NSViewRepresentable {
         /// Passes left before the probe stops a search that finds nothing.
         private var triesLeft = 0
         private static let maxTries = 20
+        var branchTypes: Set<NSPasteboard.PasteboardType> = []
+        var onGuardChange: (Bool) -> Void = { _ in }
 
         override func hitTest(_: NSPoint) -> NSView? {
             nil
@@ -82,19 +94,21 @@ struct SidebarDragFeedback: NSViewRepresentable {
             guard let window, let root = window.contentView else { return }
             let frame = convert(bounds, to: nil)
             if let found = Self.outline(at: frame, in: root) {
-                switch OutlineGapExitGuard.install(on: found) {
+                switch OutlineGapDropGuard.install(on: found, branchTypes: branchTypes) {
                 case .installed:
                     outline = found
                     gapIsAllowed = true
                     if found.draggingDestinationFeedbackStyle != .gap {
                         found.draggingDestinationFeedbackStyle = .gap
                     }
+                    onGuardChange(true)
                     return
                 case .unsupported:
                     // Fail closed: the insertion line stays, and no later
                     // pass tries again.
                     outline = found
                     gapIsAllowed = false
+                    onGuardChange(false)
                     logger.error("no drop gap: the data source of the outline view has no validateDrop method")
                     return
                 case .noDataSource:
@@ -139,27 +153,35 @@ struct SidebarDragFeedback: NSViewRepresentable {
     }
 }
 
-/// Prevents a SwiftUI crash when a drag leaves an outline view whose drop
-/// feedback is `.gap`. Never set `.gap` on a SwiftUI outline view without it.
+/// Keeps the drop proposals of a SwiftUI outline view in the gap style to
+/// the ones that SwiftUI can take. Never set `.gap` on a SwiftUI outline view
+/// without it.
 ///
-/// In the gap style, `NSOutlineView.draggingExited` validates one more drop
-/// to close the gap. That call has no item and the child index -2. SwiftUI's
-/// data source reads its rows at that index, and the app crashes with
-/// "index -2 out of bounds". A drag leaves the outline view each time that
-/// it goes onto a row with its own `.dropDestination`, for example a project
-/// header. The regular style does not make this call.
+/// It replaces the `validateDrop` method of the data source class. On an
+/// outline view in the gap style it does two things. All other calls go to
+/// SwiftUI with no change. Other Lists keep the default style, so the guard
+/// does not touch their drags.
 ///
-/// The guard replaces the `validateDrop` method of the data source class.
-/// For a child index below `NSOutlineViewDropOnItemIndex` on an outline view
-/// in the gap style, it returns "no drop" and does not call SwiftUI. All
-/// other calls go to SwiftUI with no change. Other Lists keep the default
-/// style, so the guard does not touch their drags.
+/// 1. **The exit.** `NSOutlineView.draggingExited` validates one more drop
+///    to close the gap. That call has no item and the child index -2.
+///    SwiftUI's data source reads its rows at that index, and the app crashes
+///    with "index -2 out of bounds". A drag leaves the outline view each time
+///    that it goes onto a row with its own `.dropDestination`, for example a
+///    project header. The guard answers "no drop" and does not call SwiftUI.
+/// 2. **A branch drag** (a pasteboard type of `branchTypes`: a project). Only
+///    the `ForEach`s of expandable rows take it, but AppKit proposes the slots
+///    between the leaf rows (the tabs). SwiftUI refuses them, so the gap stays
+///    at the slot where the drag started and the drop lands somewhere else.
+///    The guard moves each proposal to the nearest slot among expandable rows
+///    (`branchSlot`) and gives that slot to AppKit, so the gap and the drop
+///    are at the same slot. It never proposes a slot in an item with no
+///    children or in a closed item: SwiftUI crashes on those.
 ///
 /// Measured with a fake drag on a hosted List (`SidebarDragFeedbackTests`):
 /// without the guard, the exit crashes. With it, the gap closes, a new drag
 /// opens the gap again, and the drop lands at its slot.
 @MainActor
-enum OutlineGapExitGuard {
+enum OutlineGapDropGuard {
     private typealias Validate = @convention(c) (
         AnyObject, Selector, NSOutlineView, NSDraggingInfo, AnyObject?, Int
     ) -> NSDragOperation
@@ -173,26 +195,53 @@ enum OutlineGapExitGuard {
         case noDataSource
     }
 
+    /// A drop slot: the child `index` of `item` (nil: the top level).
+    struct Slot {
+        let item: AnyObject?
+        let index: Int
+    }
+
     /// The classes that have the guard.
     private static var guardedClasses: Set<ObjectIdentifier> = []
 
+    /// The pasteboard types that only the `ForEach`s of expandable rows take.
+    private(set) static var branchTypes: Set<NSPasteboard.PasteboardType> = []
+
     /// Installs the guard on the class of the outline view's data source,
-    /// one time for each class.
-    static func install(on outline: NSOutlineView) -> Result {
+    /// one time for each class. `branchTypes` add to the types of a branch
+    /// drag.
+    static func install(
+        on outline: NSOutlineView,
+        branchTypes: Set<NSPasteboard.PasteboardType> = []
+    ) -> Result {
         guard let source = outline.dataSource else { return .noDataSource }
         guard let dataSourceClass = declaredClass(of: source) else { return .unsupported }
         let key = ObjectIdentifier(dataSourceClass)
-        if guardedClasses.contains(key) { return .installed }
+        if guardedClasses.contains(key) {
+            self.branchTypes.formUnion(branchTypes)
+            return .installed
+        }
         let selector = #selector(NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:))
         guard let method = class_getInstanceMethod(dataSourceClass, selector) else { return .unsupported }
         let original = unsafeBitCast(method_getImplementation(method), to: Validate.self)
         let replacement: @convention(block) (AnyObject, NSOutlineView, NSDraggingInfo, AnyObject?, Int)
             -> NSDragOperation = { source, view, info, item, index in
-                let isGapExit = MainActor.assumeIsolated {
-                    index < NSOutlineViewDropOnItemIndex && view.draggingDestinationFeedbackStyle == .gap
+                MainActor.assumeIsolated {
+                    guard view.draggingDestinationFeedbackStyle == .gap else {
+                        return original(source, selector, view, info, item, index)
+                    }
+                    if index < NSOutlineViewDropOnItemIndex { return [] }
+                    let types = Array(OutlineGapDropGuard.branchTypes)
+                    guard !types.isEmpty, info.draggingPasteboard.availableType(from: types) != nil else {
+                        return original(source, selector, view, info, item, index)
+                    }
+                    let location = view.convert(info.draggingLocation, from: nil)
+                    guard let slot = branchSlot(in: view, item: item, index: index, location: location) else {
+                        return []
+                    }
+                    view.setDropItem(slot.item, dropChildIndex: slot.index)
+                    return original(source, selector, view, info, slot.item, slot.index)
                 }
-                if isGapExit { return [] }
-                return original(source, selector, view, info, item, index)
             }
         // A method that the class only inherits gets its own copy first, so
         // that the superclass keeps its own method.
@@ -202,7 +251,38 @@ enum OutlineGapExitGuard {
             method_setImplementation(method, block)
         }
         guardedClasses.insert(key)
+        self.branchTypes.formUnion(branchTypes)
         return .installed
+    }
+
+    /// The slot among expandable rows that is nearest to AppKit's proposal
+    /// of the child `index` of `item`. `location` is in the outline view's
+    /// coordinates. Nil means no drop.
+    ///
+    /// - On the upper half of the row of `item`: before `item`.
+    /// - In an open `item` with expandable children: among them, at the
+    ///   first one or later (a proposal among the leaf rows moves down to
+    ///   the first expandable child).
+    /// - Else: after `item`.
+    /// - At the top level: the proposal with no change. SwiftUI refuses it
+    ///   when a `ForEach` of leaf rows owns that slot.
+    static func branchSlot(in outline: NSOutlineView, item: AnyObject?, index: Int, location: NSPoint) -> Slot? {
+        guard index >= 0 else { return nil }
+        guard let item else { return Slot(item: nil, index: index) }
+        let row = outline.row(forItem: item)
+        let position = outline.childIndex(forItem: item)
+        guard row >= 0, position >= 0 else { return nil }
+        let parent = outline.parent(forItem: item) as AnyObject?
+        if location.y < outline.rect(ofRow: row).midY {
+            return Slot(item: parent, index: position)
+        }
+        let count = outline.numberOfChildren(ofItem: item)
+        if outline.isItemExpanded(item), count > 0,
+           let firstBranch = (0 ..< count).first(where: { outline.isExpandable(outline.child($0, ofItem: item)) })
+        {
+            return Slot(item: item, index: min(max(index, firstBranch), count))
+        }
+        return Slot(item: parent, index: position + 1)
     }
 
     /// The class of `object`. When KVO observes the object, the runtime

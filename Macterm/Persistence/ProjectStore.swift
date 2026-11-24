@@ -121,6 +121,25 @@ final class ProjectStore {
         return true
     }
 
+    /// Move a project into the project `parent` (nil: the top level), at
+    /// the place `offset` among the rows of `parent`. The offset counts the
+    /// rows before the move, as a drop slot does: a project that is already
+    /// in `parent` keeps the place that the slot shows. Returns false where
+    /// `move(_:into:)` does.
+    @discardableResult
+    func move(_ id: UUID, into parent: UUID?, at offset: Int) -> Bool {
+        var siblings = children(of: parent).map(\.id)
+        var slot = min(max(offset, 0), siblings.count)
+        if let current = siblings.firstIndex(of: id) {
+            siblings.remove(at: current)
+            if current < slot { slot -= 1 }
+        }
+        guard move(id, into: parent, saving: false) else { return false }
+        siblings.insert(id, at: slot)
+        reorder(parent: parent, ids: siblings)
+        return true
+    }
+
     /// Put the rows of `parent` in the order of `ids`. An id that is not a
     /// row of `parent` is ignored. A row of `parent` that `ids` does not
     /// name keeps its order after the named ones.
