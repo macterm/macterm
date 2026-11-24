@@ -133,12 +133,12 @@ struct ZmxReaperTests {
     @Test
     func local_orphans_are_running_unclaimed_sessions_that_no_client_shows() {
         let sessions = [
-            LocalSession(name: "macterm-a", clients: 0), // orphan → end
-            LocalSession(name: "macterm-b", clients: 0), // claimed → spare
-            LocalSession(name: "macterm-c", clients: 1), // shown → spare
-            LocalSession(name: "macterm-d", clients: nil), // unknown count → spare
-            LocalSession(name: "macterm-e", isRunning: false, clients: 0), // exited → the app ends it anyway
-            LocalSession(name: "user-f", clients: 0), // foreign prefix → spare
+            SessionInfo(name: "macterm-a", clients: 0), // orphan → end
+            SessionInfo(name: "macterm-b", clients: 0), // claimed → spare
+            SessionInfo(name: "macterm-c", clients: 1), // shown → spare
+            SessionInfo(name: "macterm-d", clients: nil), // unknown count → spare
+            SessionInfo(name: "macterm-e", isRunning: false, clients: 0), // exited → the app ends it anyway
+            SessionInfo(name: "user-f", clients: 0), // foreign prefix → spare
         ]
         #expect(ZmxReaper.localOrphans(in: sessions, known: ["macterm-b"]) == ["macterm-a"])
         #expect(ZmxReaper.localOrphans(in: [], known: []).isEmpty)
@@ -174,24 +174,24 @@ struct ZmxEnvironmentTests {
 }
 
 @MainActor
-struct RemoteForegroundTests {
+struct SessionForegroundTests {
     @Test
     func a_foreground_message_gives_the_same_shape_as_a_probe_line() {
         let message = MactermProtocol.Foreground(
             idle: false, shell: false, comm: ProtocolBin(Data("/usr/bin/hx".utf8)), args: ProtocolBin(Data("hx a;b.md".utf8))
         )
-        #expect(RemoteForeground(message) == RemoteForeground(comm: "/usr/bin/hx", isIdle: false, isShell: false, command: "hx a;b.md"))
+        #expect(SessionForeground(message) == SessionForeground(comm: "/usr/bin/hx", isIdle: false, isShell: false, command: "hx a;b.md"))
     }
 
     @Test
     func an_idle_shell_with_no_shell_verdict_and_no_command_line() {
         let message = MactermProtocol.Foreground(idle: true, shell: nil, comm: ProtocolBin(Data("-zsh".utf8)), args: ProtocolBin(Data()))
-        #expect(RemoteForeground(message) == RemoteForeground(comm: "-zsh", isIdle: true, isShell: nil, command: nil))
+        #expect(SessionForeground(message) == SessionForeground(comm: "-zsh", isIdle: true, isShell: nil, command: nil))
     }
 
     @Test
     func a_message_with_no_name_is_not_a_sample() {
         let message = MactermProtocol.Foreground(idle: false, shell: false, comm: ProtocolBin(Data()), args: ProtocolBin(Data("hx".utf8)))
-        #expect(RemoteForeground(message) == nil)
+        #expect(SessionForeground(message) == nil)
     }
 }

@@ -125,6 +125,9 @@ struct WindowSnapshot: Codable {
     /// unchanged set writes the same file. nil (an older snapshot) opens only
     /// the active project, as before.
     var expandedProjectIDs: [UUID]?
+    /// Whether the window showed the project screen of `activeProjectID`
+    /// (`WindowState.showsProjectScreen`). nil (an older snapshot) means a tab.
+    var showsProjectScreen: Bool?
 
     /// The saved windows with the retired app-wide panel value
     /// (`Preferences.takeLegacyProjectMemoryPanelVisible`) in each window

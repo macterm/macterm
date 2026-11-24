@@ -1,0 +1,713 @@
+import CryptoKit
+import Foundation
+import os
+
+private let logger = Logger(subsystem: appBundleID, category: "SSHConnections")
+
+/// One ssh connection for each host (design/005, step 1). Every command to a
+/// host goes over that connection, so the user logs in once for each host,
+/// as with `ssh host` in a terminal.
+///
+/// - If the user's own ssh config names a ControlPath (`ssh -G`) and a master
+///   answers there (`ssh -O check`), Macterm uses it and opens no master.
+/// - Otherwise Macterm runs `ssh -M -N` with its own ControlPath in
+///   `<App Support>/cm/`. Its prompts go to `macterm askpass`
+///   (`SSH_ASKPASS_REQUIRE=force`), which asks the GUI (`SSHLoginPrompts`).
+///   The GUI answers only the bundled askpass, started under one of these
+///   masters while it logs in (`askpassOwner(forPeer:)`, design/006 §4).
+/// - Macterm's master stays after quit, until the link drops.
+///   `ControlPersist=yes` on the command line wins over the user's config:
+///   after the login, ssh moves the master into the background, and the ssh
+///   that Macterm started exits. The next launch finds the master on the
+///   same path and logs in to no host again. `ServerAlive*` ends the master
+///   when the host stops answering, after a network change or a long sleep.
+/// - Each connect reads `ssh -G` again. The own path is a hash of where it
+///   sends the host (`SSHControlPath.endpointKeys`), so a changed config
+///   logs in again, also while Macterm runs.
+/// - `connections.json` in the control directory records the path of each
+///   master that Macterm started. The hosts of an ssh config cannot be
+///   listed (`Host *.lan`), so the record is the list. When the config no
+///   longer gives the recorded path, or `ssh -G` refuses the config, Macterm
+///   ends the old master: at the next connect, and at launch for each
+///   record (`endStaleConnections`). A master that two destinations record
+///   ends only with the last record (`release`).
+/// - A command over the master (`run`) never logs in by itself: `BatchMode`
+///   refuses a prompt, and `ProxyCommand=/usr/bin/false` stops the direct
+///   connection that ssh tries when the master does not answer. It fails
+///   closed.
+///
+/// - A login that writes text and asks nothing for `SSHLoginNotice.delay`
+///   (a host that waits for a log-in in the browser) reports ssh's last
+///   line to `loginUI`, until the login ends or a question comes.
+///
+/// Each new login writes a log line with the count for its host in this run
+/// (`ssh login: host=… logins=…`), so that the logins of a day can be
+/// counted from the log (design/005, the roaming-link question).
+@MainActor
+final class SSHConnections {
+    struct Configuration {
+        /// The ssh of PATH, through `/usr/bin/env`, as every background
+        /// operation of a remote project.
+        var ssh: [String] = ["/usr/bin/env", "ssh"]
+        /// Options in front of every other argument. Tests give `-F <config>`.
+        var options: [String] = []
+        /// Where Macterm's own ControlPaths go. Mode 0700.
+        var controlDirectory: URL
+        /// The `SSH_ASKPASS` program of a master. nil: ssh's own default.
+        var askpass: String?
+        /// More environment for a master (the socket that askpass reports to).
+        var environment: [String: String] = [:]
+        /// The executable that a peer of `ssh.askpass` must be. nil: any.
+        var askpassExecutable: String?
+
+        var recordFile: URL { controlDirectory.appendingPathComponent("connections.json") }
+
+        static var live: Configuration {
+            Configuration(
+                controlDirectory: FileStorage.appSupportDirectory().appendingPathComponent("cm", isDirectory: true),
+                askpass: Bundle.main.resourceURL?.appendingPathComponent("ssh-bridge/macterm-askpass").path,
+                environment: [SSHConnections.askpassSocketVariable: ControlSocketServer.defaultSocketPath()],
+                // The shim execs the bundled CLI, so the peer runs it.
+                askpassExecutable: Bundle.main.resourceURL?.appendingPathComponent("bin/macterm").resolvingSymlinksInPath().path
+            )
+        }
+    }
+
+    /// Tells `macterm askpass` which app to ask: the one that started its ssh.
+    nonisolated static let askpassSocketVariable = "MACTERM_ASKPASS_SOCKET"
+
+    /// How a host is reached.
+    struct Route: Equatable {
+        var controlPath: String
+        /// The user's own ControlMaster, which Macterm never ends.
+        var isUsersOwn: Bool
+    }
+
+    enum Failure: Error, Equatable, CustomStringConvertible {
+        case invalidDestination(String)
+        case controlPathTooLong(String)
+        case cannotStart(String)
+        /// `ssh -G` refused the config (exit 255). ssh's last line.
+        case configUnreadable(String)
+        /// The master exited before it listened: a refused login, a
+        /// failed prompt, or no route to the host. ssh's last line of
+        /// stderr.
+        case loginFailed(String)
+        /// The user cancelled a question of the login.
+        case cancelled
+        /// No connection is up, and the caller asked for no login.
+        case notConnected
+
+        var description: String {
+            switch self {
+            case let .invalidDestination(destination): "not an ssh destination: \(destination)"
+            case let .controlPathTooLong(path): "the control path is too long for a socket: \(path)"
+            case let .cannotStart(reason): "cannot start ssh: \(reason)"
+            case let .configUnreadable(reason): "ssh cannot read the config: \(reason)"
+            case let .loginFailed(reason): reason.isEmpty ? "the ssh login failed" : "the ssh login failed: \(reason)"
+            case .cancelled: "the ssh login was cancelled"
+            case .notConnected: "no ssh connection is up"
+            }
+        }
+    }
+
+    static let shared = SSHConnections(configuration: .live)
+
+    private let configuration: Configuration
+    /// The own path of each master that Macterm started, by destination.
+    /// Kept in `connections.json`, because a master outlives the app.
+    private var owned: [String: String]
+    /// The ssh of each login that has not finished. After the login, the
+    /// master is in the background and is no child of Macterm.
+    private var loggingIn: [String: Process] = [:]
+    /// The login in flight for each host, and whether it may ask the user.
+    private var connecting: [String: (task: Task<Route, Error>, prompts: Bool)] = [:]
+    /// Masters whose login the user cancelled.
+    private var cancelled: Set<pid_t> = []
+    /// New logins for each host in this run.
+    private(set) var logins: [String: Int] = [:]
+    /// The GUI's side of a login: its notices, and the end of its
+    /// questions when the ssh of a login exits. With none (before launch
+    /// sets it, and in tests), a login shows no notice and an install
+    /// question is declined.
+    weak var loginUI: (any LoginUI)?
+    /// Questions that are open for each master.
+    private var asking: [pid_t: Int] = [:]
+
+    init(configuration: Configuration) {
+        self.configuration = configuration
+        owned = Self.readRecord(at: configuration.recordFile)
+    }
+
+    /// The route to `destination`, after the login if there is none yet.
+    /// Calls for one host at the same time share one login. With `login`
+    /// false, only a connection that is up: it throws `notConnected` and
+    /// never asks the user (a pane close ends its session with it). With
+    /// `prompts` false, the login runs in `BatchMode` with no askpass: it
+    /// succeeds only when it needs no answer from the user (a key with no
+    /// passphrase, an agent). An automatic reconnect logs in so.
+    func connect(_ destination: String, login: Bool = true, prompts: Bool = true) async throws -> Route {
+        guard Self.isValidDestination(destination) else { throw Failure.invalidDestination(destination) }
+        guard login else { return try await liveRoute(destination) }
+        while let busy = connecting[destination] {
+            if busy.prompts || !prompts { return try await busy.task.value }
+            // A quiet login cannot answer a caller that may ask (a key): it
+            // stops, and that caller logs in itself.
+            busy.task.cancel()
+            _ = try? await busy.task.value
+            if connecting[destination]?.task == busy.task { connecting[destination] = nil }
+        }
+        let task = Task { try await self.open(destination, prompts: prompts) }
+        connecting[destination] = (task, prompts)
+        defer { if connecting[destination]?.task == task { connecting[destination] = nil } }
+        return try await task.value
+    }
+
+    /// Run `command` on the host over its connection. It never logs in by
+    /// itself (see the type's comment). `input` is the command's stdin; nil
+    /// is `/dev/null`. With `login` false, only a connection that is up
+    /// (`connect(_:login:prompts:)`).
+    func run(
+        _ destination: String,
+        _ command: String,
+        input: FileHandle? = nil,
+        login: Bool = true,
+        timeout: Duration = .seconds(30)
+    ) async throws -> ProcessRunner.Outcome {
+        let route = try await connect(destination, login: login)
+        guard let executable = configuration.ssh.first,
+              let outcome = await ProcessRunner.run(
+                  executable,
+                  sshArguments(commandArguments(route, destination, command)),
+                  environment: ProcessInfo.processInfo.environment,
+                  input: input,
+                  timeout: timeout
+              )
+        else { throw Failure.cannotStart(configuration.ssh.joined(separator: " ")) }
+        return outcome
+    }
+
+    /// Start `command` on the host over its connection, with `stdio` as its
+    /// stdin and stdout. It is for a command that does not end by itself
+    /// (the server's proxy). stderr goes to the returned pipe. The caller
+    /// ends the process.
+    func start(
+        _ destination: String,
+        _ command: String,
+        stdio: FileHandle,
+        login: Bool = true
+    ) async throws -> (Process, CollectedPipe) {
+        let route = try await connect(destination, login: login)
+        guard let executable = configuration.ssh.first else { throw Failure.cannotStart("no ssh") }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = sshArguments(commandArguments(route, destination, command))
+        process.environment = ProcessInfo.processInfo.environment
+        process.standardInput = stdio
+        process.standardOutput = stdio
+        let stderr = CollectedPipe()
+        process.standardError = stderr.pipe
+        do {
+            try process.run()
+        } catch {
+            stderr.stop()
+            throw Failure.cannotStart(EnglishErrorText.describe(error))
+        }
+        return (process, stderr)
+    }
+
+    private func commandArguments(_ route: Route, _ destination: String, _ command: String) -> [String] {
+        [
+            "-S", route.controlPath,
+            "-o", "ControlMaster=no",
+            "-o", "BatchMode=yes",
+            "-o", "ProxyCommand=/usr/bin/false",
+            // A `RemoteCommand` of the user's config refuses a command line.
+            "-o", "RemoteCommand=none",
+            "-T", "--", destination, command,
+        ]
+    }
+
+    /// The argv of an ssh channel over `route` that runs `command` on a tty:
+    /// a remote pane (0057). It never logs in by itself, as `run`; `-q`
+    /// keeps ssh's own notices (`Shared connection to box closed.`) out of
+    /// the pane. A lost connection exits 255.
+    func ttyArguments(_ route: Route, _ destination: String, _ command: String) -> [String] {
+        configuration.ssh + configuration.options + [
+            "-S", route.controlPath,
+            "-o", "ControlMaster=no",
+            "-o", "BatchMode=yes",
+            "-o", "ProxyCommand=/usr/bin/false",
+            "-o", "RemoteCommand=none",
+            "-q", "-t", "--", destination, command,
+        ]
+    }
+
+    /// The route of a connection that is up, with no login: the user's own
+    /// master, or Macterm's.
+    private func liveRoute(_ destination: String) async throws -> Route {
+        let config = try await resolvedConfig(destination)
+        if let path = SSHControlPath.userPath(fromConfig: config), await controlAnswers(destination, at: path) {
+            return Route(controlPath: path, isUsersOwn: true)
+        }
+        let own = SSHControlPath.own(forConfig: config, in: configuration.controlDirectory)
+        guard await controlAnswers(destination, at: own) else { throw Failure.notConnected }
+        return Route(controlPath: own, isUsersOwn: false)
+    }
+
+    /// The destination as ssh resolves it from the user's config (`ssh -G`):
+    /// `user@hostname:port`. Two names for one machine give one value, and
+    /// one name that the config points at another machine gives another.
+    /// nil when `ssh -G` fails.
+    func resolvedDestination(_ destination: String) async -> String? {
+        guard Self.isValidDestination(destination) else { return nil }
+        let outcome = await runSSH(["-G", "--", destination], timeout: .seconds(5))
+        guard let outcome, outcome.status == 0 else { return nil }
+        return SSHControlPath.resolvedDestination(fromConfig: outcome.stdout)
+    }
+
+    /// The host name that a UDP packet can go to directly: `hostname` of
+    /// `ssh -G`, unless the config sends the connection through a jump host
+    /// or a proxy command (UDP would not take that way). nil when `ssh -G`
+    /// fails.
+    func directHostname(_ destination: String) async -> String? {
+        guard Self.isValidDestination(destination) else { return nil }
+        let outcome = await runSSH(["-G", "--", destination], timeout: .seconds(5))
+        guard let outcome, outcome.status == 0 else { return nil }
+        return SSHControlPath.directHostname(fromConfig: outcome.stdout)
+    }
+
+    /// End Macterm's master for `destination`, or its login. A user's master
+    /// stays.
+    func disconnect(_ destination: String) async {
+        loggingIn[destination]?.terminate()
+        loggingIn[destination] = nil
+        let current = try? await SSHControlPath.own(forConfig: resolvedConfig(destination), in: configuration.controlDirectory)
+        await release(destination)
+        if let current, !owned.values.contains(current) {
+            await endConnection(destination, at: current)
+        }
+    }
+
+    /// At launch: end each recorded master whose path the config no longer
+    /// gives, or whose config `ssh -G` refuses. Drop the record of a master
+    /// that is gone. An `ssh -G` that fails in another way (a time-out)
+    /// changes nothing.
+    func endStaleConnections() async {
+        for (destination, path) in owned {
+            let current: String?
+            do {
+                current = try await SSHControlPath.own(forConfig: resolvedConfig(destination), in: configuration.controlDirectory)
+            } catch Failure.configUnreadable(_) {
+                current = nil
+            } catch {
+                continue
+            }
+            guard owned[destination] == path else { continue }
+            if current == path {
+                // A connect in flight can start a master on this same path.
+                if await !controlAnswers(destination, at: path), connecting[destination] == nil, owned[destination] == path {
+                    record(destination, nil)
+                }
+                continue
+            }
+            await release(destination)
+        }
+    }
+
+    /// The user cancelled a question of the login of the connection `pid`. End the
+    /// login: ssh would ask again (the next password try, the next method).
+    /// Only the master gets the signal. The ssh of a `ProxyJump` host under
+    /// it can ask once more; the app refuses that askpass (no master), and
+    /// the ssh then exits on the closed connection.
+    func cancelLogin(connectionPID pid: pid_t) {
+        guard let process = loggingIn.values.first(where: { $0.processIdentifier == pid }), process.isRunning else { return }
+        cancelled.insert(pid)
+        process.terminate()
+    }
+
+    /// Run `body`, a question of the login of the connection `pid`. While
+    /// it runs, the login shows no notice.
+    func asking<T>(connectionPID pid: pid_t, _ body: () async -> T) async -> T {
+        asking[pid, default: 0] += 1
+        defer {
+            asking[pid, default: 1] -= 1
+            if asking[pid] == 0 { asking[pid] = nil }
+        }
+        return await body()
+    }
+
+    /// At quit: end each login that has not finished. A master that has
+    /// logged in stays for the next launch.
+    func endLogins() {
+        for process in loggingIn.values {
+            process.terminate()
+        }
+        loggingIn.removeAll()
+    }
+
+    /// The host and the master pid for an askpass `pid`, or nil when no
+    /// master of Macterm started that process.
+    ///
+    /// - The peer must run `askpassExecutable`. A pid alone can be reused.
+    /// - A master of Macterm that logs in must be its parent, or an ancestor
+    ///   up to `askpassAncestry` steps above it. ssh runs its askpass with a direct
+    ///   `exec` (`readpass.c`), so for the login of the host itself the
+    ///   parent is the master. A `ProxyJump` host's login comes from an ssh
+    ///   that the master started through `sh -c`, two steps lower.
+    func askpassOwner(forPeer pid: pid_t) -> (host: String, pid: pid_t)? {
+        if let expected = configuration.askpassExecutable, !Self.process(pid, runs: expected) { return nil }
+        var ancestor = pid
+        for _ in 0 ..< Self.askpassAncestry {
+            guard let parent = ProcessInspector.parentPID(of: ancestor), parent > 1 else { return nil }
+            for (host, process) in loggingIn where process.isRunning && process.processIdentifier == parent {
+                return (host, parent)
+            }
+            ancestor = parent
+        }
+        return nil
+    }
+
+    static let askpassAncestry = 4
+
+    /// Whether `pid` runs the executable at `path`, with links resolved.
+    nonisolated static func process(_ pid: pid_t, runs path: String) -> Bool {
+        guard let actual = ProcessInspector.executablePath(pid: pid) else { return false }
+        return URL(fileURLWithPath: actual).resolvingSymlinksInPath().path == URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    }
+
+    // MARK: - Connect
+
+    private func open(_ destination: String, prompts: Bool) async throws -> Route {
+        let config: String
+        do {
+            config = try await resolvedConfig(destination)
+        } catch let failure as Failure {
+            if case .configUnreadable = failure { await release(destination) }
+            throw failure
+        }
+        let own = SSHControlPath.own(forConfig: config, in: configuration.controlDirectory)
+        if let old = owned[destination], old != own {
+            logger.info("ssh: host=\(destination, privacy: .public) has a changed config, its old master ends")
+            await release(destination)
+        }
+        if let path = SSHControlPath.userPath(fromConfig: config), await controlAnswers(destination, at: path) {
+            logger.debug("ssh: host=\(destination, privacy: .public) uses the user's master")
+            return Route(controlPath: path, isUsersOwn: true)
+        }
+        return try await startConnection(destination, path: own, prompts: prompts)
+    }
+
+    /// The output of `ssh -G`. A config that ssh cannot read fails here, as
+    /// the login would.
+    private func resolvedConfig(_ destination: String) async throws -> String {
+        guard let outcome = await runSSH(["-G", "--", destination], timeout: .seconds(5)) else {
+            throw Failure.cannotStart(configuration.ssh.joined(separator: " "))
+        }
+        let reason = SSHControlPath.lastLine(of: outcome.stderr)
+        switch outcome.status {
+        case 0: return outcome.stdout
+        // ssh's exit for an error. A time-out is SIGTERM.
+        case 255: throw Failure.configUnreadable(reason)
+        default: throw Failure.cannotStart("ssh -G exited with \(outcome.status) \(reason)")
+        }
+    }
+
+    /// Drop the record of `destination`, and end its master unless another
+    /// destination records the same master (`box` and `bob@box` can).
+    private func release(_ destination: String) async {
+        guard let path = owned[destination] else { return }
+        record(destination, nil)
+        guard !owned.values.contains(path) else { return }
+        await endConnection(destination, at: path)
+    }
+
+    private func controlAnswers(_ destination: String, at path: String) async -> Bool {
+        await runControl("check", destination, at: path)?.status == 0
+    }
+
+    /// End the master on `path`. A user's master is never on one of
+    /// Macterm's own paths.
+    private func endConnection(_ destination: String, at path: String) async {
+        guard await controlAnswers(destination, at: path) else { return }
+        _ = await runControl("exit", destination, at: path)
+    }
+
+    /// `ssh -O`. It reads no config (`-F /dev/null`): it talks only to the
+    /// socket, and a config that ssh cannot read must not keep an old master.
+    private func runControl(_ operation: String, _ destination: String, at path: String) async -> ProcessRunner.Outcome? {
+        guard let executable = configuration.ssh.first else { return nil }
+        return await ProcessRunner.run(
+            executable,
+            Array(configuration.ssh.dropFirst()) + ["-F", "/dev/null", "-O", operation, "-S", path, "--", destination],
+            environment: ProcessInfo.processInfo.environment,
+            timeout: .seconds(5)
+        )
+    }
+
+    private func record(_ destination: String, _ path: String?) {
+        guard owned[destination] != path else { return }
+        owned[destination] = path
+        do {
+            try JSONEncoder().encode(owned).write(to: configuration.recordFile, options: .atomic)
+        } catch {
+            let file = configuration.recordFile.path
+            logger.error("ssh: cannot write \(file, privacy: .public): \(EnglishErrorText.describe(error), privacy: .public)")
+        }
+    }
+
+    private static func readRecord(at url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    }
+
+    private func runSSH(_ arguments: [String], timeout: Duration) async -> ProcessRunner.Outcome? {
+        guard let executable = configuration.ssh.first else { return nil }
+        return await ProcessRunner.run(
+            executable,
+            sshArguments(arguments),
+            environment: ProcessInfo.processInfo.environment,
+            timeout: timeout
+        )
+    }
+
+    private func sshArguments(_ arguments: [String]) -> [String] {
+        Array(configuration.ssh.dropFirst()) + configuration.options + arguments
+    }
+
+    private func startConnection(_ destination: String, path: String, prompts: Bool) async throws -> Route {
+        guard SSHControlPath.fitsSocket(path) else { throw Failure.controlPathTooLong(path) }
+        try FileManager.default.createDirectory(
+            at: configuration.controlDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        // The master of this run or of an earlier one.
+        if await controlAnswers(destination, at: path) {
+            logger.debug("ssh: host=\(destination, privacy: .public) uses its master")
+            record(destination, path)
+            return Route(controlPath: path, isUsersOwn: false)
+        }
+        // A master that died left its socket. ssh refuses to listen on a
+        // path that exists.
+        unlink(path)
+
+        guard let executable = configuration.ssh.first else { throw Failure.cannotStart("no ssh") }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = sshArguments(Self.connectionArguments(destination, path: path, prompts: prompts))
+        var environment = ProcessInfo.processInfo.environment.merging(configuration.environment) { _, new in new }
+        if prompts, let askpass = configuration.askpass {
+            environment["SSH_ASKPASS"] = askpass
+            environment["SSH_ASKPASS_REQUIRE"] = "force"
+        }
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        let stderr = CollectedPipe()
+        process.standardError = stderr.pipe
+        // The wait below ends the login when this ssh exits.
+        process.terminationHandler = { [weak self] process in
+            let pid = process.processIdentifier
+            Task { @MainActor in self?.loginUI?.cancel(sshPID: pid) }
+        }
+        do {
+            try process.run()
+        } catch {
+            stderr.stop()
+            throw Failure.cannotStart(EnglishErrorText.describe(error))
+        }
+        loggingIn[destination] = process
+        // A pid that an earlier, cancelled master had.
+        cancelled.remove(process.processIdentifier)
+
+        // ssh listens on the control socket only after the login.
+        let pid = process.processIdentifier
+        var notice = SSHLoginNotice()
+        var shown: String?
+        defer {
+            asking[pid] = nil
+            if shown != nil { loginUI?.showNotice(host: destination, sshPID: pid, line: nil) }
+        }
+        while !FileManager.default.fileExists(atPath: path) {
+            // A quiet login shows nothing: the user may be away.
+            let line = prompts ? notice.update(text: stderr.text, asking: asking[pid] != nil, now: .now) : nil
+            if line != shown {
+                shown = line
+                loginUI?.showNotice(host: destination, sshPID: pid, line: line)
+            }
+            guard process.isRunning else {
+                // The ssh exits when it moves the master into the background,
+                // after the master listens.
+                if FileManager.default.fileExists(atPath: path) { break }
+                await stderr.finish(within: ProcessRunner.drainTimeout)
+                if loggingIn[destination] === process { loggingIn[destination] = nil }
+                if cancelled.remove(process.processIdentifier) != nil {
+                    logger.info("ssh: host=\(destination, privacy: .public) login cancelled")
+                    throw Failure.cancelled
+                }
+                let reason = SSHControlPath.lastLine(of: stderr.text)
+                logger.info("ssh: host=\(destination, privacy: .public) login failed: \(reason, privacy: .public)")
+                throw Failure.loginFailed(reason)
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled {
+                process.terminate()
+                throw CancellationError()
+            }
+        }
+        stderr.discard()
+        if loggingIn[destination] === process { loggingIn[destination] = nil }
+        record(destination, path)
+        let count = logins[destination, default: 0] + 1
+        logins[destination] = count
+        logger.info("ssh login: host=\(destination, privacy: .public) logins=\(count, privacy: .public)")
+        return Route(controlPath: path, isUsersOwn: false)
+    }
+
+    /// The arguments of a master. With `prompts` false, `BatchMode` refuses
+    /// every question of the login.
+    nonisolated static func connectionArguments(_ destination: String, path: String, prompts: Bool) -> [String] {
+        // `-S`, not `-o ControlPath=`: ssh splits an `-o` value at spaces,
+        // and "Macterm Debug" has one.
+        ["-M", "-N", "-S", path]
+            + (prompts ? [] : ["-o", "BatchMode=yes"])
+            + [
+                "-o", "ControlPersist=yes",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "ConnectTimeout=10",
+                "--", destination,
+            ]
+    }
+
+    /// `[user@]host` and nothing that ssh could read as an option or that a
+    /// shell could split. Fail closed: a project path from a file must
+    /// never become an ssh option.
+    nonisolated static func isValidDestination(_ destination: String) -> Bool {
+        guard !destination.isEmpty, !destination.hasPrefix("-") else { return false }
+        return destination.unicodeScalars.allSatisfy { scalar in
+            !CharacterSet.whitespacesAndNewlines.contains(scalar) && !CharacterSet.controlCharacters.contains(scalar)
+        }
+    }
+}
+
+/// When a login that asks nothing shows ssh's text. Pure.
+///
+/// One rule for every host, with no match on a vendor's text: the last line
+/// that ssh wrote since the last question, once it has stayed the same for
+/// `delay`. ssh's own warnings ("Warning: Permanently added …", "** WARNING:
+/// connection is not using a post-quantum key exchange …" and the lines
+/// under it) are notices for a terminal, not a reason to wait, so they do
+/// not count.
+struct SSHLoginNotice {
+    static let delay: Duration = .seconds(2)
+
+    /// The bytes of ssh's text up to the last question.
+    private var mark = 0
+    private var line: String?
+    private var since: ContinuousClock.Instant?
+
+    /// The line to show now, or nil.
+    mutating func update(text: String, asking: Bool, now: ContinuousClock.Instant) -> String? {
+        let bytes = Array(text.utf8)
+        if asking {
+            mark = bytes.count
+            line = nil
+            since = nil
+            return nil
+        }
+        let new = String(decoding: bytes.dropFirst(mark), as: UTF8.self)
+        let candidate = SSHPrompt.displayText(new)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty && !$0.hasPrefix("Warning: ") && !$0.hasPrefix("** ") }
+        if candidate != line {
+            line = candidate
+            since = now
+        }
+        guard let line, let since, now - since >= Self.delay else { return nil }
+        return line
+    }
+}
+
+/// ControlPath rules. Pure.
+enum SSHControlPath {
+    /// The `ssh -G` keys that name where a master goes, as OpenSSH's `%C`.
+    static let endpointKeys = ["user", "hostname", "port", "proxyjump", "proxycommand"]
+
+    /// Macterm's own path for a host, from the output of `ssh -G`: a hash of
+    /// `endpointKeys`, so that a short name with no special characters
+    /// changes when the config sends the host somewhere else.
+    static func own(forConfig output: String, in directory: URL) -> String {
+        var values: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            let key = parts[0].lowercased()
+            if endpointKeys.contains(key), values[key] == nil {
+                values[key] = parts.count == 2 ? String(parts[1]) : ""
+            }
+        }
+        let endpoint = endpointKeys.map { "\($0)=\(values[$0] ?? "")" }.joined(separator: "\n")
+        let digest = SHA256.hash(data: Data(endpoint.utf8))
+        let name = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(name).path
+    }
+
+    /// ssh binds a temporary name first, the path plus a dot and 16
+    /// characters, and `sun_path` holds 104 bytes with its NUL.
+    static func fitsSocket(_ path: String) -> Bool {
+        path.utf8.count + 17 < 104
+    }
+
+    /// The ControlPath that the user's ssh config gives a host, from the
+    /// output of `ssh -G` (ssh expands `%C`, `~` and the other tokens there).
+    /// nil when the config names none.
+    static func userPath(fromConfig output: String) -> String? {
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, parts[0].lowercased() == "controlpath" else { continue }
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            return value.isEmpty || value.lowercased() == "none" ? nil : value
+        }
+        return nil
+    }
+
+    /// `user@hostname:port` from the output of `ssh -G`. nil when a value
+    /// is missing.
+    static func resolvedDestination(fromConfig output: String) -> String? {
+        var values: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].lowercased()
+            if ["user", "hostname", "port"].contains(key), values[key] == nil {
+                values[key] = parts[1].trimmingCharacters(in: .whitespaces)
+            }
+        }
+        guard let user = values["user"], let hostname = values["hostname"], let port = values["port"],
+              !user.isEmpty, !hostname.isEmpty, !port.isEmpty
+        else { return nil }
+        return "\(user)@\(hostname):\(port)"
+    }
+
+    /// `hostname` from the output of `ssh -G`, or nil when the config names a
+    /// jump host or a proxy command, or has no host name.
+    static func directHostname(fromConfig output: String) -> String? {
+        var values: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            let key = parts[0].lowercased()
+            if ["hostname", "proxyjump", "proxycommand"].contains(key), values[key] == nil {
+                values[key] = parts.count == 2 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+            }
+        }
+        for key in ["proxyjump", "proxycommand"] {
+            if let value = values[key], !value.isEmpty, value.lowercased() != "none" { return nil }
+        }
+        guard let host = values["hostname"], !host.isEmpty else { return nil }
+        return host
+    }
+
+    static func lastLine(of text: String) -> String {
+        text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    }
+}

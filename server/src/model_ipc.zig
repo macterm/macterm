@@ -103,7 +103,7 @@ pub fn loadFrom(s: *Server, dir_text: []const u8) void {
         st.readonly = true;
         break :blk Model.init(s.gpa);
     };
-    std.log.info("server: model from {s}: {d} projects, {d} workspaces", .{ st.path.?, st.model.?.data.projects.len, st.model.?.data.workspaces.len });
+    std.log.info("server: model from {s}: {d} projects", .{ st.path.?, st.model.?.data.projects.len });
 }
 
 /// Writes the model now if a change is not on disk. A write that fails is
@@ -164,6 +164,7 @@ pub fn replySubscribe(s: *Server, peer: u64, re: u64) void {
         .sessions = list.items,
         .client = p.client,
     });
+    registry.listRead(s);
 }
 
 // ── Requests ────────────────────────────────────────────────────────────────
@@ -255,6 +256,7 @@ fn modelError(err: model.Error) Outcome {
         error.NotFound => fail(.not_found, "No object has this id."),
         error.DuplicateId => fail(.duplicate_id, "An object has this id."),
         error.BadRequest => fail(.invalid_args, "The model refuses this change."),
+        error.Refused => fail(.refused, "The project does not allow this change."),
         error.OutOfMemory => fail(.unavailable, "The server is out of memory."),
     };
 }
@@ -274,12 +276,14 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             .color = args.color,
             .created_at = args.created_at,
             .parent = args.parent,
-            .kind = args.kind,
             .sort_order = nextSortOrder(mo, args.parent),
+            .sidebar = args.sidebar,
+            .single_tab = args.single_tab,
+            .removable = args.removable,
+            .alias = args.alias,
         }) catch |err| return modelError(err),
         m.ProjectSet => {
             const p = mo.findProject(args.id) orelse return modelError(error.NotFound);
-            if (args.path) |path| if (p.kind == .group and path.len != 0) return modelError(error.BadRequest);
             if (args.parent) |parent| mo.setParent(args.id, parent) catch |err| return modelError(err);
             const al = mo.arena.allocator();
             if (args.name) |n| p.name = try al.dupe(u8, n);
@@ -288,18 +292,16 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         },
         m.ProjectReorder => mo.reorderProjects(args.parent, args.ids) catch |err| return modelError(err),
         m.ProjectRemove => _ = mo.removeProject(args.id) catch |err| return modelError(err),
-        m.WorkspaceCreate => mo.addWorkspace(args.id, args.kind) catch |err| return modelError(err),
-        m.WorkspaceRemove => _ = mo.removeWorkspace(args.id) catch |err| return modelError(err),
-        m.TabCreate => mo.createTab(args.workspace, args.id, if (args.index) |i| @as(usize, i) else null, args.root, args.title, args.focus) catch |err| return modelError(err),
+        m.TabCreate => mo.createTab(args.project, args.id, if (args.index) |i| @as(usize, i) else null, args.root, args.title, args.focus) catch |err| return modelError(err),
         m.TabClose => _ = mo.closeTab(args.id) catch |err| return modelError(err),
         m.TabSet => mo.renameTab(args.id, args.title) catch |err| return modelError(err),
-        m.TabSelect => mo.selectTab(args.workspace, args.id) catch |err| return modelError(err),
+        m.TabSelect => mo.selectTab(args.project, args.id) catch |err| return modelError(err),
         m.TabReorder => {
-            const ws = mo.workspaceOfTab(args.id) orelse return modelError(error.NotFound);
-            if (!ws.id.eql(args.workspace)) return modelError(error.NotFound);
+            const p = mo.projectOfTab(args.id) orelse return modelError(error.NotFound);
+            if (!p.id.eql(args.project)) return modelError(error.NotFound);
             mo.reorderTab(args.id, args.index) catch |err| return modelError(err);
         },
-        m.TabMove => mo.moveTab(args.id, args.to_workspace, if (args.index) |i| @as(usize, i) else null) catch |err| return modelError(err),
+        m.TabMove => mo.moveTab(args.id, args.to_project, if (args.index) |i| @as(usize, i) else null) catch |err| return modelError(err),
         m.TabMerge => mo.mergeTab(args.src, args.dst, args.target_pane, args.zone, args.split_id, rebalance(s, args.rebalance)) catch |err| return modelError(err),
         m.PaneSplit => {
             const dir = splitDir(s, mo, args.target, args.dir) orelse return fail(.invalid_args, "Unknown split direction.");
@@ -307,7 +309,7 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         },
         m.PaneClose => _ = mo.closePane(args.id, rebalance(s, args.rebalance)) catch |err| return modelError(err),
         m.PaneMove => mo.movePane(args.id, args.dest, args.zone, args.split_id, rebalance(s, args.rebalance)) catch |err| return modelError(err),
-        m.PaneSeparate => mo.separatePane(args.id, args.tab_id, args.workspace) catch |err| return modelError(err),
+        m.PaneSeparate => mo.separatePane(args.id, args.tab_id, args.project) catch |err| return modelError(err),
         m.PaneFocus => mo.focusPane(args.id) catch |err| return modelError(err),
         m.PaneZoom => mo.zoom(args.tab, args.pane) catch |err| return modelError(err),
         m.SplitRatio => {
@@ -316,14 +318,15 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         },
         m.SelectSet => {
             // Check both before a change: a request changes all or nothing.
-            const ws: ?*model.Workspace = if (args.tab) |t| (mo.workspaceOfTab(t) orelse return modelError(error.NotFound)) else null;
+            const holder: ?*model.Project = if (args.tab) |t| (mo.projectOfTab(t) orelse return modelError(error.NotFound)) else null;
+            if (holder) |h| if (h.sidebar == .none) return modelError(error.Refused);
             if (args.project) |id| {
                 const p = mo.findProject(id) orelse return modelError(error.NotFound);
-                if (p.kind == .group) return modelError(error.BadRequest);
-                if (ws) |w| if (!w.id.eql(.ofProject(id))) return modelError(error.BadRequest);
+                if (p.sidebar == .none) return modelError(error.Refused);
+                if (holder) |h| if (!h.id.eql(id)) return modelError(error.BadRequest);
                 mo.selectProject(id) catch |err| return modelError(err);
             }
-            if (ws) |w| mo.selectTab(w.id, args.tab.?) catch |err| return modelError(err);
+            if (holder) |h| mo.selectTab(h.id, args.tab.?) catch |err| return modelError(err);
         },
         m.ModelImport => return putModel(s, a, args.model, .{ .import = args.source }),
         m.ModelReplace => return putModel(s, a, args.model, .replace),
@@ -332,10 +335,11 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
     return done;
 }
 
-/// The `sort_order` after the last child of `parent`.
+/// The `sort_order` after the last `tree` child of `parent`.
 fn nextSortOrder(mo: *const Model, parent: ?model.ProjectId) i64 {
     var next: i64 = 0;
     for (mo.data.projects) |*p| {
+        if (p.sidebar != .tree) continue;
         const at = mo.parentOf(p);
         const same = if (at == null or parent == null or parent.?.isEmpty())
             at == null and (parent == null or parent.?.isEmpty())
@@ -400,13 +404,17 @@ fn putModel(s: *Server, a: std.mem.Allocator, data: model.ModelData, how: union(
 const Snapshot = struct {
     projects: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     /// Parent id ("" for the top level) to the encoded order of its children.
+    /// Every project is a parent.
     orders: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
-    /// Workspace id to its encoded `TabOrder`.
-    workspaces: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
-    workspace_kinds: std.StringHashMapUnmanaged(model.Kind) = .empty,
+    /// The parents in `orders` that hold no project.
+    empty_orders: std.StringHashMapUnmanaged(void) = .empty,
+    /// Project id to its encoded `TabOrder`.
+    tab_orders: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
+    /// The projects in `tab_orders` that hold no tab.
+    no_tabs: std.StringHashMapUnmanaged(void) = .empty,
     /// Tab id to its encoded `TabChanged`.
     tabs: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
-    tab_workspaces: std.StringHashMapUnmanaged([]const u8) = .empty,
+    tab_projects: std.StringHashMapUnmanaged([]const u8) = .empty,
     panes: std.StringArrayHashMapUnmanaged(m.RemovedPane) = .empty,
     /// The sessions of the local panes.
     sessions: std.StringHashMapUnmanaged(void) = .empty,
@@ -415,27 +423,29 @@ const Snapshot = struct {
     fn take(a: std.mem.Allocator, mo: *const Model) !Snapshot {
         var snap: Snapshot = .{};
         for (mo.data.projects) |*p| {
-            try snap.projects.put(a, try a.dupe(u8, p.id.text), try msgpack.encodeAlloc(a, m.ProjectChanged{ .project = p.* }));
+            try snap.projects.put(a, try a.dupe(u8, p.id.text), try msgpack.encodeAlloc(a, m.ProjectChanged{ .project = .of(p.*) }));
         }
-        // The order of each parent's children.
+        // The order of each parent's children. Only a `tree` project is a
+        // parent or a child.
         var parents: std.StringArrayHashMapUnmanaged(void) = .empty;
         try parents.put(a, "", {});
-        for (mo.data.projects) |*p| if (p.kind == .group) try parents.put(a, try a.dupe(u8, p.id.text), {});
+        for (mo.data.projects) |*p| if (p.sidebar == .tree) try parents.put(a, try a.dupe(u8, p.id.text), {});
         for (parents.keys()) |parent| {
             const ids = try childOrder(a, mo, parent);
             const value: m.ProjectOrder = .{ .parent = if (parent.len == 0) null else .of(parent), .ids = ids };
             try snap.orders.put(a, parent, try msgpack.encodeAlloc(a, value));
+            if (ids.len == 0) try snap.empty_orders.put(a, parent, {});
         }
-        for (mo.data.workspaces) |*w| {
-            const ids = try a.alloc(model.TabId, w.tabs.len);
-            for (w.tabs, ids) |t, *id| id.* = t.id;
-            const key = try a.dupe(u8, w.id.text);
-            try snap.workspaces.put(a, key, try msgpack.encodeAlloc(a, m.TabOrder{ .workspace = w.id, .kind = w.kind, .ids = ids, .active_tab = w.active_tab }));
-            try snap.workspace_kinds.put(a, key, w.kind);
-            for (w.tabs) |*t| {
+        for (mo.data.projects) |*p| {
+            const ids = try a.alloc(model.TabId, p.tabs.len);
+            for (p.tabs, ids) |t, *id| id.* = t.id;
+            const key = try a.dupe(u8, p.id.text);
+            try snap.tab_orders.put(a, key, try msgpack.encodeAlloc(a, m.TabOrder{ .project = p.id, .ids = ids, .active_tab = p.active_tab }));
+            if (p.tabs.len == 0) try snap.no_tabs.put(a, key, {});
+            for (p.tabs) |*t| {
                 const tkey = try a.dupe(u8, t.id.text);
-                try snap.tabs.put(a, tkey, try msgpack.encodeAlloc(a, m.TabChanged{ .workspace = w.id, .tab = t.*, .zoomed = mo.zoomedPane(t.id) }));
-                try snap.tab_workspaces.put(a, tkey, key);
+                try snap.tabs.put(a, tkey, try msgpack.encodeAlloc(a, m.TabChanged{ .project = p.id, .tab = t.*, .zoomed = mo.zoomedPane(t.id) }));
+                try snap.tab_projects.put(a, tkey, key);
                 var list: std.ArrayList(*const model.Pane) = .empty;
                 try tree.collectPanes(a, &t.root, &list);
                 for (list.items) |pane| {
@@ -456,6 +466,7 @@ const Snapshot = struct {
     fn childOrder(a: std.mem.Allocator, mo: *const Model, parent: []const u8) ![]const model.ProjectId {
         var list: std.ArrayList(*const model.Project) = .empty;
         for (mo.data.projects) |*p| {
+            if (p.sidebar != .tree) continue;
             const at = mo.parentOf(p);
             const same = if (at) |x| std.mem.eql(u8, x.text, parent) else parent.len == 0;
             if (same) try list.append(a, p);
@@ -498,10 +509,14 @@ fn diff(
     }
     for (after.orders.keys(), after.orders.values()) |id, bytes| {
         const old = before.orders.get(id);
+        // A new project holds no project yet: its `project.set` says enough.
+        if (old == null and after.empty_orders.contains(id)) continue;
         if (old == null or !std.mem.eql(u8, old.?, bytes)) try events.append(a, try event(a, m.ProjectOrder, bytes));
     }
-    for (after.workspaces.keys(), after.workspaces.values()) |id, bytes| {
-        const old = before.workspaces.get(id);
+    for (after.tab_orders.keys(), after.tab_orders.values()) |id, bytes| {
+        const old = before.tab_orders.get(id);
+        // A new project holds no tab yet: its `project.set` says enough.
+        if (old == null and after.no_tabs.contains(id)) continue;
         if (old == null or !std.mem.eql(u8, old.?, bytes)) try events.append(a, try event(a, m.TabOrder, bytes));
     }
     for (after.tabs.keys(), after.tabs.values()) |id, bytes| {
@@ -509,15 +524,10 @@ fn diff(
         if (old == null or !std.mem.eql(u8, old.?, bytes)) try events.append(a, try event(a, m.TabChanged, bytes));
     }
     for (before.tabs.keys()) |id| if (!after.tabs.contains(id)) {
-        const ws = before.tab_workspaces.get(id).?;
-        // The tab of a workspace that went with it: `workspace.remove` or
-        // `project.remove` says it.
-        if (!after.workspaces.contains(ws)) continue;
-        try events.append(a, try eventOf(a, m.TabRemoved{ .workspace = .of(ws), .id = .of(id) }));
-    };
-    for (before.workspaces.keys()) |id| if (!after.workspaces.contains(id)) {
-        if (before.workspace_kinds.get(id).? == .project) continue;
-        try events.append(a, try eventOf(a, m.WorkspaceRemoved{ .id = .of(id) }));
+        const project = before.tab_projects.get(id).?;
+        // The tab of a project that went with it: `project.remove` says it.
+        if (!after.projects.contains(project)) continue;
+        try events.append(a, try eventOf(a, m.TabRemoved{ .project = .of(project), .id = .of(id) }));
     };
     for (before.projects.keys()) |id| if (!after.projects.contains(id)) {
         try events.append(a, try eventOf(a, m.ProjectRemoved{ .id = .of(id) }));

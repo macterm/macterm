@@ -8,7 +8,7 @@ import Testing
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct LocalSessionsTests {
     @Test
-    func a_running_session_is_listed_with_its_shell_and_pty_and_is_killed() async throws {
+    func a_running_session_is_listed_with_its_shell_and_is_killed() async throws {
         try await withServer { server in
             let sessions = LocalSessions(server: server)
             let id = "list-\(UInt32.random(in: 0 ... .max))"
@@ -19,7 +19,6 @@ struct LocalSessionsTests {
             let listed = try #require(await sessions.list()?.first { $0.name == id })
             #expect(listed.isRunning)
             #expect(listed.shellPID != nil)
-            #expect(listed.ttyPath?.hasPrefix("/dev/") == true)
 
             await sessions.kill(id)
             #expect(await sessions.list()?.contains { $0.name == id } == false)
@@ -28,8 +27,10 @@ struct LocalSessionsTests {
         }
     }
 
+    /// The server ends it when a list reads the status. `LocalSessions`
+    /// ends no session itself.
     @Test
-    func a_session_whose_shell_exits_is_ended() async throws {
+    func a_session_whose_shell_exits_is_ended_after_a_list_reads_it() async throws {
         try await withServer { server in
             let sessions = LocalSessions(server: server)
             await sessions.prepare()
@@ -49,7 +50,7 @@ struct LocalSessionsTests {
     }
 
     @Test
-    func a_session_that_exited_while_no_app_was_connected_is_ended_at_the_connect() async throws {
+    func a_session_that_exited_while_no_app_was_connected_is_ended_after_a_list_reads_it() async throws {
         try await withServer { server in
             let id = "gone-\(UInt32.random(in: 0 ... .max))"
             let other = try await server.connect()
@@ -113,5 +114,19 @@ struct LocalSessionsTests {
             cols: 80,
             rows: 24
         )
+    }
+}
+
+struct LocalSessionConversionTests {
+    @Test
+    func a_server_session_becomes_a_local_session() {
+        let session = MactermProtocol.Session(
+            id: "macterm-x", state: .running, build: "b", level: 1, buildKey: "k",
+            pid: 10, shellPid: 11, pty: ProtocolBin(Data("/dev/ttys004".utf8)), cols: 80, rows: 24, clients: 2
+        )
+        #expect(SessionInfo(session) == SessionInfo(name: "macterm-x", pid: 10, shellPID: 11, clients: 2, buildKey: "k"))
+        var exited = session
+        exited.state = .exited
+        #expect(!SessionInfo(exited).isRunning)
     }
 }

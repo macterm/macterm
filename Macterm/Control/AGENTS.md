@@ -40,6 +40,7 @@ Rules:
   - `ssh` keeps `.captureForPassthrough`. It mirrors the own argv of ssh. It answers a leading `-h` or `--help` itself (`startsWithHelpFlag`).
 - **Agent skills** (`macterm skills`). There are four Agent Skills (panes, workspace, sub-agents, palettes). They are `SKILL.md` files in the format of agentskills.io. They teach coding agents this CLI.
   - They are compiled into the binary from `Macterm/Control/AgentSkills/` (shared with the CLI target, like `ControlProtocol`). The CLI prints them offline: every skill after a header about the install, or one skill as it is. Agents install them themselves.
+  - The Zig CLI embeds the same text as files in `server/src/cli/skills/`. `AgentSkillsTests` checks that the files are the text of `AgentSkills`. Change both together.
   - Agents load one skill at a time, so each skill embeds `AgentSkills.groundRules`.
   - We ran every example against a hermetic instance before it shipped. Keep it that way.
   - `AgentSkillsTests` runs every `macterm …` line in them against the tree of `--experimental-dump-help` of the bundled CLI. If you rename a verb or a flag, a test fails until the skills follow.

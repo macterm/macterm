@@ -33,7 +33,7 @@ struct SessionClient {
     /// Every local v2 session from the server (`LocalSessions`), or nil when
     /// the server cannot be reached. nil means UNKNOWN: a caller never ends
     /// or restarts anything on it.
-    var listSessions: @Sendable () async -> [LocalSession]?
+    var listSessions: @Sendable () async -> [SessionInfo]?
     /// Ends v1's local zmx sessions of these names and their programs
     /// (`V1Sessions`), at the first v2 launch (design/008 §4). True only
     /// when none of them runs after it. False on the unit-test host, which
@@ -180,7 +180,7 @@ enum ZmxReaper {
     /// this build flavor's own (`LocalServer.folderName`), so every session
     /// in it was made by an app of this flavor. These are the leftovers of a
     /// crash, or of a close whose kill did not reach the server.
-    static func localOrphans(in sessions: [LocalSession], known: Set<String>) -> [String] {
+    static func localOrphans(in sessions: [SessionInfo], known: Set<String>) -> [String] {
         sessions.compactMap { session in
             guard session.isRunning,
                   session.name.hasPrefix(ZmxSessionName.prefix),
@@ -278,10 +278,11 @@ enum ZmxEnvironment {
 /// policy), and — when the host's `ps` gave it — the foreground's full
 /// command line (`args`, feeds Save Layout's `run:` capture, the remote
 /// analogue of the local KERN_PROCARGS2 argv).
-struct RemoteForeground: Equatable {
+struct SessionForeground: Equatable {
     let comm: String
     /// The host's idle verdict — true when the tty's foreground process
-    /// group IS the session leader's (the shell owns its prompt), judged
+    /// group is the session's shell's (the shell owns its prompt; under
+    /// login(1) that is the shell's own group, not login's), judged
     /// where the processes actually live so no local shell database has to
     /// recognize a remote-only login shell. nil when the host could not say
     /// — consumers fall back to the local shell-database heuristic.
@@ -292,7 +293,7 @@ struct RemoteForeground: Equatable {
     /// shell only the host has.
     let isShell: Bool?
     /// The full `ps -o args=` command line, nil when the report carried
-    /// none. May describe a shell at its prompt — `Pane.applyRemoteForeground`
+    /// none. May describe a shell at its prompt — `Pane.applyForeground`
     /// decides whether it counts as a running command.
     let command: String?
 

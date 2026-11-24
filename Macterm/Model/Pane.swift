@@ -32,7 +32,7 @@ final class Pane: Identifiable {
     let sessionSlug: String
     /// Whether this pane's project is remote (#104) — its `projectPath` is an
     /// scp-style spec and its session lives on the remote host. Cached at
-    /// init: the poll and title paths read it every tick.
+    /// init.
     let isRemote: Bool
     /// The remote host name for display fallback (`processTitle` shows it
     /// while no remote process name is known). nil for local panes.
@@ -44,7 +44,7 @@ final class Pane: Identifiable {
     @ObservationIgnored
     let remoteSpec: ProjectPath?
     /// For a remote pane, the host folder of its session, once its session
-    /// attached on the host's server (0057, `RemoteHosts.sessionAttached`):
+    /// attached on the host's server (0057, `RemoteHost.sessionAttached`):
     /// the folder of its creation, then the shell's own (OSC 7) at each
     /// save. nil: the pane never had a v2 session there (a new pane, or one
     /// from before v2), so a missing session is made. When it is set and
@@ -52,20 +52,27 @@ final class Pane: Identifiable {
     /// (`PaneSnapshot.hostSessionDirectory`).
     @ObservationIgnored
     var hostSessionDirectory: String?
-    /// A remote pane whose connection stopped or failed (`RemoteHosts`): the
-    /// app tries again by itself, and a key connects at once. Its frozen
-    /// screen is not dimmed: its cursor is faint and does not blink
-    /// (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row says
-    /// `Connection Lost` (`TerminalPane`), so that it does not look live.
-    /// Never persisted.
-    var isRemoteLinkLost = false {
-        didSet { if isRemoteLinkLost { remoteLineMode = nil } }
+    /// The host of a remote pane (`RemoteHosts.host(of:)`), set when its
+    /// first view asks. The pane reads its link state from it. A host lives
+    /// for the run of the app.
+    var linkHost: RemoteHost?
+
+    /// A remote pane whose connection stopped or failed (its host's session
+    /// table, 0264): the app tries again by itself, and a key connects at
+    /// once. Its frozen screen is not dimmed: its cursor is faint and does
+    /// not blink (`GhosttyTerminalNSView.isCursorDisabled`), and its badge row
+    /// says `Connection Lost` (`TerminalPane`), so that it does not look
+    /// live. Never persisted.
+    var isRemoteLinkLost: Bool {
+        linkHost?.isLost(sessionName) ?? false
     }
 
     /// A try runs now for a lost pane, or a slow first connect runs for a
-    /// pane that came back after a restart (`RemoteHosts.firstConnectIsSlow`):
+    /// pane that came back after a restart (`RemoteHost.firstConnectIsSlow`):
     /// its badge says `Reconnecting`. Never persisted.
-    var isRemoteReconnecting = false
+    var isRemoteReconnecting: Bool {
+        linkHost?.isReconnecting(sessionName) ?? false
+    }
 
     /// The badge of a remote pane whose connection is lost or slow, or nil.
     enum RemoteLinkBadge: Equatable {
@@ -88,24 +95,18 @@ final class Pane: Identifiable {
     let shell: String?
     /// Extra environment variables for the spawned shell. nil/empty → none.
     let env: [String: String]?
-    /// The latest observation of this pane's foreground — name, shell-ness,
-    /// provenance, and when it was made (`ForegroundSample`). The single
-    /// foreground truth for BOTH worlds: local samples come from the process
-    /// table via `refreshForegroundProcess()`, remote ones from the host's
-    /// reports via `applyRemoteForeground`. nil = no observation has ever
-    /// been made (pre-surface locally; no report yet remotely) — a
-    /// state the busy-close policy treats conservatively. Republished only
-    /// when the observation changes, so a steady poll doesn't re-render the
-    /// sidebar every tick.
+    /// The latest foreground that the pane's session reported, and when it
+    /// came (`ForegroundSample`): the same input for local and remote panes
+    /// (`applyForeground`). nil before the first report, and while no
+    /// channel is up: a state the busy-close policy treats conservatively.
+    /// Republished only when the report changes.
     private(set) var foregroundSample: ForegroundSample?
 
     /// The basename of the pane's live foreground process — a running command
     /// (`hx`, `btop`), or the pane's shell when idle at a prompt (so a nested
     /// `zsh` launched inside `nu` shows `zsh`). This is the tab name's
     /// default source. Reads through `foregroundSample`; the setter is a
-    /// seam for tests (and synthesizes a sample with origin matching the
-    /// pane's world) — production sampling goes through
-    /// `refreshForegroundProcess()` / `applyRemoteForeground`.
+    /// seam for tests. Reports go through `applyForeground`.
     var foregroundProcessName: String? {
         get { foregroundSample?.name }
         set {
@@ -116,38 +117,24 @@ final class Pane: Identifiable {
             foregroundSample = ForegroundSample(
                 name: newValue,
                 isIdleShell: ProcessInspector.isShellProcessName(newValue),
-                origin: isRemote ? .remoteEvent : .processTable(pid: nil),
                 sampledAt: Date()
             )
         }
     }
 
-    /// A title a foreground *program* set via OSC 0/2 (claude's session
+    /// A title that a foreground *program* set with OSC 0/2 (claude's session
     /// summary, ssh's `user@host`). When present it wins over
-    /// `foregroundProcessName` in `displayTitle`. The escape sequence itself
-    /// carries no provenance — a shell that titles from its prompt (nushell,
-    /// Starship, ghostty shell-integration — emitting `~/dir`, `host:~/dir`)
-    /// is indistinguishable from a program naming its session — so
-    /// `receiveReportedTitle` recovers provenance from the process table:
-    /// a title is adopted only while the foreground process is NOT a shell,
-    /// and it's pinned to that pid — `applyForegroundRefresh` expires it the
-    /// moment a different process (usually the shell, on exit) takes the
-    /// foreground, so an idle pane falls back to the process name.
+    /// `foregroundProcessName` in `displayTitle`. The escape sequence has no
+    /// provenance: a shell that titles from its prompt (nushell, Starship)
+    /// looks the same as a program that names its session. So
+    /// `receiveReportedTitle` judges it against the session's foreground
+    /// report, which comes in order with the output.
     private(set) var programTitle: String?
 
-    /// The foreground pid that set `programTitle`, used to expire it.
-    @ObservationIgnored
-    private var programTitlePID: pid_t?
-
     /// The AI coding agent in this pane's foreground (claude, codex, …), for
-    /// the sidebar's agent logo. Derived in `applyForegroundRefresh` from the
-    /// foreground process's `comm`/argv[0] and cached against the pid, so the
-    /// poll's steady ticks don't re-read argv or churn `@Observable`.
+    /// the sidebar's agent logo. Matched again only when the report changes
+    /// (`applyForeground`).
     private(set) var agentIcon: AgentIcon?
-
-    /// The foreground pid `agentIcon` was computed for.
-    @ObservationIgnored
-    private var agentIconPID: pid_t?
 
     /// The session's attention flags (design/004 §6). `unseen`: a run ended
     /// and no client showed the pane since. `failed`: that run failed.
@@ -183,14 +170,13 @@ final class Pane: Identifiable {
     var executionState: TerminalExecutionState = .idle {
         didSet {
             guard executionState != oldValue else { return }
-            // A remote pane's OSC title expires when its command ends — the
-            // execution edge is the pid-change analogue local panes get from
-            // the poll (see `receiveRemoteReportedTitle`). An agent that
-            // finishes a turn ends its run and keeps the foreground, so the
-            // title stays while the host's latest report says a program
-            // holds the pty: the shell's own report comes before the prompt
-            // that ended the run. A pane with no report keeps no title.
-            if isRemote, oldValue == .running, programTitle != nil, !remoteProgramHoldsForeground {
+            // A program's OSC title expires when its command ends (see
+            // `receiveReportedTitle`). An agent that finishes a turn ends its
+            // run and keeps the foreground, so the title stays while the
+            // latest report says a program holds the pty: the shell's own
+            // report comes before the prompt that ended the run. A pane with
+            // no report keeps no title.
+            if oldValue == .running, programTitle != nil, !programHoldsForeground {
                 programTitle = nil
             }
             // Transitions (idle→running, running→done) are exactly when the
@@ -200,151 +186,92 @@ final class Pane: Identifiable {
         }
     }
 
-    /// A snapshot of the remote pane's session starts or ends
-    /// (`PaneChannelEvent`). Its replay is not new output.
-    func receiveRemoteSnapshot(started: Bool) {
-        guard isRemote else { return }
-        isReceivingRemoteSnapshot = started
-    }
-
-    /// Between the two snapshot marks of a remote pane: the output is the
-    /// session's replay, not new output. Its title is the last one that the
-    /// session saw, maybe a prompt's from before the program in front
-    /// started, so it never names the tab (`receiveReportedTitle`): the
-    /// pushed foreground does. Cleared with the surface and when the
-    /// connection stops.
-    @ObservationIgnored
-    private(set) var isReceivingRemoteSnapshot = false
-
-    /// The pane's connection stopped (`RemoteHosts`): a replay that it cut
-    /// is over.
-    func remoteLinkDidStop() {
-        isReceivingRemoteSnapshot = false
-    }
-
     @ObservationIgnored
     private var executionTracker = TerminalExecutionTracker()
-    /// The global foreground poll pauses when the app has no visible window.
-    /// Keep one lightweight wake scheduled from the final IO heartbeat so an
-    /// occluded activity-owned run can still quiet-settle.
+    /// The poll pauses when the app has no visible window. Keep one
+    /// lightweight wake scheduled from the final IO heartbeat so an occluded
+    /// activity-owned run can still quiet-settle.
     @ObservationIgnored
     private var activityQuietPollWork: DispatchWorkItem?
     private let activityQuietPollDelay: TimeInterval
 
-    /// Rate limit on what a reported title costs (`TitleReportThrottle`):
-    /// the first title after a quiet window is evaluated at once, the rest
-    /// of the window's titles are held and the newest flushed once at its
-    /// end by `titleFlushWork`. Not observed: the title it holds is not yet
-    /// the pane's.
+    /// When the running command started: the session's `output` mark (OSC
+    /// 133;C), for the `CommandEnd` of its `end` mark. nil while no command
+    /// runs, and for a command that started before the channel attached.
     @ObservationIgnored
-    private var titleReportThrottle: TitleReportThrottle
-    @ObservationIgnored
-    private var titleFlushWork: DispatchWorkItem?
+    var commandStartedAt: Date?
 
-    /// Re-read the foreground process name from the process table and publish it
-    /// only when it changed (so a steady poll doesn't churn `@Observable` and
-    /// re-render the sidebar every tick). Driven by `AppState`'s poll.
-    ///
-    /// It also feeds the execution tracker, whatever the status indicator
-    /// setting is: `pane list` reports the state, and the setting only
-    /// chooses what the tab row draws.
-    func refreshForegroundProcess() {
-        // Remote panes (#104): the local process table only knows the ssh
-        // client — reading it would stomp the reported name, expire
-        // remote OSC titles, and feed the execution tracker a perpetual
-        // "ssh is running". Names come from the host's reports
-        // (`applyRemoteForeground`), titles from `receiveRemoteReportedTitle`,
-        // execution state from OSC 133 markers and activity heartbeats.
-        guard !isRemote else { return }
-        // Resolved ONCE and reused below, including inside the argv0 closure —
-        // re-resolving there could disagree with this frame's pid on a wrapped
-        // pane and would double the resolver work when the fallback fires.
-        let resolvedPID = ProcessInspector.resolvedForegroundPID(forPane: self)
-        applyForegroundRefresh(
-            name: ProcessInspector.runningProcessName(forPane: self),
-            // The RESOLVED foreground pid (session-side shell/program for a
-            // wrapped pane), NOT the raw `nsView.foregroundPID` (the zmx
-            // connect client). `programTitlePID` is pinned to this resolved pid, so the
-            // expiry compare in `applyForegroundRefresh` must use the same
-            // source — otherwise a wrapped pane's client pid never matches and
-            // every adopted OSC title (e.g. Claude Code's "✳ Claude Code")
-            // expires on the very next 250ms poll, snapping back to the process
-            // name.
-            foregroundPID: resolvedPID,
-            foregroundIsShell: ProcessInspector.foregroundProcessIsShell(forPane: self),
-            terminalInputIsRaw: ProcessInspector.terminalInputIsRaw(forPane: self),
-            argv0: { resolvedPID.flatMap(ProcessInspector.invokedNameBasename(pid:)) }
-        )
+    /// The session's shell and pty, from the channel's `state` message
+    /// (`receiveSessionState`). Code that needs a local pid reads it:
+    /// `ProcessInspector.passwordAsker` and the `run:` capture of a layout.
+    /// nil for a remote pane, and while no channel is up.
+    @ObservationIgnored
+    private(set) var sessionShell: SessionShell?
+
+    /// The pane's link to its session: made at the first surface that runs
+    /// from a channel, and kept for the pane's life. It makes the session,
+    /// runs a remote pane's driver, and gives the pane the session's
+    /// messages and its end once (`receiveLinkEvent`), however many windows
+    /// show the pane.
+    @ObservationIgnored
+    private var link: PaneLink?
+
+    var sessionLink: PaneLink {
+        if let link { return link }
+        let made = PaneLink.make(for: self)
+        made.onEvent = { [weak self] event in self?.receiveLinkEvent(event) }
+        link = made
+        return made
     }
 
-    /// Whether a foreground sample must be ignored for this pane's IDENTITY
-    /// (its name and agent icon).
-    ///
-    /// A hook-heavy shell forks a REAL process every time it draws a prompt —
-    /// `starship prompt`, `mise hook-env`, `zoxide` — and each is briefly the
-    /// pane's foreground. Publishing one renamed the tab to `starship`, and
-    /// because the poll STOPS while the window is occluded and the app is
-    /// inactive (`PollCadence.mode` → `.paused`), that wrong name then stuck
-    /// until something re-sampled: clicking the app, or any keystroke.
-    ///
-    /// While the shell sits at a prompt nothing the user launched is running,
-    /// so a non-shell foreground there can only be such a hook. A shell name
-    /// (and `nil`) is always allowed through, so returning to the prompt
-    /// restores the shell name at once. Shell-ness is decided by basename
-    /// (`/etc/shells` + login shell + `$SHELL` — a set lookup, no syscall).
-    ///
-    /// This gates the name and icon only. `programTitle` expiry stays keyed on
-    /// the foreground pid, so a title can never be misattributed. A long-lived
-    /// program (claude, hx) reports no completion while it runs, so the gate is
-    /// never armed underneath it, and a shell with no OSC 133 integration never
-    /// arms it at all — those panes keep exactly today's naming behavior.
-    private func ignoresForegroundIdentity(_ name: String?) -> Bool {
-        guard executionTracker.isShellAtPrompt, let name else { return false }
-        return !ProcessInspector.isShellProcessName(name)
+    /// The pane runs a plain ssh shell (a host with no server).
+    var runsPlainShell: Bool {
+        link?.runsPlainShell ?? false
     }
 
-    /// Testable core of `refreshForegroundProcess`: publish a changed process
-    /// name, and expire `programTitle` when the pid that set it no longer
-    /// holds the foreground, then feed the execution tracker.
-    func applyForegroundRefresh(
-        name: String?,
-        foregroundPID: pid_t?,
-        foregroundIsShell: Bool = false,
-        terminalInputIsRaw: Bool = false,
-        argv0: () -> String? = { nil }
-    ) {
-        // A prompt hook must not rename the tab. Title expiry below is NOT
-        // gated: a changed pid means the title's owner lost the foreground, and
-        // a title must never be misattributed to a different process.
-        if !ignoresForegroundIdentity(name) {
-            let nameChanged = name != foregroundProcessName
-            if nameChanged {
-                foregroundSample = ForegroundSample(
-                    name: name,
-                    isIdleShell: ProcessInspector.isShellProcessName(name),
-                    origin: .processTable(pid: foregroundPID),
-                    sampledAt: Date()
-                )
-            }
-            // A steady foreground (same pid, same comm) keeps the cached icon; a
-            // change re-matches — argv[0] is only read when comm alone doesn't
-            // identify an agent.
-            if nameChanged || foregroundPID != agentIconPID {
-                agentIconPID = foregroundPID
-                let icon = foregroundPID == nil ? nil : AgentIcon.match(comm: name, argv0: argv0)
-                if icon != agentIcon { agentIcon = icon }
-            }
+    /// `needsConfirmClose` for a pane that runs a plain shell, after its
+    /// host answered (0494, `ForegroundPolicy.plainShellNeedsConfirmClose`).
+    /// nil when the pane runs none.
+    func plainShellNeedsConfirmClose(timeout: Duration) async -> Bool? {
+        guard let idle = await link?.plainShellIsIdle(timeout: timeout) else { return nil }
+        return ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: idle, executionState: executionState)
+    }
+
+    /// A message of the pane's session, once for the pane.
+    func receiveLinkEvent(_ event: PaneLinkEvent) {
+        switch event {
+        case let .state(state): receiveSessionState(state)
+        case let .foreground(foreground): applyForeground(foreground)
+        case let .title(title): receiveReportedTitle(title)
+        case let .ttyMode(mode): lineMode = mode
+        case let .mark(mark, host): receiveSessionMark(mark, view: host?.terminalView)
+        case let .status(status): receiveSessionStatus(status)
+        case let .attention(flags): receiveAttention(flags)
+        case .ended: sessionDidEnd()
+        case let .plainShellRunsIn(host): plainShellSurfaceID = host?.surfaceID
         }
-        if programTitle != nil, programTitlePID != foregroundPID {
-            programTitle = nil
-            programTitlePID = nil
-        }
-        applyForegroundExecutionState(
-            name: name,
-            foregroundPID: foregroundPID,
-            foregroundIsShell: foregroundIsShell,
-            terminalInputIsRaw: terminalInputIsRaw
-        )
+    }
+
+    /// The surface that runs the pane's plain ssh shell (a host with no
+    /// server), or nil. A pty is one terminal and no session holds it, so
+    /// no other window can take it: the pane's other surfaces show a notice
+    /// in place of the terminal. When that surface goes, the pane gets a
+    /// fresh shell. Live state only; the link sets it (`receiveLinkEvent`).
+    var plainShellSurfaceID: UUID?
+
+    /// Whether the surface `surfaceID` shows the notice that the pane's
+    /// plain ssh shell runs in another window.
+    func plainShellRunsElsewhere(than surfaceID: UUID) -> Bool {
+        guard let owner = plainShellSurfaceID else { return false }
+        return owner != surfaceID
+    }
+
+    /// The channel's `state` message. A remote session's pid is on the
+    /// host, so it is not kept.
+    func receiveSessionState(_ state: MactermProtocol.State) {
+        guard !isRemote, state.shellPid > 0, state.shellPid <= Int64(Int32.max) else { return }
+        let tty = String(decoding: state.pty.bytes, as: UTF8.self)
+        sessionShell = SessionShell(pid: pid_t(state.shellPid), ttyPath: tty.isEmpty ? nil : tty)
     }
 
     func markCommandRunning() {
@@ -367,10 +294,10 @@ final class Pane: Identifiable {
     /// reject prompt-hook processes.
     func notePromptReturned() {
         executionTracker.notePromptReturned()
-        // On a remote pane, OSC 133;D is the host's shell saying it owns the
-        // prompt again, so the program's title goes now. Agents don't emit
-        // OSC 133; the shell around them does.
-        if isRemote { programTitle = nil }
+        // OSC 133;D is the shell that owns the prompt again, so the
+        // program's title goes now. Agents don't emit OSC 133; the shell
+        // around them does.
+        programTitle = nil
     }
 
     /// A progress report ended the pane's run: REMOVE, PAUSE or ERROR. Whether
@@ -483,114 +410,81 @@ final class Pane: Identifiable {
         NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
     }
 
-    private func applyForegroundExecutionState(
-        name: String?,
-        foregroundPID: pid_t?,
-        foregroundIsShell: Bool,
-        terminalInputIsRaw: Bool
-    ) {
+    /// Whether a report must not name the pane: a program in front while the
+    /// shell sits at its prompt (OSC 133;D since the last real submission).
+    /// A hook-heavy shell starts a real process each time it draws a prompt
+    /// (`starship prompt`, `mise hook-env`). nushell gives each one a process
+    /// group of its own, so the session reports it in front for a moment.
+    /// While the shell sits at a prompt nothing the user launched runs, so a
+    /// program in front there is such a hook. A shell is always let through,
+    /// so the return to the prompt names the pane at once. A shell with no
+    /// OSC 133 marks never arms this.
+    private func isPromptHook(isShell: Bool) -> Bool {
+        executionTracker.isShellAtPrompt && !isShell
+    }
+
+    /// The latest report, as the tracker reads it: its name, and whether a
+    /// shell holds the pty (the shell verdict, so a nested shell is no run).
+    /// A shell that runs `-c` or a script is not a shell here: it is a run
+    /// (`ProcessInspector.shellCommandLineRunsCommand`).
+    @ObservationIgnored
+    private var trackerForeground: (name: String, isShell: Bool)?
+
+    /// The session's run status. A pane restored after an app restart has had
+    /// no input in this app, so the tracker ignores its foreground. A session
+    /// that says `running` (at `hello`, before the foreground) vouches for
+    /// it: its program still runs (`TerminalExecutionTracker.trustSessionRun`).
+    func receiveSessionStatus(_ status: MactermProtocol.Status) {
+        guard status.state == .running, executionTracker.trustSessionRun() else { return }
+        if trackerForeground != nil { refreshTrackerForeground() }
+    }
+
+    /// Feeds the tracker the session's latest foreground and line mode. The
+    /// report has no pid, so the tracker keys a foreground by its name.
+    private func refreshTrackerForeground() {
         executionState = executionTracker.refreshForeground(
-            name: name,
-            pid: foregroundPID,
-            foregroundIsShell: foregroundIsShell,
-            terminalInputIsRaw: terminalInputIsRaw,
+            name: trackerForeground?.name,
+            pid: nil,
+            foregroundIsShell: trackerForeground?.isShell ?? true,
+            terminalInputIsRaw: lineMode.map { $0 != .echoing } ?? false,
             currentState: executionState
         )
         cancelActivityQuietPollIfNeeded()
     }
 
-    /// Handle an OSC 0/2 title reported by the surface. Refreshes the
-    /// foreground process (a title arrival is a command boundary); adopts the
-    /// string as `programTitle` only when a real program — not the shell — is
-    /// in the foreground (see `programTitle` for why).
+    /// An OSC 0/2 title from the session's `title` message. The session sends
+    /// the foreground before the output that follows it, so the title is
+    /// judged against the report that holds the pane now.
+    /// - A title while a command runs (OSC 133, activity, progress) shows at
+    ///   once: the program names itself.
+    /// - A title at a prompt that OSC 133;D announced is the shell's: dropped.
+    /// - Any other title shows when a program holds the pty (an agent idle
+    ///   between turns: Claude Code's `✳ task`), and is dropped when the
+    ///   shell does or when no report came. The current title that a new
+    ///   channel gets at `hello` comes before its first report, so it is
+    ///   dropped.
     ///
-    /// Throttled (`TitleReportThrottle`): the provenance lookup and the
-    /// refresh are ~100µs of syscalls, which a zmx session replaying
-    /// prompt-heavy scrollback at launch — a title per prompt, 150k of them
-    /// measured as 14s of frozen main thread — cannot pay per title. The
-    /// first title after a quiet window is handled here and now; the rest of
-    /// the window's titles are held, and the newest is handled once at the
-    /// window's end (`flushHeldTitle`), gated against the foreground that
-    /// holds the pane then — no later than the poll's own next tick would
-    /// have looked. `receiveReportedTitle(_:programPID:)` is the unthrottled
-    /// core.
+    /// It expires at the end of a run (`executionState.didSet`), at OSC
+    /// 133;D (`notePromptReturned`), and at a report of the shell or of
+    /// another program (`applyForeground`).
     func receiveReportedTitle(_ title: String) {
-        // Before the throttle, which can hold a title past the end mark.
-        guard !isReceivingRemoteSnapshot else { return }
-        switch titleReportThrottle.receive(title, at: Date()) {
-        case .evaluate:
-            evaluateReportedTitle(title)
-        case let .held(flushAfter):
-            guard let flushAfter else { return }
-            let work = DispatchWorkItem { [weak self] in self?.flushHeldTitle() }
-            titleFlushWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + flushAfter, execute: work)
-        }
-    }
-
-    private func flushHeldTitle() {
-        titleFlushWork = nil
-        guard let title = titleReportThrottle.flush(at: Date()) else { return }
-        evaluateReportedTitle(title)
-    }
-
-    /// The unthrottled title path: the remote gate, or the local provenance
-    /// lookup feeding `receiveReportedTitle(_:programPID:)`.
-    private func evaluateReportedTitle(_ title: String) {
-        if isRemote {
-            receiveRemoteReportedTitle(title)
-            return
-        }
-        receiveReportedTitle(title, programPID: ProcessInspector.foregroundProgramPID(forPane: self))
-    }
-
-    /// Drop a title held for a surface that is going away, and the flush
-    /// scheduled for it. The throttle forgets its window too, so the next
-    /// surface's first title is evaluated at once rather than held with no
-    /// flush coming.
-    private func cancelHeldTitle() {
-        titleFlushWork?.cancel()
-        titleFlushWork = nil
-        titleReportThrottle.reset()
-    }
-
-    /// Remote-pane title path (#104): there is no local foreground pid to
-    /// gate provenance on (the local process is always `ssh`), so remote
-    /// signals stand in. A title arriving while a command runs (OSC 133 /
-    /// activity / progress) is the program naming itself and is shown at
-    /// once. One arriving at a prompt OSC 133;D announced is shell churn,
-    /// discarded exactly like the local gate discards it. Any other title is
-    /// judged against the host's latest foreground report, which the host
-    /// sends before the output that follows it: shown when a program holds
-    /// the pty (an agent idling between turns: Claude Code's `✳ task`, which
-    /// no run state covers), dropped when the shell does or when no report
-    /// came. Expiry is the running→ended edge in `executionState.didSet`,
-    /// OSC 133;D (`notePromptReturned`), or a report of the shell
-    /// (`applyRemoteForeground`).
-    func receiveRemoteReportedTitle(_ title: String) {
-        // A title arrival is a command boundary — wake the poll. Deferred for
-        // the same render-loop reason as the local path.
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
-        }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        // Discard a bare version number (see the local path) — e.g. remote
-        // Claude Code emitting `2.1.202` as its title.
+        // A bare version number is not a title: Claude Code sets its version
+        // (`2.1.202`) as the title at its prompt.
         guard !ProcessInspector.looksLikeVersionString(trimmed) else { return }
         if executionState != .running {
-            guard !isShellAtPrompt, remoteProgramHoldsForeground else { return }
+            guard !isShellAtPrompt, programHoldsForeground else { return }
         }
         if trimmed != programTitle { programTitle = trimmed }
-        programTitlePID = nil
     }
 
-    /// Whether the host's latest report is a program rather than a shell —
-    /// the host's own verdict and the shell name both, so a nested shell's
+    /// Whether the latest report is a program rather than a shell: the
+    /// session's own verdict and the shell name both, so a nested shell's
     /// prompt titles don't count.
-    private var remoteProgramHoldsForeground: Bool {
-        guard let sample = foregroundSample, sample.name != nil, sample.origin == .remoteEvent else { return false }
-        return !sample.isIdleShell && !remoteForegroundIsShell
+    private var programHoldsForeground: Bool {
+        guard let sample = foregroundSample, sample.name != nil else { return false }
+        return !sample.isIdleShell && !foregroundReportIsShell
     }
 
     /// The full command line of the remote foreground process, from the host's
@@ -603,61 +497,62 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private(set) var remoteForegroundCommand: String?
 
-    /// Tier-2 naming input for remote panes (#104): the foreground that the
-    /// host's session reports for this pane (`ZmxForegroundEvents`). A macOS
-    /// remote reports `comm` as a full executable path — keep the basename,
-    /// matching local kernel-comm behavior. A version-shaped `comm` (Claude Code's native
-    /// install sets its own to `2.1.207`) is named by its invoked name
-    /// instead, as `ProcessInspector.runningProcessName` falls back to the
-    /// executable locally. nil keeps the last-known name and command.
+    /// The foreground that the pane's session reports: the tab's name, the
+    /// agent logo, the title gate and the tracker's foreground, for local and
+    /// remote panes. The session reads the pty's foreground process group
+    /// before it forwards each chunk of output, and every 500 ms
+    /// (`foreground.zig`). macOS reports `comm` as a full executable path:
+    /// the name is its basename. A version-shaped `comm` (Claude Code's
+    /// native install sets its own to `2.1.207`) is named by its invoked name
+    /// instead. nil keeps the last-known name and command.
     ///
-    /// Both verdicts prefer the HOST's own reading, falling back to the local
-    /// shell database only when the report has none. The idle verdict
-    /// (`foreground.isIdle`) is foreground pgid == session leader, and the
-    /// shell verdict (`foreground.isShell`) is the host's `/etc/shells`. The
-    /// local database is wrong in both directions across hosts: a remote-only
-    /// login shell it doesn't list would read busy at an idle prompt forever
-    /// and its nested prompt titles as a program's, and a NESTED shell running
-    /// inside the session shell would read idle even though closing kills it
-    /// — the host-side verdict matches libghostty's local surface semantics
-    /// (a nested shell is a running child) instead.
+    /// Both verdicts are the session's own, with the local shell database
+    /// only as a fallback when the report has none. The idle verdict
+    /// (`foreground.isIdle`) is foreground pgid == the process that the
+    /// session started, and the shell verdict (`foreground.isShell`) is the
+    /// host's `/etc/shells`. Under login(1), the session takes the shell's
+    /// group as its own (issue 0448). Therefore, a nested shell is a running
+    /// child in a local and a remote pane, as libghostty reads it. A prompt
+    /// hook never names the pane (`isPromptHook`). For the run
+    /// tracker only, a shell that runs `-c` or a script is a program
+    /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
     ///
     /// `remoteForegroundCommand` follows the local `runningCommand` contract:
     /// a shell foreground records no command, anything else records the
-    /// report's full command line — falling back to the comm basename when the
-    /// report carried no args field. Deliberately the shell verdict, not
-    /// the idle one: locally, `runningCommand` returns nil for any shell
-    /// argv[0], nested or not, and layout capture mirrors that.
-    func applyRemoteForeground(_ foreground: RemoteForeground?) {
+    /// report's full command line, or the name when the report carried no
+    /// args. It is the shell verdict, not the idle one: `runningCommand`
+    /// returns nil for any shell argv[0], nested or not.
+    func applyForeground(_ foreground: SessionForeground?) {
         guard let foreground, !foreground.comm.isEmpty else { return }
         let name = Self.remoteProcessName(comm: foreground.comm, command: foreground.command)
         guard !name.isEmpty else { return }
-        let origin = ForegroundSample.Origin.remoteEvent
         let isShell = foreground.isShell ?? ProcessInspector.isShellProcessName(name)
         let isIdleShell = foreground.isIdle ?? isShell
-        if name != foregroundProcessName || isIdleShell != foregroundSample?.isIdleShell
-            || origin != foregroundSample?.origin
-        {
-            foregroundSample = ForegroundSample(
-                name: name,
-                isIdleShell: isIdleShell,
-                origin: origin,
-                sampledAt: Date()
-            )
+        // The tracker gets every report: it has its own gate for a prompt
+        // hook (`TerminalExecutionTracker.shellIsAtPrompt`). A shell that
+        // runs `-c` or a script is a run for the tracker, not a prompt.
+        let runsCommand = isShell && foreground.command.map(ProcessInspector.shellCommandLineRunsCommand) == true
+        trackerForeground = (name, isShell && !runsCommand)
+        refreshTrackerForeground()
+        // A prompt hook must not name the tab: see `isPromptHook`.
+        guard !isPromptHook(isShell: isShell) else { return }
+        foregroundReportIsShell = isShell
+        let nameChanged = name != foregroundProcessName
+        if nameChanged || isIdleShell != foregroundSample?.isIdleShell {
+            foregroundSample = ForegroundSample(name: name, isIdleShell: isIdleShell, sampledAt: Date())
         }
-        remoteForegroundIsShell = isShell
         remoteForegroundCommand = isShell ? nil : (foreground.command ?? name)
+        // Another program took the pty: the title was the last one's.
+        if nameChanged, programTitle != nil { programTitle = nil }
         // The shell is back in front: whatever program titled the pane has
         // gone, and the run-state edge may never have fired (it ended idle).
-        if !remoteProgramHoldsForeground, executionState != .running, programTitle != nil {
+        if !programHoldsForeground, executionState != .running, programTitle != nil {
             programTitle = nil
         }
-        // The agent logo, by the local rule: `comm` first, then the invoked
-        // name, which the report's `ps -o args=` carries in place of the local
-        // KERN_PROCARGS2 argv. Re-matched only when the report changes, as
-        // the local path caches against the pid.
-        guard foreground != lastAppliedRemoteForeground else { return }
-        lastAppliedRemoteForeground = foreground
+        // The agent logo: `comm` first, then the invoked name from the
+        // report's command line. Matched again only when the report changes.
+        guard foreground != lastAppliedForeground else { return }
+        lastAppliedForeground = foreground
         let icon = isIdleShell ? nil : AgentIcon.match(comm: name) {
             foreground.command.flatMap { command in
                 ProcessInspector.remoteInvokedNames(commandLine: command).first {
@@ -668,24 +563,28 @@ final class Pane: Identifiable {
         if icon != agentIcon { agentIcon = icon }
     }
 
-    /// How the host's pty reads input, from the session's `tty_mode`. nil
-    /// until the first report, and for a pane with no host session.
+    /// How the session's pty reads input, from its `tty_mode`. nil until the
+    /// first report, and for a pane with no session. A change feeds the
+    /// tracker once a foreground report came: a TUI that leaves line mode is
+    /// still at work.
     @ObservationIgnored
-    var remoteLineMode: TerminalLineMode?
+    var lineMode: TerminalLineMode? {
+        didSet { if lineMode != oldValue, lineMode != nil, trackerForeground != nil { refreshTrackerForeground() } }
+    }
 
     /// The latest report's shell verdict on the foreground (see
-    /// `applyRemoteForeground`).
+    /// `applyForeground`).
     @ObservationIgnored
-    private(set) var remoteForegroundIsShell = false
+    private(set) var foregroundReportIsShell = false
 
     /// The latest report, for the password asker.
-    var remoteForegroundReport: RemoteForeground? { lastAppliedRemoteForeground }
+    var foregroundReport: SessionForeground? { lastAppliedForeground }
 
     /// The report the agent logo was last matched against.
     @ObservationIgnored
-    private var lastAppliedRemoteForeground: RemoteForeground?
+    private var lastAppliedForeground: SessionForeground?
 
-    /// The tab name for a reported remote foreground: the basename of `comm`
+    /// The tab name for a reported foreground: the basename of `comm`
     /// (`normalizeRemoteComm`), or, when that is a bare version, the name the
     /// command line was invoked as. That is its first word: `args` loses
     /// argv's quoting, so an invoked path with a space in it names the tab
@@ -699,11 +598,11 @@ final class Pane: Identifiable {
         return invoked.isEmpty ? base : invoked
     }
 
-    /// Name-only convenience over `applyRemoteForeground` (no args, no host
+    /// Name-only convenience over `applyForeground` (no args, no host
     /// idle verdict — falls back to the local shell database).
-    func applyRemoteForegroundName(_ comm: String?) {
+    func applyForegroundName(_ comm: String?) {
         guard let comm else { return }
-        applyRemoteForeground(RemoteForeground(comm: comm, isIdle: nil, command: nil))
+        applyForeground(SessionForeground(comm: comm, isIdle: nil, command: nil))
     }
 
     /// Basename of a remote `ps -o comm=` value, minus the leading `-` a
@@ -715,32 +614,9 @@ final class Pane: Identifiable {
         return (stripped as NSString).lastPathComponent
     }
 
-    /// Testable core of `receiveReportedTitle`. `programPID` is the pane's
-    /// foreground pid when that process is a non-shell program, nil otherwise.
-    func receiveReportedTitle(_ title: String, programPID: pid_t?) {
-        // A title arrival is a command boundary — wake the adaptive poll so
-        // the other panes' names catch up too. Deferred one turn, so the poll
-        // never runs inside the caller's own work.
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .terminalPollEvent, object: nil)
-        }
-        refreshForegroundProcess()
-        guard let programPID else { return }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        // A bare version number is not a useful display title — Claude Code
-        // emits its version (`2.1.202`) as an OSC 2 title at its prompt. Discard
-        // it so `displayTitle` falls back to the process name instead of pinning
-        // the version. (Its real status titles aren't version-shaped, so they
-        // still adopt normally.)
-        guard !ProcessInspector.looksLikeVersionString(trimmed) else { return }
-        if trimmed != programTitle { programTitle = trimmed }
-        programTitlePID = programPID
-    }
-
-    /// Whether this remote pane's connection stopped (#281, 0057): its client
-    /// (`macterm remote-pane`) waits on the pane's tty while the session
-    /// lives on the host. Read at trigger time by the reconnect sweep. Local
+    /// Whether this remote pane's connection stopped (#281, 0057): its driver
+    /// waits for its host's next try while the session lives on the host.
+    /// Read at trigger time by the reconnect sweep. Local
     /// panes are never "disconnected": they have no network to lose.
     var isDisconnected: Bool {
         isRemote && isRemoteLinkLost
@@ -773,19 +649,18 @@ final class Pane: Identifiable {
         // Only the copy here clears. Before the guard, so that a pane with
         // no view also clears.
         attention = MactermProtocol.Attention()
-        cancelHeldTitle()
         guard hadView else { return }
-        isReceivingRemoteSnapshot = false
-        remoteLineMode = nil
-        // A remote pane's report described the connection that goes now.
-        // The next connection's session reports again; until then nothing
-        // is known, so the close falls back to the surface's reading.
-        if isRemote {
-            foregroundSample = nil
-            remoteForegroundCommand = nil
-            remoteForegroundIsShell = false
-            lastAppliedRemoteForeground = nil
-        }
+        lineMode = nil
+        // The reports described the channels that go now. The next channel's
+        // session reports again; until then nothing is known, so the close
+        // falls back to the surface's reading.
+        foregroundSample = nil
+        programTitle = nil
+        remoteForegroundCommand = nil
+        foregroundReportIsShell = false
+        lastAppliedForeground = nil
+        trackerForeground = nil
+        sessionShell = nil
         // A notification whose pane no longer exists routes nowhere on tap, so
         // drop any still sitting in Notification Center. Ghostty does the same
         // when a surface is removed.
@@ -794,12 +669,11 @@ final class Pane: Identifiable {
 
     var processTitle: String {
         // The live foreground process name (`hx`, `btop`) when a program is
-        // running, else the shell name when idle. Always process-table derived
-        // (never the OSC title) — the quit confirmation lists real process
-        // names, and `displayTitle` falls back here. For a remote pane the
-        // name comes from the host's report; before one lands (or when the
-        // host has no server) the host name is the honest fallback — the
-        // local login shell never runs in a remote pane.
+        // running, else the shell name when idle. Always the session's report
+        // (never the OSC title): the quit confirmation lists real process
+        // names, and `displayTitle` falls back here. Before a remote pane's
+        // first report (or when the host has no server) the host name is the
+        // fallback: the local login shell never runs in a remote pane.
         if let proc = foregroundProcessName, !proc.isEmpty { return proc }
         if let remoteHost { return remoteHost }
         return Self.defaultShellName
@@ -840,10 +714,11 @@ final class Pane: Identifiable {
         start: PaneStartCommand? = nil,
         shell: String? = nil,
         env: [String: String]? = nil,
-        activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay,
-        titleReportInterval: TimeInterval = PollCadence.fastInterval
+        activityQuietPollDelay: TimeInterval = TerminalActivityTiming.quietPollDelay
     ) {
-        titleReportThrottle = TitleReportThrottle(interval: titleReportInterval)
+        // A project with no folder (`Project.hasFolder`) starts its shells
+        // in the folder of the scratch tabs.
+        let projectPath = projectPath.isEmpty ? ScratchTabs.fallbackRoot : projectPath
         self.projectPath = projectPath
         self.projectID = projectID
         self.id = id
@@ -894,7 +769,7 @@ final class Pane: Identifiable {
     /// gone for good (closed, tab/project removed, dropped by a layout apply)
     /// — NOT on transient teardown (window hide, tab-switch churn), where the
     /// session must survive. Fire-and-forget: close paths aren't blocked on
-    /// it; `LocalSessions.requestTimeout` (local) and the host link's request
+    /// it; `serverRequestTimeout` (local) and the host link's request
     /// timeout (remote) bound a stuck peer. The client is
     /// a parameter so AppState's injectable instance flows through in tests.
     func killPersistentSession(using sessionClient: SessionClient) {

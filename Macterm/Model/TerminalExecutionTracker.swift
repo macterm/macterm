@@ -80,6 +80,15 @@ struct TerminalExecutionTracker {
     /// Last observed tty input mode for `lastForeground`. Mode transitions are
     /// meaningful even when the pid/name key is unchanged.
     private var lastTerminalInputWasRaw: Bool?
+    /// A new foreground, seen in raw mode after a submission, with no run.
+    /// The session sends the foreground before the tty mode, so the raw mode
+    /// of bash's prompt can still show for a moment. If the next report is
+    /// the same foreground in canonical mode, within the submission window,
+    /// the run starts. Any other report clears it.
+    private var rawStartCandidate: (key: ForegroundProcessKey, submittedAt: Date)?
+    /// When the last nonempty submission came, until a foreground change
+    /// follows it.
+    private var submissionAwaitsForeground: Date?
     /// Why the pane is currently considered running. Foreground and explicit
     /// progress run until a completion/foreground transition; activity is an
     /// output heartbeat and quiet-settles.
@@ -144,6 +153,20 @@ struct TerminalExecutionTracker {
         shellIsAtPrompt = true
     }
 
+    /// The session says a run goes on in the pane: a pane restored after an
+    /// app restart attaches to a session whose program still runs. That run
+    /// is the user's, so the foreground is trusted as if they typed it. The
+    /// foreground is seen again as new, so the report that came before
+    /// starts the run. Only for a pane with no trusted input yet: true when
+    /// that changed something.
+    mutating func trustSessionRun() -> Bool {
+        guard !hasUserInteraction else { return false }
+        hasUserInteraction = true
+        lastForeground = nil
+        shellIsAtPrompt = false
+        return true
+    }
+
     /// ORDERING CONTRACT: this CLEARS the in-place start arming, so a caller
     /// that reports both an interaction and a submission for the same event
     /// must call this FIRST — `recordCommandSubmission` arms, and an
@@ -173,6 +196,7 @@ struct TerminalExecutionTracker {
         progressQuiesced = nil
         pendingProgressQuiesce = false
         blankSubmissionAt = nil
+        submissionAwaitsForeground = date
         // The shell has been handed work, so a foreground process from here on
         // is that work rather than prompt-hook noise. A BLANK submission
         // deliberately does not clear this (it launches nothing), which is why
@@ -352,7 +376,10 @@ struct TerminalExecutionTracker {
         // claimed as new activity after the transition — notably by the first
         // heartbeat after a command's process returned the foreground to the
         // shell.
+        let submittedAt = changed ? submissionAwaitsForeground : nil
         if changed {
+            rawStartCandidate = nil
+            submissionAwaitsForeground = nil
             pendingOutputStart = nil
             blankSubmissionAt = nil
             lastOutputRows = nil
@@ -392,6 +419,11 @@ struct TerminalExecutionTracker {
         guard hasUserInteraction else { return currentState }
 
         if terminalInputIsRaw {
+            rawStartCandidate = if let newKey, let submittedAt, currentState != .running {
+                (newKey, submittedAt)
+            } else {
+                nil
+            }
             // A TUI switching canonical→raw is still working. Demote its
             // foreground-owned run so IO heartbeats keep it alive and quiet
             // output can settle it, rather than marking it done immediately.
@@ -400,6 +432,9 @@ struct TerminalExecutionTracker {
             }
             return currentState
         }
+        let startsFromRaw = returnedToCanonical
+            && rawStartCandidate.map { $0.key == newKey && isWithinSubmissionWindow(date, submittedAt: $0.submittedAt) } == true
+        rawStartCandidate = nil
 
         // A same-pid TUI can return from raw to canonical mode while it keeps
         // working. Restore foreground authority only while it is still
@@ -414,7 +449,7 @@ struct TerminalExecutionTracker {
 
         // A canonical non-shell command is foreground-owned until its process
         // changes. Re-polls of the same pid must not restart settled state.
-        guard changed else { return currentState }
+        guard changed || startsFromRaw else { return currentState }
         // A process appearing while the shell sits at a prompt is a prompt hook,
         // not the user's command (see `shellIsAtPrompt`). Suppress the START
         // only — a run already owned by anything keeps its own rules.

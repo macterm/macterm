@@ -142,6 +142,45 @@ struct ControlHandlerTests {
         #expect(two?.tabCount == nil)
     }
 
+    @Test
+    func project_list_indexes_every_project_in_tree_order_and_names_its_parent() async {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "first")
+        let work = seedProject(appState, projectStore, name: "Work", select: false)
+        _ = seedProject(appState, projectStore, name: "last", select: false)
+        let api = seedProject(appState, projectStore, name: "api", select: false)
+        let handlers = seedProject(appState, projectStore, name: "handlers", select: false)
+        #expect(projectStore.move(api.id, into: work.id))
+        #expect(projectStore.move(handlers.id, into: api.id))
+
+        let projects = await handler.handle(request("project.list")).data?.projects
+        // The sidebar order: first, Work, api inside Work, handlers inside
+        // api, last. A parent takes an index too.
+        #expect(projects?.map(\.name) == ["first", "Work", "api", "handlers", "last"])
+        #expect(projects?.map(\.index) == [1, 2, 3, 4, 5])
+        #expect(projects?.map(\.parent) == ["", "", "Work", "api", ""])
+        #expect(projects?.map(\.parentID) == ["", "", work.id.uuidString, api.id.uuidString, ""])
+
+        let selected = await handler.handle(request("project.select", args: ControlArgs(project: "project:3")))
+        #expect(selected.data?.projects?.first?.id == api.id.uuidString)
+        #expect(selected.data?.projects?.first?.parent == "Work")
+        let parent = await handler.handle(request("project.select", args: ControlArgs(project: "Work")))
+        #expect(parent.data?.projects?.first?.id == work.id.uuidString)
+    }
+
+    @Test
+    func one_name_in_two_parents_is_still_ambiguous() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let work = seedProject(appState, projectStore, name: "Work")
+        let home = seedProject(appState, projectStore, name: "Home", select: false)
+        let one = seedProject(appState, projectStore, name: "api", select: false)
+        let two = seedProject(appState, projectStore, name: "api", select: false)
+        #expect(projectStore.move(one.id, into: work.id))
+        #expect(projectStore.move(two.id, into: home.id))
+        let response = await handler.handle(request("tab.list", args: ControlArgs(project: "api")))
+        #expect(response.error?.code == .ambiguous)
+    }
+
     // MARK: - tab.list
 
     @Test
@@ -268,7 +307,7 @@ struct ControlHandlerTests {
 
     private func stubZmx(
         _ appState: AppState,
-        sessions: [LocalSession]?
+        sessions: [SessionInfo]?
     ) {
         appState.sessionClient = SessionClient(
             runsSessions: { false },
@@ -288,9 +327,9 @@ struct ControlHandlerTests {
         stubZmx(
             appState,
             sessions: [
-                LocalSession(name: pane.sessionName, shellPID: 4242, clients: 1),
-                LocalSession(name: "macterm-orphan-aaaabbbbcccc"),
-                LocalSession(name: "macterm-exited-aaaabbbbcccc", isRunning: false),
+                SessionInfo(name: pane.sessionName, shellPID: 4242, clients: 1),
+                SessionInfo(name: "macterm-orphan-aaaabbbbcccc"),
+                SessionInfo(name: "macterm-exited-aaaabbbbcccc", isRunning: false),
             ]
         )
         let response = await handler.handle(request("session.list"))
@@ -315,7 +354,7 @@ struct ControlHandlerTests {
     @Test
     func session_info_finds_by_name_or_404s() async {
         let (handler, appState, _) = makeHandler()
-        stubZmx(appState, sessions: [LocalSession(name: "macterm-x-000011112222")])
+        stubZmx(appState, sessions: [SessionInfo(name: "macterm-x-000011112222")])
 
         let hit = await handler.handle(request("session.info", args: ControlArgs(session: "macterm-x-000011112222")))
         #expect(hit.ok)
@@ -440,6 +479,24 @@ struct ControlHandlerTests {
             ))
             #expect(response.error?.code == .badRequest)
             #expect(response.error?.message == "\"Pinned\" is a reserved name for the pinned tabs")
+        }
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
+    func project_create_refuses_a_name_with_a_slash() async throws {
+        let (handler, _, projectStore) = makeHandler()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-create-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for name in ["Work/api", "/", "api/"] {
+            let response = await handler.handle(request(
+                "project.create", args: ControlArgs(path: dir.path, name: name)
+            ))
+            #expect(response.error?.code == .badRequest)
+            #expect(response.error?.message == "a project name cannot contain a slash")
         }
         #expect(projectStore.projects.isEmpty)
     }
@@ -637,6 +694,9 @@ struct ControlHandlerTests {
         #expect(reserved.error?.message == "\"Pinned\" is a reserved name for the pinned tabs")
         let reservedCase = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: " pInNeD ")))
         #expect(reservedCase.error?.code == .badRequest)
+        let slash = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: "Work/api")))
+        #expect(slash.error?.code == .badRequest)
+        #expect(slash.error?.message == "a project name cannot contain a slash")
         #expect(projectStore.projects.first?.name == "alpha")
 
         // Unknown project
@@ -1520,7 +1580,7 @@ struct ControlHandlerTests {
             isBundled: { true },
             killSession: { name in await killed.append(name) },
             killRemoteSession: { _, _ in },
-            listSessions: { [LocalSession(name: "macterm-x-000011112222")] },
+            listSessions: { [SessionInfo(name: "macterm-x-000011112222")] },
             endV1Sessions: { _ in true }
         )
 

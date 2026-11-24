@@ -166,6 +166,28 @@ struct MactermIntentsTests {
     }
 
     @Test
+    func new_project_refuses_a_typed_name_with_a_slash() async throws {
+        let (appState, projectStore) = makeHost()
+        defer { teardown() }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intent-slash-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let named = NewMactermProjectIntent()
+        named.folder = IntentFile(fileURL: dir)
+        named.name = "Work/api"
+        let refusal = await #expect(throws: MactermIntentError.self) { try await named.perform() }
+        if case let .badInput(detail)? = refusal {
+            #expect(detail == Project.slashMessage)
+        } else {
+            Issue.record("expected badInput, got \(String(describing: refusal))")
+        }
+        #expect(projectStore.projects.isEmpty)
+        #expect(appState.activeProjectID == nil)
+    }
+
+    @Test
     func new_project_on_a_missing_folder_is_bad_input() async throws {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
@@ -366,7 +388,6 @@ struct MactermIntentsTests {
         let busy = ForegroundSample(
             name: "btop",
             isIdleShell: false,
-            origin: .processTable(pid: nil),
             sampledAt: Date()
         )
         #expect(ForegroundPolicy.needsConfirmClose(

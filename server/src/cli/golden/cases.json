@@ -59,7 +59,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -101,7 +101,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -122,7 +122,31 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+  },
+  {
+    "arguments" : [
+      "project",
+      "create",
+      "\/tmp\/api",
+      "--name",
+      "Work\/api"
+    ],
+    "exit" : 1,
+    "requests" : [
+      {
+        "args" : {
+          "name" : "Work\/api",
+          "path" : "\/tmp\/api",
+          "select" : false
+        },
+        "command" : "project.create",
+        "id" : "-",
+        "v" : 1
+      }
+    ],
+    "stderr" : "macterm: a project name cannot contain a slash\n  hint: select another name\n",
+    "stdout" : ""
   },
   {
     "arguments" : [
@@ -142,7 +166,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -165,7 +189,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
   },
   {
     "arguments" : [
@@ -187,7 +211,29 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "project:1  *  api  2 tabs      \/tmp\/api\nproject:2     web  not loaded  me@box:\/srv\/web\n"
+    "stdout" : "project:1  *  api  -  2 tabs      \/tmp\/api\nproject:2     web  -  not loaded  me@box:\/srv\/web\n"
+  },
+  {
+    "arguments" : [
+      "project",
+      "rename",
+      "api",
+      "Work\/api"
+    ],
+    "exit" : 1,
+    "requests" : [
+      {
+        "args" : {
+          "name" : "Work\/api",
+          "project" : "api"
+        },
+        "command" : "project.rename",
+        "id" : "-",
+        "v" : 1
+      }
+    ],
+    "stderr" : "macterm: a project name cannot contain a slash\n  hint: select another name\n",
+    "stdout" : ""
   },
   {
     "arguments" : [

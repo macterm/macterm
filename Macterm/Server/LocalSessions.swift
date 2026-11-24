@@ -4,63 +4,16 @@ import os
 
 private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 
-/// A local v2 session as the server lists it.
-struct LocalSession: Equatable {
-    var name: String
-    /// The session's shell, the leader of its pty. Its controlling tty's
-    /// foreground group is the pane's foreground (`ZmxForegroundResolver`).
-    var shellPID: pid_t?
-    /// The session's pty (`/dev/ttysNNN`).
-    var ttyPath: String?
-    /// False after the shell exited: the session keeps the status until a
-    /// client sends `session.kill`.
-    var isRunning: Bool
-    /// The clients that show the session. nil when the session did not say.
-    var clients: Int?
-    /// The build key of the build that started the session, which an update
-    /// never changes. nil when the session did not say.
-    var buildKey: String?
-
-    init(
-        name: String,
-        shellPID: pid_t? = nil,
-        ttyPath: String? = nil,
-        isRunning: Bool = true,
-        clients: Int? = 0,
-        buildKey: String? = nil
-    ) {
-        self.name = name
-        self.shellPID = shellPID
-        self.ttyPath = ttyPath
-        self.isRunning = isRunning
-        self.clients = clients
-        self.buildKey = buildKey
-    }
-
-    init(_ session: MactermProtocol.Session) {
-        self.init(
-            name: session.id,
-            shellPID: session.shellPid.flatMap { pid_t(exactly: $0) },
-            ttyPath: session.pty.map { String(decoding: $0.bytes, as: UTF8.self) },
-            isRunning: session.state == .running,
-            clients: session.clients.map(Int.init),
-            buildKey: session.buildKey
-        )
-    }
-}
-
 /// The app's one connection to the local server, for the sessions of its
-/// local panes. A pane's surface runs `zmx connect <name> -- <shell>`, which
-/// makes a missing session through the same server; this connection lists
-/// and ends them.
+/// local panes: the local `ServerEndpoint`. It makes, lists and ends the
+/// sessions. A local pane's `PaneSession` opens its channel on the
+/// session's own socket (`paneChannels`), not on this connection.
 ///
 /// It connects at the first use, and again after the connection ends (the
-/// server exits when it has no session and no client). The app owns every
-/// local session, so a session whose shell exited is ended here: at its
-/// `session.exit` event, and at each connect for one that exited while no
-/// app was connected. Its pane already closed, or closes from the client's
-/// exit.
-actor LocalSessions {
+/// server exits when it has no session and no client). The server ends a
+/// session whose shell exited when a client read the status, so nothing
+/// here ends one.
+actor LocalSessions: ServerEndpoint {
     static let shared = LocalSessions(server: LocalServer.bundled)
 
     private let server: LocalServer?
@@ -77,19 +30,21 @@ actor LocalSessions {
         case batch(ServerEventBatch)
     }
 
-    /// The longest wait for one reply. A kill waits for the session to end:
-    /// the server gives it 3 s before SIGKILL.
-    static let requestTimeout: Duration = .seconds(10)
+    /// A pane's connect tries this many times, `connectWait` apart, before
+    /// the pane is gone: a server that an update replaced, or one that
+    /// exited while idle, is back within this time.
+    private static let connectTries = 12
+    private static let connectWait: Duration = .milliseconds(500)
 
     init(server: LocalServer?) {
         self.server = server
     }
 
     /// Every session, or nil when the server cannot be reached.
-    func list() async -> [LocalSession]? {
+    func list() async -> [SessionInfo]? {
         do {
             let sessions = try await call(MactermProtocol.SessionList.self, .init()).sessions
-            return sessions.map(LocalSession.init)
+            return sessions.map(SessionInfo.init)
         } catch {
             logger.warning("session list failed: \(String(describing: error), privacy: .public)")
             return nil
@@ -134,47 +89,67 @@ actor LocalSessions {
     private func call<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args) async throws -> M.Result {
         let connection = try await connected()
         do {
-            return try await Self.bounded { try await connection.call(method, args) }
+            return try await connection.call(method, args, timeout: serverRequestTimeout)
         } catch ServerClientError.disconnected {
             // The server exited while idle: one new connection.
             drop(connection)
             let next = try await connected()
-            return try await Self.bounded { try await next.call(method, args) }
+            return try await next.call(method, args, timeout: serverRequestTimeout)
         }
     }
 
-    /// The reply, or `ServerClientError.noAnswer` after `requestTimeout`. A
-    /// request that waits for its reply cannot be cancelled, so the two race
-    /// in tasks of their own and the first to finish answers.
-    static func bounded<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
-        let answered = OSAllocatedUnfairLock(initialState: false)
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
-            func finish(_ result: Result<T, Error>) {
-                guard answered.withLock({ done in
-                    defer { done = true }
-                    return !done
-                })
-                else { return }
-                continuation.resume(with: result)
-            }
-            Task {
-                do {
-                    try await finish(.success(body()))
-                } catch {
-                    finish(.failure(error))
-                }
-            }
-            Task {
-                try? await Task.sleep(for: requestTimeout)
-                finish(.failure(ServerClientError.noAnswer))
-            }
+    /// The sessions' own sockets: a local pane's bytes never pass through
+    /// the server (design/001). Throws when there is no bundled server.
+    nonisolated func paneChannels() async throws -> any PaneChannelOpener {
+        guard let server else { throw ServerClientError.noAnswer }
+        return SessionSockets(directory: server.directory) { [weak self] session in
+            Task { await self?.exitRead(session) }
         }
     }
+
+    /// A pane's channel read the exit of `session` on the session's own
+    /// socket. `session.info` tells the server: the server ends a session
+    /// when a reply shows the status that it read (`registry.statusRead`).
+    /// The server hears the exit on its own connection to the session, which
+    /// can come after this request: while the reply says `running`, it asks
+    /// again. A server that is down is started again by the request.
+    private func exitRead(_ session: String) async {
+        for _ in 0 ..< Self.exitReadTries {
+            do {
+                let info = try await call(MactermProtocol.SessionInfo.self, .init(id: session))
+                if info.session.state != .running { return }
+            } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
+                return
+            } catch {
+                logger.info("session info \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+            try? await Task.sleep(for: Self.exitReadWait)
+        }
+        logger.warning("session \(session, privacy: .public): the server did not see its exit")
+    }
+
+    /// `exitRead` asks this many times, this far apart.
+    private static let exitReadTries = 40
+    private static let exitReadWait: Duration = .milliseconds(50)
 
     /// The connection to the server, made when there is none or when the
-    /// last one ended. A pane opens its channel on it.
-    func channelConnection() async throws -> ServerConnection {
-        try await connected()
+    /// last one ended. A pane opens its channel on it. It tries again for a
+    /// few seconds before it gives up.
+    func connection() async throws -> any ServerLink {
+        var tries = 0
+        while true {
+            do {
+                return try await connected()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                tries += 1
+                guard tries < Self.connectTries else { throw error }
+                logger.info("connect failed, try \(tries, privacy: .public): \(String(describing: error), privacy: .public)")
+                try await Task.sleep(for: Self.connectWait)
+            }
+        }
     }
 
     private func connected() async throws -> ServerConnection {
@@ -204,21 +179,9 @@ actor LocalSessions {
 
     private func watch(_ connection: ServerConnection) {
         Task { [weak self] in
-            if let sessions = try? await connection.call(MactermProtocol.SessionList.self, .init()).sessions {
-                for session in sessions where session.state == .exited {
-                    await self?.kill(session.id)
-                }
-            }
-        }
-        Task { [weak self] in
             await self?.feedModel(.connected)
-            for await batch in connection.events {
-                for case let .sessionExit(exit) in batch.events {
-                    await self?.kill(exit.id)
-                }
-                if batch.events.contains(where: \.isModel) {
-                    await self?.feedModel(.batch(batch))
-                }
+            for await batch in connection.events where batch.events.contains(where: \.isModel) {
+                await self?.feedModel(.batch(batch))
             }
             await self?.drop(connection)
         }

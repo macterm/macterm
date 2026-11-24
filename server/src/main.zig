@@ -86,11 +86,15 @@ fn cliCommand(init: std.process.Init, words: []const []const u8) !void {
     var out = std.Io.File.stdout().writerStreaming(init.io, &out_buf);
     var err_buf: [4096]u8 = undefined;
     var err = std.Io.File.stderr().writerStreaming(init.io, &err_buf);
+    var in_buf: [4096]u8 = undefined;
+    var in = std.Io.File.stdin().readerStreaming(init.io, &in_buf);
     var code = cli.run(.{
         .arena = arena_state.allocator(),
+        .io = init.io,
         .env = init.environ_map,
         .out = &out.interface,
         .err = &err.interface,
+        .in = &in.interface,
     }, words) catch |e| switch (e) {
         error.OutOfMemory => return e,
         error.WriteFailed => 1,

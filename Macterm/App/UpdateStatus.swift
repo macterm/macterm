@@ -12,13 +12,33 @@ enum UpdateStatus: Equatable {
     case downloading(received: UInt64, expected: UInt64?)
     case extracting
     /// The update waits. It installs when the app quits, or at once when the
-    /// user clicks Restart to Update.
-    case readyToRestart
+    /// user clicks the button. `version` is Sparkle's display version of the
+    /// update, or nil when no callback named it.
+    case readyToRestart(version: String?)
 
     /// The fraction for a determinate ring, or nil for an indeterminate one.
     var fraction: Double? {
         guard case let .downloading(received, expected?) = self, expected > 0 else { return nil }
         return min(Double(received) / Double(expected), 1)
+    }
+
+    var isReadyToRestart: Bool {
+        if case .readyToRestart = self { return true }
+        return false
+    }
+
+    /// The title of the button that installs the waiting update: Update to
+    /// v2.1.0. A Tip build shows its whole version (2.1.0-tip.57). That is
+    /// the only name of the build. With no version, the title does not guess
+    /// one.
+    var installTitle: String {
+        guard case let .readyToRestart(version?) = self, !version.isEmpty else {
+            return String(localized: "Restart to Update")
+        }
+        return String(
+            localized: "Update to v\(version)",
+            comment: "Toolbar button that installs the downloaded update and relaunches. The value is a version number, for example 2.1.0."
+        )
     }
 
     var isBusy: Bool {
@@ -49,11 +69,13 @@ enum UpdateEvent: Equatable {
     case extractionStarted
     /// The update waits to install. `onQuit` is true for a background
     /// download that Sparkle installs when the app quits
-    /// (`willInstallUpdateOnQuit`).
-    case readyToInstall(onQuit: Bool)
+    /// (`willInstallUpdateOnQuit`). `version` is the update's display
+    /// version when the callback names it. The user driver's ready callback
+    /// does not, and the machine then uses the version of the found update.
+    case readyToInstall(onQuit: Bool, version: String?)
     /// Sparkle ends the update session (`dismissUpdateInstallation`).
     case sessionEnded
-    /// The user clicked Restart to Update.
+    /// The user clicked the button that installs the waiting update.
     case restartRequested
 }
 
@@ -75,7 +97,7 @@ struct UpdateFound: Equatable {
 enum UpdateFoundReply: Equatable {
     /// Download (or extract, or install) the update now.
     case install
-    /// Keep the reply. Restart to Update sends `install` later.
+    /// Keep the reply. The install button sends `install` later.
     case holdForRestart
     /// Close the session. Macterm cannot install the update (information
     /// only, or an appcast that failed its signing check).
@@ -114,7 +136,10 @@ struct UpdateMachine: Equatable {
     /// The session is a check that the user started. Only such a session
     /// shows the ring and toasts.
     private(set) var userSession = false
-    /// The user clicked Restart to Update while Macterm had no reply to send.
+    /// The display version of the update that this session found. The user
+    /// driver's ready callback does not name its update.
+    private(set) var foundVersion: String?
+    /// The user clicked the install button while Macterm had no reply to send.
     /// The next found update at the installing stage then installs at once.
     private(set) var restartPending = false
 
@@ -139,10 +164,10 @@ struct UpdateMachine: Equatable {
             if userSession { result.toast = status.isBusy ? .downloadFailed : .checkFailed }
             // An error after the user driver's ready ends that install. A
             // background download that waits still installs on quit.
-            if status == .readyToRestart, !installsOnQuit { status = .idle }
+            if status.isReadyToRestart, !installsOnQuit { status = .idle }
             settle()
         case .downloadStarted:
-            if userSession, status != .readyToRestart { status = .downloading(received: 0, expected: nil) }
+            if userSession, !status.isReadyToRestart { status = .downloading(received: 0, expected: nil) }
         case let .expectedLength(length):
             if case let .downloading(received, _) = status {
                 status = .downloading(received: received, expected: length)
@@ -152,10 +177,10 @@ struct UpdateMachine: Equatable {
                 status = .downloading(received: received + length, expected: expected)
             }
         case .extractionStarted:
-            if userSession, status != .readyToRestart { status = .extracting }
-        case let .readyToInstall(onQuit):
+            if userSession, !status.isReadyToRestart { status = .extracting }
+        case let .readyToInstall(onQuit, version):
             if onQuit { installsOnQuit = true }
-            status = .readyToRestart
+            status = .readyToRestart(version: version ?? foundVersion)
         case .sessionEnded:
             settle()
         case .restartRequested:
@@ -174,9 +199,10 @@ struct UpdateMachine: Equatable {
         switch found.stage {
         case .installing:
             // The update waits for the app to quit. A check that the user
-            // started finds it again: show Restart to Update, and install at
+            // started finds it again: show the install button, and install at
             // once only if the user already clicked it.
-            status = .readyToRestart
+            foundVersion = found.version
+            status = .readyToRestart(version: found.version)
             if restartPending {
                 restartPending = false
                 return Result(reply: .install)
@@ -184,6 +210,7 @@ struct UpdateMachine: Equatable {
             return Result(reply: .holdForRestart)
         case .notDownloaded,
              .downloaded:
+            foundVersion = found.version
             return Result(reply: .install)
         }
     }
@@ -192,6 +219,7 @@ struct UpdateMachine: Equatable {
     private mutating func settle() {
         restartPending = false
         userSession = false
-        if status != .readyToRestart { status = .idle }
+        foundVersion = nil
+        if !status.isReadyToRestart { status = .idle }
     }
 }

@@ -10,8 +10,9 @@
 //!   decode and encode again (`server/schema/frames.json`).
 //!
 //! `check` compares the metadata of this build with an older one: the
-//! add-only rule of `messages.zig` as a test, no change to who may send a
-//! message, and no saved secret in a reply or an event (design/006 §1).
+//! add-only rule of `messages.zig` as a test, no stricter limit on a field,
+//! no change to who may send a message, and no saved secret in a reply or
+//! an event (design/006 §1).
 
 const std = @import("std");
 const server_src = @import("wire");
@@ -27,390 +28,17 @@ const Raw = msgpack.Raw;
 
 // ── Metadata ────────────────────────────────────────────────────────────────
 
-pub const Field = struct {
-    /// The key on the wire.
-    name: []const u8,
-    /// `bool`, `u8` to `u64`, `i8` to `i64`, `f64`, `str`, `bin`, `secret`,
-    /// `raw`, `[T]` for an array, or the name of a type in `types`.
-    type: []const u8,
-    optional: bool = false,
-    /// The value that a decoder uses when the key is not there: a number,
-    /// `true` or `false`, an enum tag, `[]`, or a JSON string.
-    default: ?[]const u8 = null,
-    since: u32,
-};
-
-/// One case of a tagged union.
-pub const Variant = struct {
-    name: []const u8,
-    /// The payload's wire type, as `Field.type`. Null for a case with none.
-    type: ?[]const u8 = null,
-};
-
-pub const TypeDef = struct {
-    /// The Zig name in its name space: `Hello`, `ChannelOpen.Args`, `Split`.
-    name: []const u8,
-    kind: enum { @"struct", @"enum", @"union" },
-    fields: []const Field = &.{},
-    cases: []const []const u8 = &.{},
-    variants: []const Variant = &.{},
-};
-
-pub const Message = struct {
-    /// The name on the wire.
-    name: []const u8,
-    /// Its type in `types`.
-    type: []const u8,
-    since: u32,
-    senders: []const []const u8,
-};
-
-pub const Method = struct {
-    name: []const u8,
-    /// The Zig name of the method: `ChannelOpen`.
-    type: []const u8,
-    since: u32,
-    senders: []const []const u8,
-    args: []const u8,
-    result: []const u8,
-};
-
-pub const Metadata = struct {
-    level: u32,
-    min_level: u32,
-    trust: []const []const u8,
-    /// The frozen first messages: `hello` and `refuse`.
-    messages: []const Message,
-    /// The types of the requests, responses, event batches and pane messages.
-    envelopes: []const []const u8,
-    methods: []const Method,
-    events: []const Message,
-    /// The messages on a pane channel, in `{t, a}`. Empty in metadata from
-    /// before they were added.
-    pane_messages: []const Message = &.{},
-    types: []const TypeDef,
-    /// The tags of `ErrorCode`. Empty in metadata from before they were
-    /// listed.
-    error_codes: []const []const u8 = &.{},
-};
-
-/// The schema of this build.
-pub const metadata: Metadata = build();
-
-fn build() Metadata {
-    @setEvalBranchQuota(1_000_000);
-    comptime {
-        const handshake = .{ messages.Hello, messages.Refuse };
-        const envelopes = .{ messages.Request, messages.Response, messages.EventBatch, messages.PaneMessage };
-
-        var types: []const type = &.{};
-        for (handshake) |T| types = collect(T, types);
-        for (envelopes) |T| types = collect(T, types);
-        for (messages.methods) |M| types = collect(M.Result, collect(M.Args, types));
-        for (messages.events) |E| types = collect(E, types);
-        for (messages.pane_messages) |P| types = collect(P, types);
-
-        var handshake_out: [handshake.len]Message = undefined;
-        for (handshake, 0..) |T, i| handshake_out[i] = message(T);
-        var envelope_out: [envelopes.len][]const u8 = undefined;
-        for (envelopes, 0..) |T, i| envelope_out[i] = shortName(T);
-        var method_out: [messages.methods.len]Method = undefined;
-        for (messages.methods, 0..) |M, i| method_out[i] = .{
-            .name = M.name,
-            .type = shortName(M),
-            .since = M.since,
-            .senders = trustNames(M.senders),
-            .args = shortName(M.Args),
-            .result = shortName(M.Result),
-        };
-        var event_out: [messages.events.len]Message = undefined;
-        for (messages.events, 0..) |E, i| event_out[i] = message(E);
-        var pane_out: [messages.pane_messages.len]Message = undefined;
-        for (messages.pane_messages, 0..) |P, i| pane_out[i] = message(P);
-        const type_out = typeDefs(types);
-        // Swift declares a nested type in an extension of its parent, so the
-        // parent must be a method or a type of the schema.
-        for (type_out) |t| {
-            const dot = std.mem.lastIndexOfScalar(u8, t.name, '.') orelse continue;
-            const parent = t.name[0..dot];
-            const known = for (method_out) |m| {
-                if (std.mem.eql(u8, m.type, parent)) break true;
-            } else for (type_out) |o| {
-                if (std.mem.eql(u8, o.name, parent)) break true;
-            } else false;
-            if (!known) @compileError(t.name ++ ": declare it in a method or in a type of the schema");
-        }
-
-        const trust = std.meta.fieldNames(messages.Trust);
-        var trust_out: [trust.len][]const u8 = undefined;
-        for (trust, 0..) |name, i| trust_out[i] = name;
-
-        const codes = std.meta.fieldNames(messages.ErrorCode);
-        var code_out: [codes.len][]const u8 = undefined;
-        for (codes, 0..) |name, i| {
-            checkName(name);
-            code_out[i] = name;
-        }
-
-        const h = handshake_out;
-        const e = envelope_out;
-        const ms = method_out;
-        const ev = event_out;
-        const pm = pane_out;
-        const ty = type_out;
-        const tr = trust_out;
-        const co = code_out;
-        return .{
-            .level = messages.level,
-            .min_level = messages.min_level,
-            .trust = &tr,
-            .messages = &h,
-            .envelopes = &e,
-            .methods = &ms,
-            .events = &ev,
-            .pane_messages = &pm,
-            .types = &ty,
-            .error_codes = &co,
-        };
-    }
-}
-
-/// The definitions of `types`. Two types with one name are an error: the
-/// Swift side would declare one of them twice.
-fn typeDefs(comptime types: []const type) [types.len]TypeDef {
-    comptime {
-        @setEvalBranchQuota(1_000_000);
-        var out: [types.len]TypeDef = undefined;
-        for (types, 0..) |T, i| {
-            out[i] = typeDef(T);
-            for (out[0..i]) |o| if (std.mem.eql(u8, o.name, out[i].name))
-                @compileError("two types of the schema are named " ++ o.name ++ ": rename one");
-        }
-        return out;
-    }
-}
-
-fn message(comptime T: type) Message {
-    return .{
-        .name = T.name,
-        .type = shortName(T),
-        .since = T.since,
-        .senders = trustNames(T.senders),
-    };
-}
-
-fn trustNames(comptime senders: []const messages.Trust) []const []const u8 {
-    comptime {
-        var out: [senders.len][]const u8 = undefined;
-        for (senders, 0..) |t, i| out[i] = @tagName(t);
-        const final = out;
-        return &final;
-    }
-}
-
-/// Adds `T` and every struct and enum that it holds to `list`.
-fn collect(comptime T: type, comptime list: []const type) []const type {
-    comptime {
-        switch (T) {
-            Bin, Secret, Raw, []const u8 => return list,
-            else => {},
-        }
-        if (msgpack.isText(T)) return list;
-        for (list) |L| if (L == T) return list;
-        switch (@typeInfo(T)) {
-            .optional => |o| return collect(o.child, list),
-            .pointer => |p| return collect(p.child, list),
-            .@"enum" => return list ++ &[_]type{T},
-            .@"struct" => |s| {
-                var out: []const type = list ++ &[_]type{T};
-                for (s.field_types) |F| out = collect(F, out);
-                return out;
-            },
-            .@"union" => |u| {
-                var out: []const type = list ++ &[_]type{T};
-                for (u.field_types) |F| out = collect(F, out);
-                return out;
-            },
-            else => return list,
-        }
-    }
-}
-
-/// The files whose types the schema may hold. A type's name in the schema
-/// is its name in its file, so a name must be unique across them all
-/// (`build` checks).
-const name_spaces = [_][]const u8{ "messages.", "model.", "tree." };
-
-/// The name of a type declared in one of `name_spaces`, without its module
-/// path.
-fn shortName(comptime T: type) []const u8 {
-    const full = @typeName(T);
-    // The marker nearest the end names the file that declares `T`.
-    var start: ?usize = null;
-    for (name_spaces) |marker| {
-        const i = std.mem.lastIndexOf(u8, full, marker) orelse continue;
-        if (start == null or i + marker.len > start.?) start = i + marker.len;
-    }
-    return full[start orelse @compileError("declare " ++ full ++ " by name in messages.zig or in the model") ..];
-}
-
-fn wireType(comptime T: type) []const u8 {
-    switch (T) {
-        bool => return "bool",
-        Bin => return "bin",
-        Secret => return "secret",
-        Raw => return "raw",
-        []const u8 => return "str",
-        u8, u16, u32, u64, i8, i16, i32, i64, f64 => return @typeName(T),
-        else => {},
-    }
-    if (msgpack.isText(T)) return "str";
-    return switch (@typeInfo(T)) {
-        .pointer => |p| if (p.size == .slice and @typeInfo(p.child) != .optional)
-            "[" ++ wireType(p.child) ++ "]"
-        else if (p.size == .one and @typeInfo(p.child) != .optional)
-            wireType(p.child)
-        else
-            @compileError("no wire type for " ++ @typeName(T)),
-        .@"struct", .@"enum", .@"union" => shortName(T),
-        else => @compileError("no wire type for " ++ @typeName(T)),
-    };
-}
-
-fn typeDef(comptime T: type) TypeDef {
-    comptime {
-        switch (@typeInfo(T)) {
-            .@"enum" => |e| {
-                var cases: [e.field_names.len][]const u8 = undefined;
-                for (e.field_names, 0..) |name, i| {
-                    checkName(name);
-                    cases[i] = name;
-                }
-                const final = cases;
-                return .{ .name = shortName(T), .kind = .@"enum", .cases = &final };
-            },
-            .@"struct" => |s| {
-                var fields: [s.field_names.len]Field = undefined;
-                for (s.field_names, s.field_types, s.field_attrs, 0..) |name, F, attrs, i| {
-                    checkName(name);
-                    const optional = @typeInfo(F) == .optional;
-                    const Inner = if (optional) @typeInfo(F).optional.child else F;
-                    // Swift has no struct that holds itself: a pointer goes
-                    // through a union, which is an `indirect enum` there.
-                    if (@typeInfo(Inner) == .pointer and @typeInfo(Inner).pointer.size == .one)
-                        @compileError(name ++ ": a pointer is allowed only as the payload of a union case");
-                    if (optional and attrs.defaultValue(F) != null and attrs.defaultValue(F).? != null)
-                        @compileError(name ++ ": an optional field has no default but null");
-                    fields[i] = .{
-                        .name = name,
-                        .type = wireType(Inner),
-                        .optional = optional,
-                        .default = if (optional) null else if (attrs.defaultValue(F)) |d| defaultText(F, d) else null,
-                        .since = fieldSince(T, name),
-                    };
-                }
-                const final = fields;
-                return .{ .name = shortName(T), .kind = .@"struct", .fields = &final };
-            },
-            .@"union" => |u| {
-                if (u.tag_type == null) @compileError(@typeName(T) ++ ": a union on the wire needs a tag");
-                var variants: [u.field_names.len]Variant = undefined;
-                for (u.field_names, u.field_types, 0..) |name, F, i| {
-                    checkName(name);
-                    if (std.mem.eql(u8, name, "unknown") and F != void)
-                        @compileError(@typeName(T) ++ ": the unknown case has no payload");
-                    variants[i] = .{ .name = name, .type = if (F == void) null else wireType(F) };
-                }
-                const final = variants;
-                return .{ .name = shortName(T), .kind = .@"union", .variants = &final };
-            },
-            else => unreachable,
-        }
-    }
-}
-
-/// A field's level: `T.field_since.<name>` for a field added after its type,
-/// else the type's own `since`, else the `since` of the method whose `Args`
-/// or `Result` it is, else 1. A new field in a type of an older
-/// level must name its level in `field_since`; `check` refuses it if not.
-fn fieldSince(comptime T: type, comptime name: []const u8) u32 {
-    if (@hasDecl(T, "field_since") and @hasField(@TypeOf(T.field_since), name))
-        return @field(T.field_since, name);
-    if (@hasDecl(T, "since")) return T.since;
-    for (messages.methods) |M| {
-        if (T == M.Args or T == M.Result) return M.since;
-    }
-    return carriedSince(T);
-}
-
-/// The lowest `since` of the methods and events that carry `T` (the model's
-/// types come with the messages of level 3). 1 for a type that a message of
-/// level 1 carries, or that no message carries.
-fn carriedSince(comptime T: type) u32 {
-    comptime {
-        @setEvalBranchQuota(2_000_000);
-        var lowest: ?u32 = null;
-        for (messages.methods) |M| {
-            for (collect(M.Result, collect(M.Args, &.{}))) |C| if (C == T) {
-                lowest = @min(lowest orelse M.since, M.since);
-            };
-        }
-        for (messages.events) |E| {
-            for (collect(E, &.{})) |C| if (C == T) {
-                lowest = @min(lowest orelse E.since, E.since);
-            };
-        }
-        return lowest orelse 1;
-    }
-}
-
-/// Names that the generated Swift uses for its own locals.
-const reserved_names = [_][]const u8{ "self", "key", "reader", "writer", "key_count" };
-
-/// A field name or an enum tag must be a snake_case identifier: the Swift
-/// side compares it as a String, and only for ASCII is that the same as the
-/// byte compare of the Zig side.
-fn checkName(comptime name: []const u8) void {
-    comptime {
-        if (name.len == 0 or !std.ascii.isLower(name[0]))
-            @compileError("'" ++ name ++ "' must start with a lowercase letter");
-        for (name) |c| if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_'))
-            @compileError("'" ++ name ++ "' must be snake_case: a to z, 0 to 9 and _");
-        if (std.mem.indexOf(u8, name, "__") != null or name[name.len - 1] == '_')
-            @compileError("'" ++ name ++ "' has an _ that the Swift name cannot keep");
-        for (reserved_names) |r| if (std.mem.eql(u8, r, name))
-            @compileError("'" ++ name ++ "' is a name that the generated Swift uses");
-    }
-}
-
-fn defaultText(comptime F: type, comptime value: F) []const u8 {
-    if (F == bool) return if (value) "true" else "false";
-    if (F == []const u8) {
-        for (value) |c| if (c == '"' or c == '\\' or c < 0x20)
-            @compileError("a default string has a quote, a backslash or a control character");
-        return "\"" ++ value ++ "\"";
-    }
-    return switch (@typeInfo(F)) {
-        .int => std.fmt.comptimePrint("{d}", .{value}),
-        .float => if (std.math.isFinite(value))
-            std.fmt.comptimePrint("{d}", .{value})
-        else
-            @compileError("a default float must be finite"),
-        .@"enum" => @tagName(value),
-        .pointer => if (value.len == 0) "[]" else @compileError("a default array must be empty"),
-        // A struct whose own fields all have their defaults: `{}`.
-        .@"struct" => if (std.meta.eql(value, F{})) "{}" else @compileError("a default struct must be .{}"),
-        else => @compileError("no default of type " ++ @typeName(F)),
-    };
-}
-
-pub fn writeMetadata(w: *std.Io.Writer, meta: Metadata) std.Io.Writer.Error!void {
-    try std.json.Stringify.value(meta, .{
-        .whitespace = .indent_2,
-        .emit_null_optional_fields = false,
-    }, w);
-    try w.writeByte('\n');
-}
+const schema = protocol.metadata;
+pub const Field = schema.Field;
+pub const Variant = schema.Variant;
+pub const TypeDef = schema.TypeDef;
+pub const Message = schema.Message;
+pub const Method = schema.Method;
+pub const Metadata = schema.Metadata;
+pub const metadata = schema.metadata;
+pub const writeMetadata = schema.writeMetadata;
+const collect = schema.collect;
+const typeDefs = schema.typeDefs;
 
 // ── Check ───────────────────────────────────────────────────────────────────
 
@@ -422,6 +50,69 @@ pub const Base = enum {
     /// addition needs a level above it.
     release,
 };
+
+/// The removals and changes that the check against `main` lets pass: the
+/// lines of `check`, without the line feed. No release has these items, so
+/// no peer in the field reads them. The check against a release never lets
+/// one pass. An entry does nothing once `main` has the change: remove it
+/// then.
+///
+/// Issue 0498 (design/010 §11): one project type. `Workspace` and its
+/// requests and event go, the tabs are in the project, the tab requests and
+/// events name a `project`, and `Node` is `SplitNode`.
+const removals_before_release = [_][]const u8{
+    "method workspace.create was removed",
+    "method workspace.remove was removed",
+    "event workspace.remove was removed",
+    "type Kind was removed",
+    "type Workspace was removed",
+    "type WorkspaceCreate.Args was removed",
+    "type WorkspaceCreate.Result was removed",
+    "type WorkspaceRemove.Args was removed",
+    "type WorkspaceRemove.Result was removed",
+    "type WorkspaceRemoved was removed",
+    "type Node was removed",
+    "ModelData.workspaces was removed",
+    "ProjectChanged.project: its type or default changed",
+    "Split.first: its type or default changed",
+    "Split.second: its type or default changed",
+    "Tab.root: its type or default changed",
+    "TabCreate.Args.workspace was removed",
+    "TabCreate.Args.root: its type or default changed",
+    "TabSelect.Args.workspace was removed",
+    "TabReorder.Args.workspace was removed",
+    "TabMove.Args.to_workspace was removed",
+    "PaneSeparate.Args.workspace was removed",
+    "TabChanged.workspace was removed",
+    "TabRemoved.workspace was removed",
+    "TabOrder.workspace was removed",
+    "TabOrder.kind was removed",
+    "TabCreate.Args.project is new, but it is not optional and has no default",
+    "TabSelect.Args.project is new, but it is not optional and has no default",
+    "TabReorder.Args.project is new, but it is not optional and has no default",
+    "TabMove.Args.to_project is new, but it is not optional and has no default",
+    "TabChanged.project is new, but it is not optional and has no default",
+    "TabRemoved.project is new, but it is not optional and has no default",
+    "TabOrder.project is new, but it is not optional and has no default",
+    // `model.json` version 2.
+    "ModelData.version: its type or default changed",
+};
+
+fn removalPasses(against: Base, comptime fmt: []const u8, args: anytype) bool {
+    if (against != .main) return false;
+    var buf: [256]u8 = undefined;
+    const item = std.fmt.bufPrint(&buf, fmt, args) catch return false;
+    for (removals_before_release) |r| if (std.mem.eql(u8, r, item)) return true;
+    return false;
+}
+
+/// Writes one line of `check` and counts it, unless the check is against
+/// `main` and `removals_before_release` lists the line.
+fn report(w: *std.Io.Writer, n: *usize, against: Base, comptime fmt: []const u8, args: anytype) std.Io.Writer.Error!void {
+    if (removalPasses(against, fmt, args)) return;
+    try w.print(fmt ++ "\n", args);
+    n.* += 1;
+}
 
 /// Writes one line for each change from `old` to `new` that an older peer
 /// could not read, for each change to who may send a message, and for each
@@ -467,9 +158,9 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
     }
     const level: NewLevel = .{ .level = new.level, .released = if (against == .release) o.level else null };
 
-    n += try checkMessages(w, "message", o.messages, new.messages, level);
-    n += try checkMessages(w, "event", o.events, new.events, level);
-    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level);
+    n += try checkMessages(w, "message", o.messages, new.messages, level, against);
+    n += try checkMessages(w, "event", o.events, new.events, level, against);
+    n += try checkMessages(w, "pane message", o.pane_messages, new.pane_messages, level, against);
 
     for (o.error_codes) |code| {
         for (new.error_codes) |c| {
@@ -482,8 +173,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
 
     for (o.methods) |om| {
         const nm = findName(Method, new.methods, om.name) orelse {
-            try w.print("method {s} was removed\n", .{om.name});
-            n += 1;
+            try report(w, &n, against, "method {s} was removed", .{om.name});
             continue;
         };
         if (nm.since != om.since) {
@@ -524,8 +214,7 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
 
     for (o.types) |ot| {
         const nt = findName(TypeDef, new.types, ot.name) orelse {
-            try w.print("type {s} was removed\n", .{ot.name});
-            n += 1;
+            try report(w, &n, against, "type {s} was removed", .{ot.name});
             continue;
         };
         if (nt.kind != ot.kind) {
@@ -576,26 +265,27 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
         };
         for (ot.fields) |of| {
             const nf = findName(Field, nt.fields, of.name) orelse {
-                try w.print("{s}.{s} was removed\n", .{ ot.name, of.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s} was removed", .{ ot.name, of.name });
                 continue;
             };
             if (!std.mem.eql(u8, nf.type, of.type) or nf.optional != of.optional or
                 !optionalEql(nf.default, of.default))
             {
-                try w.print("{s}.{s}: its type or default changed\n", .{ ot.name, of.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s}: its type or default changed", .{ ot.name, of.name });
             }
             if (nf.since != of.since) {
                 try w.print("{s}.{s}: since changed from {d} to {d}\n", .{ ot.name, of.name, of.since, nf.since });
+                n += 1;
+            }
+            if (stricter(of, nf)) |limit| {
+                try w.print("{s}.{s}: its {s} is stricter\n", .{ ot.name, of.name, limit });
                 n += 1;
             }
         }
         for (nt.fields) |nf| {
             if (findName(Field, ot.fields, nf.name) != null) continue;
             if (!nf.optional and nf.default == null) {
-                try w.print("{s}.{s} is new, but it is not optional and has no default\n", .{ ot.name, nf.name });
-                n += 1;
+                try report(w, &n, against, "{s}.{s} is new, but it is not optional and has no default", .{ ot.name, nf.name });
             }
             if (!level.ok(nf.since)) {
                 try w.print("{s}.{s} is new, but {f}\n", .{ ot.name, nf.name, level.why(nf.since) });
@@ -637,12 +327,12 @@ fn checkMessages(
     old: []const Message,
     new: []const Message,
     level: NewLevel,
+    against: Base,
 ) std.Io.Writer.Error!usize {
     var n: usize = 0;
     for (old) |om| {
         const nm = findName(Message, new, om.name) orelse {
-            try w.print(what ++ " {s} was removed\n", .{om.name});
-            n += 1;
+            try report(w, &n, against, what ++ " {s} was removed", .{om.name});
             continue;
         };
         if (nm.since != om.since or !std.mem.eql(u8, nm.type, om.type)) {
@@ -690,6 +380,25 @@ fn containsName(list: []const []const u8, name: []const u8) bool {
 fn findName(comptime T: type, items: []const T, name: []const u8) ?T {
     for (items) |item| if (std.mem.eql(u8, item.name, name)) return item;
     return null;
+}
+
+/// The first limit of `old` that `new` makes stricter. A client that sent a value that the old limit allowed
+/// must still be able to send it. A limit that `old` did not list can come:
+/// it names a check that the server already made.
+fn stricter(old: Field, new: Field) ?[]const u8 {
+    if (lower(old.max_length, new.max_length)) return "max_length";
+    if (lower(old.maximum, new.maximum)) return "maximum";
+    if (lower(new.min_length, old.min_length)) return "min_length";
+    if (lower(new.min_items, old.min_items)) return "min_items";
+    if (lower(new.minimum, old.minimum)) return "minimum";
+    return null;
+}
+
+/// `b` is below `a`, when `a` is listed. An unlisted `b` is no limit.
+fn lower(a: anytype, b: @TypeOf(a)) bool {
+    const x = a orelse return false;
+    const y = b orelse return false;
+    return y < x;
 }
 
 fn optionalEql(a: ?[]const u8, b: ?[]const u8) bool {
@@ -1314,9 +1023,8 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
     }
 
     // The model (design/010): a split tree with an f64 ratio and both cases
-    // of the Node union, in a reply, a request, a batch and an import.
+    // of the SplitNode union, in a reply, a request, a batch and an import.
     const project_id = model.ProjectId.of("p-1");
-    const workspace_id = model.WorkspaceId.ofProject(project_id);
     const tab_id = model.TabId.of("t-1");
     const left: model.Pane = .{
         .id = model.PaneId.of("pane-1"),
@@ -1346,25 +1054,27 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
         .focused = right.id,
     };
     var tabs = [_]model.Tab{tab};
-    var projects = [_]model.Project{.{
+    var projects = [_]model.Project{ .{
         .id = project_id,
         .name = "api",
         .path = "/src/api",
         .color = "blue",
         .sort_order = 2,
         .created_at = 1_700_000_000_000,
-    }};
-    var workspaces = [_]model.Workspace{.{
-        .id = workspace_id,
-        .kind = .project,
         .tabs = &tabs,
         .active_tab = tab_id,
-    }};
+    }, .{
+        .id = .of("pin-1"),
+        .name = "Pinned",
+        .path = "",
+        .sidebar = .top,
+        .removable = false,
+        .alias = "pinned",
+    } };
     const model_data: model.ModelData = .{
         .epoch_hint = 5,
         .imported_v1 = true,
         .projects = &projects,
-        .workspaces = &workspaces,
         .selection = .{ .active_project = project_id },
     };
 
@@ -1378,15 +1088,16 @@ pub fn fixtures(arena: std.mem.Allocator) ![]const Fixture {
     });
     try list.append(arena, try control(arena, "state.subscribe result", Raw{ .bytes = try buf.toOwnedSlice() }, true));
     try m.encodeRequest(&buf.writer, 11, m.TabCreate, .{
-        .workspace = workspace_id,
+        .project = project_id,
         .id = tab_id,
         .root = .{ .split = &split },
         .title = "build",
     });
     try list.append(arena, try control(arena, "tab.create request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
     try list.append(arena, try control(arena, "model events", m.EventBatch{ .seq = 13, .cause = 11, .ev = &.{
-        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .workspace = workspace_id, .tab = tab, .zoomed = right.id }) } },
-        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .workspace = workspace_id, .kind = .project, .ids = &.{tab_id}, .active_tab = tab_id }) } },
+        .{ .e = m.ProjectChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.ProjectChanged{ .project = .of(projects[1]) }) } },
+        .{ .e = m.TabChanged.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabChanged{ .project = project_id, .tab = tab, .zoomed = right.id }) } },
+        .{ .e = m.TabOrder.name, .a = .{ .bytes = try msgpack.encodeAlloc(arena, m.TabOrder{ .project = project_id, .ids = &.{tab_id}, .active_tab = tab_id }) } },
     } }, true));
     try m.encodeRequest(&buf.writer, 12, m.ModelImport, .{ .model = model_data, .source = "workspaces_v3.json" });
     try list.append(arena, try control(arena, "model.import request", Raw{ .bytes = try buf.toOwnedSlice() }, true));
@@ -1535,6 +1246,62 @@ test "the check refuses a removed field, message, method, type or case" {
 
     const no_type = try edit(arena, "\"name\": \"Role\"", "\"name\": \"Rule\"");
     try testing.expectEqualStrings("type Role was removed\n", try problems(arena, base, no_type));
+}
+
+test "a listed removal passes against main, never against a release" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const opts: std.json.ParseOptions = .{ .ignore_unknown_fields = true };
+    // A type and a field from `removals_before_release`.
+    const listed = try edit(arena, "{\"name\": \"Role\", \"kind\": \"enum\", \"cases\": [\"gui\", \"unknown\"]}",
+        \\{"name": "Kind", "kind": "enum", "cases": ["project", "pinned"]},
+        \\   {"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "Kind", "since": 1}]}
+    );
+    const removed = try std.mem.replaceOwned(u8, arena, listed,
+        \\{"name": "Kind", "kind": "enum", "cases": ["project", "pinned"]},
+        \\   {"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1},
+        \\     {"name": "kind", "type": "Kind", "since": 1}]}
+    ,
+        \\{"name": "TabOrder", "kind": "struct", "fields": [
+        \\     {"name": "ids", "type": "str", "since": 1}]}
+    );
+    try testing.expectEqualStrings("", try problems(arena, listed, removed));
+
+    const old = try std.json.parseFromSliceLeaky(Metadata, arena, listed, opts);
+    const new = try std.json.parseFromSliceLeaky(Metadata, arena, removed, opts);
+    var out: std.Io.Writer.Allocating = .init(arena);
+    try testing.expectEqual(2, try check(&out.writer, old, new, .release));
+    try testing.expectEqualStrings("type Kind was removed\nTabOrder.kind was removed\n", out.written());
+}
+
+test "a listed limit never gets stricter, and a new limit can come" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const pane_field = "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1}";
+    const ratio = "{\"name\": \"ratio\", \"type\": \"u8\", \"default\": \"50\", \"since\": 1}";
+    const limited = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 10, "maximum": 90}
+    );
+    try testing.expectEqualStrings("", try problems(arena, base, limited));
+
+    const wider = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 5}
+    );
+    try testing.expectEqualStrings("", try problems(arena, limited, wider));
+
+    const higher_min = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 20, "maximum": 90}
+    );
+    try testing.expectEqualStrings("PaneSplit.Args.ratio: its minimum is stricter\n", try problems(arena, limited, higher_min));
+
+    const short = try edit(arena, pane_field, "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1, \"max_length\": 64}");
+    const shorter = try edit(arena, pane_field, "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1, \"max_length\": 32}");
+    try testing.expectEqualStrings("PaneSplit.Args.pane: its max_length is stricter\n", try problems(arena, short, shorter));
 }
 
 test "a new enum case needs an unknown case in the enum" {
@@ -1778,11 +1545,11 @@ test "the secret check reads a type that holds itself once" {
 }
 
 /// The model's split tree, as the schema would carry it (design/010 §3).
-const model_types = collect(model.tree.Node, &.{});
+const model_types = collect(model.tree.SplitNode, &.{});
 
 test "the model's tree has a schema: a union, a pointer and an f64" {
     const defs = comptime typeDefs(model_types);
-    const node = findName(TypeDef, &defs, "Node").?;
+    const node = findName(TypeDef, &defs, "SplitNode").?;
     try testing.expectEqual(.@"union", node.kind);
     try testing.expectEqualStrings("pane", node.variants[0].name);
     try testing.expectEqualStrings("Pane", node.variants[0].type.?);
@@ -1793,9 +1560,9 @@ test "the model's tree has a schema: a union, a pointer and an f64" {
     const ratio = findName(Field, split.fields, "ratio").?;
     try testing.expectEqualStrings("f64", ratio.type);
     try testing.expectEqualStrings("0.5", ratio.default.?);
-    try testing.expectEqualStrings("Node", findName(Field, split.fields, "first").?.type);
+    try testing.expectEqualStrings("SplitNode", findName(Field, split.fields, "first").?.type);
     try testing.expectEqual(.@"enum", findName(TypeDef, &defs, "Dir").?.kind);
-    try testing.expect(!protocol.holdsSecret(model.tree.Node));
+    try testing.expect(!protocol.holdsSecret(model.tree.SplitNode));
 }
 
 test "a model id is a str on the wire" {
@@ -1822,9 +1589,9 @@ test "the model's tree round-trips through MessagePack" {
         .first = .{ .pane = .{ .id = .of("a"), .session = "macterm-a" } },
         .second = .{ .pane = .{ .id = .of("b"), .session = "macterm-b", .host = "box", .attention = .failed } },
     };
-    const root: tree.Node = .{ .split = &split };
+    const root: tree.SplitNode = .{ .split = &split };
     const bytes = try msgpack.encodeAlloc(arena, root);
-    const back = try msgpack.decodeSlice(tree.Node, arena, bytes);
+    const back = try msgpack.decodeSlice(tree.SplitNode, arena, bytes);
     try testing.expectEqual(0.3, back.split.ratio);
     try testing.expectEqualStrings("box", back.split.second.pane.host.?);
     try testing.expectEqualSlices(u8, bytes, try msgpack.encodeAlloc(arena, back));
@@ -1836,7 +1603,7 @@ test "the Swift output of a union is an indirect enum on {t, a}" {
     defer out.deinit();
     for (defs) |t| try writeSwiftType(&out.writer, t);
     const s = out.written();
-    try testing.expect(std.mem.indexOf(u8, s, "    indirect enum Node: Equatable {\n        case pane(MactermProtocol.Pane)\n        case split(MactermProtocol.Split)\n") != null);
+    try testing.expect(std.mem.indexOf(u8, s, "    indirect enum SplitNode: Equatable {\n        case pane(MactermProtocol.Pane)\n        case split(MactermProtocol.Split)\n") != null);
     try testing.expect(std.mem.indexOf(u8, s, "case \"split\": self = try .split(reader.decodePayload(MactermProtocol.Split.self, from: payload))") != null);
     try testing.expect(std.mem.indexOf(u8, s, "case let other: throw MessagePackError.unknownEnumTag(other)") != null);
     try testing.expect(std.mem.indexOf(u8, s, "var ratio: Double = 0.5\n") != null);

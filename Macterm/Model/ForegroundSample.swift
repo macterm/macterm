@@ -1,45 +1,23 @@
 import Foundation
 
-/// One observation of what holds a pane's foreground — the single value the
-/// naming and busyness policies read, identical for local and remote panes.
+/// One foreground report of a pane's session: the single value the naming
+/// and busyness policies read, the same for local and remote panes.
 ///
-/// A sample carries its provenance (local process table or the host's
-/// report), so a policy never has to guess where a name came from.
-///
-/// Shell-ness is judged AT SAMPLING TIME by the origin that produced the
-/// observation, not at read time by the consumer: a policy reading
-/// `isIdleShell` doesn't need to know which host's shell database applies (the
-/// local /etc/shells is wrong for a remote comm — a remote-only login shell
-/// would read as a running program forever).
+/// Shell-ness is the session's verdict (its process groups and its
+/// `/etc/shells`), judged where the processes run, with the local database
+/// only as a fallback (`Pane.applyForeground`). A policy that reads
+/// `isIdleShell` never asks which host's shell database applies.
 struct ForegroundSample: Equatable {
-    enum Origin: Equatable {
-        /// The local process table (`ProcessInspector` syscalls); `pid` is
-        /// the resolved foreground pid the observation came from (nil when
-        /// the pane had no live surface/pid to inspect).
-        case processTable(pid: pid_t?)
-        /// A report the host's session pushed through the pane's own connection
-        /// (`ZmxForegroundEvents`): current at the moment it arrived, in the
-        /// order of the output, and it costs no connection of its own.
-        case remoteEvent
-    }
-
-    /// Foreground comm basename (normalized), or nil when the origin had
-    /// nothing to report. Distinct from "no sample was ever taken", which is
+    /// Foreground comm basename (normalized), or nil when the report had
+    /// nothing. Distinct from "no report came", which is
     /// `Pane.foregroundSample == nil`.
     var name: String?
 
-    /// Whether `name` is a shell sitting at its prompt-owner position, judged
-    /// by the origin (locally: /etc/shells + login shell; remote: the host's
-    /// own verdicts, from its process groups and its /etc/shells, with the
-    /// local database only as a fallback — see `Pane.applyRemoteForeground`).
+    /// Whether `name` is a shell that owns its prompt.
     var isIdleShell: Bool
 
-    var origin: Origin
-
-    /// When this observation was made (the sample is republished only when
-    /// the observation changes, so this is "first seen", not "last
-    /// confirmed" — republishing every tick would re-render the sidebar at
-    /// poll cadence for no visible change).
+    /// When the report came. The sample is republished only when the report
+    /// changes, so this is "first seen", not "last confirmed".
     var sampledAt: Date
 }
 
@@ -57,10 +35,11 @@ enum ForegroundPolicy {
     /// verdict derives from the remote-side signals instead — the OSC
     /// 133/heartbeat execution state (catches a command mid-output), else
     /// the host's latest report (an idle shell is not worth a dialog;
-    /// anything else is). A pane with no report (a host with no server, or
-    /// before the first report) falls back to the surface's reading, which
-    /// for the ssh client is always busy: never silently kill an unknown
-    /// foreground.
+    /// anything else is). A pane with no report (before the first report,
+    /// or a plain shell whose host did not answer, see
+    /// `plainShellNeedsConfirmClose`) falls back to the surface's reading.
+    /// That reading is busy when the cursor is not at the prompt that OSC
+    /// 133 marks. Never silently kill an unknown foreground.
     static func needsConfirmClose(
         sample: ForegroundSample?,
         executionState: TerminalExecutionState,
@@ -71,6 +50,14 @@ enum ForegroundPolicy {
         guard hasSurface else { return false }
         guard isRemote else { return surfaceBusy() }
         return remoteNeedsConfirmClose(sample: sample, executionState: executionState) ?? surfaceBusy()
+    }
+
+    /// The verdict for a pane on a host with no server (a plain shell,
+    /// 0494). It has no sample. libghostty reads it as busy when the host's
+    /// shell sends no OSC 133 prompt mark. So the close asks the host first
+    /// (`HostCommands.shellIsIdle`). `shellIdle` is the host's answer.
+    static func plainShellNeedsConfirmClose(shellIdle: Bool, executionState: TerminalExecutionState) -> Bool {
+        executionState == .running || !shellIdle
     }
 
     /// The remote-side busy verdict alone, nil when no sample has ever

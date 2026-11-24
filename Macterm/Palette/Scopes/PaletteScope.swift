@@ -16,13 +16,16 @@ import Foundation
 /// project's tree) that a shell command could only approximate
 /// slowly or not at all.
 /// A custom palette (`CustomPaletteFile`, a YAML file of nodes) is the one
-/// `.custom` case, its screens told apart by `CustomPaletteTarget`.
+/// `.custom` case, its screens told apart by `CustomPaletteTarget`. A screen
+/// that asks for a value is the one `.input` case (`InputPaletteScope`).
 enum PaletteScopeID: Hashable {
     case passwords
     case files
     /// A screen of a custom palette (`CustomPaletteFile`): its file, node,
     /// the values exported above it and the pill naming it.
     case custom(CustomPaletteTarget)
+    /// A screen that asks for one value (`PaletteInput`).
+    case input(PaletteInput)
 
     /// The screens Macterm ships.
     static let builtIn: [PaletteScopeID] = [.passwords, .files]
@@ -34,6 +37,7 @@ enum PaletteScopeID: Hashable {
         case .passwords: PalettePill(title: AppCommand.passwordManager.title, icon: "key.fill")
         case .files: PalettePill(title: AppCommand.files.title, icon: "doc.text.magnifyingglass")
         case let .custom(target): target.pill
+        case let .input(input): input.pill
         }
     }
 
@@ -45,7 +49,8 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
-        case .custom: ""
+        case .custom,
+             .input: ""
         }
     }
 
@@ -55,7 +60,8 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: .passwordManager
         case .files: .files
-        case .custom: nil
+        case .custom,
+             .input: nil
         }
     }
 
@@ -65,6 +71,7 @@ enum PaletteScopeID: Hashable {
         case .passwords: PasswordPaletteScope()
         case .files: FilesPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
+        case let .input(input): InputPaletteScope(input: input)
         }
     }
 }
@@ -88,13 +95,19 @@ struct PaletteLoading: Equatable {
 /// Retry (`PaletteScope.retry`, also ⌘R). `detail` is the reason as the
 /// user can act on it: the command's stderr, or where the output stopped
 /// parsing.
+///
+/// A failure that is not `retryable` is a refusal: an input screen's value
+/// that is not allowed (`InputPaletteScope`). It shows as one line, with no
+/// Retry, because the user acts on it by changing the text.
 struct PaletteFailure: Error, Equatable {
     let title: String
     let detail: String?
+    let retryable: Bool
 
-    init(title: String, detail: String? = nil) {
+    init(title: String, detail: String? = nil, retryable: Bool = true) {
         self.title = title
         self.detail = detail
+        self.retryable = retryable
     }
 }
 
@@ -107,6 +120,9 @@ struct PaletteFailure: Error, Equatable {
 @MainActor
 protocol PaletteScope: AnyObject {
     var placeholder: String { get }
+    /// The text of the field when the screen comes to the top of the
+    /// stack: empty for a search, the value for an input screen.
+    var initialQuery: String { get }
     /// Every section for `query`, in display order. Unlike the root's merged
     /// search, a scope keeps its own sections while searching — its
     /// matches, then whatever it offers to do with the text typed.
@@ -132,6 +148,7 @@ protocol PaletteScope: AnyObject {
 }
 
 extension PaletteScope {
+    var initialQuery: String { "" }
     var loading: PaletteLoading? { nil }
     var failure: PaletteFailure? { nil }
     func retry() {}

@@ -1,30 +1,21 @@
 import Darwin
 import Foundation
 
-/// Reads the command currently running in a pane by resolving its foreground
-/// process. libghostty hands us the pid directly
-/// (`ghostty_surface_foreground_pid`, exposed as `GhosttyTerminalNSView
-/// .foregroundPID`); we turn that pid into a command string via the OS process
-/// table (`KERN_PROCARGS2`). No process-tree walking or env markers needed.
+/// Reads a local pane's foreground process from the OS process table
+/// (`KERN_PROCARGS2`, `proc_pidpath`), for the code that needs a pid: the
+/// password asker and the `run:` capture of a layout. The tab's name comes
+/// from the session's report (`Pane.applyForeground`), not from here.
 ///
 /// Everything is best-effort: any failure yields nil rather than throwing. Only
 /// same-uid processes are readable, which the pane's foreground process is.
 enum ProcessInspector {
-    /// The pid to inspect for a pane's foreground process. When the pane's
-    /// shell is wrapped in its session, libghostty's `foregroundPID` points at
-    /// the local `zmx connect` client (whose `comm` is just `zmx`), while the
-    /// real shell / program runs in the session process — a detached process
-    /// tree reachable only by session name. `ZmxForegroundResolver` maps the
-    /// name to the session pty's foreground process; use that when available,
-    /// else fall back to libghostty's pid (no zmx, over-budget bypass, or
-    /// before the first session listing populates the cache).
-    /// The resolved foreground pid for a pane — the session-side shell/program
-    /// when wrapped, else libghostty's client pid — the SAME value the title
-    /// provenance gate (`foregroundProgramPID`) and name lookups resolve through.
-    /// Callers comparing against `Pane.programTitlePID` (the title's pin) MUST use
-    /// this, not `nsView.foregroundPID` (the raw client pid) — for a wrapped pane
-    /// the two never match, which would expire every adopted OSC title on the
-    /// next poll.
+    /// The pid of the pane's foreground process. A pane that runs in a local
+    /// session has no process on its surface: the shell runs in the session.
+    /// The channel's `state` message gives the shell (`Pane.sessionShell`),
+    /// and the foreground is the process group that holds its tty. Until the
+    /// first `state`, the pane reads as resolving (the shell name, no saved
+    /// run). The surface's own pid is correct only for a plain shell (no
+    /// bundled server, or a bypass), also when a palette command wraps it.
     @MainActor
     static func resolvedForegroundPID(forPane pane: Pane) -> pid_t? {
         foregroundPID(forPane: pane)
@@ -32,24 +23,29 @@ enum ProcessInspector {
 
     @MainActor
     private static func foregroundPID(forPane pane: Pane) -> pid_t? {
-        // Remote panes (#104): the only local process is the ssh client — no
-        // local pid ever describes what runs inside the pane. Every pid-based
-        // API returns nil/false; titles come from the host's foreground
-        // reports and execution-gated OSC titles, and `runningCommand`
-        // answers from the latest report's command line.
+        // Remote panes (#104): the only local process is the ssh client. Every
+        // pid-based API returns nil or false; `runningCommand` answers from
+        // the latest report's command line.
         guard !pane.isRemote else { return nil }
-        if let resolved = ZmxForegroundResolver.foregroundPID(sessionName: pane.sessionName) {
-            return resolved
-        }
-        // A pane that runs in a local session has no process on its surface:
-        // the shell runs in the session, reachable only by session name via
-        // the resolver above. Until the resolver's cache has the session (the
-        // async-registration race right after spawn/restore), the pane reads
-        // as resolving (falls back to the shell name, saves no run). The
-        // surface's own pid is only correct for a plain shell (no bundled
-        // server, or a bypass), also when a palette command wraps it.
+        if let shell = pane.sessionShell { return foregroundGroup(ofLeader: shell.pid) }
         if SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true { return nil }
         return SurfaceRegistry.shared.view(of: pane)?.foregroundPID
+    }
+
+    /// The foreground process group of the tty that `leaderPID` controls, or
+    /// nil when the process is gone. From `kinfo_proc.kp_eproc.e_tpgid`, as
+    /// `ps` computes its `+` flag. Not `tcgetpgrp`: that ioctl works only on
+    /// the caller's own controlling terminal. Not `proc_pidinfo` either: the
+    /// leader is root's `/usr/bin/login`, which it refuses across uids.
+    static func foregroundGroup(ofLeader leaderPID: pid_t) -> pid_t? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, leaderPID]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        // A reaped pid gives a zeroed struct, not an error.
+        guard info.kp_proc.p_pid == leaderPID else { return nil }
+        let group = info.kp_eproc.e_tpgid
+        return group > 0 ? group : nil
     }
 
     /// The command running in the pane's foreground, or nil if the pane is idle
@@ -126,6 +122,17 @@ enum ProcessInspector {
         return pid_t(info.pbi_ppid)
     }
 
+    /// True when the process runs and the file it runs from is deleted: an
+    /// update removed the old app bundle. `proc_pidpath` then fails with
+    /// `ENOENT` (measured), and tccd, which makes the same call, denies
+    /// every protected folder to the process and to the programs it is
+    /// responsible for. A process that is gone (`ESRCH`) or that the kernel
+    /// does not show is not marked.
+    nonisolated static func executableIsDeleted(pid: pid_t) -> Bool {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return proc_pidpath(pid, &buffer, UInt32(buffer.count)) <= 0 && errno == ENOENT
+    }
+
     /// The executable's resolved absolute path from the kernel
     /// (`proc_pidpath`), or nil when the process is gone or unreadable.
     static func executablePath(pid: pid_t) -> String? {
@@ -179,17 +186,7 @@ enum ProcessInspector {
         return comm
     }
 
-    /// The name `pid` was invoked as, or nil. Unlike `comm` — the
-    /// *executable's* basename, which for some CLIs is an arch- or
-    /// version-named binary — argv names what the user actually ran
-    /// (`claude`, `codex`). Used as the agent-icon fallback when `comm`
-    /// doesn't identify an agent. See `invokedName(argv:)` for the shape.
-    static func invokedNameBasename(pid: pid_t) -> String? {
-        guard let args = argv(pid: pid) else { return nil }
-        return invokedName(argv: args)
-    }
-
-    /// Testable core of `invokedNameBasename`: argv[0]'s basename (login-shell
+    /// The name a process was invoked as: argv[0]'s basename (login-shell
     /// `-` stripped) — or, when argv[0] is an interpreter (`node …/bin/pi`),
     /// the script's basename from argv[1] with a script extension stripped,
     /// so an npm-installed CLI still yields its command name.
@@ -260,18 +257,6 @@ enum ProcessInspector {
             && (value.last?.isNumber ?? false)
     }
 
-    /// The pid of the pane's foreground process when it's a real program, or
-    /// nil when the pane is idle at a shell prompt (or unreadable). This is
-    /// the provenance gate for OSC titles: a title arriving while a program
-    /// holds the foreground was set by that program; one arriving while the
-    /// shell holds it is prompt churn (see `Pane.receiveReportedTitle`).
-    @MainActor
-    static func foregroundProgramPID(forPane pane: Pane) -> pid_t? {
-        guard let pid = foregroundPID(forPane: pane) else { return nil }
-        guard let args = argv(pid: pid), let first = args.first, !isShell(first) else { return nil }
-        return pid
-    }
-
     /// Whether the pane's foreground process is a shell. Prefer the process's
     /// executable/argv path over its display name; the shell set itself comes
     /// from the host (`getusershell`, login shell, `$SHELL`) rather than a
@@ -302,6 +287,25 @@ enum ProcessInspector {
     static func isIdleShellInvocation(_ argv: [String]) -> Bool {
         guard let first = argv.first, isShell(first) else { return false }
         return !shellInvocationRunsCommand(argv)
+    }
+
+    /// Whether a shell's command line from a session report runs a command,
+    /// not a prompt: `sh -c "sleep 1"` (a `-c` option) or `/bin/sh
+    /// ./deploy.sh` (a script as the first argument). The report joins the
+    /// arguments with spaces, so a word after an option can be that
+    /// option's value (`bash -o vi`, `nu --execute use ghostty *`). When it
+    /// is not sure, the scan says no run: a run that shows no spinner is
+    /// better than a prompt that shows one. It does not see a `-c` after
+    /// `--execute`.
+    static func shellCommandLineRunsCommand(_ commandLine: String) -> Bool {
+        let words = commandLine.split(separator: " ").dropFirst().map(String.init)
+        for (index, word) in words.enumerated() {
+            if shellOptionConsumesNextArgument(word) { return false }
+            if word == "--" { return index == 0 && words.count > 1 }
+            if !word.hasPrefix("-") || word == "-" { return index == 0 }
+            if !word.hasPrefix("--"), word.dropFirst().contains("c") { return true }
+        }
+        return false
     }
 
     private static func shellInvocationRunsCommand(_ argv: [String]) -> Bool {
@@ -337,27 +341,9 @@ enum ProcessInspector {
         option == "--rcfile" || option == "--init-file" || option == "--execute"
     }
 
-    /// Whether the pane's tty is in raw/cbreak-style input mode. Full-screen and
-    /// interactive CLIs (editors, ssh, agent TUIs) commonly disable canonical
-    /// input and/or echo while they are idle at their own prompt. Plain shell
-    /// commands like `sleep 20` leave the tty in canonical mode, so this lets the
-    /// sidebar avoid treating every long-lived interactive foreground process as
-    /// perpetual work without app-specific process-name exclusions.
-    @MainActor
-    static func terminalInputIsRaw(forPane pane: Pane) -> Bool {
-        // For a pane that runs in a local session, probe the SESSION's pty:
-        // its surface has no pty of its own.
-        let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true {
-            // A session pane whose tty isn't cached yet has no other tty to
-            // read: answer canonical, so the state does not flap across cache
-            // refreshes (each flip republishes execution state and
-            // re-renders).
-            return false
-        }
-        return terminalInputIsRaw(ttyPath: daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName)
-    }
-
+    /// Whether a tty is in raw or cbreak input mode: canonical input or echo
+    /// is off. Editors, ssh and agent TUIs run so while they idle at their
+    /// own prompt; `sleep 20` leaves the tty canonical.
     static func terminalInputIsRaw(ttyPath: String?) -> Bool {
         guard let flags = localModes(ttyPath: ttyPath) else { return false }
         let canonical = flags & tcflag_t(ICANON) != 0
@@ -420,13 +406,13 @@ enum ProcessInspector {
     }
 
     /// The tty whose line discipline the pane's programs read through: the
-    /// session's pty for a pane that runs in a local session (nil until it is
-    /// cached), the surface's own otherwise.
+    /// session's pty for a pane that runs in a local session (nil until its
+    /// channel's first `state`), the surface's own otherwise.
     @MainActor
     private static func lineDisciplineTTYPath(forPane pane: Pane) -> String? {
-        let daemonTTY = ZmxForegroundResolver.daemonTTYPath(sessionName: pane.sessionName)
-        if daemonTTY == nil, SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true { return nil }
-        return daemonTTY ?? SurfaceRegistry.shared.view(of: pane)?.ttyName
+        if let shell = pane.sessionShell { return shell.ttyPath }
+        if SurfaceRegistry.shared.view(of: pane)?.runsInLocalSession == true { return nil }
+        return SurfaceRegistry.shared.view(of: pane)?.ttyName
     }
 
     /// The current working directory of the pane's foreground process, read

@@ -32,11 +32,19 @@ final class WindowState: Identifiable {
     var activeProjectID: UUID? {
         didSet {
             guard activeProjectID != oldValue else { return }
+            showsProjectScreen = false
             expandActiveProject()
         }
     }
 
-    /// The projects whose sidebar sections are open in this window.
+    /// Whether this window shows the project screen (`EmptyProjectView`) of
+    /// `activeProjectID` in place of a tab, also when the project has tabs.
+    /// `AppState.showProjectScreen` sets it. A change of project clears it.
+    /// Saved as `WindowSnapshot.showsProjectScreen`.
+    var showsProjectScreen = false
+
+    /// The rows whose sidebar sections are open in this window: projects and
+    /// groups (design 013). The saved key keeps its old name.
     ///
     /// Per window, and persisted (`WindowSnapshot.expandedProjectIDs`), so a
     /// relaunch keeps each section open or closed as the user left it. It
@@ -47,7 +55,7 @@ final class WindowState: Identifiable {
     /// the sidebar builds, and the active-project rule above must run in the
     /// same order as the restore: project first, then the saved set over it.
     /// A saved set that closed the active project therefore stays closed.
-    var expandedProjects: Set<UUID> = []
+    var expandedRows: Set<UUID> = []
 
     /// The tab this window shows for each project it has visited, keyed by
     /// project id.
@@ -164,6 +172,6 @@ final class WindowState: Identifiable {
     /// The pinned workspace has no section to open.
     private func expandActiveProject() {
         guard let activeProjectID, activeProjectID != PinnedTabs.workspaceID else { return }
-        expandedProjects.insert(activeProjectID)
+        expandedRows.insert(activeProjectID)
     }
 }

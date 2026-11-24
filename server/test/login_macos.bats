@@ -1,0 +1,52 @@
+#!/usr/bin/env bats
+# The session's foreground under login(1) (`Session.isShellGroup`). Only
+# macOS starts a shell under login(1), so CI runs this file on macOS only.
+
+load test_helper
+
+setup_file() {
+  export PYTHONPATH="$BATS_TEST_DIRNAME"
+}
+
+# The shell under login(1) is idle at its prompt, and a program in front is
+# not.
+check_idle() {
+  python3 - <<'PY'
+from v2client import Client
+c = Client("s1")
+c.attach(foreground=True)
+def last():
+    return c.messages("foreground")[-1]["a"]
+c.wait(lambda: c.messages("foreground") and b"sh" in last()["comm"], what="the shell in front")
+assert last()["idle"] is True, last()
+def busy():
+    n = len(c.messages("inspect"))
+    c.pane("inspect_read")
+    c.wait_msg("inspect", count=n + 1)
+    return c.messages("inspect")[-1]["a"]["terminal"]["busy"]
+assert busy() is False
+c.type("sleep 30\r")
+c.wait(lambda: b"sleep" in last()["comm"], what="the sleep foreground")
+assert last()["idle"] is False, last()
+assert busy() is True
+c.type(b"\x03")
+c.wait(lambda: last()["idle"] is True, what="the idle foreground")
+assert busy() is False
+PY
+}
+
+# macOS starts a local shell under login(1) (ghostty's launch), which puts
+# the shell in a process group of its own: that group is the shell's.
+@test "events: a shell under login(1) is idle at its prompt" {
+  "$ZMX" __create-session s1 -- /usr/bin/login -flpq "$(id -un)" /bin/sh
+  check_idle
+}
+
+# A palette command with a wrapper starts `macterm palette exec … -- login …`.
+# The wrapper first runs a command in a process group of its own, then runs
+# login(1) with exec. The session reads the program that runs, not the
+# command that it started.
+@test "events: a wrapper that runs login(1) with exec gives a shell that is idle at its prompt" {
+  "$ZMX" __create-session s1 -- /bin/sh -c 'set -m; sleep 0.3; set +m; exec /usr/bin/login -flpq "$(id -un)" /bin/sh'
+  check_idle
+}

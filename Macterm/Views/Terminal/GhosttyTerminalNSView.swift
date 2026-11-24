@@ -171,15 +171,17 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// `ghostty_surface_new`. Retained here and freed in `destroySurface`.
     nonisolated(unsafe) private var configCStrings: [UnsafeMutablePointer<CChar>] = []
 
-    /// Fires on each OSC title with the reported string. Whether the string
-    /// is *used* for naming is the pane's call (`Pane.receiveReportedTitle`
-    /// gates on the foreground process); every arrival also marks a command
-    /// boundary that drives a foreground-process refresh.
+    /// Fires on each OSC title with the reported string: the session's
+    /// `title` message, or libghostty's for a surface with no session.
+    /// Whether the string is *used* for naming is the pane's call
+    /// (`Pane.receiveReportedTitle` gates on the session's foreground).
     var onTitleChange: ((String) -> Void)?
 
     /// Deliver a title reported by libghostty (OSC 0/2 / `SET_TITLE`).
-    /// Called by `GhosttyCallbacks`.
+    /// Called by `GhosttyCallbacks`. A surface that runs from a channel
+    /// takes the session's title, which the session coalesces.
     func surfaceDidReportTitle(_ title: String) {
+        guard channelRuntime == nil else { return }
         onTitleChange?(title)
     }
 
@@ -384,11 +386,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// arming that `recordCommandSubmission` then sets, so the reverse order
     /// silently disarms the agent path. Keep the two calls in this order.
     var onCommandSubmitted: ((Bool) -> Void)?
-    /// The text that `sendText` submitted, for the length of its
-    /// `onCommandSubmitted` call; nil for a Return that the user typed. Its
-    /// echo may not be on the screen yet, so project memory reads the
-    /// command from here, and from the screen only for a typed Return.
-    private(set) var submittedText: String?
     /// Whether a programmatic payload's content evidence may be carried past
     /// the submission that consumed it — true only for a raw-mode agent
     /// foreground, where a bracketed paste can leave it unsubmitted. See
@@ -417,9 +414,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     var onSplitRequest: ((SplitDirection, SplitPosition) -> Void)?
     var onZoomRequest: (() -> Void)?
     var isZoomed: Bool = false
-    /// The tab shows more than one pane, so a pinch out can zoom this one.
-    var isSplit = false
-    private var pinchZoom = PinchZoomGesture()
     var onSearchStart: ((String?) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int?) -> Void)?
@@ -448,14 +442,6 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// current total row count. Occlusion-independent — see
     /// `surfaceDidOutputActivity`.
     var onOutputActivity: ((UInt64) -> Void)?
-    /// A snapshot of the pane's session starts (true) or ends (false).
-    var onSnapshotMark: ((Bool) -> Void)?
-    /// The host's session reports the pane's foreground (`PaneChannelEvent`).
-    var onRemoteForeground: ((RemoteForeground) -> Void)?
-    /// The host's session reports how the pane's pty reads input.
-    var onRemoteTtyMode: ((TerminalLineMode) -> Void)?
-    /// The session's attention flags (`PaneSessionHost.paneAttention`).
-    var onAttention: ((MactermProtocol.Attention) -> Void)?
     /// The link URL under the mouse (`GHOSTTY_ACTION_MOUSE_OVER_LINK`), nil
     /// when the pointer leaves it. Drives the pane's hover-URL banner.
     var onLinkHover: ((String?) -> Void)?
@@ -583,6 +569,10 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     private(set) lazy var copyMode = CopyModeController { [weak self] action in
         self?.sendBindingAction(action)
     }
+
+    /// The zoom of the pane's picture: a pinch scales it, a two-finger
+    /// scroll pans it, and Reset Zoom ends it.
+    private(set) lazy var pictureZoom = PaneZoomController(view: self)
 
     /// The popover of Explain Output (`explainOutput`). Made on first use.
     var explainPopover: ExplainPopover {
@@ -717,7 +707,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
 
         // A remote pane runs from a channel on the host's link
-        // (`startRemoteChannel`). Without a server to ask (the unit-test
+        // (`prepareChannel`, through the pane's `PaneLink`). Without a server to ask (the unit-test
         // host) it keeps the fixed line below.
         let remoteChannel = remoteSpec != nil && SessionClient.liveBypass != .unitTestHost
         if remoteChannel {
@@ -835,10 +825,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             return
         }
 
-        if channelLaunch != nil {
-            startChannel(surface: surface)
-            NotificationCenter.default.post(name: .zmxSessionsChanged, object: nil)
-        } else if remoteChannel {
+        if channelLaunch != nil || remoteChannel {
             startChannel(surface: surface)
         }
 
@@ -920,6 +907,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         clearCommandSubmissionEvidence()
         // The selection dies with the surface; the mode must not outlive it.
         copyMode.reset()
+        pictureZoom.surfaceDidEnd()
         // A composition in flight has nowhere left to commit — drop it before
         // the surface goes, so a reattached surface starts uncomposed rather
         // than inheriting a preedit that can never be resolved.
@@ -1042,9 +1030,11 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        if newSize != frame.size { pictureZoom.viewWillResize() }
         super.setFrameSize(newSize)
         if pendingSurfaceCreation { createSurface() }
         updateMetalLayerSize()
+        pictureZoom.viewDidResize()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -1078,6 +1068,7 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             CATransaction.commit()
         }
         ghostty_surface_set_content_scale(surface, scale, scale)
+        pictureZoom.contentScaleDidChange(to: CGFloat(scale))
         applySurfaceSize(scaledSize)
     }
 
@@ -1691,21 +1682,27 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
         }
     }
 
-    /// A pinch out zooms this pane, and a pinch in unzooms it: the path of
-    /// the context menu's Zoom Pane. The pane under the pointer gets the
-    /// event, so it takes focus first.
+    /// A pinch scales the picture of the pane under the pointer
+    /// (`PaneZoomController`). It never changes the tile zoom (Zoom Pane):
+    /// one gesture has one action. libghostty reads no magnify event. The
+    /// pane takes focus at the start of the pinch, so that Reset Zoom acts
+    /// on it.
     override func magnify(with event: NSEvent) {
-        guard let direction = pinchZoom.track(phase: event.phase, magnification: event.magnification),
-              PinchZoomGesture.togglesZoom(direction, isZoomed: isZoomed, isSplit: isSplit)
-        else { return super.magnify(with: event) }
+        guard surface != nil else { return super.magnify(with: event) }
         onInteraction?()
-        if direction == .outward { window?.makeFirstResponder(self) }
-        onZoomRequest?()
+        if event.phase.contains(.began) || event.phase.isEmpty { window?.makeFirstResponder(self) }
+        pictureZoom.pinch(by: event.magnification, at: mousePoint(from: event))
     }
 
+    /// While the picture is zoomed, a two-finger scroll pans it first, and
+    /// scrolls the terminal only with what the pan cannot take at its edge.
+    /// A wheel that is not precise always scrolls.
     override func scrollWheel(with event: NSEvent) {
         onInteraction?()
-        forwardScrollWheel(event)
+        guard pictureZoom.isZoomed, event.hasPreciseScrollingDeltas else { return forwardScrollWheel(event) }
+        let leftover = pictureZoom.pan(by: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+        guard leftover != .zero else { return }
+        forwardScrollWheel(event, deltaX: leftover.width, deltaY: leftover.height)
     }
 
     /// Mirror of the core's scroll accumulator. See `ScrollbarSurface`.
@@ -1802,7 +1799,18 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             zoom.target = self
             menu.addItem(zoom)
         }
+        if pictureZoom.isZoomed {
+            if onZoomRequest == nil { menu.addItem(.separator()) }
+            let reset = NSMenuItem(title: String(localized: "Reset Zoom"), action: #selector(handleResetZoom), keyEquivalent: "")
+            reset.target = self
+            menu.addItem(reset)
+        }
         return menu
+    }
+
+    @objc
+    private func handleResetZoom() {
+        pictureZoom.reset()
     }
 
     @objc
@@ -2083,9 +2091,7 @@ extension GhosttyTerminalNSView {
         }
         if TerminalCommandSubmission.textContainsNewline(text) {
             let hasContent = consumeCommandSubmissionEvidence()
-            submittedText = text
             onCommandSubmitted?(hasContent)
-            submittedText = nil
             if hasContent { preserveProgrammaticCommandInput(text) }
         }
         return true
@@ -2120,27 +2126,6 @@ extension GhosttyTerminalNSView {
         guard h > 0 else { return nil }
         let rect = NSRect(x: x, y: bounds.height - y - h, width: max(w, 1), height: h)
         return bounds.intersects(rect) ? rect.intersection(bounds) : nil
-    }
-
-    /// The column of the cursor on its screen row, or nil without a surface
-    /// or while the cursor is scrolled out of view.
-    ///
-    /// From the IME point: libghostty puts it at the MIDDLE of the cursor's
-    /// cell, measured from the view's edge, so the left window padding is in
-    /// it (`Surface.imePointScaled`). The cell width comes from the surface
-    /// size, because the point's own width is the preedit's, zero with
-    /// nothing composed. `window-padding-balance` adds under half a cell on
-    /// the left, which the round down absorbs with the half cell of the
-    /// midpoint.
-    func cursorColumn() -> Int? {
-        guard let surface, let size = surfaceSize, size.cell_width_px > 0 else { return nil }
-        var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
-        ghostty_surface_ime_point(surface, &x, &y, &w, &h)
-        guard h > 0 else { return nil }
-        let scale = Double(window?.backingScaleFactor ?? 2.0)
-        let cellWidth = Double(size.cell_width_px) / scale
-        let column = ((x - GhosttyApp.shared.windowPadding.left) / cellWidth).rounded(.down)
-        return column >= 0 ? Int(column) : nil
     }
 
     /// Send a single key chord through libghostty's key-*encoding* path — the
@@ -2287,7 +2272,7 @@ extension GhosttyTerminalNSView {
 extension GhosttyTerminalNSView {
     /// Tells the session that the user saw the pane (`PaneSession.seen`).
     func sendSeen() {
-        channelRuntime?.route.seen()
+        channelRuntime?.route.input.seen()
     }
 
     /// The live terminal grid + cell/surface pixel dimensions
@@ -2302,7 +2287,7 @@ extension GhosttyTerminalNSView {
     @discardableResult
     func sendLeadershipClaim() -> Bool {
         guard let size = surfaceSize, size.columns > 0, size.rows > 0, let runtime = channelRuntime else { return false }
-        runtime.route.claim(grid: nil)
+        runtime.route.input.claim(grid: nil)
         return true
     }
 

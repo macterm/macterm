@@ -14,11 +14,8 @@ final class GhosttyCallbacks: @unchecked Sendable {
     func action(target: ghostty_target_s, action: ghostty_action_s) -> Bool {
         switch action.tag {
         case GHOSTTY_ACTION_SET_TITLE:
-            // OSC 0/2. Whether the string becomes the tab name is decided by
-            // the pane (it's honored only while a real program — not the shell
-            // — is in the foreground, see `Pane.receiveReportedTitle`); its
-            // arrival is also a command-boundary signal that refreshes the
-            // foreground-process name.
+            // OSC 0/2, for a surface with no session. A surface on a channel
+            // takes the session's title (`SurfaceChannelHost.paneTitle`).
             guard let view = surfaceView(from: target) else { return true }
             let title = String(cString: action.action.set_title.title)
             DispatchQueue.main.async { view.surfaceDidReportTitle(title) }
@@ -47,7 +44,12 @@ final class GhosttyCallbacks: @unchecked Sendable {
         case GHOSTTY_ACTION_PWD:
             guard let view = surfaceView(from: target) else { return true }
             let pwd = String(cString: action.action.pwd.pwd)
-            DispatchQueue.main.async { view.currentPwd = pwd }
+            // A surface on a channel takes the session's folder
+            // (`SurfaceChannelHost.paneCwd`).
+            DispatchQueue.main.async {
+                guard view.channelRuntime == nil else { return }
+                view.currentPwd = pwd
+            }
             return true
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             guard let view = surfaceView(from: target) else { return true }

@@ -11,13 +11,15 @@ extension Pane {
     /// zoom, process exit, tab titles, links, the adaptive background, and
     /// `onRunEnded`) stay in `TerminalSurface.configure`.
     ///
-    /// Every surface of a pane parses the same output, so only the feed
-    /// surface (the first) gets the callbacks that read it: titles, runs,
-    /// notifications and project memory. A second window's surface
-    /// gets the ones that its own user and its own view cause: typing, size,
-    /// chrome. `PaneSurface` sets the search, copy mode, link and read-only
+    /// The session's own messages (foreground, title, tty mode, marks,
+    /// state, attention) and its end come once, through the pane's
+    /// `PaneLink` (`receiveLinkEvent`), not through the views. Every surface
+    /// of a pane parses the same output with libghostty, so the callbacks
+    /// that count what it reads (runs, notifications, project memory) act
+    /// only for the surface of the link's counting view
+    /// (`PaneSurface.countsOutput`). `PaneSurface` sets the search, copy mode, link and read-only
     /// callbacks.
-    func connectViewCallbacks(_ view: GhosttyTerminalNSView, isFeed: Bool) {
+    func connectViewCallbacks(_ view: GhosttyTerminalNSView) {
         view.onInteraction = { [weak self] in
             self?.recordUserInteraction()
         }
@@ -28,12 +30,8 @@ extension Pane {
         // Order matters: `onInteraction` clears the tracker's in-place start
         // arming that `onCommandSubmitted` sets, and the view calls them in
         // that order. See `GhosttyTerminalNSView.onCommandSubmitted`.
-        view.onCommandSubmitted = { [weak self, weak view] hasContent in
-            guard let self else { return }
-            // Before the tracker leaves the prompt: memory captures the line
-            // only while the shell is at its prompt.
-            ProjectMemory.shared.commandSubmitted(pane: self, view: view)
-            recordCommandSubmission(hasContent: hasContent)
+        view.onCommandSubmitted = { [weak self] hasContent in
+            self?.recordCommandSubmission(hasContent: hasContent)
         }
         view.canCarryCommandInput = { [weak self] in self?.allowsInPlaceOutputStart ?? false }
         // The surface half of the passthrough gate. The key responders decline
@@ -53,27 +51,23 @@ extension Pane {
             guard let view else { return }
             AdaptiveTerminalChrome.shared.terminalBackgroundDidChange(color, in: view)
         }
-        // Every surface's channel gets the same flags from the session.
-        view.onAttention = { [weak self] flags in self?.receiveAttention(flags) }
-        guard isFeed else { return }
-        // Each OSC title is a command-boundary signal that re-reads the
-        // foreground process, and — when a real program (not the shell) holds
-        // the foreground — becomes the pane's display title.
+        // A surface with no session reports its own titles.
         view.onTitleChange = { [weak self] title in self?.receiveReportedTitle(title) }
+        // libghostty's callbacks: only the counting surface counts what it parses.
+        let counts = { [weak view] in view?.owningSurface?.countsOutput ?? true }
         view.onDesktopNotification = { [weak self, weak view] title, body in
-            guard let self else { return }
+            guard let self, counts() else { return }
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
             NotificationHandler.shared.post(pane: self, title: title, body: body)
         }
         view.onProgressStarted = { [weak self] in
-            self?.refreshForegroundProcess()
+            guard counts() else { return }
             self?.markCommandRunning()
         }
         view.onProgressFinished = { [weak self, weak view] in
             // Only a live run can end. Whether it failed is the session's
             // flag (`Pane.attention`).
-            guard let self, executionState == .running else { return }
-            refreshForegroundProcess()
+            guard let self, counts(), executionState == .running else { return }
             markProgressFinished()
             view?.onRunEnded?()
         }
@@ -84,43 +78,29 @@ extension Pane {
                 // next idle poll, so the bubble is up before the user types.
                 PasswordPromptMonitor.shared.viewDidOutput(view)
             }
-            guard let self else { return }
+            guard let self, counts() else { return }
             // The single activity source. Output heartbeats fire from the pty
             // IO path regardless of occlusion, so they also reach background
             // tabs, and they carry the row total so the tracker can tell
-            // growth from an in-place redraw. Always refresh foreground/raw
-            // state first: a running canonical command can switch to a raw TUI
-            // while normal polling is paused behind a fully occluded window.
-            // The heartbeat is throttled to ~2 Hz, and the tracker preserves
-            // foreground/progress authority until that raw transition occurs.
-            refreshForegroundProcess()
+            // growth from an in-place redraw. The session's foreground and
+            // tty mode reach the tracker on their own (`applyForeground`).
             markOutputActivity(totalRows: total)
         }
-        view.onSnapshotMark = { [weak self] started in
-            self?.receiveRemoteSnapshot(started: started)
-        }
-        view.onRemoteForeground = { [weak self] foreground in
-            self?.applyRemoteForeground(foreground)
-        }
-        view.onRemoteTtyMode = { [weak self] mode in
-            self?.remoteLineMode = mode
-        }
         view.onCommandFinished = { [weak self, weak view] exitCode, durationNs, command in
-            guard let self else { return }
-            // A command boundary is exactly when the pane's identity changes —
-            // the program that just exited (claude, hx) is gone and the shell
-            // owns the foreground again. Refresh from the process table HERE
-            // rather than waiting for the next poll tick: the adaptive poll
-            // slows to 2s when the app is inactive and stops entirely once no
-            // window is visible, which is why a finished agent's icon and name
-            // used to linger until the user clicked or typed.
-            // `notePromptReturned` feeds the naming gate.
-            notePromptReturned()
-            refreshForegroundProcess()
-            // Project memory: off unless the user turned it on, macOS 26+.
-            ProjectMemory.shared.commandFinished(
-                pane: self, view: view, exitCode: exitCode, durationNs: durationNs, reportedCommand: command
-            )
+            guard let self, counts() else { return }
+            // A surface on a channel gets the shell's 133;D from the session
+            // (`receiveSessionMark`); a surface with no session has only this one.
+            if view?.channelRuntime == nil {
+                notePromptReturned()
+                let duration = Double(durationNs) / 1_000_000_000
+                recordCommandEnd(
+                    command: command,
+                    exitCode: exitCode < 0 ? nil : Int(exitCode),
+                    startedAt: Date().addingTimeInterval(-duration),
+                    outputTail: nil,
+                    view: view
+                )
+            }
             markCommandFinished()
             view?.onRunEnded?()
             guard !(NSApp.isActive && view?.isFocused == true) else { return }
@@ -133,6 +113,56 @@ extension Pane {
             }
             NotificationHandler.shared.post(pane: self, title: String(localized: "Command Finished"), body: body)
         }
+    }
+
+    /// A mark of the pane's session, once for the pane, from the link's
+    /// counting view (`view`): the command's start and its end for project
+    /// memory.
+    func receiveSessionMark(_ mark: MactermProtocol.Mark, view: GhosttyTerminalNSView?) {
+        // OSC 133;D: the shell owns its prompt again. It feeds the title
+        // gate and the tracker's prompt hold.
+        if mark.kind == .end { notePromptReturned() }
+        switch mark.kind {
+        case .output:
+            commandStartedAt = Date()
+        case .end:
+            let command = mark.command.map { String(decoding: $0.bytes, as: UTF8.self) }
+            recordCommandEnd(
+                command: command,
+                exitCode: mark.exitCode.map(Int.init),
+                startedAt: commandStartedAt,
+                outputTail: mark.outputTail.map { String(decoding: $0.bytes, as: UTF8.self) },
+                view: view
+            )
+            commandStartedAt = nil
+        case .prompt,
+             .input,
+             .unknown:
+            break
+        }
+    }
+
+    /// Hands a finished command to project memory (off unless the user
+    /// turned it on, macOS 26+). A failure's output tail comes from the
+    /// session's end mark: nothing reads the screen.
+    private func recordCommandEnd(
+        command: String?,
+        exitCode: Int?,
+        startedAt: Date?,
+        outputTail: String?,
+        view: GhosttyTerminalNSView?
+    ) {
+        let end = CommandEnd(
+            paneID: id,
+            projectID: projectID,
+            command: command,
+            exitCode: exitCode,
+            directory: view?.currentPwd,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            outputTail: outputTail
+        )
+        ProjectMemory.shared.commandEnded(end)
     }
 
     private static func formatDuration(_ seconds: Double) -> String {
@@ -150,6 +180,19 @@ extension Pane {
             let mins = (rounded % 3600) / 60
             return String(localized: "\(hours)h \(mins)m", comment: "A duration in hours and minutes, as in 2h 5m")
         }
+    }
+
+    /// The session ended: the pane closes, once. The handler is the one of
+    /// the window that draws the pane (`TerminalSurface.configure`), or the
+    /// warm's (`AppState.warmPane`): the first surface that has one, from the
+    /// preferred surface on.
+    func sessionDidEnd() {
+        let registry = SurfaceRegistry.shared
+        let all = registry.surfaces(of: self)
+        guard !all.isEmpty else { return }
+        let preferred = registry.preferredSurface(of: self)
+        let ordered = [preferred] + all.filter { $0 !== preferred }
+        ordered.lazy.compactMap(\.nsView).compactMap(\.onProcessExit).first?()
     }
 
     /// Tells the session that the user saw the pane, on the channel of one

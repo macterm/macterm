@@ -102,146 +102,124 @@ struct ProjectMemoryTests {
 
     // MARK: - Recording
 
-    @Test
-    func the_reported_command_wins_and_the_screen_gives_only_a_matching_tail() throws {
-        let screen = """
-        app % make test
-        FAIL checkout
-        app %
-        """
-        let finish = ProjectMemory.Finish(directory: "/app", exitCode: 1, finishedAt: now, duration: 3)
-        let reported = try #require(ProjectMemory.reportedCommand("make test  "))
-        #expect(reported == ExtractedCommand(command: "make test", output: ""))
+    private func end(
+        _ command: String?,
+        exit: Int?,
+        startedAt: Date? = nil,
+        directory: String? = "/app",
+        outputTail: String? = nil
+    ) -> CommandEnd {
+        CommandEnd(
+            paneID: UUID(),
+            projectID: UUID(),
+            command: command,
+            exitCode: exit,
+            directory: directory,
+            startedAt: startedAt,
+            finishedAt: now,
+            outputTail: outputTail
+        )
+    }
 
-        // The screen shows the same command: its tail is kept.
+    @Test
+    func the_command_and_the_tail_come_from_the_end() throws {
+        let reported = try #require(ProjectMemory.reportedCommand("make test  "))
+        #expect(reported == "make test")
+
         let entry = try #require(ProjectMemory.makeEntry(
-            reported: reported, submitted: ExtractedCommand(command: "make", output: ""),
-            screen: screen, source: ScreenCommandExtractor(), finish: finish
+            end("make test  ", exit: 1, startedAt: now.addingTimeInterval(-3), outputTail: "FAIL checkout")
         ))
         #expect(entry.command == "make test")
+        #expect(entry.directory == "/app")
         #expect(entry.failureTail == "FAIL checkout")
+        #expect(entry.startedAt == now.addingTimeInterval(-3))
 
-        // Another command on the screen: the reported one stays, with no tail.
-        let other = try #require(ProjectMemory.makeEntry(
-            reported: ProjectMemory.reportedCommand("make lint"), screen: screen, source: ScreenCommandExtractor(), finish: finish
-        ))
+        // A failure whose session sent no output has no tail.
+        let other = try #require(ProjectMemory.makeEntry(end("make lint", exit: 1)))
         #expect(other.command == "make lint")
         #expect(other.failureTail == nil)
 
-        // A leading space is private, and text with no command is nothing.
-        #expect(ProjectMemory.reportedCommand(" secret")?.isPrivate == true)
-        #expect(ProjectMemory.makeEntry(
-            reported: ProjectMemory.reportedCommand(" secret"), screen: screen, source: ScreenCommandExtractor(), finish: finish
-        ) == nil)
+        // Text with no command is nothing.
         #expect(ProjectMemory.reportedCommand("   ") == nil)
     }
 
     @Test
-    func a_failure_keeps_a_redacted_tail_of_its_output() throws {
-        let screen = """
-        app % API_TOKEN=abc ./deploy
-        connecting with API_TOKEN=abc
-        error: rejected
-        app %
-        """
-        let entry = try #require(ProjectMemory.makeEntry(
-            screen: screen,
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: "/app", exitCode: 1, finishedAt: now, duration: 3)
-        ))
+    func a_failure_keeps_a_redacted_capped_tail_of_its_output() throws {
+        let output = "connecting with API_TOKEN=abc\nerror: rejected"
+        let entry = try #require(ProjectMemory.makeEntry(end("API_TOKEN=abc ./deploy", exit: 1, outputTail: output)))
         #expect(entry.command == "API_TOKEN=••• ./deploy")
         #expect(entry.failureTail == "connecting with API_TOKEN=•••\nerror: rejected")
         #expect(entry.outcome == .failure)
-        #expect(entry.startedAt == now.addingTimeInterval(-3))
+
+        // The session sends more rows than the entry keeps.
+        let long = (1 ... 30).map { "line \($0)" }.joined(separator: "\n")
+        let capped = try #require(ProjectMemory.makeEntry(end("make", exit: 2, outputTail: long)))
+        #expect(capped.failureTail == MemoryEntry.tail(of: long))
+        #expect(capped.failureTail?.hasSuffix("line 30") == true)
+        #expect(capped.failureTail?.contains("line 1\n") == false)
     }
 
     @Test
     func a_success_keeps_no_output() throws {
-        let screen = "app % make\nbuilt\napp %"
-        let entry = try #require(ProjectMemory.makeEntry(
-            screen: screen, source: ScreenCommandExtractor(), finish: .init(directory: nil, exitCode: 0, finishedAt: now, duration: 1)
-        ))
+        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0, outputTail: "built")))
         #expect(entry.command == "make")
         #expect(entry.failureTail == nil)
     }
 
     @Test
-    func a_command_that_nothing_names_is_not_recorded() {
-        #expect(ProjectMemory.makeEntry(
-            screen: "app %", source: ScreenCommandExtractor(), finish: .init(directory: "/app", exitCode: 0, finishedAt: now, duration: 1)
-        ) == nil)
+    func an_end_with_no_command_is_not_recorded() {
+        #expect(ProjectMemory.makeEntry(end(nil, exit: 1, outputTail: "error")) == nil)
+        #expect(ProjectMemory.makeEntry(end("  ", exit: 1)) == nil)
     }
 
     @Test
-    func clear_is_recorded_from_the_line_captured_at_submission() throws {
-        // `clear` wipes the screen, so after it only the new prompt is left.
-        let submitted = try #require(ScreenCommandExtractor.typedCommand(onScreen: "~/app on main\n❯ clear"))
-        let entry = try #require(ProjectMemory.makeEntry(
-            submitted: submitted,
-            screen: "~/app on main\n❯",
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: "/app", exitCode: 0, finishedAt: now, duration: 0.01)
-        ))
-        #expect(entry.command == "clear")
+    func a_command_with_a_leading_space_is_recorded_and_redacted() throws {
+        let entry = try #require(ProjectMemory.makeEntry(end(" export TOKEN=abc", exit: 0)))
+        #expect(entry.command == "export TOKEN=\(MemoryRedaction.mask)")
+        let failure = try #require(ProjectMemory.makeEntry(end(" make", exit: 1, outputTail: "error")))
+        #expect(failure.command == "make")
+        #expect(failure.failureTail == "error")
     }
 
     @Test
-    func the_submitted_line_wins_and_the_screen_gives_only_its_own_output() throws {
-        // A log line that looks like a prompt line (`% make`) fools the screen.
-        let screen = """
-        app % ./ci.sh
-        % make
-        error: 1 failed
-        app %
-        """
-        let entry = try #require(ProjectMemory.makeEntry(
-            submitted: ScreenCommandExtractor.sentCommand("./ci.sh\n"),
-            screen: screen,
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: nil, exitCode: 2, finishedAt: now, duration: 1)
-        ))
-        #expect(entry.command == "./ci.sh")
-        // The screen's guess is `make`, not this command, so its output is not kept.
-        #expect(entry.failureTail == nil)
-
-        let matching = try #require(ProjectMemory.makeEntry(
-            submitted: ScreenCommandExtractor.sentCommand("make test\n"),
-            screen: "app % make test\nerror: 1 failed\napp %",
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: nil, exitCode: 2, finishedAt: now, duration: 1)
-        ))
-        #expect(matching.failureTail == "error: 1 failed")
+    func an_end_with_no_start_has_no_duration() throws {
+        let entry = try #require(ProjectMemory.makeEntry(end("make", exit: 0)))
+        #expect(entry.duration == 0)
+        #expect(end("make", exit: 0, startedAt: now.addingTimeInterval(-2.5)).duration == 2.5)
+        // A clock that went back gives no negative duration.
+        #expect(end("make", exit: 0, startedAt: now.addingTimeInterval(5)).duration == 0)
     }
 
+    /// The recorder takes a command end into its project, and nothing
+    /// while the switch is off. Synchronous on purpose, as the switch test:
+    /// `isEnabled` reads shared state.
     @Test
-    func a_cursor_cut_command_is_completed_from_the_screen() throws {
-        let entry = try #require(ProjectMemory.makeEntry(
-            submitted: ScreenCommandExtractor.typedCommand(onScreen: "$ rm -rf build dist", cursorColumn: 12, columns: 80),
-            screen: "$ rm -rf build dist\nremoved 2\n$",
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: nil, exitCode: 0, finishedAt: now, duration: 1)
-        ))
-        #expect(entry.command == "rm -rf build dist")
-    }
+    func a_command_end_is_recorded_in_its_project_only_while_the_switch_is_on() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-memory-end-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let preferences = Preferences.shared
+        let shared = ProjectMemory.shared
+        let (wasOn, wasReader) = (preferences.projectMemory, shared.modelReader)
+        defer {
+            (preferences.projectMemory, shared.modelReader) = (wasOn, wasReader)
+            shared.refreshModelAvailability()
+        }
+        shared.modelReader = { .available }
+        shared.refreshModelAvailability()
+        let memory = ProjectMemory(store: ProjectMemoryStore(directory: directory))
+        let project = UUID()
+        let make = CommandEnd(paneID: UUID(), projectID: project, command: "make", exitCode: 0, startedAt: nil, finishedAt: now)
 
-    @Test
-    func a_right_prompt_keeps_the_command_and_its_output() throws {
-        let screen = "~/app> make test        11:23:45 AM\nerror: 1 failed\n~/app>"
-        let entry = try #require(ProjectMemory.makeEntry(
-            submitted: ScreenCommandExtractor.typedCommand(onScreen: "~/app> make test        11:23:45 AM", cursorColumn: 16, columns: 80),
-            screen: screen,
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: nil, exitCode: 2, finishedAt: now, duration: 1)
-        ))
-        #expect(entry.command == "make test")
-        #expect(entry.failureTail == "error: 1 failed")
-    }
+        preferences.projectMemory = false
+        memory.commandEnded(make)
+        #expect(memory.store.entries(for: project).isEmpty)
 
-    @Test
-    func a_submission_long_before_the_command_started_is_not_its_line() {
-        let submittedAt = now
-        #expect(ProjectMemory.submission(at: submittedAt, matches: now.addingTimeInterval(0.3)))
-        #expect(!ProjectMemory.submission(at: submittedAt, matches: now.addingTimeInterval(5)))
+        preferences.projectMemory = true
+        memory.commandEnded(make)
+        #expect(memory.store.entries(for: project).map(\.command) == (ProjectMemory.isSupported ? ["make"] : []))
+        memory.commandEnded(CommandEnd(paneID: UUID(), projectID: PinnedTabs.workspaceID, command: "make", finishedAt: now))
+        #expect(memory.store.entries(for: PinnedTabs.workspaceID).isEmpty)
     }
 
     @Test
@@ -294,6 +272,26 @@ struct ProjectMemoryTests {
         let project = Project(name: "acme", path: "/tmp", sortOrder: 0)
         memory.projectLookup = { $0 == project.id ? project : nil }
         return (memory, summarizer, project)
+    }
+
+    @Test
+    func a_project_with_no_folder_reads_no_git() async throws {
+        let (memory, _, _) = makeBackgroundMemory {}
+        var reads = 0
+        memory.gitReader = { _ in
+            reads += 1
+            return GitStatus(branch: "main")
+        }
+        let parent = Project(name: "parent", path: "", sortOrder: 0)
+        memory.projectLookup = { $0 == parent.id ? parent : nil }
+        memory.refreshGit(parent.id)
+        let deadline = Date().addingTimeInterval(2)
+        while !memory.gitAnswered.contains(parent.id), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(memory.gitAnswered.contains(parent.id))
+        #expect(reads == 0)
+        #expect(memory.git[parent.id] == nil)
     }
 
     private func waitForSummary(_ summarizer: ProjectMemorySummarizer, _ project: UUID) async throws {
@@ -451,32 +449,6 @@ struct ProjectMemoryTests {
         ProjectMemory(store: store).attach(projectStore: projectStore) { _ in false }
 
         #expect(FileManager.default.fileExists(atPath: store.fileURL(for: project).path))
-    }
-
-    @Test
-    func a_submitted_line_with_a_leading_space_is_private() {
-        #expect(ScreenCommandExtractor.sentCommand(" export TOKEN=x\n")?.isPrivate == true)
-        #expect(ScreenCommandExtractor.typedCommand(onScreen: "app %  export TOKEN=x")?.isPrivate == true)
-        #expect(ProjectMemory.makeEntry(
-            submitted: ScreenCommandExtractor.sentCommand(" export TOKEN=x\n"),
-            screen: nil,
-            source: ScreenCommandExtractor(),
-            finish: .init(directory: nil, exitCode: 0, finishedAt: now, duration: 1)
-        ) == nil)
-    }
-
-    @Test
-    func a_prompt_line_with_no_command_captures_nothing() {
-        #expect(ScreenCommandExtractor.typedCommand(onScreen: "output\napp %") == nil)
-        #expect(ScreenCommandExtractor.typedCommand(onScreen: "plain text with no mark") == nil)
-    }
-
-    @Test
-    func a_private_command_is_not_recorded() {
-        let screen = "app %  export TOKEN=abc\napp %"
-        #expect(ProjectMemory.makeEntry(
-            screen: screen, source: ScreenCommandExtractor(), finish: .init(directory: nil, exitCode: 0, finishedAt: now, duration: 1)
-        ) == nil)
     }
 
     @Test

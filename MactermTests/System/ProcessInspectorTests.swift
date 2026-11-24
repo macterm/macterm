@@ -89,6 +89,23 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isIdleShellInvocation(["/bin/bash", "-lc", "sleep 10"]))
     }
 
+    /// A session report joins the arguments with spaces.
+    @Test
+    func reportedShellCommandLine_runsCommandOnlyForMinusCOrScript() {
+        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/sh -c sleep 1; printf started; echo"))
+        #expect(ProcessInspector.shellCommandLineRunsCommand("bash -lc make"))
+        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/bash /path/to/script.sh"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("-zsh"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash --posix"))
+        // The value of `--execute` lost its quotes: the words after it are
+        // not a script.
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("/opt/homebrew/bin/nu --execute use ghostty *"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand(""))
+        // A word after an unknown option can be its value: no run.
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash -o vi"))
+        #expect(!ProcessInspector.shellCommandLineRunsCommand("nu --config /x/config.nu"))
+    }
+
     /// Every nushell pane runs the exact argv below — ghostty's command-wrapper
     /// injects `--execute 'use ghostty *'` to load shell integration. Unlike
     /// `-c`, nushell's `--execute` runs its code and THEN enters the
@@ -217,5 +234,39 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isProtectedExecutable(atPath: fake.path))
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "/usr/bin/no-such-program"))
         #expect(!ProcessInspector.isProtectedExecutable(atPath: "usr/bin/sudo"), "relative paths never are")
+    }
+
+    @Test
+    func a_process_whose_file_was_deleted_is_detected() throws {
+        // The case of a session process after an update deleted the old
+        // bundle. A copy of a platform binary is killed at launch, so the
+        // copy gets an ad-hoc signature first.
+        let folder = FileManager.default.temporaryDirectory.appending(path: "ProcessInspectorTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let copy = folder.appending(path: "sleep")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: copy)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["-f", "-s", "-", copy.path]
+        sign.standardError = FileHandle.nullDevice
+        try sign.run()
+        sign.waitUntilExit()
+        try #require(sign.terminationStatus == 0)
+
+        let process = Process()
+        process.executableURL = copy
+        process.arguments = ["30"]
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+        #expect(!ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+        try FileManager.default.removeItem(at: copy)
+        #expect(ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+
+        process.terminate()
+        process.waitUntilExit()
+        // A process that is gone is not marked.
+        #expect(!ProcessInspector.executableIsDeleted(pid: process.processIdentifier))
+        #expect(!ProcessInspector.executableIsDeleted(pid: getpid()))
     }
 }

@@ -8,8 +8,8 @@ struct ProjectMemoryStoreTests {
         FileManager.default.temporaryDirectory.appendingPathComponent("macterm-memory-\(UUID().uuidString)", isDirectory: true)
     }
 
-    private func entry(_ command: String, exit: Int? = 0, at date: Date = Date()) -> MemoryEntry {
-        MemoryEntry(command: command, directory: "/tmp", exitCode: exit, finishedAt: date, duration: 1)
+    private func entry(_ command: String, exit: Int? = 0) -> MemoryEntry {
+        MemoryEntry(command: command, directory: "/tmp", exitCode: exit, finishedAt: Date(), duration: 1)
     }
 
     @Test

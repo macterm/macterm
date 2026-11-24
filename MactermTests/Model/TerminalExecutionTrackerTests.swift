@@ -122,6 +122,61 @@ struct TerminalExecutionTrackerTests {
         #expect(progressState == .running)
     }
 
+    /// bash's readline holds the tty raw at its prompt. The session sends
+    /// the foreground before the tty mode, so the command that a Return
+    /// started comes first with the prompt's raw mode, then canonical.
+    @Test
+    func submittedCommandFirstSeenWithThePromptsRawModeStartsWhenCanonical() {
+        var tracker = TerminalExecutionTracker()
+        tracker.recordUserInteraction()
+        tracker.recordCommandSubmission(at: Date(), allowInPlaceOutputStart: false, hasContent: true)
+        var state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true, currentState: .idle
+        )
+        #expect(state == .idle)
+        state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false, currentState: state
+        )
+        #expect(state == .running)
+        state = tracker.refreshForeground(
+            name: "bash", pid: nil, foregroundIsShell: true, terminalInputIsRaw: true, currentState: state
+        )
+        #expect(state == .done)
+    }
+
+    /// A program that leaves raw mode long after its start (vim's `:!make`)
+    /// is not the race: no run starts.
+    @Test
+    func rawStartExpiresAfterTheSubmissionWindow() {
+        var tracker = TerminalExecutionTracker()
+        let submittedAt = Date(timeIntervalSince1970: 100)
+        tracker.recordUserInteraction()
+        tracker.recordCommandSubmission(at: submittedAt, allowInPlaceOutputStart: false, hasContent: true)
+        var state = tracker.refreshForeground(
+            name: "vim", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true,
+            at: submittedAt.addingTimeInterval(0.5), currentState: .idle
+        )
+        state = tracker.refreshForeground(
+            name: "vim", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false,
+            at: submittedAt.addingTimeInterval(600), currentState: state
+        )
+        #expect(state == .idle)
+    }
+
+    /// With no submission, the same reports start nothing.
+    @Test
+    func rawThenCanonicalForegroundWithNoSubmissionStaysIdle() {
+        var tracker = TerminalExecutionTracker()
+        tracker.recordUserInteraction()
+        var state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: true, currentState: .idle
+        )
+        state = tracker.refreshForeground(
+            name: "sh", pid: nil, foregroundIsShell: false, terminalInputIsRaw: false, currentState: state
+        )
+        #expect(state == .idle)
+    }
+
     @Test
     func rawForegroundCannotStartButCanonicalRunDemotesAndSettles() {
         var tracker = TerminalExecutionTracker()

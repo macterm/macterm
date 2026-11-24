@@ -208,4 +208,56 @@ struct ControlProtocolTests {
         let decoded = try ControlProtocol.decodeResponse(ControlProtocol.encode(response))
         #expect(decoded.data?.dump == dump)
     }
+
+    // MARK: - ssh.askpass, shared with the Zig `macterm askpass`
+
+    /// `server/src/cli/fixtures/askpass.json`: `askpass.zig` sends each
+    /// `request` and reads each `response` there. This side checks that the
+    /// request is the one that the v1 CLI sends, and that the app's codec reads
+    /// the response as the Zig CLI does.
+    private struct AskpassFixture: Decodable {
+        var name: String
+        var prompt: String
+        var mode: String?
+        var response: String?
+        var stdout: String
+        var stderr: String
+        var exit: Int
+    }
+
+    @Test
+    func askpass_requests_and_replies_match_the_shared_fixtures() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Control
+            .deletingLastPathComponent() // MactermTests
+            .deletingLastPathComponent() // repo root
+            .appendingPathComponent("server/src/cli/fixtures/askpass.json")
+        let data = try Data(contentsOf: url)
+        let cases = try JSONDecoder().decode([AskpassFixture].self, from: data)
+        let requests = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]]).map { $0["request"] as? [String: Any] }
+        #expect(cases.contains { $0.response != nil })
+        for (c, want) in zip(cases, requests) {
+            let confirm = c.mode == "confirm"
+            if let want {
+                // The request of the v1 CLI (`AskpassCommand`), without its id.
+                var args = ControlArgs()
+                args.prompt = c.prompt
+                args.confirm = confirm ? true : nil
+                let line = try ControlProtocol.encode(ControlRequest(command: "ssh.askpass", args: args))
+                var sent = try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
+                sent["id"] = nil
+                #expect(NSDictionary(dictionary: sent).isEqual(to: want), "\(c.name)")
+            }
+            guard let raw = c.response else { continue }
+            let response = try ControlProtocol.decodeResponse(Data(raw.replacingOccurrences(of: "$ID", with: "x").utf8))
+            #expect(response.id == "x")
+            if c.exit == 0 {
+                let answer = try #require(response.data?.askpass?.answer, "\(c.name)")
+                #expect(c.stdout == (confirm ? "" : answer + "\n"), "\(c.name)")
+            } else {
+                #expect(!response.ok, "\(c.name)")
+                #expect(c.stderr == "macterm: \(response.error?.message ?? "")\n", "\(c.name)")
+            }
+        }
+    }
 }

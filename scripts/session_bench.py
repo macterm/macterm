@@ -13,9 +13,10 @@ app used:
 
   v1         `zmx attach <s> <command>` on a pty: a v1 session daemon and an
              attach client for each pane.
-  v2         a channel on one connection to the server's socket
-             (LocalSessions, PaneSession): the session is made with
-             `session.create`, and the app reads the channel itself.
+  v2         a connection of its own to the session's socket
+             (SessionSockets, PaneSession): the server makes the session
+             with `session.create`, and the app reads the session's socket
+             itself. The server carries no byte of a local pane.
 
 Arms:
 
@@ -40,7 +41,7 @@ of the flood until its prompt shows. These are what the relay's skip-ahead
 Reattach: fill a session with --reattach-lines lines of 200 columns, detach,
 then time a new client until the echo of a marker line that is sent after the
 client attaches. The echo comes after the replay. v1 starts an attach client;
-v2 opens a channel.
+v2 connects to the session's socket.
 Idle (macOS): open --idle-panes panes of /bin/cat in each layer, then read the
 phys_footprint and the interrupt wakeups of the session side (v1: the daemons; v2: the
 server and the sessions) and of the clients (v1: the attach clients; v2: none,
@@ -432,8 +433,24 @@ class PtyPane:
         self.program.close()
 
 
+class SessionStream(RelayStream):
+    """A local v2 pane as the app opens it (SessionSockets): a connection of
+    its own to the session's socket. The session speaks the frames of the
+    relay, with the pane on channel 1 and no requests."""
+
+    PANE = 1
+
+    def open(self, session):
+        self.pane(self.PANE, "attach", cols=COLUMNS, rows=ROWS)
+        return self.PANE
+
+    def close_channel(self, channel):
+        self.close()
+
+
 class ChannelPane:
-    """A v2 pane: a channel on the app's stream to a server."""
+    """A v2 pane: a channel on the app's stream to a server, or a local
+    pane's connection to its session (SessionStream)."""
 
     def __init__(self, stream, channel):
         self.stream = stream
@@ -569,6 +586,12 @@ class Bench:
             self.local.wait(lambda: self.local.control, 30, "the server's hello")
         return self.local
 
+    def session_stream(self, name):
+        """A local pane's own connection to the session `name`, attached.
+        Returns the stream and its pane channel."""
+        stream = SessionStream(path=os.path.join(self.runtime_dir, name))
+        return stream, stream.open(name)
+
     def open_pane(self, layer, name, command, marker, remote=False):
         """Make a session that runs the command, and attach a pane to it.
         Returns the pane and the time in ms from its start to its first
@@ -585,7 +608,10 @@ class Bench:
         start = time.monotonic()
         stream.call("session.create", id=name, command=[word.encode() for word in command],
                     cols=COLUMNS, rows=ROWS)
-        channel = stream.open(name)
+        if remote:
+            channel = stream.open(name)
+        else:
+            stream, channel = self.session_stream(name)
         poke_until(lambda: stream.type(channel, "\r"),
                    lambda t: stream.wait(lambda: marker.encode() in stream.tail.get(channel, b""),
                                          t, repr(marker)), 30)
@@ -746,10 +772,9 @@ class Bench:
         name = self.session(f"reattach-{layer}")
         command, marker = self.fill_script()
         if layer == "v2":
-            stream = self.local_stream()
-            stream.call("session.create", id=name, command=[word.encode() for word in command],
-                        cols=COLUMNS, rows=ROWS)
-            channel = stream.open(name)
+            self.local_stream().call("session.create", id=name, command=[word.encode() for word in command],
+                                     cols=COLUMNS, rows=ROWS)
+            stream, channel = self.session_stream(name)
             stream.type(channel, "\r")
             stream.wait(lambda: marker.encode() in stream.tail.get(channel, b""), 120, repr(marker))
             stream.close_channel(channel)
@@ -770,9 +795,8 @@ class Bench:
         """Attach to the filled session and send the token. Returns the time
         in ms until its answer, and the bytes that the client got."""
         if layer == "v2":
-            stream = self.local_stream()
             start = time.monotonic()
-            channel = stream.open(name)
+            stream, channel = self.session_stream(name)
             stream.type(channel, f"{token}\n")
             end = stream.wait_output(channel, f"got-{token}".encode(), 60)
             replay = stream.received.get(channel, 0)

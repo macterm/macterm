@@ -10,7 +10,6 @@ struct TerminalPane: View {
     let pane: Pane
     let focused: Bool
     let isZoomed: Bool
-    let isSplit: Bool
     /// Dimmed because another pane drives this session's size (#345).
     var isNonLeaderMirror = false
     let onFocus: () -> Void
@@ -30,6 +29,11 @@ struct TerminalPane: View {
         // This window's view of the pane: its own search, copy mode and
         // read-only state, its own view, its own client of the session.
         let surface = SurfaceRegistry.shared.surface(for: pane, in: host)
+        // A plain ssh shell (a host with no server) runs in one surface only,
+        // and no window can take it. The other surfaces show a notice in
+        // place of the terminal, from the first frame, also in the key
+        // window.
+        let plainShellElsewhere = pane.plainShellRunsElsewhere(than: surface.id)
         // The search bar sits above the terminal surface in a VStack, so showing
         // it pushes the terminal content down rather than overlaying it.
         VStack(spacing: 0) {
@@ -57,7 +61,6 @@ struct TerminalPane: View {
                 surface: surface,
                 focused: focused,
                 isZoomed: isZoomed,
-                isSplit: isSplit,
                 isNonLeaderMirror: isNonLeaderMirror,
                 // Read here (not just passed through) so the observation
                 // dependency registers: an orphaned-with-no-host bump must
@@ -70,6 +73,19 @@ struct TerminalPane: View {
                 onSplitRequest: onSplitRequest,
                 onZoomRequest: onZoomRequest
             )
+            .opacity(plainShellElsewhere ? 0 : 1)
+            .overlay {
+                if plainShellElsewhere {
+                    StandAsideNotice(
+                        title: String(localized: "Showing in another window"),
+                        detail: String(
+                            localized: "The host has no Macterm server, so this shell runs in one window only.",
+                            comment: "Under 'Showing in another window', in a pane whose ssh shell runs in another window"
+                        )
+                    )
+                    .allowsHitTesting(false)
+                }
+            }
             // Overlays anchor to the surface, not the VStack, so the search
             // bar (above) never shifts them.
             .overlay(alignment: .bottomLeading) {
@@ -112,13 +128,18 @@ struct TerminalPane: View {
                         .transition(.opacity)
                     }
                     // Outdated-session pill: the session runs from an older
-                    // Macterm version. A click restarts it, and asks first
-                    // when a program runs.
+                    // Macterm version, or from a file that an update deleted
+                    // (then macOS denies it Documents and the other protected
+                    // folders). A click restarts it, and asks first when a
+                    // program runs.
                     if let appState, appState.showsOutdatedSessionBadge(pane) {
                         ModePill(
                             title: String(localized: "Outdated"),
                             systemImage: "arrow.triangle.2.circlepath",
-                            help: String(localized: "This pane is from an outdated Macterm version. Click to refresh")
+                            help: String(localized: """
+                            This session is from an older version of Macterm. \
+                            It can lose access to folders. Click to restart it.
+                            """)
                         ) { [weak appState, weak pane] in
                             guard let appState, let pane else { return }
                             appState.requestRestartSession(of: pane)
@@ -254,7 +275,6 @@ private struct TerminalSurface: NSViewRepresentable {
     let surface: PaneSurface
     let focused: Bool
     let isZoomed: Bool
-    let isSplit: Bool
     /// Another pane drives this session's pty size (#345), so this surface's
     /// frame is laid out for foreign geometry.
     let isNonLeaderMirror: Bool
@@ -406,15 +426,12 @@ private struct TerminalSurface: NSViewRepresentable {
     /// work before any window draws it.
     private func configure(_ view: GhosttyTerminalNSView) {
         view.onFocus = onFocus
-        // Every surface of the pane gets the session's exit. Only the feed's
-        // ends the pane: another window's client that dies alone is a detach.
-        view.onProcessExit = { [weak surface] in
-            if surface?.isFeed ?? true { onProcessExit() }
-        }
+        // The pane's link calls one surface's handler at the session's end
+        // (`Pane.sessionDidEnd`); a surface with no session calls its own.
+        view.onProcessExit = onProcessExit
         view.onSplitRequest = onSplitRequest
         view.onZoomRequest = onZoomRequest
         view.isZoomed = isZoomed
-        view.isSplit = isSplit
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
         // A run ended: the window marks it seen if the user looks at the pane.

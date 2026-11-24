@@ -16,6 +16,11 @@ const client = @import("client.zig");
 const output = @import("output.zig");
 const m = @import("../protocol/messages.zig");
 const chord = @import("../chord.zig");
+const skills = @import("skills.zig");
+const api = @import("api.zig");
+const mcp = @import("mcp.zig");
+const ssh = @import("ssh.zig");
+const askpass = @import("askpass.zig");
 
 const Command = command.Command;
 const Option = command.Option;
@@ -24,9 +29,13 @@ const Option = command.Option;
 pub const Context = struct {
     /// An arena: the CLI is short-lived.
     arena: std.mem.Allocator,
+    /// For files: the cache of `ssh`.
+    io: std.Io,
     env: *const std.process.Environ.Map,
     out: *std.Io.Writer,
     err: *std.Io.Writer,
+    /// stdin, for `api call --args -`.
+    in: ?*std.Io.Reader = null,
 };
 
 const socket_option: Option = .{ .names = &.{"--socket"}, .value = "socket", .abstract = "Control socket path. It overrides discovery." };
@@ -140,10 +149,253 @@ const session_command: Command = .{
     .default = &session_list_command,
 };
 
+// ── skills (design 011 issue 4) ─────────────────────────────────────────────
+
+const skills_command: Command = .{
+    .name = "skills",
+    .abstract = "Print skills that teach AI coding agents to use Macterm. It works with no running app.",
+    .discussion =
+    \\Prints Agent Skills: SKILL.md files that Claude Code, Codex, OpenCode, Gemini CLI, Cursor and other agents load from a skills directory. They teach an agent to run commands in panes and read their output, to build a workspace that persists, to run sub-agents in panes of their own, and to write extensions that add screens to the command palette. There is no installer. The agent installs them itself. To set one up, give it this prompt:
+    \\
+    \\  Run `macterm skills` and install each skill it prints into your skills
+    \\  directory as <name>/SKILL.md, exactly as printed. Then tell me what you
+    \\  installed and where. (Outside a Macterm pane, `macterm` is
+    \\  /Applications/Macterm.app/Contents/Resources/bin/macterm.)
+    \\
+    \\With no arguments, it prints every skill after a short header about the install. A line with its path introduces each skill (==> <name>/SKILL.md <==). With a name, it prints only that SKILL.md, exactly as it is, ready to redirect into place.
+    ,
+    .options = &.{
+        .{ .names = &.{"--list"}, .abstract = "List the names and descriptions of the skills instead." },
+        .{ .names = &.{"--json"}, .abstract = "Print JSON: the name, description, path and (without --list) text of each skill." },
+    },
+    .arguments = &.{.{ .name = "name", .abstract = "Print only the SKILL.md of this skill, exactly as it is.", .optional = true }},
+};
+
+/// `skills`: the text is in the binary, so it needs no server.
+fn skillsRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const list = parsed.flag("--list");
+    const name: ?[]const u8 = if (parsed.positionals.len > 0) parsed.positionals[0] else null;
+    if (list and name != null) {
+        try output.writeError(ctx.err, "pass a skill name or --list, not both", null);
+        return 1;
+    }
+    var chosen: []const skills.Skill = &skills.all;
+    if (name) |n| {
+        const s = skills.named(n) orelse {
+            try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "no skill named \"{s}\"", .{n}), "run `macterm skills --list` for their names");
+            return 1;
+        };
+        chosen = s[0..1];
+    }
+    if (parsed.flag("--json")) {
+        // `--list` leaves out the text, as v1 left out a nil field.
+        const Row = struct { name: []const u8, description: []const u8, path: []const u8, text: ?[]const u8 };
+        const rows = try ctx.arena.alloc(Row, chosen.len);
+        for (chosen, rows) |s, *r| r.* = .{ .name = s.name, .description = s.description, .path = s.path, .text = if (list) null else s.text };
+        try output.writeJson(ctx.arena, ctx.out, try toJson(ctx.arena, struct { skills: []const Row }{ .skills = rows }));
+    } else if (list) {
+        try skills.writeList(ctx.out);
+    } else if (name != null) {
+        try ctx.out.writeAll(chosen[0].text);
+    } else try skills.writeCatalog(ctx.out);
+    return 0;
+}
+
+// ── ssh and askpass (design 011 issue 6) ────────────────────────────────────
+
+const ssh_command: Command = .{
+    .name = "ssh",
+    .abstract = "Run ssh with terminfo install and environment forwarding. It works with no running app.",
+    .discussion =
+    \\Installs the bundled xterm-ghostty terminfo of Macterm on the destination at the first connection (the result is cached). Sets TERM to a value that the host can resolve. Requests SendEnv forwarding for COLORTERM, TERM_PROGRAM and TERM_PROGRAM_VERSION. Then it replaces itself with the real ssh. The flags and the destination of ssh pass through exactly as you wrote them:
+    \\
+    \\  macterm ssh user@example.com
+    \\  macterm ssh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
+    \\  macterm ssh --terminfo=false user@example.com
+    \\
+    \\This is the engine behind the ssh wrapper of the shell integration (the ssh-env and ssh-terminfo features). It mirrors `ghostty +ssh`.
+    ,
+    .options = &.{
+        .{ .names = &.{"--forward-env"}, .value = "forward-env", .default = "true", .abstract = "Set TERM and request SendEnv forwarding." },
+        .{ .names = &.{"--terminfo"}, .value = "terminfo", .default = "true", .abstract = "Install the bundled xterm-ghostty terminfo at the first connection." },
+        .{ .names = &.{"--cache"}, .value = "cache", .default = "true", .abstract = "Use the terminfo install cache." },
+        .{ .names = &.{"--ssh"}, .value = "ssh", .default = "ssh", .abstract = "Path to the ssh binary. The default is the first `ssh` in PATH." },
+        .{ .names = &.{"--verbose"}, .abstract = "Print status lines to stderr." },
+    },
+    .arguments = &.{.{ .name = "ssh-args", .abstract = "Arguments for ssh, exactly as you wrote them (flags, destination, command).", .optional = true, .repeating = true, .passthrough = true }},
+};
+
+/// `ssh`: needs no server. It ends in the exec of ssh.
+fn sshRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const options = (try ssh.readOptions(ctx.err, parsed)) orelse return command.usage_exit;
+    const tmp = ctx.env.get("TMPDIR") orelse "/tmp/";
+    const env: ssh.Env = .{
+        .arena = ctx.arena,
+        .io = ctx.io,
+        .home = ctx.env.get("HOME") orelse home: {
+            // As `NSHomeDirectory`: the user's record.
+            const pw = std.c.getpwuid(std.c.getuid()) orelse break :home null;
+            break :home if (pw.dir) |d| std.mem.span(d) else null;
+        },
+        .tmp = if (std.mem.endsWith(u8, tmp, "/")) tmp else try std.mem.concat(ctx.arena, u8, &.{ tmp, "/" }),
+        .err = ctx.err,
+    };
+    const argv = switch (try ssh.plan(env, options, parsed.positionals)) {
+        .exec => |argv| argv,
+        .exit => |code| return code,
+    };
+    try ctx.out.flush();
+    try ctx.err.flush();
+    const reason = try ssh.exec(ctx.arena, argv);
+    try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "failed to run {s}: {s}", .{ argv[0], reason }), null);
+    return 1;
+}
+
+const askpass_command: Command = .{
+    .name = "askpass",
+    .abstract = "Ask Macterm what an ssh login asks. ssh runs it; you do not.",
+    .hidden = true,
+    .arguments = &.{.{ .name = "prompt", .abstract = "The prompt that ssh gives.", .optional = true }},
+};
+
+// ── api (design 011 §4) ─────────────────────────────────────────────────────
+
+const method_argument: command.Argument = .{ .name = "method", .abstract = "The name of the method, as `macterm api list` prints it." };
+
+const api_list_command: Command = .{
+    .name = "list",
+    .abstract = "List the methods of the server that this CLI can call. It works with no server.",
+    .options = &.{.{ .names = &.{"--json"}, .abstract = "Print JSON: the name, level and description of each method." }},
+};
+
+const api_describe_command: Command = .{
+    .name = "describe",
+    .abstract = "Print a method as JSON: its arguments and its result as JSON Schema. It works with no server.",
+    .arguments = &.{method_argument},
+};
+
+const api_call_command: Command = .{
+    .name = "call",
+    .abstract = "Send one request to the server and print its result as JSON.",
+    .options = &.{
+        .{ .names = &.{"--args"}, .value = "json", .abstract = "The arguments as a JSON object, or - to read them from stdin. The default is {}." },
+        socket_option,
+    },
+    .arguments = &.{method_argument},
+};
+
+const api_command: Command = .{
+    .name = "api",
+    .abstract = "List, describe and call the methods of the server's protocol.",
+    .discussion =
+    \\The methods and their types come from the protocol of this build. The arguments and the result use the keys of the protocol (snake_case). Bytes are JSON strings.
+    ,
+    .subcommands = &.{ &api_list_command, &api_describe_command, &api_call_command },
+};
+
+fn apiList(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    if (parsed.flag("--json")) {
+        try output.writeJson(ctx.arena, ctx.out, try api.listJson(ctx.arena));
+    } else try output.writeColumns(ctx.arena, ctx.out, try api.listRows(ctx.arena));
+    return 0;
+}
+
+fn apiMethod(ctx: Context, name: []const u8) error{ OutOfMemory, WriteFailed }!?api.Method {
+    if (api.find(name)) |method| return method;
+    try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "no method named \"{s}\"", .{name}), "run `macterm api list` for their names");
+    return null;
+}
+
+fn apiDescribe(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const method = (try apiMethod(ctx, parsed.positionals[0])) orelse return 1;
+    try output.writeJson(ctx.arena, ctx.out, try api.describe(ctx.arena, method));
+    return 0;
+}
+
+fn apiCall(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const method = (try apiMethod(ctx, parsed.positionals[0])) orelse return 1;
+    const text = parsed.value("--args") orelse "{}";
+    const json = if (!std.mem.eql(u8, text, "-")) text else read: {
+        const in = ctx.in orelse break :read "";
+        // A request that is larger than one frame cannot go.
+        break :read in.allocRemaining(ctx.arena, .limited(server_frame_max)) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.StreamTooLong => {
+                try output.writeError(ctx.err, "the arguments on stdin are larger than one request holds (1 MiB)", null);
+                return 1;
+            },
+            else => {
+                try output.writeError(ctx.err, "could not read the arguments from stdin", null);
+                return 1;
+            },
+        };
+    };
+    const value = std.json.parseFromSliceLeaky(std.json.Value, ctx.arena, json, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            try output.writeError(ctx.err, "the arguments are not JSON", "give a JSON object, for example --args '{\"id\": \"macterm-x\"}'");
+            return 1;
+        },
+    };
+    inline for (m.methods) |M| {
+        if (comptime m.maySend(M, .local)) if (std.mem.eql(u8, method.name, M.name)) return apiSend(ctx, parsed, M, value);
+    }
+    unreachable;
+}
+
+/// `server.frame_max`: the server reads no larger request.
+const server_frame_max = 1024 * 1024;
+
+fn apiSend(ctx: Context, parsed: command.Parsed, comptime M: type, value: std.json.Value) error{ OutOfMemory, WriteFailed }!u8 {
+    var fault: api.Fault = .{};
+    const args = api.fromJson(M.Args, ctx.arena, value, &fault) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Invalid => {
+            const message = try std.fmt.allocPrint(ctx.arena, "args{s}: {s}", .{ fault.path.items, fault.message });
+            try output.writeError(ctx.err, message, "run `macterm api describe " ++ M.name ++ "` for the arguments");
+            return 1;
+        },
+    };
+    var conn = switch (try connect(ctx, parsed)) {
+        .ok => |c| c,
+        .exit => |code| return code,
+    };
+    defer conn.close();
+    switch (conn.request(M, args) catch |err| return requestFailed(ctx, conn, err)) {
+        .ok => |result| try output.writeJson(ctx.arena, ctx.out, try api.toJson(ctx.arena, result)),
+        .err => |e| {
+            try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "{s} ({s})", .{ e.message, e.code }), null);
+            return 1;
+        },
+    }
+    return 0;
+}
+
+// ── mcp (design 014) ────────────────────────────────────────────────────────
+
+const mcp_command: Command = .{
+    .name = "mcp",
+    .abstract = "Run an MCP server on stdin and stdout for AI coding agents. It works with no running app.",
+    .discussion =
+    \\The agent starts this command and sends JSON-RPC messages, one on each line. Each tool is one method of the server's protocol (see `macterm api list`). The tools connect to Macterm at each call. While Macterm is not running, a tool call fails and tells the agent so.
+    ,
+    .options = &.{socket_option},
+};
+
+fn mcpRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
+    const in = ctx.in orelse return 0;
+    mcp.serve(std.heap.page_allocator, .{ .env = ctx.env, .socket = parsed.value("--socket") }, in, ctx.out) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WriteFailed => return error.WriteFailed,
+        error.ReadFailed => return 1,
+    };
+    return 0;
+}
+
 pub const root: Command = .{
     .name = "macterm",
     .abstract = "Control a running Macterm: projects, tabs, panes, zmx sessions.",
-    .subcommands = &.{ &status_command, &pane_command, &session_command, &help_command },
+    .subcommands = &.{ &status_command, &pane_command, &session_command, &ssh_command, &skills_command, &askpass_command, &api_command, &mcp_command, &help_command },
 };
 
 /// Runs one argument line (without the program name) and returns the exit
@@ -168,6 +420,13 @@ pub fn run(ctx: Context, words: []const []const u8) error{ OutOfMemory, WriteFai
             if (c == &session_list_command) return sessionList(ctx, parsed);
             if (c == &session_info_command) return sessionInfo(ctx, parsed);
             if (c == &session_kill_command) return sessionKill(ctx, parsed);
+            if (c == &skills_command) return skillsRun(ctx, parsed);
+            if (c == &api_list_command) return apiList(ctx, parsed);
+            if (c == &api_describe_command) return apiDescribe(ctx, parsed);
+            if (c == &api_call_command) return apiCall(ctx, parsed);
+            if (c == &mcp_command) return mcpRun(ctx, parsed);
+            if (c == &ssh_command) return sshRun(ctx, parsed);
+            if (c == &askpass_command) return askpass.run(ctx.arena, ctx.env, ctx.out, ctx.err, if (parsed.positionals.len > 0) parsed.positionals[0] else "");
             unreachable;
         },
     }
@@ -713,6 +972,9 @@ const golden_help = .{
     .{ [_]*const Command{ &session_command, &session_list_command }, @embedFile("golden/help/session-list.txt") },
     .{ [_]*const Command{ &session_command, &session_info_command }, @embedFile("golden/help/session-info.txt") },
     .{ [_]*const Command{ &session_command, &session_kill_command }, @embedFile("golden/help/session-kill.txt") },
+    .{ [_]*const Command{&skills_command}, @embedFile("golden/help/skills.txt") },
+    .{ [_]*const Command{&ssh_command}, @embedFile("golden/help/ssh.txt") },
+    .{ [_]*const Command{&askpass_command}, @embedFile("golden/help/askpass.txt") },
 };
 
 fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
@@ -724,6 +986,10 @@ fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
     }
     return out.items;
 }
+
+/// The commands that v1 did not have (design 011 §4). The contract has no
+/// line for them.
+const new_in_v2 = [_]*const Command{ &api_command, &mcp_command };
 
 fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contract, path: []const *const Command) !void {
     const c = path[path.len - 1];
@@ -762,6 +1028,7 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
         try testing.expectEqual(g.names.len, o.names.len);
         for (g.names, o.names) |a, b| try testing.expectEqualStrings(a, b);
         try testing.expectEqualStrings(g.value orelse "", o.value orelse "");
+        try testing.expectEqualStrings(g.default orelse "", o.default orelse "");
         try testing.expectEqualStrings(try collapse(arena, g.abstract), try collapse(arena, o.abstract));
     }
     try testing.expectEqual(visible.items.len, n);
@@ -772,12 +1039,14 @@ fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contrac
         try testing.expectEqual(g.optional, a.optional);
         try testing.expectEqual(g.repeating, a.repeating);
         try testing.expectEqual(std.mem.eql(u8, g.takes orelse "", "unrecognized"), a.unrecognized);
+        try testing.expectEqual(std.mem.eql(u8, g.takes orelse "", "all"), a.passthrough);
         try testing.expectEqualStrings(try collapse(arena, g.abstract), try collapse(arena, a.abstract));
     }
 
     // Subcommands: each ported one is in the contract, in the same order.
     var last: usize = 0;
     for (c.subcommands) |sub| {
+        if (std.mem.indexOfScalar(*const Command, &new_in_v2, sub) != null) continue;
         var at: ?usize = null;
         for (golden.subcommands, 0..) |name, k| {
             if (std.mem.eql(u8, name, sub.name)) at = k;
@@ -807,7 +1076,19 @@ test "the help of a ported leaf command is the golden text" {
     }
 }
 
-test "the root help lists the ported commands as the golden text does" {
+test "the overview of a group wraps as its golden help" {
+    // The overview of `pane` ends at column 80 on one line; that of
+    // `session` is short.
+    inline for (.{ .{ &pane_command, @embedFile("golden/help/pane.txt") }, .{ &session_command, @embedFile("golden/help/session.txt") } }) |entry| {
+        var out: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        try command.writeHelp(&out.writer, &.{ &root, entry[0] });
+        const golden = entry[1][0 .. std.mem.indexOf(u8, entry[1], "\n\n").? + 2];
+        try testing.expect(std.mem.startsWith(u8, out.written(), golden));
+    }
+}
+
+test "the root help lists the ported commands as the golden text does, and api and mcp" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
     try command.writeHelp(&out.writer, &.{&root});
@@ -825,6 +1106,14 @@ test "the root help lists the ported commands as the golden text does" {
         \\  pane                    List, inspect, split, focus and close panes, and run
         \\                          commands in them.
         \\  session                 Inspect and kill terminal sessions that zmx runs.
+        \\  ssh                     Run ssh with terminfo install and environment
+        \\                          forwarding. It works with no running app.
+        \\  skills                  Print skills that teach AI coding agents to use
+        \\                          Macterm. It works with no running app.
+        \\  api                     List, describe and call the methods of the server's
+        \\                          protocol.
+        \\  mcp                     Run an MCP server on stdin and stdout for AI coding
+        \\                          agents. It works with no running app.
         \\
         \\  See 'macterm help <subcommand>' for detailed help.
         \\
@@ -861,7 +1150,7 @@ test "status and usage errors print the golden output" {
     for (inputs, goldens) |input, golden| {
         var out: std.Io.Writer.Allocating = .init(arena);
         var err: std.Io.Writer.Allocating = .init(arena);
-        const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+        const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
         const exit: u8 = switch (try command.parse(arena, &root, input.arguments)) {
             // A word that is not a command: the other verbs are not ported yet.
             .usage_error => if (spec.find(input.arguments[0..1]) == null) try run(ctx, input.arguments) else continue,
@@ -973,7 +1262,7 @@ test "status with no server exits 2 and names the socket" {
     var env: std.process.Environ.Map = .init(arena);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", "/nonexistent/.server" }));
     try testing.expectEqualStrings("", out.written());
     try testing.expectEqualStrings("macterm: could not reach the Macterm server:\n  /nonexistent/.server: no socket file\n", err.written());
@@ -1090,6 +1379,15 @@ fn runAgainstStub(arena: std.mem.Allocator, build: []const u8, reply: @FieldType
 /// Runs `words` with `--socket <stand-in>` against a stand-in that answers as
 /// `init` says, with `env` as the environment.
 fn runStub(arena: std.mem.Allocator, init: Stub, words: []const []const u8, env_pairs: []const [2][]const u8) !StubRun {
+    return runStubWith(arena, init, words, env_pairs, null);
+}
+
+/// `runStub` with `in` as stdin and no environment.
+fn runStubIn(arena: std.mem.Allocator, init: Stub, words: []const []const u8, in: *std.Io.Reader) !StubRun {
+    return runStubWith(arena, init, words, &.{}, in);
+}
+
+fn runStubWith(arena: std.mem.Allocator, init: Stub, words: []const []const u8, env_pairs: []const [2][]const u8, in: ?*std.Io.Reader) !StubRun {
     // Short: a socket path has at most 103 bytes on macOS.
     const path = try std.fmt.allocPrint(arena, "/tmp/macterm-cli-test-{d}.sock", .{std.c.getpid()});
     const path_z = try arena.dupeSentinel(u8, path, 0);
@@ -1109,7 +1407,7 @@ fn runStub(arena: std.mem.Allocator, init: Stub, words: []const []const u8, env_
     for (env_pairs) |pair| try env.put(pair[0], pair[1]);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer, .in = in };
     // Before a `--`, after which every word is typed.
     const at = for (words, 0..) |w, i| {
         if (std.mem.eql(u8, w, "--")) break i;
@@ -1176,7 +1474,7 @@ test "status exits 2 for a path that is not a socket" {
     var env: std.process.Environ.Map = .init(arena);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     try testing.expectEqual(2, try run(ctx, &.{ "status", "--socket", path }));
     try testing.expectEqualStrings(try std.fmt.allocPrint(arena, "macterm: could not reach the Macterm server:\n  {s}: not a socket\n", .{path}), err.written());
 }
@@ -1224,7 +1522,7 @@ fn runOffline(arena: std.mem.Allocator, words: []const []const u8, env_pairs: []
     for (env_pairs) |pair| try env.put(pair[0], pair[1]);
     var out: std.Io.Writer.Allocating = .init(arena);
     var err: std.Io.Writer.Allocating = .init(arena);
-    const ctx: Context = .{ .arena = arena, .env = &env, .out = &out.writer, .err = &err.writer };
+    const ctx: Context = .{ .arena = arena, .io = testing.io, .env = &env, .out = &out.writer, .err = &err.writer };
     const exit = try run(ctx, words);
     return .{ .exit = exit, .out = out.written(), .err = err.written(), .method = "", .args = "", .path = "" };
 }
@@ -1339,4 +1637,117 @@ test "session info and kill name a missing session as v1 did" {
     // A session whose shell exited is not live, as v1 listed none.
     const exited = try runStub(a, try okStub(a, m.SessionInfo, .{ .session = .{ .id = "macterm-x", .state = .exited, .build = "b", .level = 3 } }), &.{ "session", "info", "macterm-x" }, &.{});
     try testing.expectEqual(1, exited.exit);
+}
+
+// ── Tests: skills ───────────────────────────────────────────────────────────
+
+test "skills prints the catalog, one skill, the list and JSON with no server" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const one = try runOffline(arena, &.{ "skills", "macterm-panes" }, &.{});
+    try testing.expectEqual(0, one.exit);
+    try testing.expectEqualStrings(skills.all[0].text, one.out);
+
+    var catalog: std.Io.Writer.Allocating = .init(arena);
+    try skills.writeCatalog(&catalog.writer);
+    try testing.expectEqualStrings(catalog.written(), (try runOffline(arena, &.{"skills"}, &.{})).out);
+    var list: std.Io.Writer.Allocating = .init(arena);
+    try skills.writeList(&list.writer);
+    try testing.expectEqualStrings(list.written(), (try runOffline(arena, &.{ "skills", "--list" }, &.{})).out);
+
+    const Payload = struct { skills: []const struct { name: []const u8, description: []const u8, path: []const u8, text: ?[]const u8 = null } };
+    const full = try std.json.parseFromSliceLeaky(Payload, arena, (try runOffline(arena, &.{ "skills", "--json" }, &.{})).out, .{});
+    try testing.expectEqual(skills.all.len, full.skills.len);
+    for (skills.all, full.skills) |s, j| {
+        try testing.expectEqualStrings(s.name, j.name);
+        try testing.expectEqualStrings(s.description, j.description);
+        try testing.expectEqualStrings(s.path, j.path);
+        try testing.expectEqualStrings(s.text, j.text.?);
+    }
+    // `--list` leaves the text out. The slash is escaped, as `JSONEncoder` does.
+    const listed = try runOffline(arena, &.{ "skills", "--list", "--json" }, &.{});
+    try testing.expect(std.mem.indexOf(u8, listed.out, "\"text\"") == null);
+    try testing.expect(std.mem.indexOf(u8, listed.out, "\"path\" : \"macterm-palettes\\/SKILL.md\"") != null);
+    try testing.expectEqual(skills.all.len, (try std.json.parseFromSliceLeaky(Payload, arena, listed.out, .{})).skills.len);
+
+    // stdout only on success; the error and its hint go to stderr.
+    const unknown = try runOffline(arena, &.{ "skills", "nope" }, &.{});
+    try testing.expectEqual(1, unknown.exit);
+    try testing.expectEqualStrings("", unknown.out);
+    try testing.expectEqualStrings("macterm: no skill named \"nope\"\n  hint: run `macterm skills --list` for their names\n", unknown.err);
+    const both = try runOffline(arena, &.{ "skills", "--list", "macterm-panes" }, &.{});
+    try testing.expectEqual(1, both.exit);
+    try testing.expectEqualStrings("", both.out);
+    try testing.expectEqualStrings("macterm: pass a skill name or --list, not both\n", both.err);
+}
+
+// ── Tests: api ──────────────────────────────────────────────────────────────
+
+test "api list and describe need no server" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const list = try runOffline(a, &.{ "api", "list" }, &.{});
+    try testing.expectEqual(0, list.exit);
+    try testing.expect(std.mem.indexOf(u8, list.out, "session.send ") != null);
+    try testing.expectEqual(api.methods.len, std.mem.count(u8, list.out, "\n"));
+    const json = try runOffline(a, &.{ "api", "list", "--json" }, &.{});
+    const Payload = struct { methods: []const struct { name: []const u8, since: u32, doc: []const u8 } };
+    try testing.expectEqual(api.methods.len, (try std.json.parseFromSliceLeaky(Payload, a, json.out, .{})).methods.len);
+
+    const d = try runOffline(a, &.{ "api", "describe", "session.history" }, &.{});
+    try testing.expectEqual(0, d.exit);
+    const described = try std.json.parseFromSliceLeaky(std.json.Value, a, d.out, .{});
+    try testing.expectEqualStrings("session.history", described.object.get("name").?.string);
+
+    const unknown = try runOffline(a, &.{ "api", "describe", "session.nope" }, &.{});
+    try testing.expectEqual(1, unknown.exit);
+    try testing.expectEqualStrings("macterm: no method named \"session.nope\"\n  hint: run `macterm api list` for their names\n", unknown.err);
+}
+
+test "api call sends the method with the JSON args and prints the result" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const stub = try okStub(a, m.SessionHistory, .{ .text = .{ .bytes = "$ ls" } });
+    const r = try runStub(a, stub, &.{ "api", "call", "session.history", "--args", "{\"id\": \"macterm-x\", \"scrollback\": true}" }, &.{});
+    try testing.expectEqual(0, r.exit);
+    const args = try decodedArgs(a, m.SessionHistory, r);
+    try testing.expectEqualStrings("macterm-x", args.id);
+    try testing.expect(args.scrollback);
+    try testing.expectEqualStrings("{\n  \"text\" : \"$ ls\",\n  \"truncated\" : false\n}\n", r.out);
+
+    // No --args is {}.
+    const ping = try runStub(a, try okStub(a, m.Ping, .{}), &.{ "api", "call", "ping" }, &.{});
+    try testing.expectEqual(0, ping.exit);
+    try testing.expectEqualStrings("ping", ping.method);
+    try testing.expectEqualStrings("{\n\n}\n", ping.out);
+
+    // --args - reads stdin.
+    var in: std.Io.Reader = .fixed("{\"id\": \"macterm-in\"}");
+    const piped = try runStubIn(a, try okStub(a, m.SessionKill, .{}), &.{ "api", "call", "session.kill", "--args", "-" }, &in);
+    try testing.expectEqual(0, piped.exit);
+    try testing.expectEqualStrings("macterm-in", (try decodedArgs(a, m.SessionKill, piped)).id);
+}
+
+test "api call refuses bad args before it connects, and prints the server's error" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const bad = try runOffline(a, &.{ "api", "call", "session.send", "--args", "{\"id\": \"x\"}" }, &.{});
+    try testing.expectEqual(1, bad.exit);
+    try testing.expectEqualStrings("macterm: args.text: expected a value: the key is required\n  hint: run `macterm api describe session.send` for the arguments\n", bad.err);
+    const typo = try runOffline(a, &.{ "api", "call", "session.kill", "--args", "{\"id\": \"x\", \"force\": true}" }, &.{});
+    try testing.expectEqualStrings("macterm: args.force: not a key of this type\n  hint: run `macterm api describe session.kill` for the arguments\n", typo.err);
+    const not_json = try runOffline(a, &.{ "api", "call", "ping", "--args", "{" }, &.{});
+    try testing.expectEqual(1, not_json.exit);
+    try testing.expect(std.mem.startsWith(u8, not_json.err, "macterm: the arguments are not JSON\n"));
+
+    const missing: Stub = .{ .listen_fd = -1, .build = build_options.version, .reply = .err, .err_code = "not_found" };
+    const r = try runStub(a, missing, &.{ "api", "call", "session.info", "--args", "{\"id\": \"macterm-gone\"}" }, &.{});
+    try testing.expectEqual(1, r.exit);
+    try testing.expectEqualStrings("", r.out);
+    try testing.expectEqualStrings("macterm: the stand-in refused (not_found)\n", r.err);
 }

@@ -29,12 +29,12 @@ struct WorkspaceTests {
         let splitID = try #require(ModelWriter.paneSplit(second, paneID: first.id, direction: .vertical))
         let nested = try #require(second.splitRoot.findPane(id: splitID))
         #expect(!ws.hasLostRemoteLink)
-        nested.isRemoteLinkLost = true
+        nested.setRemoteLink(lost: true)
         #expect(ws.hasLostRemoteLink)
-        first.isRemoteLinkLost = true
-        nested.isRemoteLinkLost = false
+        first.setRemoteLink(lost: true)
+        nested.setRemoteLink(lost: false)
         #expect(ws.hasLostRemoteLink)
-        first.isRemoteLinkLost = false
+        first.setRemoteLink(lost: false)
         #expect(!ws.hasLostRemoteLink)
     }
 
@@ -50,17 +50,17 @@ struct WorkspaceTests {
             return flag
         }
         let drop = observe()
-        pane.isRemoteLinkLost = true
+        pane.setRemoteLink(lost: true)
         #expect(drop.wasInvalidated)
         let heal = observe()
-        pane.isRemoteLinkLost = false
+        pane.setRemoteLink(lost: false)
         #expect(heal.wasInvalidated)
     }
 
     @Test
     func a_local_workspace_never_has_a_lost_link() {
         let ws = makeWorkspace()
-        ws.tabs[0].splitRoot.allPanes()[0].isRemoteLinkLost = true
+        ws.tabs[0].splitRoot.allPanes()[0].setRemoteLink(lost: true)
         #expect(!ws.hasLostRemoteLink)
     }
 

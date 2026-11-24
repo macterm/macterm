@@ -67,6 +67,8 @@ final class ProjectMemoryStore {
         scheduleSave(projectID)
     }
 
+    /// Adds an entry at the end. Each one is recorded at its command's end,
+    /// so the list is in the order of the ends.
     func append(_ entry: MemoryEntry, to projectID: UUID) {
         var list = entries(for: projectID)
         list.append(entry)

@@ -7,7 +7,7 @@ const tree = @import("tree.zig");
 const model = @import("model.zig");
 const file = @import("file.zig");
 
-const Node = tree.Node;
+const SplitNode = tree.SplitNode;
 const Model = model.Model;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -16,11 +16,11 @@ fn mkPane(id: []const u8) tree.Pane {
     return .{ .id = .of(id), .session = id };
 }
 
-fn pane(id: []const u8) Node {
+fn pane(id: []const u8) SplitNode {
     return .{ .pane = mkPane(id) };
 }
 
-fn split(a: std.mem.Allocator, id: []const u8, dir: tree.Dir, ratio: f64, first: Node, second: Node) !Node {
+fn split(a: std.mem.Allocator, id: []const u8, dir: tree.Dir, ratio: f64, first: SplitNode, second: SplitNode) !SplitNode {
     const s = try a.create(tree.Split);
     s.* = .{ .id = .of(id), .dir = dir, .ratio = ratio, .first = first, .second = second };
     return .{ .split = s };
@@ -34,7 +34,16 @@ fn newModel() !Model {
     return m;
 }
 
-/// Tab `t` in workspace `p`: H(a, V(b, c)), split ids s1 and s2.
+/// The hidden projects of design/010 §11, §2.
+fn addPinned(m: *Model, id: []const u8) !void {
+    try m.addProject(.{ .id = .of(id), .name = "Pinned", .path = "", .sidebar = .top, .removable = false, .alias = "pinned" });
+}
+
+fn addWidget(m: *Model, id: []const u8) !void {
+    try m.addProject(.{ .id = .of(id), .name = "Widget", .path = "", .sidebar = .none, .single_tab = true });
+}
+
+/// Tab `t` in project `p`: H(a, V(b, c)), split ids s1 and s2.
 fn threePaneTab(m: *Model, tab_id: []const u8, a: []const u8, b: []const u8, c: []const u8, s1: []const u8, s2: []const u8) !void {
     const arena = m.arena.allocator();
     const root = try split(arena, s1, .horizontal, 0.5, pane(a), try split(arena, s2, .vertical, 0.5, pane(b), pane(c)));
@@ -67,7 +76,7 @@ fn expectValid(m: *const Model) !void {
 
 const fixture_text = @embedFile("trees.json");
 
-fn fixtureNode(a: std.mem.Allocator, v: std.json.Value, next_split: *usize) !Node {
+fn fixtureNode(a: std.mem.Allocator, v: std.json.Value, next_split: *usize) !SplitNode {
     switch (v) {
         .string => |name| return pane(name),
         .object => |o| {
@@ -87,7 +96,7 @@ fn fixtureNode(a: std.mem.Allocator, v: std.json.Value, next_split: *usize) !Nod
 
 /// Fails when the tree and the fixture differ. With `erase_names`, a pane
 /// name does not count.
-fn expectTreeEquals(v: std.json.Value, n: *const Node, erase_names: bool, where: []const u8) !void {
+fn expectTreeEquals(v: std.json.Value, n: *const SplitNode, erase_names: bool, where: []const u8) !void {
     switch (v) {
         .string => |name| {
             try testing.expect(n.* == .pane);
@@ -238,7 +247,7 @@ test "create a tab: the focus is the first pane and the tab is active" {
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
     try expectFocus(&m, "t1", "a");
-    try testing.expectEqualStrings("t1", m.findWorkspace(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findProject(.of("p")).?.active_tab.?.text);
     try expectValid(&m);
 }
 
@@ -246,7 +255,7 @@ test "create a tab refuses a used id and changes nothing" {
     var m = try newModel();
     defer m.deinit();
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
-    const before = m.findWorkspace(.of("p")).?.tabs.len;
+    const before = m.findProject(.of("p")).?.tabs.len;
     // A pane id in use, a split id in use, a tab id in use, and a pane twice.
     try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t2"), null, pane("b"), null, true));
     const arena = m.arena.allocator();
@@ -254,7 +263,7 @@ test "create a tab refuses a used id and changes nothing" {
     try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t1"), null, pane("x"), null, true));
     try testing.expectError(error.DuplicateId, m.createTab(.of("p"), .of("t2"), null, try split(arena, "q", .horizontal, 0.5, pane("x"), pane("x")), null, true));
     try testing.expectError(error.NotFound, m.createTab(.of("nope"), .of("t2"), null, pane("x"), null, true));
-    try testing.expectEqual(before, m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectEqual(before, m.findProject(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -350,8 +359,8 @@ test "close the last pane closes the tab and the next tab is the previous one" {
     try m.selectTab(.of("p"), .of("t2"));
     // History, newest first: t3, t1. Closing t2 (active) gives t3.
     try testing.expectEqual(model.CloseResult.tab_closed, try m.closePane(.of("b"), false));
-    try testing.expectEqualStrings("t3", m.findWorkspace(.of("p")).?.active_tab.?.text);
-    try testing.expectEqual(@as(usize, 2), m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectEqualStrings("t3", m.findProject(.of("p")).?.active_tab.?.text);
+    try testing.expectEqual(@as(usize, 2), m.findProject(.of("p")).?.tabs.len);
     try testing.expectError(error.NotFound, m.closePane(.of("b"), false));
     try expectValid(&m);
 }
@@ -363,7 +372,7 @@ test "close the only tab leaves no active tab" {
     const gone = try m.closeTab(.of("t1"));
     try testing.expectEqual(@as(usize, 1), gone.len);
     try testing.expectEqualStrings("a", gone[0].id.text);
-    try testing.expectEqual(@as(?model.TabId, null), m.findWorkspace(.of("p")).?.active_tab);
+    try testing.expectEqual(@as(?model.TabId, null), m.findProject(.of("p")).?.active_tab);
 }
 
 test "focus next and previous wrap, and a zoom follows another focus away" {
@@ -433,7 +442,7 @@ test "move a pane to another tab; its tab closes when it was the last pane" {
     try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t2")));
     try expectOrder(&m, "t1", &.{ "a", "x", "b", "c" });
     try expectFocus(&m, "t1", "x");
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectEqual(@as(usize, 1), m.findProject(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -466,11 +475,11 @@ test "separate a pane into a new tab after its tab" {
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     try m.createTab(.of("p"), .of("t9"), null, pane("z"), null, false);
     try m.separatePane(.of("c"), .of("t2"), null);
-    const ws = m.findWorkspace(.of("p")).?;
-    try testing.expectEqualStrings("t1", ws.tabs[0].id.text);
-    try testing.expectEqualStrings("t2", ws.tabs[1].id.text);
-    try testing.expectEqualStrings("t9", ws.tabs[2].id.text);
-    try testing.expectEqualStrings("t2", ws.active_tab.?.text);
+    const p = m.findProject(.of("p")).?;
+    try testing.expectEqualStrings("t1", p.tabs[0].id.text);
+    try testing.expectEqualStrings("t2", p.tabs[1].id.text);
+    try testing.expectEqualStrings("t9", p.tabs[2].id.text);
+    try testing.expectEqualStrings("t2", p.active_tab.?.text);
     try expectOrder(&m, "t1", &.{ "a", "b" });
     try expectOrder(&m, "t2", &.{"c"});
     try expectFocus(&m, "t2", "c");
@@ -534,17 +543,17 @@ test "a grid with a used id fails and changes nothing" {
     try testing.expectError(error.NotFound, m.makeGrid(.of("t1"), .of("zz"), 2, 2, &gen2));
 }
 
-test "move a tab to another workspace keeps its tree and selects it" {
+test "move a tab to another project keeps its tree and selects it" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace(.of("pinned"), .pinned);
+    try addPinned(&m, "pinned");
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
     try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
     try m.focusPane(.of("c"));
     try m.moveTab(.of("t1"), .of("pinned"), null);
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
-    try testing.expectEqualStrings("t2", m.findWorkspace(.of("p")).?.active_tab.?.text);
-    try testing.expectEqualStrings("t1", m.findWorkspace(.of("pinned")).?.active_tab.?.text);
+    try testing.expectEqual(@as(usize, 1), m.findProject(.of("p")).?.tabs.len);
+    try testing.expectEqualStrings("t2", m.findProject(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findProject(.of("pinned")).?.active_tab.?.text);
     try expectOrder(&m, "t1", &.{ "a", "b", "c" });
     try expectFocus(&m, "t1", "c");
     try testing.expectError(error.BadRequest, m.moveTab(.of("t1"), .of("pinned"), null));
@@ -559,14 +568,14 @@ test "reorder tabs" {
     try m.createTab(.of("p"), .of("t2"), null, pane("b"), null, true);
     try m.createTab(.of("p"), .of("t3"), null, pane("c"), null, true);
     try m.reorderTab(.of("t3"), 0);
-    const ws = m.findWorkspace(.of("p")).?;
-    try testing.expectEqualStrings("t3", ws.tabs[0].id.text);
-    try testing.expectEqualStrings("t1", ws.tabs[1].id.text);
+    const p = m.findProject(.of("p")).?;
+    try testing.expectEqualStrings("t3", p.tabs[0].id.text);
+    try testing.expectEqualStrings("t1", p.tabs[1].id.text);
     try m.reorderTab(.of("t3"), 99);
-    try testing.expectEqualStrings("t3", m.findWorkspace(.of("p")).?.tabs[2].id.text);
+    try testing.expectEqualStrings("t3", m.findProject(.of("p")).?.tabs[2].id.text);
 }
 
-test "remove a project removes its workspace and lists its panes" {
+test "remove a project removes its tabs and lists its panes" {
     var m = try newModel();
     defer m.deinit();
     try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q" });
@@ -575,70 +584,128 @@ test "remove a project removes its workspace and lists its panes" {
     const gone = try m.removeProject(.of("p"));
     try testing.expectEqual(@as(usize, 3), gone.len);
     try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("p")));
-    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("p")));
     try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t1")));
     try testing.expectEqual(@as(?model.ProjectId, null), m.data.selection.active_project);
+    try testing.expect(m.tab_history.get(.of("p")) == null);
     try testing.expectError(error.NotFound, m.removeProject(.of("p")));
     try expectValid(&m);
 }
 
-test "remove a workspace that is not a project's, with its tabs and their history" {
+test "a hidden project that is not removable is refused, a widget is removed with its tab" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace(.of("pin"), .pinned);
+    try addPinned(&m, "pin");
     try m.createTab(.of("pin"), .of("t1"), null, pane("a"), null, true);
-    try m.createTab(.of("pin"), .of("t2"), null, pane("b"), null, true);
-    try testing.expectError(error.BadRequest, m.removeWorkspace(.of("p")));
-    const gone = try m.removeWorkspace(.of("pin"));
-    try testing.expectEqual(@as(usize, 2), gone.len);
-    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("pin")));
-    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t1")));
-    try testing.expect(m.tab_history.get(.of("pin")) == null);
-    try testing.expectError(error.NotFound, m.removeWorkspace(.of("pin")));
+    try testing.expectError(error.Refused, m.removeProject(.of("pin")));
+    try testing.expect(m.findTab(.of("t1")) != null);
+    try addWidget(&m, "w");
+    try m.createTab(.of("w"), .of("t2"), null, pane("b"), null, true);
+    const gone = try m.removeProject(.of("w"));
+    try testing.expectEqual(@as(usize, 1), gone.len);
+    try testing.expectEqual(@as(?*model.Tab, null), m.findTab(.of("t2")));
+    try testing.expect(m.tab_history.get(.of("w")) == null);
     try expectValid(&m);
 }
 
-test "a project id is not reused, and workspaces other than projects need a kind" {
+test "a project id and an alias are not reused" {
     var m = try newModel();
     defer m.deinit();
     try testing.expectError(error.DuplicateId, m.addProject(.{ .id = .of("p"), .name = "P2", .path = "/p2" }));
-    try testing.expectError(error.BadRequest, m.addWorkspace(.of("w"), .project));
-    try m.addWorkspace(.of("w"), .widget);
-    try testing.expectError(error.DuplicateId, m.addWorkspace(.of("w"), .quick));
-    try testing.expectError(error.DuplicateId, m.addWorkspace(.of("p"), .quick));
+    try addPinned(&m, "pin");
+    try testing.expectError(error.DuplicateId, addPinned(&m, "pin2"));
+    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("e"), .name = "E", .path = "", .alias = "" }));
+    try testing.expectEqualStrings("pin", m.findAlias("pinned").?.id.text);
+    try testing.expectEqual(@as(?*model.Project, null), m.findAlias("scratch"));
 }
 
-test "a group has no workspace, holds rows, and is never selected" {
+test "a hidden project is at the top level and holds no project" {
     var m = try newModel();
     defer m.deinit();
-    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g", .kind = .group }));
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try testing.expectEqual(@as(?*model.Workspace, null), m.findWorkspace(.of("g")));
-    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("x"), .name = "X", .path = "/x", .parent = .of("p") }));
+    try addPinned(&m, "pin");
+    try addWidget(&m, "w");
+    // A hidden project cannot have a parent, and cannot be one.
+    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("h"), .name = "H", .path = "", .sidebar = .bottom, .parent = .of("p") }));
+    try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("c"), .name = "C", .path = "/c", .parent = .of("pin") }));
+    try testing.expectError(error.BadRequest, m.setParent(.of("pin"), .of("p")));
+    try testing.expectError(error.BadRequest, m.setParent(.of("p"), .of("w")));
+    // The top-level order holds the tree projects only.
+    try testing.expectError(error.BadRequest, m.reorderProjects(null, &.{ .of("p"), .of("pin") }));
+    try m.reorderProjects(null, &.{.of("p")});
+    try expectValid(&m);
+}
+
+test "a single_tab project holds one tab" {
+    var m = try newModel();
+    defer m.deinit();
+    try addWidget(&m, "w");
+    try m.createTab(.of("w"), .of("t1"), null, pane("a"), null, true);
+    try testing.expectError(error.Refused, m.createTab(.of("w"), .of("t2"), null, pane("b"), null, true));
+    try threePaneTab(&m, "t3", "c", "d", "e", "s1", "s2");
+    try testing.expectError(error.Refused, m.moveTab(.of("t3"), .of("w"), null));
+    try testing.expectError(error.Refused, m.separatePane(.of("c"), .of("t4"), .of("w")));
+    try testing.expect(m.findTab(.of("t2")) == null and m.findTab(.of("t4")) == null);
+    try testing.expectEqual(@as(usize, 3), tree.paneCount(&m.findTab(.of("t3")).?.root));
+    // A refusal changes nothing: the tab stays in its project, active.
+    try testing.expectEqualStrings("p", m.projectOfTab(.of("t3")).?.id.text);
+    try testing.expectEqualStrings("t3", m.findProject(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findProject(.of("w")).?.active_tab.?.text);
+    // A pane of the one tab cannot go to a new tab in its own project.
+    try addWidget(&m, "w2");
+    try m.moveTab(.of("t3"), .of("w2"), null);
+    try testing.expectError(error.Refused, m.separatePane(.of("c"), .of("t5"), null));
+    try testing.expectEqual(@as(usize, 1), m.findProject(.of("w2")).?.tabs.len);
+    _ = try m.removeProject(.of("w2"));
+    // Once it is empty, a tab can go in again.
+    _ = try m.closeTab(.of("t1"));
+    try m.createTab(.of("p"), .of("t6"), null, pane("f"), null, true);
+    try m.moveTab(.of("t6"), .of("w"), null);
+    try expectValid(&m);
+}
+
+test "a project that no window draws cannot be selected" {
+    var m = try newModel();
+    defer m.deinit();
+    try addWidget(&m, "w");
+    try addPinned(&m, "pin");
+    try testing.expectError(error.Refused, m.selectProject(.of("w")));
+    try m.selectProject(.of("pin"));
+    try testing.expectEqualStrings("pin", m.data.selection.active_project.?.text);
+}
+
+test "any project can hold tabs and projects, and can be selected" {
+    var m = try newModel();
+    defer m.deinit();
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "" });
     try testing.expectError(error.BadRequest, m.addProject(.{ .id = .of("x"), .name = "X", .path = "/x", .parent = .of("zz") }));
-    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("g") });
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("p") });
     try m.addProject(.{ .id = .of("r"), .name = "R", .path = "/r", .parent = .of("") });
-    try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("q")).?).?.text);
+    try testing.expectEqualStrings("p", m.parentOf(m.findProject(.of("q")).?).?.text);
     try testing.expectEqual(@as(?model.ProjectId, null), m.parentOf(m.findProject(.of("r")).?));
-    try testing.expectError(error.BadRequest, m.selectProject(.of("g")));
-    try testing.expectError(error.BadRequest, m.removeProject(.of("g")));
+    try m.selectProject(.of("g"));
+    try m.selectProject(.of("p"));
+    // A project with tabs can hold a project too.
+    try m.createTab(.of("p"), .of("t1"), null, .{ .pane = mkPane("a") }, null, true);
     try expectValid(&m);
+    // A project that holds a project is refused, and nothing changes.
+    try testing.expectError(error.BadRequest, m.removeProject(.of("p")));
+    try testing.expect(m.findTab(.of("t1")) != null);
     _ = try m.removeProject(.of("q"));
-    try testing.expectEqual(@as(usize, 0), (try m.removeProject(.of("g"))).len);
-    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("g")));
+    try testing.expectEqual(@as(usize, 1), (try m.removeProject(.of("p"))).len);
+    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("p")));
     try expectValid(&m);
 }
 
-test "set a parent: never into itself or into a group that it holds" {
+test "set a parent: never into itself or into a project that it holds" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try m.addProject(.{ .id = .of("h"), .name = "H", .path = "", .kind = .group, .parent = .of("g") });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g" });
+    try m.addProject(.{ .id = .of("h"), .name = "H", .path = "/h", .parent = .of("g") });
     try m.setParent(.of("p"), .of("h"));
     try testing.expectEqualStrings("h", m.parentOf(m.findProject(.of("p")).?).?.text);
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("g")));
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("h")));
     try testing.expectError(error.BadRequest, m.setParent(.of("h"), .of("p")));
+    try testing.expectError(error.BadRequest, m.setParent(.of("h"), .of("zz")));
     try testing.expectError(error.NotFound, m.setParent(.of("zz"), null));
     try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("h")).?).?.text);
     try m.setParent(.of("p"), .of(""));
@@ -648,7 +715,7 @@ test "set a parent: never into itself or into a group that it holds" {
 test "reorder the children of one parent" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "/g" });
     try m.addProject(.{ .id = .of("a"), .name = "A", .path = "/a", .parent = .of("g") });
     try m.addProject(.{ .id = .of("b"), .name = "B", .path = "/b", .parent = .of("g") });
     try m.reorderProjects(.of("g"), &.{ .of("b"), .of("a") });
@@ -659,7 +726,9 @@ test "reorder the children of one parent" {
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{.of("a")}));
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{ .of("a"), .of("a") }));
     try testing.expectError(error.BadRequest, m.reorderProjects(.of("g"), &.{ .of("a"), .of("p") }));
-    try testing.expectError(error.BadRequest, m.reorderProjects(.of("p"), &.{}));
+    // Any project is a parent: `p` holds no project.
+    try m.reorderProjects(.of("p"), &.{});
+    try testing.expectError(error.BadRequest, m.reorderProjects(.of("p"), &.{.of("a")}));
     try testing.expectError(error.NotFound, m.reorderProjects(.of("zz"), &.{}));
     try testing.expectEqual(@as(i64, 0), m.findProject(.of("b")).?.sort_order);
     try testing.expectEqual(@as(i64, 1), m.findProject(.of("a")).?.sort_order);
@@ -716,7 +785,7 @@ test "input that validate would refuse is refused" {
     try testing.expectError(error.BadRequest, m.createTab(.of("p"), .of("t1"), null, try split(arena, "s", .horizontal, 7.0, pane("a"), pane("b")), null, true));
     try m.createTab(.of("p"), .of("t1"), null, pane("a"), null, true);
     try testing.expectError(error.BadRequest, m.splitPane(.of("t1"), .of("a"), .{ .id = .of("d"), .session = "" }, .of("s9"), .horizontal, .second, null, true, false));
-    try testing.expectEqual(@as(usize, 1), m.findWorkspace(.of("p")).?.tabs.len);
+    try testing.expectEqual(@as(usize, 1), m.findProject(.of("p")).?.tabs.len);
     try expectValid(&m);
 }
 
@@ -741,10 +810,12 @@ fn faultOf(json: []const u8) ![]const u8 {
 }
 
 const base_ok =
-    \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p"}],
-    \\ "workspaces":[{"id":"p","kind":"project","active_tab":"t1","tabs":[
+    \\{"version":2,"projects":[{"id":"p","name":"P","path":"/p","active_tab":"t1","tabs":[
     \\   {"id":"t1","focused":"a","root":{"split":{"id":"s1","dir":"horizontal","ratio":0.5,
-    \\     "first":{"pane":{"id":"a","session":"sa"}},"second":{"pane":{"id":"b","session":"sb"}}}}}]}],
+    \\     "first":{"pane":{"id":"a","session":"sa"}},"second":{"pane":{"id":"b","session":"sb"}}}}}]},
+    \\ {"id":"w","name":"Widget","path":"","sidebar":"none","single_tab":true},
+    \\ {"id":"pin","name":"Pinned","path":"","sidebar":"top","removable":false,"alias":"pinned"},
+    \\ {"id":"q","name":"Q","path":"/q","parent":"p"}],
     \\ "selection":{"active_project":"p"}}
 ;
 
@@ -753,27 +824,29 @@ test "a good file loads" {
     var m = try file.parse(testing.allocator, base_ok, &fault);
     defer m.deinit();
     try expectOrder(&m, "t1", &.{ "a", "b" });
-    // A file from before groups has no `parent` and no `kind`.
-    const p = m.findProject(.of("p")).?;
-    try testing.expectEqual(model.ProjectKind.project, p.kind);
-    try testing.expectEqual(@as(?model.ProjectId, null), p.parent);
+    try testing.expectEqual(@as(?model.ProjectId, null), m.findProject(.of("p")).?.parent);
+    try testing.expectEqual(model.ProjectSidebar.none, m.findProject(.of("w")).?.sidebar);
+    try testing.expectEqualStrings("pin", m.findAlias("pinned").?.id.text);
 }
 
 test "each fault names its place" {
     const cases = [_]struct { from: []const u8, to: []const u8, want: []const u8 }{
-        .{ .from = "\"id\":\"b\"", .to = "\"id\":\"a\"", .want = "workspaces[0].tabs[0].root.second.id: duplicate" },
-        .{ .from = "\"id\":\"s1\"", .to = "\"id\":\"b\"", .want = "workspaces[0].tabs[0].root.second.id: duplicate" },
-        .{ .from = "\"ratio\":0.5", .to = "\"ratio\":1.5", .want = "workspaces[0].tabs[0].root.ratio: outside 0 to 1" },
-        .{ .from = "\"ratio\":0.5", .to = "\"ratio\":0", .want = "workspaces[0].tabs[0].root.ratio: outside 0 to 1" },
-        .{ .from = "\"focused\":\"a\"", .to = "\"focused\":\"zz\"", .want = "workspaces[0].tabs[0].focused: not in the tab" },
-        .{ .from = "\"active_tab\":\"t1\"", .to = "\"active_tab\":\"zz\"", .want = "workspaces[0].active_tab: not in the workspace" },
-        .{ .from = "\"session\":\"sb\"", .to = "\"session\":\"\"", .want = "workspaces[0].tabs[0].root.second.session: empty" },
+        .{ .from = "\"id\":\"b\"", .to = "\"id\":\"a\"", .want = "projects[0].tabs[0].root.second.id: duplicate" },
+        .{ .from = "\"id\":\"s1\"", .to = "\"id\":\"b\"", .want = "projects[0].tabs[0].root.second.id: duplicate" },
+        .{ .from = "\"ratio\":0.5", .to = "\"ratio\":1.5", .want = "projects[0].tabs[0].root.ratio: outside 0 to 1" },
+        .{ .from = "\"ratio\":0.5", .to = "\"ratio\":0", .want = "projects[0].tabs[0].root.ratio: outside 0 to 1" },
+        .{ .from = "\"focused\":\"a\"", .to = "\"focused\":\"zz\"", .want = "projects[0].tabs[0].focused: not in the tab" },
+        .{ .from = "\"active_tab\":\"t1\"", .to = "\"active_tab\":\"zz\"", .want = "projects[0].active_tab: not in the project" },
+        .{ .from = "\"session\":\"sb\"", .to = "\"session\":\"\"", .want = "projects[0].tabs[0].root.second.session: empty" },
         .{ .from = "\"active_project\":\"p\"", .to = "\"active_project\":\"zz\"", .want = "selection.active_project: no such project" },
-        .{ .from = "\"kind\":\"project\"", .to = "\"kind\":\"pinned\"", .want = "workspaces[0].id: also a project" },
-        .{ .from = "\"workspaces\":[{\"id\":\"p\"", .to = "\"workspaces\":[{\"id\":\"zz\"", .want = "workspaces[0].id: no project" },
-        .{ .from = "\"id\":\"t1\"", .to = "\"id\":\"\"", .want = "workspaces[0].tabs[0].id: empty" },
-        .{ .from = "\"path\":\"/p\"", .to = "\"path\":\"/p\",\"kind\":\"group\"", .want = "projects[0].path: a group has no path" },
-        .{ .from = "\"path\":\"/p\"", .to = "\"path\":\"\",\"kind\":\"group\"", .want = "workspaces[0].id: no project" },
+        .{ .from = "\"active_project\":\"p\"", .to = "\"active_project\":\"w\"", .want = "selection.active_project: a project with sidebar none" },
+        .{ .from = "\"id\":\"t1\"", .to = "\"id\":\"\"", .want = "projects[0].tabs[0].id: empty" },
+        .{ .from = "\"id\":\"w\"", .to = "\"id\":\"p\"", .want = "projects[1].id: duplicate" },
+        .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"alias\":\"pinned\"", .want = "projects[2].alias: duplicate" },
+        .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"alias\":\"\"", .want = "projects[1].alias: empty" },
+        .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"parent\":\"p\"", .want = "projects[1].parent: a project with sidebar none is at the top level" },
+        .{ .from = "\"parent\":\"p\"", .to = "\"parent\":\"pin\"", .want = "projects[3].parent: not a tree project" },
+        .{ .from = "\"name\":\"Widget\"", .to = "\"name\":\"Widget\",\"parent\":\"gone\"", .want = "projects[1].parent: a project with sidebar none is at the top level" },
     };
     for (cases) |c| {
         const text = try std.mem.replaceOwned(u8, testing.allocator, base_ok, c.from, c.to);
@@ -783,19 +856,23 @@ test "each fault names its place" {
     }
 }
 
-test "a project with no workspace is a fault" {
-    const text = "{\"version\":1,\"projects\":[{\"id\":\"p\",\"name\":\"P\",\"path\":\"/p\"}]}";
-    try testing.expectEqualStrings("workspaces: a project has no workspace", try faultOf(text));
+test "a single_tab project with two tabs is a fault" {
+    const text =
+        \\{"version":2,"projects":[{"id":"w","name":"W","path":"","sidebar":"none","single_tab":true,"tabs":[
+        \\   {"id":"t1","root":{"pane":{"id":"a","session":"sa"}}},
+        \\   {"id":"t2","root":{"pane":{"id":"b","session":"sb"}}}]}]}
+    ;
+    try testing.expectEqualStrings("projects[0].tabs: more than one in a single_tab project", try faultOf(text));
 }
 
 test "a tab id twice is a fault" {
     const text =
-        \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p"}],
-        \\ "workspaces":[{"id":"p","kind":"project","tabs":[
-        \\   {"id":"t1","root":{"pane":{"id":"a","session":"sa"}}},
+        \\{"version":2,"projects":[{"id":"p","name":"P","path":"/p","tabs":[
+        \\   {"id":"t1","root":{"pane":{"id":"a","session":"sa"}}}]},
+        \\ {"id":"q","name":"Q","path":"/q","tabs":[
         \\   {"id":"t1","root":{"pane":{"id":"b","session":"sb"}}}]}]}
     ;
-    try testing.expectEqualStrings("workspaces[0].tabs[1].id: duplicate", try faultOf(text));
+    try testing.expectEqualStrings("projects[1].tabs[0].id: duplicate", try faultOf(text));
 }
 
 // ── The file ────────────────────────────────────────────────────────────────
@@ -803,8 +880,9 @@ test "a tab id twice is a fault" {
 test "a model writes and reads back the same" {
     var m = try newModel();
     defer m.deinit();
-    try m.addWorkspace(.of("pinned"), .pinned);
+    try addPinned(&m, "pinned");
     try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.createTab(.of("pinned"), .of("t2"), null, pane("d"), null, true);
     try m.renameTab(.of("t1"), "build \"it\"");
     try m.setAttention(.of("c"), .done);
     try m.selectProject(.of("p"));
@@ -818,10 +896,15 @@ test "a model writes and reads back the same" {
     var back = try file.parse(testing.allocator, out.written(), &fault);
     defer back.deinit();
     try testing.expect(back.data.imported_v1);
+    try testing.expectEqual(model.version, back.data.version);
     try testing.expectEqualStrings("build \"it\"", back.findTab(.of("t1")).?.custom_title.?);
     try testing.expectEqual(tree.ModelAttention.done, back.findPane(.of("c")).?.attention);
     try testing.expectEqualStrings("p", back.data.selection.active_project.?.text);
-    try testing.expectEqual(@as(usize, 2), back.data.workspaces.len);
+    try testing.expectEqual(@as(usize, 2), back.data.projects.len);
+    const pinned = back.findAlias("pinned").?;
+    try testing.expectEqual(model.ProjectSidebar.top, pinned.sidebar);
+    try testing.expect(!pinned.removable);
+    try testing.expectEqualStrings("t2", pinned.active_tab.?.text);
     try expectOrder(&back, "t1", &.{ "a", "b", "c" });
 
     var again: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -830,51 +913,146 @@ test "a model writes and reads back the same" {
     try testing.expectEqualStrings(out.written(), again.written());
 }
 
-test "a selected group is a fault" {
-    const text = try std.mem.replaceOwned(u8, testing.allocator, base_ok, "\"active_project\":\"p\"", "\"active_project\":\"g\"");
-    defer testing.allocator.free(text);
-    const with_group = try std.mem.replaceOwned(u8, testing.allocator, text, "\"path\":\"/p\"}", "\"path\":\"/p\"},{\"id\":\"g\",\"name\":\"G\",\"path\":\"\",\"kind\":\"group\"}");
-    defer testing.allocator.free(with_group);
-    try testing.expectEqualStrings("selection.active_project: no such project", try faultOf(with_group));
-}
-
-test "a group and a parent write and read back" {
+test "a project and its parent write and read back" {
     var m = try newModel();
     defer m.deinit();
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .kind = .group });
-    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("g") });
+    try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "/q", .parent = .of("p") });
     const text = try written(&m);
     defer testing.allocator.free(text);
     var fault: model.Fault = .{};
     var back = try file.parse(testing.allocator, text, &fault);
     defer back.deinit();
-    try testing.expectEqual(model.ProjectKind.group, back.findProject(.of("g")).?.kind);
-    try testing.expectEqual(model.ProjectKind.project, back.findProject(.of("p")).?.kind);
-    try testing.expectEqualStrings("g", back.parentOf(back.findProject(.of("q")).?).?.text);
+    try testing.expectEqualStrings("p", back.parentOf(back.findProject(.of("q")).?).?.text);
     try testing.expectEqual(@as(?model.ProjectId, null), back.findProject(.of("p")).?.parent);
 }
 
-test "a parent that is not a group, or a loop of parents, reads as the top level" {
+test "a version 1 file with workspaces loads, and a save writes version 2 with no workspaces" {
+    // The shape that a build before issue 0498 wrote.
     const text =
-        \\{"version":1,"projects":[
-        \\ {"id":"p","name":"P","path":"/p","parent":"gone"},
-        \\ {"id":"q","name":"Q","path":"/q","parent":"p"},
-        \\ {"id":"g","name":"G","path":"","kind":"group","parent":"h"},
-        \\ {"id":"h","name":"H","path":"","kind":"group","parent":"g"},
-        \\ {"id":"r","name":"R","path":"/r","parent":"g"}],
-        \\ "workspaces":[{"id":"p","kind":"project"},{"id":"q","kind":"project"},{"id":"r","kind":"project"}]}
+        \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p"}],
+        \\ "workspaces":[{"id":"p","kind":"project","active_tab":"t1","tabs":[
+        \\   {"id":"t1","root":{"pane":{"id":"a","session":"sa"}}}]},
+        \\  {"id":"PIN","kind":"pinned","active_tab":"t2","tabs":[{"id":"t2","root":{"pane":{"id":"b","session":"sb"}}}]},
+        \\  {"id":"SCR","kind":"scratch"},
+        \\  {"id":"Q","kind":"quick","tabs":[{"id":"t3","root":{"pane":{"id":"c","session":"sc"}}}]},
+        \\  {"id":"W","kind":"widget"}],
+        \\ "selection":{"active_project":"p"}}
     ;
     var fault: model.Fault = .{};
     var m = try file.parse(testing.allocator, text, &fault);
     defer m.deinit();
-    for ([_][]const u8{ "p", "q", "g", "h" }) |id| {
+    try expectValid(&m);
+    try testing.expectEqual(@as(usize, 5), m.data.projects.len);
+    try testing.expectEqualStrings("t1", m.findProject(.of("p")).?.active_tab.?.text);
+    const Want = struct { id: []const u8, name: []const u8, sidebar: model.ProjectSidebar, single: bool, removable: bool, alias: ?[]const u8, tabs: usize };
+    for ([_]Want{
+        .{ .id = "PIN", .name = "Pinned", .sidebar = .top, .single = false, .removable = false, .alias = "pinned", .tabs = 1 },
+        .{ .id = "SCR", .name = "Scratch Tabs", .sidebar = .bottom, .single = false, .removable = false, .alias = "scratch", .tabs = 0 },
+        .{ .id = "Q", .name = "Quick Terminal", .sidebar = .none, .single = true, .removable = false, .alias = "quick", .tabs = 1 },
+        .{ .id = "W", .name = "Widget", .sidebar = .none, .single = true, .removable = true, .alias = null, .tabs = 0 },
+    }) |w| {
+        const p = m.findProject(.of(w.id)).?;
+        try testing.expectEqualStrings(w.name, p.name);
+        try testing.expectEqualStrings("", p.path);
+        try testing.expectEqual(@as(?model.ProjectId, null), p.parent);
+        try testing.expectEqual(w.sidebar, p.sidebar);
+        try testing.expectEqual(w.single, p.single_tab);
+        try testing.expectEqual(w.removable, p.removable);
+        if (w.alias) |x| try testing.expectEqualStrings(x, p.alias.?) else try testing.expectEqual(@as(?[]const u8, null), p.alias);
+        try testing.expectEqual(w.tabs, p.tabs.len);
+    }
+    try testing.expectEqualStrings("t2", m.findProject(.of("PIN")).?.active_tab.?.text);
+
+    const out = try written(&m);
+    defer testing.allocator.free(out);
+    try testing.expectEqual(@as(?u32, model.version), file.peekVersion(testing.allocator, out));
+    try testing.expect(std.mem.indexOf(u8, out, "workspaces") == null);
+    try testing.expect(std.mem.indexOf(u8, out, "\"kind\"") == null);
+    var back = try file.parse(testing.allocator, out, &fault);
+    defer back.deinit();
+    const again = try written(&back);
+    defer testing.allocator.free(again);
+    try testing.expectEqualStrings(out, again);
+}
+
+test "a version 1 file with kind loads, a former group is a project, and a save writes no kind" {
+    // The shape that a build before issue 0480 wrote.
+    const text =
+        \\{"version":1,"projects":[
+        \\ {"id":"g","name":"G","path":"","color":"red","kind":"group"},
+        \\ {"id":"p","name":"P","path":"/p","kind":"project","parent":"g"}],
+        \\ "workspaces":[{"id":"p","kind":"project"}]}
+    ;
+    var fault: model.Fault = .{};
+    var m = try file.parse(testing.allocator, text, &fault);
+    defer m.deinit();
+    try expectValid(&m);
+    const g = m.findProject(.of("g")).?;
+    try testing.expectEqualStrings("G", g.name);
+    try testing.expectEqualStrings("red", g.color.?);
+    try testing.expectEqualStrings("", g.path);
+    try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("p")).?).?.text);
+    // The former group is a project as any other.
+    try m.selectProject(.of("g"));
+    try m.createTab(.of("g"), .of("t1"), null, .{ .pane = mkPane("a") }, null, true);
+
+    const out = try written(&m);
+    defer testing.allocator.free(out);
+    const Written = struct { projects: []const struct { kind: ?[]const u8 = null } };
+    const read = try std.json.parseFromSlice(Written, testing.allocator, out, .{ .ignore_unknown_fields = true });
+    defer read.deinit();
+    try testing.expectEqual(@as(usize, 2), read.value.projects.len);
+    for (read.value.projects) |p| try testing.expectEqual(@as(?[]const u8, null), p.kind);
+    var back = try file.parse(testing.allocator, out, &fault);
+    defer back.deinit();
+    const again = try written(&back);
+    defer testing.allocator.free(again);
+    try testing.expectEqualStrings(out, again);
+}
+
+test "a version 1 workspace with no project, or twice, is a fault, and a key stays strict" {
+    try testing.expectEqualStrings("workspaces[0].id: no project", try faultOf(
+        \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p"}],"workspaces":[{"id":"zz","kind":"project"}]}
+    ));
+    try testing.expectEqualStrings("workspaces[1].id: duplicate", try faultOf(
+        \\{"version":1,"projects":[{"id":"p","name":"P","path":"/p"}],"workspaces":[{"id":"p","kind":"project"},{"id":"p","kind":"project"}]}
+    ));
+    // A project with no workspace has no tabs.
+    var fault: model.Fault = .{};
+    var m = try file.parse(testing.allocator, "{\"version\":1,\"projects\":[{\"id\":\"p\",\"name\":\"P\",\"path\":\"/p\"}]}", &fault);
+    m.deinit();
+    for ([_][]const u8{ "\"kind\":\"folder\"", "\"bogus\":1" }) |extra| {
+        var buf: [64]u8 = undefined;
+        const with = try std.fmt.bufPrint(&buf, "\"path\":\"/p\",{s}", .{extra});
+        const bad = try std.mem.replaceOwned(u8, testing.allocator, base_ok, "\"path\":\"/p\"", with);
+        defer testing.allocator.free(bad);
+        try testing.expectError(error.Syntax, file.parse(testing.allocator, bad, &fault));
+    }
+}
+
+test "an unknown parent, or a loop of parents, reads as the top level" {
+    const text =
+        \\{"version":1,"projects":[
+        \\ {"id":"p","name":"P","path":"/p","parent":"gone"},
+        \\ {"id":"q","name":"Q","path":"/q","parent":"p"},
+        \\ {"id":"g","name":"G","path":"/g","parent":"h"},
+        \\ {"id":"h","name":"H","path":"/h","parent":"g"},
+        \\ {"id":"r","name":"R","path":"/r","parent":"g"}],
+        \\ "workspaces":[{"id":"p","kind":"project"},{"id":"q","kind":"project"},{"id":"g","kind":"project"},
+        \\  {"id":"h","kind":"project"},{"id":"r","kind":"project"}]}
+    ;
+    var fault: model.Fault = .{};
+    var m = try file.parse(testing.allocator, text, &fault);
+    defer m.deinit();
+    for ([_][]const u8{ "p", "g", "h" }) |id| {
         try testing.expectEqual(@as(?model.ProjectId, null), m.parentOf(m.findProject(.of(id)).?));
     }
+    try testing.expectEqualStrings("p", m.parentOf(m.findProject(.of("q")).?).?.text);
     try testing.expectEqualStrings("g", m.parentOf(m.findProject(.of("r")).?).?.text);
     // The file keeps what it said.
     try testing.expectEqualStrings("gone", m.findProject(.of("p")).?.parent.?.text);
     // A new parent never makes a loop through the old one.
-    try m.addProject(.{ .id = .of("k"), .name = "K", .path = "", .kind = .group, .parent = .of("h") });
+    try m.addProject(.{ .id = .of("k"), .name = "K", .path = "/k", .parent = .of("h") });
     try testing.expectError(error.BadRequest, m.setParent(.of("g"), .of("k")));
 }
 
@@ -987,15 +1165,16 @@ test "compact frees the memory of old edits and keeps the model" {
     _ = try m.closePane(.of("a"), false);
     try expectFocus(&m, "t1", "c");
     _ = try m.closeTab(.of("t2"));
-    try testing.expectEqualStrings("t1", m.findWorkspace(.of("p")).?.active_tab.?.text);
+    try testing.expectEqualStrings("t1", m.findProject(.of("p")).?.active_tab.?.text);
 }
 
 /// Adds to project `p` a project and a pane with every field set, tab `t1`
 /// (H(a, V(b, c))) and tab `t2` (pane `x`), and selects `p`.
 fn addFullModel(m: *Model) !void {
-    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .color = "red", .kind = .group });
+    try m.addProject(.{ .id = .of("g"), .name = "G", .path = "", .color = "red" });
+    try addWidget(m, "w");
     try m.addProject(.{ .id = .of("q"), .name = "Q", .path = "me@box:/q", .color = "blue", .sort_order = 3, .created_at = 1700000000000, .parent = .of("g") });
-    try m.addWorkspace(.of("pinned"), .pinned);
+    try addPinned(m, "pinned");
     try threePaneTab(m, "t1", "a", "b", "c", "s1", "s2");
     const x: tree.Pane = .{
         .id = .of("x"),

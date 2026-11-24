@@ -353,7 +353,7 @@ struct AppStateTests {
         state.renameProject(project.id, to: "pinned", store: store)
         #expect(store.projects.first?.name == "alpha")
         let notice = try #require(state.pendingDialog)
-        #expect(notice.kind == .reservedProjectName)
+        #expect(notice.kind == .refusedProjectName)
         #expect(notice.confirmTitle == nil)
         #expect(notice.message == PinnedTabs.reservedNameMessage)
         state.dismissPendingDialog()
@@ -361,6 +361,20 @@ struct AppStateTests {
         state.renameProject(project.id, to: "beta", store: store)
         #expect(store.projects.first?.name == "beta")
         #expect(state.pendingDialog == nil)
+    }
+
+    @Test
+    func sidebar_rename_refuses_a_slash_with_a_notice() throws {
+        let state = makeAppState()
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json"))
+        let project = store.create(name: "alpha", path: "/tmp")
+
+        state.renameProject(project.id, to: "Work/api", store: store)
+        #expect(store.projects.first?.name == "alpha")
+        let notice = try #require(state.pendingDialog)
+        #expect(notice.kind == .refusedProjectName)
+        #expect(notice.message == Project.slashMessage)
     }
 
     @Test
@@ -1009,6 +1023,25 @@ struct AppStateTests {
     }
 
     @Test
+    func requestRemoveGroup_asks_only_when_the_group_has_projects() {
+        let state = makeAppState()
+        let group = Project(name: "g", path: "")
+
+        var ran = false
+        state.requestRemoveGroup(group, projectCount: 0) { ran = true }
+        #expect(ran, "an empty group goes at once")
+        #expect(state.pendingDialog == nil)
+
+        ran = false
+        state.requestRemoveGroup(group, projectCount: 2) { ran = true }
+        #expect(!ran)
+        #expect(state.pendingDialog?.kind == .removeGroup(group.id))
+        #expect(state.pendingDialog?.message.contains("2") == true, "the question says how many")
+        state.confirmPendingDialog()
+        #expect(ran)
+    }
+
+    @Test
     func pendingBulkRemove_confirm_and_cancel() {
         let state = makeAppState()
         // Every pane reads busy, so the selection stages instead of running.
@@ -1097,6 +1130,61 @@ struct AppStateTests {
         state.markActiveTabSeenOnActivation()
 
         #expect(pane.attention == unseenFailure)
+    }
+
+    /// The quick terminal's tab is not in `workspaces`. Its focused pane is
+    /// seen when the flags arrive while the panel is key, and the app need
+    /// not be active (the panel is non-activating).
+    @Test
+    func the_focused_pane_of_a_key_quick_terminal_is_seen_when_its_flags_arrive() throws {
+        let quick = QuickTerminalSplitState()
+        let state = AppState(
+            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+            projectFiles: makeProjectFileStore(),
+            quickTerminal: quick
+        )
+        state.isAppActive = { false }
+        var keyPaneIDs: Set<UUID> = []
+        state.paneIsInKeyWindow = { keyPaneIDs.contains($0.id) }
+        let pane = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+
+        pane.receiveAttention(unseenFailure)
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == unseenFailure)
+
+        keyPaneIDs = [pane.id]
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
+    /// A run end in the focused pane of a key quick terminal ends its `.done`
+    /// state. A split pane that is not focused keeps its state and flags.
+    @Test
+    func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
+        let quick = QuickTerminalSplitState()
+        let state = AppState(
+            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+            projectFiles: makeProjectFileStore(),
+            quickTerminal: quick
+        )
+        state.paneIsInKeyWindow = { _ in true }
+        let focused = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+        quick.split(paneID: focused.id, direction: .horizontal, position: .second)
+        quick.focusPane(focused.id)
+        let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
+
+        for pane in [focused, other] {
+            pane.executionState = .done
+            pane.receiveAttention(unseenFailure)
+            quick.onRunEnded(pane.id)
+        }
+
+        #expect(focused.executionState == .idle)
+        #expect(focused.attention == MactermProtocol.Attention())
+        #expect(other.executionState == .done)
+        #expect(other.attention == unseenFailure)
     }
 
     /// The session keeps the flags across a quit: the saved file has none.
@@ -1233,6 +1321,105 @@ struct AppStateTests {
         state.requestClosePane(target, projectID: p.id)
         #expect(state.pendingDialog == nil)
         #expect(tab.splitRoot.allPanes().count == 1)
+    }
+
+    // MARK: - A plain shell's host decides the close (0494)
+
+    /// A tab with two panes whose surfaces read busy, as libghostty reads a
+    /// plain ssh shell with no OSC 133 marks. The host answers `answer` for
+    /// the pane that runs the plain shell.
+    private func plainShellTab(answer: Bool?) throws -> (state: AppState, project: Project, tab: TerminalTab, target: UUID) {
+        let state = makeAppState()
+        let p = seedProject(state)
+        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
+        let target = try #require(tab.focusedPaneID)
+        state.paneNeedsConfirmClose = { _ in true }
+        state.paneRunsPlainShell = { $0.id == target }
+        state.askPlainShellNeedsConfirmClose = { pane, _ in pane.id == target ? answer : nil }
+        return (state, p, tab, target)
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async {
+        for _ in 0 ..< 200 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @Test
+    func a_plain_shell_that_its_host_calls_idle_closes_with_no_warning() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.tab.splitRoot.allPanes().count == 1 }
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
+        #expect(fx.state.pendingDialog == nil)
+    }
+
+    @Test
+    func a_plain_shell_that_its_host_calls_busy_warns() async throws {
+        let fx = try plainShellTab(answer: true)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+        #expect(fx.tab.splitRoot.allPanes().count == 2)
+    }
+
+    @Test
+    func a_plain_shell_whose_host_does_not_answer_warns() async throws {
+        let fx = try plainShellTab(answer: nil)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_tab_with_an_idle_plain_shell_still_warns_for_its_other_busy_pane() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.requestCloseTab(fx.tab.id, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closeTab(tabID: fx.tab.id, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_host_that_does_not_answer_in_time_gets_a_warning() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.plainShellAnswerTimeout = .milliseconds(50)
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            try? await Task.sleep(for: .seconds(30))
+            return false
+        }
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_pane_that_closed_during_the_wait_gets_no_warning() async throws {
+        let fx = try plainShellTab(answer: true)
+        var asked = false
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            asked = true
+            try? await Task.sleep(for: .milliseconds(100))
+            return true
+        }
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        // A second request for the same pane while the host is asked does nothing.
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { asked }
+        fx.state.closePane(fx.target, projectID: fx.project.id)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(fx.state.pendingDialog == nil)
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
+    }
+
+    @Test
+    func the_hosts_answer_replaces_only_its_own_panes_reading() throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let plain = try #require(panes.first { $0.id == fx.target })
+        #expect(!fx.state.closeNeedsConfirmation([plain], plainAnswers: [plain.id: false]))
+        #expect(fx.state.closeNeedsConfirmation([plain]))
+        #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
     }
 
     // MARK: - applyLayout
@@ -1839,6 +2026,50 @@ struct AppStateTests {
         #expect(files.find(forProjectPath: root)?.url.lastPathComponent == "proj.yaml")
     }
 
+    // MARK: - A project with no folder
+
+    @Test
+    func a_project_with_no_folder_starts_its_shells_in_the_scratch_folder() throws {
+        let state = makeAppState()
+        let p = Project(name: "parent", path: "", sortOrder: 0)
+        state.selectProject(p)
+        let pane = try #require(state.workspaces[p.id]?.activeTab?.focusedPane)
+        #expect(pane.projectPath == ScratchTabs.fallbackRoot)
+    }
+
+    @Test
+    func next_project_skips_a_project_with_no_folder() {
+        let state = makeAppState()
+        let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
+        let group = Project(name: "g", path: "", sortOrder: 1)
+        let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
+        state.selectProject(a)
+        state.selectNextProject(projects: [a, group, b])
+        #expect(state.activeProjectID == b.id)
+        state.selectPreviousProject(projects: [a, group, b])
+        #expect(state.activeProjectID == a.id)
+    }
+
+    @Test
+    func a_project_with_no_folder_has_no_layout_file() {
+        let files = makeProjectFileStore()
+        let state = makeAppState(projectFiles: files)
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-no-folder-\(UUID().uuidString).json"))
+        let p = store.add(Project(name: "parent", path: ""))
+        state.selectProject(p)
+
+        func isNoFolder(_ error: Error?) -> Bool {
+            if case .noFolder? = error as? LayoutFileError { true } else { false }
+        }
+        #expect(isNoFolder(state.saveLayout(project: p)))
+        #expect(isNoFolder(state.applyLayout(project: p)))
+        #expect(files.scan().isEmpty)
+        let ctx = AppCommandContext(appState: state, projectStore: store)
+        #expect(AppCommand.saveLayout.action(in: ctx) == nil)
+        #expect(AppCommand.applyLayout.action(in: ctx) == nil)
+    }
+
     // MARK: - panesToWarm (eager process start for focused project)
 
     @Test
@@ -1874,11 +2105,8 @@ struct AppStateTests {
     // The poll calls `pane.settleTerminalActivityIfQuiet()` directly (no
     // occlusion special-casing): the OUTPUT_ACTIVITY heartbeat that sources
     // activity is occlusion-independent, so a quiet pane settles the same
-    // whether or not it is on screen. These drive the settle in isolation —
-    // deterministic (no live surface, no `Preferences` global) and a truer
-    // unit than the full `refreshAllForegroundProcesses` tick, which re-reads
-    // each pane's real foreground process (nil under test, clearing the run
-    // source).
+    // whether or not it is on screen. These drive the settle in isolation:
+    // deterministic (no live surface, no `Preferences` global).
 
     /// A pane whose activity went quiet long ago (past the 3s settle window).
     private func quietRunningPane() -> Pane {
@@ -1911,8 +2139,7 @@ struct AppStateTests {
 
     /// The poll tracks execution whatever the status indicator setting is:
     /// `pane list` reports the state, and the setting only chooses what the
-    /// tab row draws (#705). A remote pane keeps the tick deterministic: the
-    /// poll reads no local process for it.
+    /// tab row draws (#705).
     @Test
     func poll_settles_a_quiet_run_with_the_status_indicator_off() throws {
         let priorIndicator = Preferences.shared.showTabStatusIndicator
@@ -1926,7 +2153,7 @@ struct AppStateTests {
         pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
         #expect(pane.executionState == .running)
 
-        state.refreshAllForegroundProcesses()
+        state.settleAllPanes()
         #expect(pane.executionState == .done)
     }
 

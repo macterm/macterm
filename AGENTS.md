@@ -15,8 +15,9 @@ This file is the map: the build, the architecture, the folders and the conventio
 | `Macterm/Views/Terminal/` | surface rules, copy mode, Explain Output, read-only panes, animations |
 | `Macterm/Memory/` | Project Insights |
 | `Macterm/Search/` | the one search engine |
-| `Macterm/Server/` | the local server client, local and remote panes as v2 sessions, remote projects, a host's server |
-| `Macterm/System/` | system helpers, one ssh connection for each host |
+| `Macterm/Server/` | the local server client, the session endpoints, local panes as v2 sessions |
+| `Macterm/Remote/` | remote projects, a host's server, the roaming link's app part, one ssh connection for each host |
+| `Macterm/System/` | system helpers |
 | `Macterm/Protocol/` | the v2 protocol and its generated code |
 | `Macterm/Control/` | the control CLI and its socket (`CLI/` links to it) |
 | `Macterm/Intents/` | App Intents, Shortcuts, Spotlight |
@@ -84,7 +85,7 @@ MactermApp (SwiftUI @main)
 
 A `Pane` is the record of one terminal: its identity, its session, and the state that the session's output decides (titles, foreground, run state, bells). It holds no view. A `PaneSurface` is one host's view of it. `SurfaceRegistry.shared` owns every surface, keyed by its host and the pane id (`SurfaceHost`: `.window(id)`, `.incubator`, `.quickTerminal`, `.widget(id)`, design 010 §5), and it makes, finds and destroys the views. The surface owns the `GhosttyTerminalNSView`, its scroll view and the UI state of that view (search, copy mode, read-only, hover link, adaptive background, closing ghost). `TerminalSurface.makeNSView` returns `surface.ensureScrollView()`, a cached instance that lives as long as the surface. `dismantleNSView` does nothing. The view dies only through `PaneSurface.destroy()`, which `SurfaceRegistry.destroySurfaces(of:)` calls for every surface of a pane. A Ghostty surface is welded to its `NSView` and `CAMetalLayer`. If SwiftUI made the view again when the tree changes shape or you switch tabs, the surface would die. `SurfaceIncubator` is a window that is always invisible. It gives a pane that is off screen a window with a size, so that `createSurface()` can succeed early. A body asks `SurfaceRegistry.surface(for: pane, in: host)`; the host is `\.paneHost` (a window, the quick terminal or a widget sets it; the default `.incubator` gets the first surface). The first host takes the incubator's surface. That call makes the model object only: no view and no client exist before `ensureNSView`. Code with no host in hand (the CLI, intents, persistence) asks `SurfaceRegistry.view(of:)` or `preferredSurface(of:)`: the surface in the key window, else one in a visible window, else the first that has a view. `Pane` has no getter that passes through to a surface.
 
-**The pane connects the callbacks of its view when it makes the view** (`Pane.connectViewCallbacks`, from `PaneSurface.ensureNSView`): execution tracking, attention flags, titles, search, notifications and project memory. A pane that no window drew (a `tab new --no-focus` tab, a background tab that a launch warmed) therefore records its submissions and output, and `pane list` follows its runs. `TerminalSurface.configure` sets only the callbacks that need the window that draws the pane: focus, splits, zoom, process exit, tab titles, links, the adaptive background, and `onRunEnded` (it marks a run seen when the user looks at the pane). The poll pauses while the app is inactive and no window is visible (`PollCadence`), so the output heartbeat can be the only signal of a run in such a pane.
+**The pane connects the callbacks of its view when it makes the view** (`Pane.connectViewCallbacks`, from `PaneSurface.ensureNSView`): the session's messages (foreground, title, marks, state, attention), execution tracking, notifications and project memory. A pane that no window drew (a `tab new --no-focus` tab, a background tab that a launch warmed) therefore records its submissions and output, and `pane list` follows its runs. `TerminalSurface.configure` sets only the callbacks that need the window that draws the pane: focus, splits, zoom, process exit, tab titles, links, the adaptive background, and `onRunEnded` (it marks a run seen when the user looks at the pane). The poll pauses while the app is inactive and no window is visible (`PollCadence`), so the output heartbeat can be the only signal of a run in such a pane.
 
 ### State
 
@@ -94,7 +95,7 @@ A `Pane` is the record of one terminal: its identity, its session, and the state
 - **`ProjectStore`** is the project list (`projects.json`). It is saved on its own.
 - **`Workspace`** is the collection of tabs of one workspace, `AppState.workspaces[id]`. Its `kind` is `project`, `pinned` or `scratch` (`WorkspaceKind`; `quick` and `widget` are for the cut-over, when those tabs join `workspaces`). A project's workspace has the project's id; the pinned and scratch tabs are sentinel workspaces with fixed ids (`PinnedTabs.workspaceID`, `ScratchTabs.workspaceID`, see Pinned Tabs).
 - **`TerminalTab`** is a `SplitNode` tree plus the IDs of the focused pane and the zoomed pane. **`SplitNode`** is `.pane(Pane)` or `.split(SplitBranch)`. The tree operations of `SplitNode` are pure: they build new branches and keep each branch's `id`. Only a divider drag changes a branch in place (its ratio).
-- **`WindowState`** (`Macterm/App/WindowState.swift`) exists once for each window. It holds the project that the window shows and its tab for each project (`activeTabIDs`). It also holds the width and visibility of the sidebar, and the flags of the palette and sheets. Macterm saves it as `WindowSnapshot`.
+- **`WindowState`** (`Macterm/App/WindowState.swift`) exists once for each window. It holds the project that the window shows, its tab for each project (`activeTabIDs`), and whether it shows the project screen in place of a tab (`showsProjectScreen`). It also holds the width and visibility of the sidebar, and the flags of the palette and sheets. Macterm saves it as `WindowSnapshot`.
 - **`Preferences`** is an observable wrapper for UserDefaults. Never touch `UserDefaults.standard` in app code. Under tests, `Preferences.defaults` resolves to a side suite that Macterm wipes.
 
 ## Layout
@@ -105,10 +106,11 @@ A `Pane` is the record of one terminal: its identity, its session, and the state
 - `Macterm/Model/`: `ModelState`, `SplitNode`, `Pane`, `Workspace` (with `WorkspaceKind`), `TerminalTab`, `Project`, `ProjectPath`, `PinnedTabs`, `DesktopWidget`, `ForegroundSample`, `TerminalExecutionTracker`, `CopyMode`, `OutputExplanation`, `PasswordPrompt`, `FileLink`, `TextFileEditor`.
 - `Macterm/Memory/`: Project Insights.
 - `Macterm/Persistence/`: `WorkspacePersistence`, `ProjectStore`, `LayoutFileService`, `ProjectFileStore`, the layout files, `PinnedLayoutStore`, `WidgetLayoutStore`, `PasswordStore`.
-- `Macterm/System/`: `ProcessInspector`, `SSHConnections`, `SSHWrapper`, `OnDeviceModel`, `ProcessRunner` and other wrappers of system services.
+- `Macterm/System/`: `ProcessInspector`, `SSHWrapper`, `OnDeviceModel`, `ProcessRunner` and other wrappers of system services.
 - `Macterm/Config/`: `MactermConfig`, `MactermConfigFile`, `GhosttyConfigSource` and the readers of single ghostty keys.
 - `Macterm/Settings/`: the Settings panes.
-- `Macterm/Server/`: the client of the local server and of a host's server.
+- `Macterm/Server/`: the client of a server (`ServerEndpoint`, `PaneSession`), and the local server.
+- `Macterm/Remote/`: remote projects: `RemoteHosts`, `RemoteHost`, `RemoteServers`, `SSHConnections`, `SSHPrompt`, `LoginUI`, `HostCommands`.
 - `Macterm/Protocol/`: the v2 protocol (`MessagePack`, `ProtocolFrame`, the generated `MactermProtocol`).
 - `Macterm/Link/`: the packet layer of the roaming link.
 - `Macterm/Control/`: the control socket, its handler and the agent skills.

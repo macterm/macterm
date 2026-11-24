@@ -1,14 +1,14 @@
-//! The model on the Mac server (design/010 §1): projects, workspaces, tabs
-//! and their split trees, and the operations that change them.
+//! The model on the Mac server (design/010 §1, §11): projects, their tabs
+//! and the split trees of the tabs, and the operations that change them.
 //!
-//! `Data` is what goes to disk (`file.zig`). `Model` is `Data` plus the
-//! state that stays in memory: the zoomed pane of each tab, the focus
-//! history of each tab, and the tab history of each workspace.
+//! `ModelData` is what goes to disk (`file.zig`). `Model` is `ModelData` plus
+//! the state that stays in memory: the zoomed pane of each tab, the focus
+//! history of each tab, and the tab history of each project.
 //!
 //! **Every operation checks first and changes after.** An operation that
 //! returns an error leaves the model as it was (design/010 §7), so a caller
-//! never sees half of a change (out of memory is the one exception). Inputs are copied into the
-//! model's arena, so a caller keeps its own memory.
+//! never sees half of a change (out of memory is the one exception). Inputs
+//! are copied into the model's arena, so a caller keeps its own memory.
 //!
 //! A changed list or a removed tab leaves its old memory in the arena, so
 //! each edit costs some bytes. `compact` copies the model into a new arena
@@ -20,56 +20,120 @@ const Allocator = std.mem.Allocator;
 pub const tree = @import("tree.zig");
 const ids = @import("ids.zig");
 
-pub const Node = tree.Node;
+pub const SplitNode = tree.SplitNode;
 pub const Pane = tree.Pane;
 pub const ProjectId = ids.ProjectId;
-pub const WorkspaceId = ids.WorkspaceId;
 pub const TabId = ids.TabId;
 pub const PaneId = ids.PaneId;
 pub const SplitId = ids.SplitId;
 
-/// The version of the file that this build writes (design/010 §2).
-pub const version: u32 = 1;
+/// The version of the file that this build writes (design/010 §2). Version
+/// 1 had a list of workspaces apart from the projects; `file.zig` still
+/// reads it (design/010 §11).
+pub const version: u32 = 2;
 
-pub const Kind = enum { project, pinned, scratch, quick, widget };
+/// Where the sidebar draws a project (design/010 §11, §2).
+pub const ProjectSidebar = enum {
+    /// A row of the project tree.
+    tree,
+    /// Its tabs are rows above the tree, with no project row (Pinned).
+    top,
+    /// Its tabs are rows below the tree, with no project row (Scratch Tabs).
+    bottom,
+    /// No window draws it (the quick terminal, a widget).
+    none,
+};
 
-/// A `group` is a folder row of the sidebar (design/013): it holds
-/// projects and groups, and has no path, no workspace and no tabs. Only a
-/// `project` is a leaf.
-pub const ProjectKind = enum { project, group };
+pub const Tab = struct {
+    id: TabId,
+    custom_title: ?[]const u8 = null,
+    root: SplitNode,
+    focused: ?PaneId = null,
+};
 
+/// One project: a row of the tree, or a hidden project (Pinned, Scratch
+/// Tabs, the quick terminal, a widget). The capability fields (`sidebar`,
+/// `single_tab`, `removable`, `alias`) are set by `project.create` and never
+/// change. The rules that hold between projects are in `validate`.
 pub const Project = struct {
     id: ProjectId,
     name: []const u8,
-    /// A local path, or `user@host:dir`. Empty for a group.
+    /// A local path, or `user@host:dir`. Can be empty (design/013, "Ethan
+    /// chose B" §1).
     path: []const u8,
     color: ?[]const u8 = null,
     /// Orders the children of one parent.
     sort_order: i64 = 0,
     /// Unix time in milliseconds.
     created_at: i64 = 0,
-    /// The group that holds this row. Null or empty is the top level.
-    /// `Model.parentOf` reads a parent that is not a group as the top
-    /// level. The file stays valid (design/013 §2).
+    /// The project that holds this one. Null or empty is the top level.
+    /// A project can hold tabs and projects at the same time. `Model.parentOf`
+    /// reads an unknown parent as the top level. The file stays valid
+    /// (design/013, "Ethan chose B" §1).
     parent: ?ProjectId = null,
-    kind: ProjectKind = .project,
-};
-
-pub const Tab = struct {
-    id: TabId,
-    custom_title: ?[]const u8 = null,
-    root: Node,
-    focused: ?PaneId = null,
-};
-
-pub const Workspace = struct {
-    /// For a `project` workspace, the project's id. Any other kind has an
-    /// id of its own (the fixed ids of the pinned and the scratch workspace,
-    /// a widget's id).
-    id: WorkspaceId,
-    kind: Kind,
+    sidebar: ProjectSidebar = .tree,
+    /// The project holds at most one tab.
+    single_tab: bool = false,
+    /// `project.remove` may remove it.
+    removable: bool = true,
+    /// The one short word that finds this project (`pinned`, `scratch`,
+    /// `quick`). Unique in the model.
+    alias: ?[]const u8 = null,
     tabs: []Tab = &.{},
     active_tab: ?TabId = null,
+
+    /// Reads a project of `model.json`, and drops the `kind` that an older
+    /// build wrote: the parser refuses an unknown key. Only the token
+    /// parsers call it (`parseFromSlice`), not `parseFromValue`.
+    pub fn jsonParse(a: Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!Project {
+        const InFile = struct {
+            id: ProjectId,
+            name: []const u8,
+            path: []const u8,
+            color: ?[]const u8 = null,
+            sort_order: i64 = 0,
+            created_at: i64 = 0,
+            parent: ?ProjectId = null,
+            sidebar: ProjectSidebar = .tree,
+            single_tab: bool = false,
+            removable: bool = true,
+            alias: ?[]const u8 = null,
+            tabs: []Tab = &.{},
+            active_tab: ?TabId = null,
+            kind: ?enum { project, group } = null,
+        };
+        const f = try std.json.innerParse(InFile, a, source, options);
+        return .{
+            .id = f.id,
+            .name = f.name,
+            .path = f.path,
+            .color = f.color,
+            .sort_order = f.sort_order,
+            .created_at = f.created_at,
+            .parent = f.parent,
+            .sidebar = f.sidebar,
+            .single_tab = f.single_tab,
+            .removable = f.removable,
+            .alias = f.alias,
+            .tabs = f.tabs,
+            .active_tab = f.active_tab,
+        };
+    }
+
+    fn hasTab(p: *const Project, id: TabId) bool {
+        for (p.tabs) |t| if (t.id.eql(id)) return true;
+        return false;
+    }
+
+    fn tabIndex(p: *const Project, id: TabId) usize {
+        for (p.tabs, 0..) |t, i| if (t.id.eql(id)) return i;
+        unreachable;
+    }
+
+    /// A `single_tab` project with its one tab.
+    fn isFull(p: *const Project) bool {
+        return p.single_tab and p.tabs.len > 0;
+    }
 };
 
 pub const Selection = struct {
@@ -84,7 +148,6 @@ pub const ModelData = struct {
     epoch_hint: u64 = 0,
     imported_v1: bool = false,
     projects: []Project = &.{},
-    workspaces: []Workspace = &.{},
     selection: Selection = .{},
 };
 
@@ -97,6 +160,10 @@ pub const Error = error{
     /// The request cannot be done to this model (the same pane as source and
     /// target, a pane that is not in the tab, ...).
     BadRequest,
+    /// A capability field of the project refuses the change: a second tab
+    /// in a `single_tab` project, the removal of a project that is not
+    /// `removable`, the selection of a project that no window draws.
+    Refused,
 };
 
 /// The most recent ids first, with no duplicates.
@@ -152,8 +219,8 @@ pub const Model = struct {
     zoomed: ids.Map(TabId, PaneId) = .empty,
     /// Tab id to its earlier focus, newest first (design/010 §1).
     pane_history: ids.Map(TabId, Recency(PaneId)) = .empty,
-    /// Workspace id to its earlier active tabs, newest first.
-    tab_history: ids.Map(WorkspaceId, Recency(TabId)) = .empty,
+    /// Project id to its earlier active tabs, newest first.
+    tab_history: ids.Map(ProjectId, Recency(TabId)) = .empty,
 
     pub fn init(gpa: Allocator) Model {
         return .{ .arena = .init(gpa) };
@@ -181,7 +248,7 @@ pub const Model = struct {
         var it = m.zoomed.iterator();
         while (it.next()) |e| try zoomed.put(a, try e.key_ptr.dupe(a), try e.value_ptr.dupe(a));
         const pane_history = try cloneHistory(TabId, PaneId, a, m.pane_history);
-        const tab_history = try cloneHistory(WorkspaceId, TabId, a, m.tab_history);
+        const tab_history = try cloneHistory(ProjectId, TabId, a, m.tab_history);
         m.arena.deinit();
         m.* = .{
             .arena = fresh,
@@ -194,34 +261,34 @@ pub const Model = struct {
 
     // ── Lookup ──────────────────────────────────────────────────────────────
 
-    const TabLoc = struct { ws: *Workspace, index: usize };
+    const TabLoc = struct { project: *Project, index: usize };
 
     pub fn findProject(m: *const Model, id: ProjectId) ?*Project {
         for (m.data.projects) |*p| if (p.id.eql(id)) return p;
         return null;
     }
 
-    pub fn findWorkspace(m: *const Model, id: WorkspaceId) ?*Workspace {
-        for (m.data.workspaces) |*w| if (w.id.eql(id)) return w;
+    pub fn findAlias(m: *const Model, alias: []const u8) ?*Project {
+        for (m.data.projects) |*p| if (p.alias) |x| if (std.mem.eql(u8, x, alias)) return p;
         return null;
     }
 
     fn locateTab(m: *const Model, tab_id: TabId) ?TabLoc {
-        for (m.data.workspaces) |*w| {
-            for (w.tabs, 0..) |t, i| if (t.id.eql(tab_id)) return .{ .ws = w, .index = i };
+        for (m.data.projects) |*p| {
+            for (p.tabs, 0..) |t, i| if (t.id.eql(tab_id)) return .{ .project = p, .index = i };
         }
         return null;
     }
 
     pub fn findTab(m: *const Model, tab_id: TabId) ?*Tab {
         const loc = m.locateTab(tab_id) orelse return null;
-        return &loc.ws.tabs[loc.index];
+        return &loc.project.tabs[loc.index];
     }
 
     /// The tab that holds pane `pane_id`.
     pub fn findPaneTab(m: *const Model, pane_id: PaneId) ?*Tab {
-        for (m.data.workspaces) |*w| {
-            for (w.tabs) |*t| if (tree.contains(&t.root, pane_id)) return t;
+        for (m.data.projects) |*p| {
+            for (p.tabs) |*t| if (tree.contains(&t.root, pane_id)) return t;
         }
         return null;
     }
@@ -231,9 +298,9 @@ pub const Model = struct {
         return tree.findPane(&t.root, pane_id);
     }
 
-    /// The workspace that holds tab `tab_id`.
-    pub fn workspaceOfTab(m: *const Model, tab_id: TabId) ?*Workspace {
-        return (m.locateTab(tab_id) orelse return null).ws;
+    /// The project that holds tab `tab_id`.
+    pub fn projectOfTab(m: *const Model, tab_id: TabId) ?*Project {
+        return (m.locateTab(tab_id) orelse return null).project;
     }
 
     pub fn zoomedPane(m: *const Model, tab_id: TabId) ?PaneId {
@@ -243,15 +310,15 @@ pub const Model = struct {
     /// True when a pane or a split has this id. Panes and splits share one
     /// namespace, as `validate` checks it.
     fn nodeIdInUse(m: *const Model, text: []const u8) bool {
-        for (m.data.workspaces) |*w| {
-            for (w.tabs) |*t| if (tree.hasNodeId(&t.root, text)) return true;
+        for (m.data.projects) |*p| {
+            for (p.tabs) |*t| if (tree.hasNodeId(&t.root, text)) return true;
         }
         return false;
     }
 
     /// Fails with `DuplicateId` when a pane or a split of `node` has an id
     /// that the model has, or that the node has twice.
-    fn checkFreshIds(m: *Model, node: *const Node, other: ?*const Node) Error!void {
+    fn checkFreshIds(m: *Model, node: *const SplitNode, other: ?*const SplitNode) Error!void {
         // Scratch memory: a check leaves nothing in the model's arena.
         var scratch: std.heap.ArenaAllocator = .init(m.arena.child_allocator);
         defer scratch.deinit();
@@ -262,9 +329,9 @@ pub const Model = struct {
     fn checkFreshIn(
         m: *Model,
         a: Allocator,
-        node: *const Node,
+        node: *const SplitNode,
         seen: *std.StringHashMapUnmanaged(void),
-        ignoring: ?*const Node,
+        ignoring: ?*const SplitNode,
     ) Error!void {
         const id = switch (node.*) {
             .pane => |p| p.id.text,
@@ -288,65 +355,60 @@ pub const Model = struct {
         }
     }
 
-    // ── Projects and workspaces ─────────────────────────────────────────────
+    // ── Projects ────────────────────────────────────────────────────────────
 
-    /// Adds a project and its workspace (kind `project`, the same id).
+    /// Adds a project with no tabs (`p.tabs` and `p.active_tab` are not
+    /// read). Its capability fields must keep the rules of `validate`: a
+    /// unique `alias`, and a parent only for a `tree` project, in a `tree`
+    /// project.
     pub fn addProject(m: *Model, p: Project) Error!void {
         const a = m.alloc();
         if (p.id.isEmpty()) return error.BadRequest;
-        if (p.kind == .group and p.path.len != 0) return error.BadRequest;
-        if (m.findProject(p.id) != null or m.findWorkspace(.ofProject(p.id)) != null) return error.DuplicateId;
+        if (m.findProject(p.id) != null) return error.DuplicateId;
+        if (p.alias) |x| {
+            if (x.len == 0) return error.BadRequest;
+            if (m.findAlias(x) != null) return error.DuplicateId;
+        }
         const parent = topLevelIfEmpty(p.parent);
-        if (parent) |g| if (!m.isGroup(g)) return error.BadRequest;
+        if (parent) |g| {
+            if (p.sidebar != .tree) return error.BadRequest;
+            const holder = m.findProject(g) orelse return error.BadRequest;
+            if (holder.sidebar != .tree) return error.BadRequest;
+        }
         const copy: Project = .{
             .id = try p.id.dupe(a),
             .name = try a.dupe(u8, p.name),
             .path = try a.dupe(u8, p.path),
-            .color = if (p.color) |c| try a.dupe(u8, c) else null,
+            .color = try dupeText(a, p.color),
             .sort_order = p.sort_order,
             .created_at = p.created_at,
             .parent = try dupeId(a, parent),
-            .kind = p.kind,
+            .sidebar = p.sidebar,
+            .single_tab = p.single_tab,
+            .removable = p.removable,
+            .alias = try dupeText(a, p.alias),
         };
-        const projects = try appendOne(Project, a, m.data.projects, copy);
-        if (copy.kind == .project) {
-            m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = .ofProject(copy.id), .kind = .project });
-        }
-        m.data.projects = projects;
+        m.data.projects = try appendOne(Project, a, m.data.projects, copy);
     }
 
-    fn isGroup(m: *const Model, id: ProjectId) bool {
-        const g = m.findProject(id) orelse return false;
-        return g.kind == .group;
-    }
-
-    /// The group that holds `p`, or null for the top level. A parent that is
-    /// not a group reads as the top level. When `p` is on a loop of parents,
-    /// `p` reads as the top level.
+    /// The project that holds `p`, or null for the top level. An unknown
+    /// parent reads as the top level. When `p` is on a loop of parents, `p`
+    /// reads as the top level.
     pub fn parentOf(m: *const Model, p: *const Project) ?ProjectId {
-        const first = topLevelIfEmpty(p.parent) orelse return null;
-        if (!m.isGroup(first)) return null;
-        var at = first;
-        var steps: usize = 0;
-        while (steps <= m.data.projects.len) : (steps += 1) {
-            if (at.eql(p.id)) return null;
-            const up = m.findProject(at).?;
-            at = topLevelIfEmpty(up.parent) orelse return first;
-            if (!m.isGroup(at)) return first;
-        }
-        // A loop above the parent that does not hold `p`.
-        return first;
+        return parentIn(m.data.projects, p);
     }
 
-    /// Moves a project or a group into the group `parent`, or to the top
-    /// level when null. A group cannot go into itself or into a group that
-    /// it holds.
+    /// Moves a `tree` project into the `tree` project `parent`, or to the
+    /// top level when null. A project cannot go into itself or into a
+    /// project that it holds.
     pub fn setParent(m: *Model, id: ProjectId, parent: ?ProjectId) Error!void {
         const a = m.alloc();
         const p = m.findProject(id) orelse return error.NotFound;
         const wanted = topLevelIfEmpty(parent);
         if (wanted) |g| {
-            if (!m.isGroup(g)) return error.BadRequest;
+            if (p.sidebar != .tree) return error.BadRequest;
+            const holder = m.findProject(g) orelse return error.BadRequest;
+            if (holder.sidebar != .tree) return error.BadRequest;
             // The parents as the file has them, so that a loop is seen too.
             var at: ?ProjectId = g;
             var steps: usize = 0;
@@ -360,22 +422,22 @@ pub const Model = struct {
         p.parent = try dupeId(a, wanted);
     }
 
-    /// Sets the order of the children of `parent` (the top level when null).
-    /// `order` must hold each child once, and nothing else.
+    /// Sets the order of the `tree` children of `parent` (the top level
+    /// when null). `order` must hold each child once, and nothing else. A
+    /// hidden project has no place in an order.
     pub fn reorderProjects(m: *Model, parent: ?ProjectId, order: []const ProjectId) Error!void {
         const wanted = topLevelIfEmpty(parent);
         if (wanted) |g| {
             if (m.findProject(g) == null) return error.NotFound;
-            if (!m.isGroup(g)) return error.BadRequest;
         }
         var children: usize = 0;
         for (m.data.projects) |*p| {
-            if (sameParent(m.parentOf(p), wanted)) children += 1;
+            if (p.sidebar == .tree and sameParent(m.parentOf(p), wanted)) children += 1;
         }
         if (order.len != children) return error.BadRequest;
         for (order, 0..) |id, i| {
             const p = m.findProject(id) orelse return error.NotFound;
-            if (!sameParent(m.parentOf(p), wanted)) return error.BadRequest;
+            if (p.sidebar != .tree or !sameParent(m.parentOf(p), wanted)) return error.BadRequest;
             for (order[0..i]) |earlier| if (earlier.eql(id)) return error.BadRequest;
         }
         for (order, 0..) |id, i| m.findProject(id).?.sort_order = @intCast(i);
@@ -386,66 +448,36 @@ pub const Model = struct {
         return x.?.eql(y.?);
     }
 
-    fn topLevelIfEmpty(id: ?ProjectId) ?ProjectId {
-        const x = id orelse return null;
-        return if (x.isEmpty()) null else x;
-    }
-
-    /// Adds a workspace that is not a project's: pinned, scratch, quick or
-    /// widget.
-    pub fn addWorkspace(m: *Model, id: WorkspaceId, kind: Kind) Error!void {
-        const a = m.alloc();
-        if (kind == .project or id.isEmpty()) return error.BadRequest;
-        if (m.findWorkspace(id) != null or m.findProject(.of(id.text)) != null) return error.DuplicateId;
-        m.data.workspaces = try appendOne(Workspace, a, m.data.workspaces, .{ .id = try id.dupe(a), .kind = kind });
-    }
-
-    /// Removes a workspace that is not a project's, with its tabs. Returns
-    /// the panes that left the model.
-    pub fn removeWorkspace(m: *Model, id: WorkspaceId) Error![]const Pane {
-        const a = m.alloc();
-        const wi = indexOf(Workspace, m.data.workspaces, id) orelse return error.NotFound;
-        if (m.data.workspaces[wi].kind == .project) return error.BadRequest;
-        var gone: std.ArrayList(Pane) = .empty;
-        for (m.data.workspaces[wi].tabs) |*t| try appendPanes(a, &t.root, &gone);
-        const workspaces = try removeAt(Workspace, a, m.data.workspaces, wi);
-        for (m.data.workspaces[wi].tabs) |t| m.forgetTab(t.id);
-        _ = m.tab_history.remove(id);
-        m.data.workspaces = workspaces;
-        return gone.items;
-    }
-
-    /// Removes a project and its workspace. Returns the panes that left the
-    /// model (the caller ends their sessions).
+    /// Removes a project with its tabs. A project that holds projects is
+    /// refused (`BadRequest`): the caller moves or removes them first. A
+    /// project that is not `removable` is `Refused`. Returns the panes that
+    /// left the model (the caller ends their sessions).
     pub fn removeProject(m: *Model, id: ProjectId) Error![]const Pane {
         const a = m.alloc();
-        const ws_id: WorkspaceId = .ofProject(id);
         const pi = indexOf(Project, m.data.projects, id) orelse return error.NotFound;
-        if (m.data.projects[pi].kind == .group) {
-            for (m.data.projects) |*p| {
-                if (m.parentOf(p)) |g| if (g.eql(id)) return error.BadRequest;
-            }
-            m.data.projects = try removeAt(Project, a, m.data.projects, pi);
-            return &.{};
+        if (!m.data.projects[pi].removable) return error.Refused;
+        for (m.data.projects) |*p| {
+            if (m.parentOf(p)) |g| if (g.eql(id)) return error.BadRequest;
         }
-        const wi = indexOf(Workspace, m.data.workspaces, ws_id) orelse return error.NotFound;
         var gone: std.ArrayList(Pane) = .empty;
-        for (m.data.workspaces[wi].tabs) |*t| try appendPanes(a, &t.root, &gone);
-        for (m.data.workspaces[wi].tabs) |t| m.forgetTab(t.id);
-        _ = m.tab_history.remove(ws_id);
-        m.data.projects = try removeAt(Project, a, m.data.projects, pi);
-        m.data.workspaces = try removeAt(Workspace, a, m.data.workspaces, wi);
+        for (m.data.projects[pi].tabs) |*t| try appendPanes(a, &t.root, &gone);
+        const projects = try removeAt(Project, a, m.data.projects, pi);
+        for (m.data.projects[pi].tabs) |t| m.forgetTab(t.id);
+        _ = m.tab_history.remove(id);
+        m.data.projects = projects;
         if (m.data.selection.active_project) |sel| {
             if (sel.eql(id)) m.data.selection.active_project = null;
         }
         return gone.items;
     }
 
+    /// A project with `sidebar: none` cannot be selected (`Refused`): no
+    /// window draws it.
     pub fn selectProject(m: *Model, id: ?ProjectId) Error!void {
         const a = m.alloc();
         if (id) |wanted| {
             const p = m.findProject(wanted) orelse return error.NotFound;
-            if (p.kind == .group) return error.BadRequest;
+            if (p.sidebar == .none) return error.Refused;
             m.data.selection.active_project = try wanted.dupe(a);
         } else {
             m.data.selection.active_project = null;
@@ -454,23 +486,24 @@ pub const Model = struct {
 
     // ── Tabs ────────────────────────────────────────────────────────────────
 
-    /// Makes a tab in workspace `ws_id` at `index` (at the end when null or
-    /// too big). `root` is copied. The tab's focus is the first pane. With
-    /// `focus`, or when the workspace has no active tab, it becomes the
-    /// active tab.
+    /// Makes a tab in project `project_id` at `index` (at the end when null
+    /// or too big). `root` is copied. The tab's focus is the first pane.
+    /// With `focus`, or when the project has no active tab, it becomes the
+    /// active tab. A full `single_tab` project is `Refused`.
     pub fn createTab(
         m: *Model,
-        ws_id: WorkspaceId,
+        project_id: ProjectId,
         tab_id: TabId,
         index: ?usize,
-        root: Node,
+        root: SplitNode,
         title: ?[]const u8,
         focus: bool,
     ) Error!void {
         const a = m.alloc();
-        const ws = m.findWorkspace(ws_id) orelse return error.NotFound;
+        const p = m.findProject(project_id) orelse return error.NotFound;
         if (tab_id.isEmpty()) return error.BadRequest;
-        if (m.locateTab(tab_id) != null or m.findWorkspace(.of(tab_id.text)) != null) return error.DuplicateId;
+        if (m.locateTab(tab_id) != null) return error.DuplicateId;
+        if (p.isFull()) return error.Refused;
         try m.checkFreshIds(&root, null);
         var copy = try tree.clone(a, root);
         const tab: Tab = .{
@@ -479,9 +512,9 @@ pub const Model = struct {
             .root = copy,
             .focused = tree.firstPane(&copy).id,
         };
-        const at = @min(index orelse ws.tabs.len, ws.tabs.len);
-        ws.tabs = try insertAt(Tab, a, ws.tabs, at, tab);
-        if (focus or ws.active_tab == null) try m.activate(ws, tab.id);
+        const at = @min(index orelse p.tabs.len, p.tabs.len);
+        p.tabs = try insertAt(Tab, a, p.tabs, at, tab);
+        if (focus or p.active_tab == null) try m.activate(p, tab.id);
     }
 
     /// Closes a tab. Returns its panes: they left the model.
@@ -489,34 +522,33 @@ pub const Model = struct {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
         var gone: std.ArrayList(Pane) = .empty;
-        try appendPanes(a, &loc.ws.tabs[loc.index].root, &gone);
+        try appendPanes(a, &loc.project.tabs[loc.index].root, &gone);
         try m.detachTab(loc);
         return gone.items;
     }
 
-    /// Takes the tab out of its workspace and picks the next active tab
-    /// (the newest of the history that is still there, else the last tab).
+    /// Takes the tab out of its project and picks the next active tab (the
+    /// newest of the history that is still there, else the last tab).
     fn detachTab(m: *Model, loc: TabLoc) Error!void {
         const a = m.alloc();
-        const ws = loc.ws;
-        const id = ws.tabs[loc.index].id;
-        ws.tabs = try removeAt(Tab, a, ws.tabs, loc.index);
+        const p = loc.project;
+        const id = p.tabs[loc.index].id;
+        p.tabs = try removeAt(Tab, a, p.tabs, loc.index);
         m.forgetTab(id);
-        if (m.tab_history.getPtr(ws.id)) |h| h.remove(id);
-        const was_active = ws.active_tab != null and ws.active_tab.?.eql(id);
+        if (m.tab_history.getPtr(p.id)) |h| h.remove(id);
+        const was_active = p.active_tab != null and p.active_tab.?.eql(id);
         if (!was_active) return;
-        if (m.tab_history.getPtr(ws.id)) |h| {
-            if (h.popValid(ws, wsHasTab)) |prev| {
-                ws.active_tab = prev;
+        if (m.tab_history.getPtr(p.id)) |h| {
+            if (h.popValid(p, projectHasTab)) |prev| {
+                p.active_tab = prev;
                 return;
             }
         }
-        ws.active_tab = if (ws.tabs.len > 0) ws.tabs[ws.tabs.len - 1].id else null;
+        p.active_tab = if (p.tabs.len > 0) p.tabs[p.tabs.len - 1].id else null;
     }
 
-    fn wsHasTab(ws: *const Workspace, id: TabId) bool {
-        for (ws.tabs) |t| if (t.id.eql(id)) return true;
-        return false;
+    fn projectHasTab(p: *const Project, id: TabId) bool {
+        return p.hasTab(id);
     }
 
     fn forgetTab(m: *Model, id: TabId) void {
@@ -524,27 +556,22 @@ pub const Model = struct {
         _ = m.pane_history.remove(id);
     }
 
-    fn activate(m: *Model, ws: *Workspace, tab_id: TabId) Error!void {
+    fn activate(m: *Model, p: *Project, tab_id: TabId) Error!void {
         const a = m.alloc();
-        if (ws.active_tab) |cur| {
+        if (p.active_tab) |cur| {
             if (!cur.eql(tab_id)) {
-                const gop = try m.tab_history.getOrPut(a, ws.id);
+                const gop = try m.tab_history.getOrPut(a, p.id);
                 if (!gop.found_existing) gop.value_ptr.* = .{ .limit = tab_history_limit };
                 try gop.value_ptr.push(a, cur);
             }
         }
-        ws.active_tab = tab_id;
+        p.active_tab = tab_id;
     }
 
-    pub fn selectTab(m: *Model, ws_id: WorkspaceId, tab_id: TabId) Error!void {
-        const ws = m.findWorkspace(ws_id) orelse return error.NotFound;
-        if (!wsHasTab(ws, tab_id)) return error.NotFound;
-        try m.activate(ws, ws.tabs[tabIndex(ws, tab_id)].id);
-    }
-
-    fn tabIndex(ws: *const Workspace, id: TabId) usize {
-        for (ws.tabs, 0..) |t, i| if (t.id.eql(id)) return i;
-        unreachable;
+    pub fn selectTab(m: *Model, project_id: ProjectId, tab_id: TabId) Error!void {
+        const p = m.findProject(project_id) orelse return error.NotFound;
+        if (!p.hasTab(tab_id)) return error.NotFound;
+        try m.activate(p, p.tabs[p.tabIndex(tab_id)].id);
     }
 
     pub fn renameTab(m: *Model, tab_id: TabId, title: ?[]const u8) Error!void {
@@ -553,23 +580,25 @@ pub const Model = struct {
         tab.custom_title = if (title) |t| try a.dupe(u8, t) else null;
     }
 
-    /// Moves a tab inside its workspace to `index` (clamped).
+    /// Moves a tab inside its project to `index` (clamped).
     pub fn reorderTab(m: *Model, tab_id: TabId, index: usize) Error!void {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
-        const tab = loc.ws.tabs[loc.index];
-        const without = try removeAt(Tab, a, loc.ws.tabs, loc.index);
-        loc.ws.tabs = try insertAt(Tab, a, without, @min(index, without.len), tab);
+        const tab = loc.project.tabs[loc.index];
+        const without = try removeAt(Tab, a, loc.project.tabs, loc.index);
+        loc.project.tabs = try insertAt(Tab, a, without, @min(index, without.len), tab);
     }
 
-    /// Moves a tab to another workspace (pinned and scratch included) and
-    /// selects it there. Its panes keep their sessions.
-    pub fn moveTab(m: *Model, tab_id: TabId, to_ws: WorkspaceId, index: ?usize) Error!void {
+    /// Moves a tab to another project (Pinned and Scratch Tabs included)
+    /// and selects it there. Its panes keep their sessions. A full
+    /// `single_tab` project is `Refused`.
+    pub fn moveTab(m: *Model, tab_id: TabId, to_project: ProjectId, index: ?usize) Error!void {
         const a = m.alloc();
         const loc = m.locateTab(tab_id) orelse return error.NotFound;
-        const dst = m.findWorkspace(to_ws) orelse return error.NotFound;
-        if (dst == loc.ws) return error.BadRequest;
-        const tab = loc.ws.tabs[loc.index];
+        const dst = m.findProject(to_project) orelse return error.NotFound;
+        if (dst == loc.project) return error.BadRequest;
+        if (dst.isFull()) return error.Refused;
+        const tab = loc.project.tabs[loc.index];
         // Grow the destination first: the only step that can fail after the
         // checks. Nothing has changed if it does.
         const at = @min(index orelse dst.tabs.len, dst.tabs.len);
@@ -652,7 +681,7 @@ pub const Model = struct {
         }
     }
 
-    fn treeHas(root: *const Node, id: PaneId) bool {
+    fn treeHas(root: *const SplitNode, id: PaneId) bool {
         return tree.contains(root, id);
     }
 
@@ -703,8 +732,8 @@ pub const Model = struct {
     }
 
     pub fn setRatio(m: *Model, split_id: SplitId, ratio: f64) Error!void {
-        for (m.data.workspaces) |*w| {
-            for (w.tabs) |*t| if (tree.setRatio(&t.root, split_id, ratio)) return;
+        for (m.data.projects) |*p| {
+            for (p.tabs) |*t| if (tree.setRatio(&t.root, split_id, ratio)) return;
         }
         return error.NotFound;
     }
@@ -764,25 +793,26 @@ pub const Model = struct {
     }
 
     /// Moves pane `pane_id` out of its tab into a new tab `tab_id`, in
-    /// workspace `ws_id` (the pane's own when null), after the source tab
-    /// when it is in the same workspace. The tab of one pane cannot be
-    /// separated.
-    pub fn separatePane(m: *Model, pane_id: PaneId, tab_id: TabId, ws_id: ?WorkspaceId) Error!void {
+    /// project `project_id` (the pane's own when null), after the source tab
+    /// when it is in the same project. The tab of one pane cannot be
+    /// separated. A full `single_tab` project is `Refused`.
+    pub fn separatePane(m: *Model, pane_id: PaneId, tab_id: TabId, project_id: ?ProjectId) Error!void {
         const a = m.alloc();
         const src = m.findPaneTab(pane_id) orelse return error.NotFound;
         if (tree.paneCount(&src.root) <= 1) return error.BadRequest;
         if (tab_id.isEmpty()) return error.BadRequest;
-        if (m.locateTab(tab_id) != null or m.findWorkspace(.of(tab_id.text)) != null) return error.DuplicateId;
+        if (m.locateTab(tab_id) != null) return error.DuplicateId;
         const src_loc = m.locateTab(src.id).?;
-        const ws = if (ws_id) |id| (m.findWorkspace(id) orelse return error.NotFound) else src_loc.ws;
+        const p = if (project_id) |id| (m.findProject(id) orelse return error.NotFound) else src_loc.project;
+        if (p.isFull()) return error.Refused;
         const pane = tree.findPane(&src.root, pane_id).?.*;
-        const at = if (ws == src_loc.ws) src_loc.index + 1 else ws.tabs.len;
+        const at = if (p == src_loc.project) src_loc.index + 1 else p.tabs.len;
         const new_tab: Tab = .{ .id = try tab_id.dupe(a), .root = .{ .pane = pane }, .focused = pane.id };
-        // Take the pane out first: `src` points into `ws.tabs`, and a copy of
+        // Take the pane out first: `src` points into `p.tabs`, and a copy of
         // that slice made before the change would hold the old tab.
         try m.takeOut(src, pane_id);
-        ws.tabs = try insertAt(Tab, a, ws.tabs, at, new_tab);
-        try m.activate(ws, new_tab.id);
+        p.tabs = try insertAt(Tab, a, p.tabs, at, new_tab);
+        try m.activate(p, new_tab.id);
     }
 
     /// Puts the whole tree of tab `src_id` into tab `dst_id`, next to pane
@@ -806,7 +836,7 @@ pub const Model = struct {
         if (split_id.isEmpty()) return error.BadRequest;
         if (m.nodeIdInUse(split_id.text)) return error.DuplicateId;
         const sid = try split_id.dupe(a);
-        const moved = src_loc.ws.tabs[src_loc.index].root;
+        const moved = src_loc.project.tabs[src_loc.index].root;
         try m.detachTab(src_loc);
         const dst = m.findTab(dst_id).?;
         if (target) |t| {
@@ -846,44 +876,75 @@ pub const Model = struct {
 
     // ── Panes that left ─────────────────────────────────────────────────────
 
-    fn appendPanes(a: Allocator, node: *const Node, out: *std.ArrayList(Pane)) Error!void {
+    fn appendPanes(a: Allocator, node: *const SplitNode, out: *std.ArrayList(Pane)) Error!void {
         var list: std.ArrayList(*const Pane) = .empty;
         try tree.collectPanes(a, node, &list);
         for (list.items) |p| try out.append(a, p.*);
     }
 };
 
+// ── Parents ─────────────────────────────────────────────────────────────────
+
+fn topLevelIfEmpty(id: ?ProjectId) ?ProjectId {
+    const x = id orelse return null;
+    return if (x.isEmpty()) null else x;
+}
+
+fn findIn(projects: []const Project, id: ProjectId) ?*const Project {
+    for (projects) |*p| if (p.id.eql(id)) return p;
+    return null;
+}
+
+/// `Model.parentOf` over a list of projects, so that `validate` reads the
+/// tree as the model does.
+fn parentIn(projects: []const Project, p: *const Project) ?ProjectId {
+    const first = topLevelIfEmpty(p.parent) orelse return null;
+    if (findIn(projects, first) == null) return null;
+    var at = first;
+    var steps: usize = 0;
+    while (steps <= projects.len) : (steps += 1) {
+        if (at.eql(p.id)) return null;
+        const up = findIn(projects, at).?;
+        at = topLevelIfEmpty(up.parent) orelse return first;
+        if (findIn(projects, at) == null) return first;
+    }
+    // A loop above the parent that does not hold `p`.
+    return first;
+}
+
 // ── Copies for `compact` ───────────────────────────────────────────────────
 
 fn cloneData(a: Allocator, d: ModelData) Allocator.Error!ModelData {
     const projects = try a.alloc(Project, d.projects.len);
-    for (d.projects, projects) |p, *out| out.* = .{
-        .id = try p.id.dupe(a),
-        .name = try a.dupe(u8, p.name),
-        .path = try a.dupe(u8, p.path),
-        .color = try dupeText(a, p.color),
-        .sort_order = p.sort_order,
-        .created_at = p.created_at,
-        .parent = try dupeId(a, p.parent),
-        .kind = p.kind,
-    };
-    const workspaces = try a.alloc(Workspace, d.workspaces.len);
-    for (d.workspaces, workspaces) |w, *out| {
-        const tabs = try a.alloc(Tab, w.tabs.len);
-        for (w.tabs, tabs) |t, *tab| tab.* = .{
+    for (d.projects, projects) |p, *out| {
+        const tabs = try a.alloc(Tab, p.tabs.len);
+        for (p.tabs, tabs) |t, *tab| tab.* = .{
             .id = try t.id.dupe(a),
             .custom_title = try dupeText(a, t.custom_title),
             .root = try tree.clone(a, t.root),
             .focused = try dupeId(a, t.focused),
         };
-        out.* = .{ .id = try w.id.dupe(a), .kind = w.kind, .tabs = tabs, .active_tab = try dupeId(a, w.active_tab) };
+        out.* = .{
+            .id = try p.id.dupe(a),
+            .name = try a.dupe(u8, p.name),
+            .path = try a.dupe(u8, p.path),
+            .color = try dupeText(a, p.color),
+            .sort_order = p.sort_order,
+            .created_at = p.created_at,
+            .parent = try dupeId(a, p.parent),
+            .sidebar = p.sidebar,
+            .single_tab = p.single_tab,
+            .removable = p.removable,
+            .alias = try dupeText(a, p.alias),
+            .tabs = tabs,
+            .active_tab = try dupeId(a, p.active_tab),
+        };
     }
     return .{
         .version = d.version,
         .epoch_hint = d.epoch_hint,
         .imported_v1 = d.imported_v1,
         .projects = projects,
-        .workspaces = workspaces,
         .selection = .{ .active_project = try dupeId(a, d.selection.active_project) },
     };
 }
@@ -931,7 +992,7 @@ fn indexOf(comptime T: type, items: []const T, id: @FieldType(T, "id")) ?usize {
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-/// The first fault of a model: where it is (`workspaces[1].tabs[0].root.first`)
+/// The first fault of a model: where it is (`projects[1].tabs[0].root.first`)
 /// and what is wrong. A fixed buffer, so a fault needs no allocator.
 pub const Fault = struct {
     buf: [200]u8 = undefined,
@@ -941,7 +1002,7 @@ pub const Fault = struct {
         return f.buf[0..f.len];
     }
 
-    fn make(comptime fmt: []const u8, args: anytype) Fault {
+    pub fn make(comptime fmt: []const u8, args: anytype) Fault {
         var f: Fault = .{};
         const s = std.fmt.bufPrint(&f.buf, fmt, args) catch f.buf[0..];
         f.len = s.len;
@@ -951,69 +1012,72 @@ pub const Fault = struct {
 
 /// Checks that `data` is a model: ids that are not empty and are not used
 /// twice, ratios inside 0..1, a `focused` pane that is in its tree, an
-/// `active_tab` that is in its workspace, and project workspaces that match
-/// their projects. A group has no path, no workspace and no selection.
-/// Returns the first fault, or null.
+/// `active_tab` that is in its project, and the rules of the capability
+/// fields (design/010 §11):
+///
+/// 1. An `alias` is not empty and is unique.
+/// 2. A project with `sidebar` other than `tree` is at the top level and
+///    holds no project. A `tree` project's parent is a `tree` project.
+/// 3. A `single_tab` project holds at most one tab.
+/// 4. The selected project is not a project with `sidebar: none`.
+///
+/// The requests keep these rules, and also: a project with children or
+/// that is not `removable` is not removed, and the capability fields never
+/// change. Returns the first fault, or null.
 pub fn validate(gpa: Allocator, data: *const ModelData) Allocator.Error!?Fault {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
     var seen: std.StringHashMapUnmanaged(void) = .empty;
+    var aliases: std.StringHashMapUnmanaged(void) = .empty;
 
     if (data.version == 0 or data.version > version) return Fault.make("version: {d}", .{data.version});
 
-    var leaves: usize = 0;
     for (data.projects, 0..) |p, i| {
         if (p.id.isEmpty()) return Fault.make("projects[{d}].id: empty", .{i});
         if ((try seen.getOrPut(a, p.id.text)).found_existing) return Fault.make("projects[{d}].id: duplicate", .{i});
-        switch (p.kind) {
-            .project => leaves += 1,
-            .group => if (p.path.len != 0) return Fault.make("projects[{d}].path: a group has no path", .{i}),
+        if (p.alias) |x| {
+            if (x.len == 0) return Fault.make("projects[{d}].alias: empty", .{i});
+            if ((try aliases.getOrPut(a, x)).found_existing) return Fault.make("projects[{d}].alias: duplicate", .{i});
         }
     }
-    var project_workspaces: usize = 0;
     var tabs_seen: std.StringHashMapUnmanaged(void) = .empty;
     var nodes_seen: std.StringHashMapUnmanaged(void) = .empty;
-    var ws_seen: std.StringHashMapUnmanaged(void) = .empty;
-    for (data.workspaces, 0..) |w, wi| {
-        if (w.id.isEmpty()) return Fault.make("workspaces[{d}].id: empty", .{wi});
-        if ((try ws_seen.getOrPut(a, w.id.text)).found_existing) return Fault.make("workspaces[{d}].id: duplicate", .{wi});
-        if (w.kind == .project) {
-            project_workspaces += 1;
-            var found = false;
-            for (data.projects) |p| found = found or (p.kind == .project and std.mem.eql(u8, p.id.text, w.id.text));
-            if (!found) return Fault.make("workspaces[{d}].id: no project", .{wi});
-        } else if ((try seen.getOrPut(a, w.id.text)).found_existing) {
-            return Fault.make("workspaces[{d}].id: also a project", .{wi});
+    for (data.projects, 0..) |*p, pi| {
+        if (p.sidebar != .tree and topLevelIfEmpty(p.parent) != null) {
+            return Fault.make("projects[{d}].parent: a project with sidebar {t} is at the top level", .{ pi, p.sidebar });
         }
-        for (w.tabs, 0..) |t, ti| {
-            if (t.id.isEmpty()) return Fault.make("workspaces[{d}].tabs[{d}].id: empty", .{ wi, ti });
+        if (parentIn(data.projects, p)) |g| {
+            if (p.sidebar != .tree) return Fault.make("projects[{d}].parent: a project with sidebar {t} is at the top level", .{ pi, p.sidebar });
+            if (findIn(data.projects, g).?.sidebar != .tree) return Fault.make("projects[{d}].parent: not a tree project", .{pi});
+        }
+        if (p.single_tab and p.tabs.len > 1) return Fault.make("projects[{d}].tabs: more than one in a single_tab project", .{pi});
+        for (p.tabs, 0..) |t, ti| {
+            if (t.id.isEmpty()) return Fault.make("projects[{d}].tabs[{d}].id: empty", .{ pi, ti });
             if ((try tabs_seen.getOrPut(a, t.id.text)).found_existing) {
-                return Fault.make("workspaces[{d}].tabs[{d}].id: duplicate", .{ wi, ti });
+                return Fault.make("projects[{d}].tabs[{d}].id: duplicate", .{ pi, ti });
             }
             var path: [96]u8 = undefined;
-            const prefix = std.fmt.bufPrint(&path, "workspaces[{d}].tabs[{d}].root", .{ wi, ti }) catch path[0..];
+            const prefix = std.fmt.bufPrint(&path, "projects[{d}].tabs[{d}].root", .{ pi, ti }) catch path[0..];
             if (try validateNode(a, &t.root, prefix, &nodes_seen)) |f| return f;
             if (t.focused) |f| {
-                if (!tree.contains(&t.root, f)) return Fault.make("workspaces[{d}].tabs[{d}].focused: not in the tab", .{ wi, ti });
+                if (!tree.contains(&t.root, f)) return Fault.make("projects[{d}].tabs[{d}].focused: not in the tab", .{ pi, ti });
             }
         }
-        if (w.active_tab) |at| {
-            if (!Model.wsHasTab(&w, at)) return Fault.make("workspaces[{d}].active_tab: not in the workspace", .{wi});
+        if (p.active_tab) |at| {
+            if (!p.hasTab(at)) return Fault.make("projects[{d}].active_tab: not in the project", .{pi});
         }
     }
-    if (project_workspaces != leaves) return Fault.make("workspaces: a project has no workspace", .{});
     if (data.selection.active_project) |id| {
-        var found = false;
-        for (data.projects) |p| found = found or (p.kind == .project and p.id.eql(id));
-        if (!found) return Fault.make("selection.active_project: no such project", .{});
+        const p = findIn(data.projects, id) orelse return Fault.make("selection.active_project: no such project", .{});
+        if (p.sidebar == .none) return Fault.make("selection.active_project: a project with sidebar none", .{});
     }
     return null;
 }
 
 fn validateNode(
     a: Allocator,
-    node: *const Node,
+    node: *const SplitNode,
     path: []const u8,
     seen: *std.StringHashMapUnmanaged(void),
 ) Allocator.Error!?Fault {

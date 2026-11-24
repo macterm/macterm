@@ -189,12 +189,14 @@ final class AppState {
         if first.activeProjectID == nil { first.activeProjectID = activeProjectID }
         guard !saved.isEmpty else { return }
         first.activeProjectID = saved[0].activeProjectID ?? first.activeProjectID
+        // After the project: a change of project clears the flag.
+        first.showsProjectScreen = saved[0].showsProjectScreen ?? false
         if let width = saved[0].sidebarWidth { first.sidebarWidth = width }
         if let visible = saved[0].sidebarVisible { first.sidebarVisible = visible }
         if let visible = saved[0].projectMemoryPanelVisible { first.projectMemoryPanelVisible = visible }
         // After the project: making a project active opens its section, and
         // the saved set must win over that.
-        if let expanded = saved[0].expandedProjectIDs { first.expandedProjects = Set(expanded) }
+        if let expanded = saved[0].expandedProjectIDs { first.expandedRows = Set(expanded) }
         if let frame = saved[0].frame {
             first.frame = frame
             applyRestoredFrame(of: first)
@@ -377,12 +379,13 @@ final class AppState {
             let restoring = pendingWindowRestores.removeFirst()
             if let project = restoring.activeProjectID {
                 window.activeProjectID = project
+                window.showsProjectScreen = restoring.showsProjectScreen ?? false
                 recordRestoredTab(restoring.activeTabID, in: window)
             }
             if let width = restoring.sidebarWidth { window.sidebarWidth = width }
             if let visible = restoring.sidebarVisible { window.sidebarVisible = visible }
             if let visible = restoring.projectMemoryPanelVisible { window.projectMemoryPanelVisible = visible }
-            if let expanded = restoring.expandedProjectIDs { window.expandedProjects = Set(expanded) }
+            if let expanded = restoring.expandedProjectIDs { window.expandedRows = Set(expanded) }
             if let frame = restoring.frame { window.frame = frame }
         } else if hasRestoredWindows {
             // A window the user opened, not one being restored: the sidebar
@@ -396,7 +399,11 @@ final class AppState {
         }
         // A new window opens on whatever the user was last looking at, which
         // is both the useful default and what a single-window build did.
-        if window.activeProjectID == nil { window.activeProjectID = activeProjectID }
+        // The project screen too, when the key window shows it.
+        if window.activeProjectID == nil {
+            window.activeProjectID = activeProjectID
+            window.showsProjectScreen = keyWindow.map { $0.activeProjectID == activeProjectID && $0.showsProjectScreen } ?? false
+        }
         // Listed before the frame moves: `setFrame` lays the window out at
         // once.
         windowRegistry.append(window)
@@ -523,8 +530,11 @@ final class AppState {
     /// tab no matter which pinned tab was active, so Cmd+T on a pinned tab
     /// created a tab the sidebar selected while the window kept showing the
     /// old one.
+    ///
+    /// A window that shows the project screen of `projectID` selects no tab.
     func selectedTab(for projectID: UUID, in window: WindowState) -> TerminalTab? {
         guard let ws = workspaces[projectID] else { return nil }
+        if showsProjectScreen(projectID, in: window, ws: ws) { return nil }
         if ws.kind != .pinned,
            let id = window.activeTabIDs[projectID],
            let tab = ws.tabs.first(where: { $0.id == id })
@@ -532,6 +542,58 @@ final class AppState {
             return tab
         }
         return ws.activeTab
+    }
+
+    /// Whether `window` shows the project screen of `projectID`. Only a
+    /// `.project` workspace has one: a flag restored over a pinned or scratch
+    /// selection is ignored.
+    private func showsProjectScreen(_ projectID: UUID, in window: WindowState, ws: Workspace) -> Bool {
+        window.showsProjectScreen && window.activeProjectID == projectID && ws.kind == .project
+    }
+
+    /// Show the project screen of `project` in `window` (the key window when
+    /// nil), also when the project has tabs: what a click on a sidebar
+    /// project row and CLI `project select` do. The project's tabs stay; a
+    /// selection of one of them shows it. A palette project row shows the
+    /// last tab (`showLastTab(of:)`).
+    func showProjectScreen(_ project: Project, in window: WindowState?) {
+        selectProject(project, in: window)
+        guard let target = window ?? keyWindow, target.activeProjectID == project.id,
+              workspaces[project.id]?.kind == .project, !target.showsProjectScreen
+        else { return }
+        target.showsProjectScreen = true
+        settleWindowSelections()
+        persistWindows()
+    }
+
+    /// Show `project` in the key window at the tab that the window last
+    /// showed there (`WindowState.activeTabIDs`), else the workspace's active
+    /// tab: what a palette project row does. A project with no tabs shows
+    /// `EmptyProjectView`. This is a function of its own and not a Bool
+    /// parameter of `showProjectScreen`, because the sidebar row and CLI
+    /// `project select` show the project screen.
+    func showLastTab(of project: Project) {
+        selectProject(project)
+        guard let key = keyWindow, key.activeProjectID == project.id else { return }
+        endProjectScreen(in: key)
+        settleWindowSelections()
+        claimLeadershipForKeyWindow()
+    }
+
+    /// Whether the key window shows the project screen. A command that acts on
+    /// the shown tab or pane (`AppCommand.actsOnShownTab`) then does nothing,
+    /// as in a project with no tabs: the workspace's active tab is not on
+    /// screen.
+    var keyWindowShowsProjectScreen: Bool {
+        guard let key = keyWindow, let projectID = key.activeProjectID, let ws = workspaces[projectID] else { return false }
+        return showsProjectScreen(projectID, in: key, ws: ws)
+    }
+
+    /// A tab of the window's project is selected: the window shows it.
+    private func endProjectScreen(in window: WindowState) {
+        guard window.showsProjectScreen else { return }
+        window.showsProjectScreen = false
+        persistWindows()
     }
 
     /// The windows that draw tabs, in creation order: the registered windows,
@@ -557,8 +619,9 @@ final class AppState {
     /// Several windows may draw one pane. Each has its own surface, which is
     /// its own client of the session, so a surface that its window does not
     /// draw any more is a stray client: it is retired here. A pane keeps its
-    /// last surface (a warm view), shown or not. Idempotent and cheap: run it
-    /// where a window's selection changes.
+    /// last surface (a warm view), shown or not, and the surface that runs
+    /// its plain ssh shell (`Pane.plainShellSurfaceID`). Idempotent and
+    /// cheap: run it where a window's selection changes.
     private func settleWindowSelections() {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
@@ -577,6 +640,9 @@ final class AppState {
         for pane in allLivePanes() where registry.surfaces(of: pane).count > 1 {
             for surface in registry.surfaces(of: pane) where registry.surfaces(of: pane).count > 1 {
                 guard let windowID = surface.windowID else { continue }
+                // A plain ssh shell is its surface's: only the window, the
+                // tab or the pane ends it, not a tab switch.
+                if pane.plainShellSurfaceID == surface.id { continue }
                 if shown[windowID]?.contains(pane.id) != true { registry.retire(surface) }
             }
         }
@@ -624,6 +690,7 @@ final class AppState {
             return
         }
         guard let ws = workspaces[projectID], ws.tabs.contains(where: { $0.id == tabID }) else { return }
+        if window.activeProjectID == projectID { endProjectScreen(in: window) }
         window.activeTabIDs[projectID] = tabID
         settleWindowSelections()
         persistWindows()
@@ -639,6 +706,11 @@ final class AppState {
     /// The settle and the claim run on EVERY key change, also for a key
     /// window on the pinned workspace, which has no selection of its own to
     /// align.
+    ///
+    /// A key window on the project screen keeps its record too: the
+    /// workspace's active tab is then the tab that the screen replaced, which
+    /// Recent Tab and the CLI act on. The window draws no tab
+    /// (`selectedTab(for:in:)`).
     private func alignKeyWindowTab() {
         if let key = keyWindow, let projectID = key.activeProjectID,
            let ws = workspaces[projectID], ws.kind != .pinned
@@ -692,6 +764,8 @@ final class AppState {
         guard let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first else { return }
         if let tab = ws.activeTabID {
             target.activeTabIDs[ws.id] = tab
+            // A selected tab ends the project screen: it is what shows now.
+            endProjectScreen(in: target)
         } else {
             target.activeTabIDs.removeValue(forKey: ws.id)
         }
@@ -747,13 +821,14 @@ final class AppState {
     }
 
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
-    /// screens was up. A different screen starts from an empty query — text
-    /// typed for one search means nothing to another.
+    /// screens was up. A different screen starts from its own text
+    /// (`PaletteScope.initialQuery`: empty for a search) — text typed for
+    /// one search means nothing to another.
     func openCommandPalette(scope: PaletteScopeID?) {
         guard let window = keyOrFirstWindow else { return }
         if window.paletteScope != scope || window.paletteStack.count > 1 {
-            commandPaletteQuery = ""
             window.showPaletteScope(scope)
+            commandPaletteQuery = window.paletteStack.last?.scope.initialQuery ?? ""
         }
         window.isCommandPaletteVisible = true
     }
@@ -991,10 +1066,6 @@ final class AppState {
     /// seed must not mistake an unread snapshot for a fresh install).
     var snapshotLoadFailed: Bool { workspaceStore.loadFailed }
 
-    /// Per-pane attempt gating for the reconnect sweep (#281). Not observed —
-    /// pure bookkeeping, no UI reads it.
-    @ObservationIgnored
-    private var reconnectPolicy = RemoteReconnectPolicy()
     /// A `.retry` sweep is planned (`scheduleReconnectRetry`).
     @ObservationIgnored
     private var reconnectRetryPlanned = false
@@ -1195,7 +1266,7 @@ final class AppState {
     @ObservationIgnored
     var pendingDesktopWidgetMaterialize: Set<UUID> = []
 
-    /// Refresh policy for `ZmxForegroundResolver`'s name→leader cache:
+    /// Refresh policy for the session listing behind `outdatedSessions`:
     /// refresh on session lifecycle events plus a 30s reconcile TTL — never
     /// per tick.
     @ObservationIgnored
@@ -1210,14 +1281,6 @@ final class AppState {
     /// (`SessionBuild`), from the last listing. A tab with one shows a
     /// badge, and Restart Session ends them (`AppState+SessionRestart`).
     var outdatedSessions: Set<String> = []
-
-    /// Bounded retries while a *wrapped* pane is missing from the server's
-    /// list: a freshly-spawned session registers asynchronously, so the
-    /// refresh fired by its creation event usually runs too early. Reset on
-    /// every lifecycle event; without the cap, a dead session would turn
-    /// every poll tick back into a listing.
-    @ObservationIgnored
-    private var zmxRetryBudget = 8
 
     /// Central project-file store (`~/.config/macterm/projects`). Injectable
     /// so tests never read or write the user's real directory.
@@ -1311,7 +1374,6 @@ final class AppState {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.zmxRefreshGate.noteSessionLifecycle()
-                    self?.zmxRetryBudget = 8
                     self?.notePollEvent()
                 }
             }),
@@ -1361,46 +1423,25 @@ final class AppState {
         // that fire `notePollEvent`, and the fresh poll timestamp turns those
         // into coalesced no-ops instead of recursive polls.
         pollCadence.notePolled(at: Date())
-        refreshZmxCacheIfDue()
-        refreshAllForegroundProcesses()
+        refreshOutdatedSessionsIfDue()
+        settleAllPanes()
         reschedulePoll()
     }
 
-    /// Refresh `ZmxForegroundResolver`'s name→leader cache when the gate
-    /// says so (session lifecycle event, or the 30s reconcile TTL), from the
-    /// server's `session.list`. Per-tick foreground resolution reads the
-    /// cache with cheap syscalls only. A failed listing keeps the cache.
-    private func refreshZmxCacheIfDue() {
+    /// List the sessions when the gate says so (session lifecycle event, or
+    /// the 30s reconcile TTL), and keep the ones of an older build. A failed
+    /// listing keeps the last answer: nothing is known.
+    private func refreshOutdatedSessionsIfDue() {
         guard !zmxRefreshInFlight, sessionClient.isBundled() else { return }
         guard zmxRefreshGate.shouldRefresh(now: Date()) else { return }
         zmxRefreshInFlight = true
         Task { [weak self, sessionClient] in
             let sessions = await sessionClient.listSessions()
-            if let sessions { ZmxForegroundResolver.updateCache(sessions) }
-            let names = Set((sessions ?? []).filter(\.isRunning).map(\.name))
-            // A failed listing keeps the last answer: nothing is known.
             let outdated = sessions.map { SessionBuild.outdatedNames(in: $0, appKey: ServerBuilds.bundledKey) }
             await MainActor.run {
+                self?.zmxRefreshInFlight = false
                 if let outdated, self?.outdatedSessions != outdated { self?.outdatedSessions = outdated }
-                self?.finishZmxRefresh(running: names)
             }
-        }
-    }
-
-    private func finishZmxRefresh(running map: Set<String>) {
-        zmxRefreshInFlight = false
-        // A wrapped pane absent from the listing means the refresh raced the
-        // session's async registration — retry on the next tick (bounded).
-        // Without this, the tab title reads `zmx` (the attach client) until
-        // the 30s reconcile catches up.
-        let missingWrapped = workspaces.values
-            .flatMap(\.tabs)
-            .flatMap { $0.splitRoot.allPanes() }
-            .contains { SurfaceRegistry.shared.view(of: $0)?.runsInLocalSession == true && !map.contains($0.sessionName) }
-        if missingWrapped, zmxRetryBudget > 0 {
-            zmxRetryBudget -= 1
-            zmxRefreshGate.noteSessionLifecycle()
-            notePollEvent()
         }
     }
 
@@ -1432,19 +1473,14 @@ final class AppState {
         pollTimerDelay = delay
     }
 
-    /// Re-read the foreground process name of every live pane across all
-    /// workspaces. Each pane only republishes (and triggers a tab re-render)
-    /// when its name actually changes, so this is cheap when nothing's moving.
-    func refreshAllForegroundProcesses() {
+    /// Settle the quiet runs of every pane, and mark seen what the key window
+    /// shows. The foreground needs no poll: each pane's session reports it
+    /// (`Pane.applyForeground`).
+    func settleAllPanes() {
         var sawBusyPane = false
         for (projectID, ws) in workspaces {
             for tab in ws.tabs {
                 for pane in tab.splitRoot.allPanes() {
-                    // The local process table only knows `ssh` for a remote
-                    // pane: its host pushes its foreground through the pane's
-                    // own connection (`Pane.receiveUnknownAPC`). Execution
-                    // state still settles from output heartbeats below.
-                    if !pane.isRemote { pane.refreshForegroundProcess() }
                     // An activity-sourced run whose output has been quiet past
                     // the window settles to `.done`. The output heartbeat is
                     // occlusion-independent, so silence is meaningful whether or
@@ -1592,11 +1628,15 @@ final class AppState {
                         activeProjectID: window.activeProjectID,
                         sidebarWidth: window.sidebarWidth,
                         isKey: window.id == keyWindowID,
-                        activeTabID: window.activeProjectID.flatMap { selectedTab(for: $0, in: window)?.id },
+                        // On the project screen: the tab that the screen replaced.
+                        activeTabID: window.activeProjectID.flatMap {
+                            selectedTab(for: $0, in: window)?.id ?? window.activeTabIDs[$0]
+                        },
                         sidebarVisible: window.sidebarVisible,
                         projectMemoryPanelVisible: window.projectMemoryPanelVisible,
                         frame: window.frame,
-                        expandedProjectIDs: window.expandedProjects.sorted { $0.uuidString < $1.uuidString }
+                        expandedProjectIDs: window.expandedRows.sorted { $0.uuidString < $1.uuidString },
+                        showsProjectScreen: window.showsProjectScreen ? true : nil
                     )
                 },
             quickTerminal: quickTerminalSnapshot(),
@@ -1633,9 +1673,9 @@ final class AppState {
                 activeTabID: pinnedWorkspace.activeTabID
             ))
         }
-        // The pinned and the scratch rows are not projects of the model.
-        let selected = activeProjectID.flatMap { Project.isSynthetic($0) ? nil : $0 }
-        modelShadow.workspacesDidSave(inputs, activeProjectID: selected)
+        // The pinned and the scratch workspaces are hidden projects of the
+        // model, so a window can select them (design/010 §11).
+        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
     }
 
     // MARK: - Project
@@ -1744,7 +1784,7 @@ final class AppState {
 
     // MARK: - Remote reconnect (#281)
 
-    /// What woke the reconnect sweep. The backoff gates each pane for every
+    /// What woke the reconnect sweep. The host's backoff gates every
     /// trigger, except `.hostAnswered`, which clears it.
     enum ReconnectTrigger: String {
         case wake
@@ -1755,7 +1795,7 @@ final class AppState {
         case hostConnected
         /// A roaming link heard its host after a gap
         /// (`.remoteHostDidAnswer`). The host's lost panes try now, with no
-        /// backoff (`RemoteReconnectPolicy.hostAnswered`).
+        /// backoff (`RemoteReconnectPolicy.clear`).
         case hostAnswered
         /// A pane became lost: its link stopped, or a try failed
         /// (`.remoteLinkDidStop`).
@@ -1765,34 +1805,28 @@ final class AppState {
     }
 
     /// How often the sweep runs again while the active project has a lost
-    /// pane and the app is active. `RemoteReconnectPolicy` gates each pane.
+    /// pane and the app is active. Each host's backoff gates its tries.
     static let reconnectRetryInterval: TimeInterval = 5
 
     /// Let the active project's lost remote panes connect again: panes whose
-    /// connection stopped while their session lives on the host.
-    /// `RemoteHosts` wakes each pane's driver, and the attach replays the
-    /// session's screen. These tries never ask the user anything
-    /// (`RemoteHosts.reconnect`): a login that needs an answer waits for a
-    /// key in the pane.
+    /// connection stopped while their session lives on the host. Each host
+    /// (`RemoteHost.reconnect`) wakes its lost panes after its backoff, and
+    /// the attach replays the session's screen. These tries never ask the
+    /// user anything: a login that needs an answer waits for a key in the
+    /// pane.
     ///
     /// The triggers (system wake, a network change, app activation, project
     /// selection, a pane that became lost) run a sweep, and while a lost pane
     /// remains, the sweep runs again every `reconnectRetryInterval` while the
-    /// app is active. `RemoteReconnectPolicy` gates each pane, so an
-    /// unreachable host is tried at most once a minute. Active project only;
-    /// other projects reconnect via `.projectSelected` when opened. A key in
-    /// a lost pane connects at once, with no backoff. `destination`: only
-    /// the panes of this host (`.hostConnected`, `.hostAnswered`). A host
-    /// that answers again (`.hostAnswered`) clears the backoff of its panes:
-    /// it is one event for each heal, so it adds no load while the host is
-    /// down.
-    ///
-    /// `failedTry`: the session of a pane whose try failed now. Its backoff
-    /// starts at the end of the try (`RemoteReconnectPolicy.tryFailed`).
-    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil, failedTry: String? = nil) {
-        if let failedTry, let pane = remotePane(session: failedTry) {
-            reconnectPolicy.tryFailed(pane.id, now: Date())
-        }
+    /// app is active. The host's backoff (`RemoteReconnectPolicy`, one for
+    /// each host) tries an unreachable host at most once a minute. Active
+    /// project only; other projects reconnect via `.projectSelected` when
+    /// opened. A key in a lost pane connects at once, with no backoff.
+    /// `destination`: only the panes of this host (`.hostConnected`,
+    /// `.hostAnswered`). A host that answers again (`.hostAnswered`) clears
+    /// its backoff: it is one event for each heal, so it adds no load while
+    /// the host is down.
+    func reconnectDroppedRemotePanes(trigger: ReconnectTrigger, destination: String? = nil) {
         guard Preferences.shared.reconnectRemotePanes else { return }
         guard !AppTerminationState.isTerminating else { return }
         // A login may ask, and its sheet brings the app to the front. A wake
@@ -1803,46 +1837,22 @@ final class AppState {
         let runsWhileInactive: Set<ReconnectTrigger> = [.activate, .projectSelected, .hostConnected, .hostAnswered]
         guard runsWhileInactive.contains(trigger) || NSApp.isActive else { return }
         guard let projectID = activeProjectID, let ws = workspaces[projectID] else { return }
-        let (sessions, anyLost) = Self.reconnectSessions(
-            ws.tabs.flatMap { $0.splitRoot.allPanes() },
-            trigger: trigger,
-            destination: destination,
-            policy: &reconnectPolicy,
-            now: Date()
-        )
-        if anyLost { scheduleReconnectRetry() }
-        guard !sessions.isEmpty else { return }
-        let count = sessions.count
-        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(count, privacy: .public) lost remote pane(s)")
-        RemoteHosts.shared.reconnect(sessions)
+        let lost = Self.lostDestinations(ws.tabs.flatMap { $0.splitRoot.allPanes() }, destination: destination)
+        guard !lost.isEmpty else { return }
+        scheduleReconnectRetry()
+        logger.info("reconnect(\(trigger.rawValue, privacy: .public)): \(lost.count, privacy: .public) host(s) with lost panes")
+        RemoteHosts.shared.reconnect(lost, answered: trigger == .hostAnswered)
     }
 
-    /// The sessions of the lost panes that the sweep tries now, and whether
-    /// any pane is lost. `destination`: only the panes of this host. Pure,
-    /// except for the policy.
-    static func reconnectSessions(
-        _ panes: [Pane],
-        trigger: ReconnectTrigger,
-        destination: String?,
-        policy: inout RemoteReconnectPolicy,
-        now: Date
-    ) -> (sessions: Set<String>, anyLost: Bool) {
-        var sessions: Set<String> = []
-        var anyLost = false
-        for pane in panes where pane.isRemote {
-            if let destination, pane.remoteDestination != destination { continue }
-            guard pane.isDisconnected else {
-                policy.observeAlive(pane.id, now: now)
-                continue
-            }
-            anyLost = true
-            if trigger == .hostAnswered { policy.hostAnswered(pane.id) }
-            // A try runs now: the next sweep judges it.
-            guard !pane.isRemoteReconnecting, policy.shouldAttempt(pane.id, now: now) else { continue }
-            policy.recordAttempt(pane.id, now: now)
-            sessions.insert(pane.sessionName)
+    /// The hosts of the lost panes. `destination`: only this host. Pure.
+    static func lostDestinations(_ panes: [Pane], destination: String?) -> Set<String> {
+        var destinations: Set<String> = []
+        for pane in panes where pane.isDisconnected {
+            guard let host = pane.remoteDestination else { continue }
+            if let destination, host != destination { continue }
+            destinations.insert(host)
         }
-        return (sessions, anyLost)
+        return destinations
     }
 
     /// One sweep later, unless one is already planned.
@@ -2083,10 +2093,55 @@ final class AppState {
     /// of the overloads below. The raw `allPanes().contains(where:
     /// \.needsConfirmClose)` ignores the retention, so it would warn about a
     /// kill that the close does not do.
-    func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
+    ///
+    /// `plainAnswers` holds the verdicts that the hosts of plain shells gave
+    /// (`judgeClose`), by pane id. They replace the surface's reading.
+    func closeNeedsConfirmation(_ closing: [Pane], plainAnswers: [UUID: Bool] = [:]) -> Bool {
         let retained = pendingPinnedSessionNames()
-        return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
+        return closing.contains { (plainAnswers[$0.id] ?? paneNeedsConfirmClose($0)) && !retained.contains($0.sessionName) }
     }
+
+    /// Judges the close of `closing` and gives the verdict to `decide`.
+    /// With no plain shell (a host with no server, 0494), `decide` runs at
+    /// once. Else the close first asks the host of each plain shell whether
+    /// the shell is idle. The asks run at the same time. `decide` runs at
+    /// the first busy answer, after the last answer, or after
+    /// `plainShellAnswerTimeout`. A pane with no answer then gets the
+    /// surface's reading, which warns. `target` names the request: a second
+    /// request for a target that is still judged does nothing.
+    func judgeClose(_ closing: [Pane], target: String, _ decide: @escaping @MainActor (Bool) -> Void) {
+        let plain = closing.filter(paneRunsPlainShell)
+        guard !plain.isEmpty else {
+            decide(closeNeedsConfirmation(closing))
+            return
+        }
+        guard closesBeingJudged.insert(target).inserted else { return }
+        let judgement = CloseJudgement(waiting: Set(plain.map(\.id)))
+        let finish: @MainActor () -> Void = { [weak self] in
+            guard let self, !judgement.isDone else { return }
+            judgement.isDone = true
+            judgement.deadline?.cancel()
+            closesBeingJudged.remove(target)
+            decide(closeNeedsConfirmation(closing, plainAnswers: judgement.answers))
+        }
+        let ask = askPlainShellNeedsConfirmClose
+        let timeout = plainShellAnswerTimeout
+        for pane in plain {
+            Task { @MainActor in
+                let answer = await ask(pane, timeout)
+                judgement.record(answer, for: pane.id)
+                if answer == true || judgement.waiting.isEmpty { finish() }
+            }
+        }
+        judgement.deadline = Task { @MainActor in
+            try? await Task.sleep(for: timeout)
+            finish()
+        }
+    }
+
+    /// The targets of `judgeClose` that wait for a host.
+    @ObservationIgnored
+    private var closesBeingJudged: Set<String> = []
 
     /// Whether closing (or, for a pinned tab, unloading) `tab` needs
     /// confirmation. Closing a tab ends every session its panes hold alone.
@@ -2102,12 +2157,16 @@ final class AppState {
 
     /// Every pane of the given projects (removed whole) and tabs.
     func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
+        closeNeedsConfirmation(panes(inProjects: projectIDs, tabs: tabs))
+    }
+
+    private func panes(inProjects projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> [Pane] {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {
             guard let tab = workspaces[tab.projectID]?.tabs.first(where: { $0.id == tab.tabID }) else { continue }
             closing += tab.splitRoot.allPanes()
         }
-        return closeNeedsConfirmation(closing)
+        return closing
     }
 
     private func panes(inProject projectID: UUID) -> [Pane] {
@@ -2121,6 +2180,24 @@ final class AppState {
     /// against an always-idle pane.
     @ObservationIgnored
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
+
+    /// Whether the pane runs a plain shell (`Pane.runsPlainShell`). A seam,
+    /// as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var paneRunsPlainShell: (Pane) -> Bool = { $0.runsPlainShell }
+
+    /// The host's verdict for a plain shell's pane
+    /// (`Pane.plainShellNeedsConfirmClose`). nil when it runs none. A seam,
+    /// as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var askPlainShellNeedsConfirmClose: (Pane, Duration) async -> Bool? = {
+        await $0.plainShellNeedsConfirmClose(timeout: $1)
+    }
+
+    /// How long a close waits for the hosts of plain shells, in total. Over
+    /// a connection that is up, `ps` answers in well under a second.
+    @ObservationIgnored
+    var plainShellAnswerTimeout: Duration = .seconds(2)
 
     /// Shows an open panel, adds or finds the selected directory as a project,
     /// and selects it. Returns the selected project, nil if cancelled.
@@ -2158,14 +2235,15 @@ final class AppState {
     }
 
     /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name the pinned workspace reserves is
-    /// refused with a notice and the old name stays — as `project rename`
-    /// refuses it with a `bad_request`. The field has closed by the time the
-    /// name arrives, so the notice is the one place left to say why.
+    /// Current Project opens too). A name that `Project.nameRefusal` refuses
+    /// (a slash, a reserved name) gets a notice and the old name stays — as
+    /// `project rename` refuses it with a `bad_request`. The field has closed
+    /// by the time the name arrives, so the notice is the one place left to
+    /// say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.reservedNameMessage(for: name) {
+        if let message = Project.nameRefusal(for: name) {
             present(.notice(
-                .reservedProjectName,
+                .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
@@ -2229,7 +2307,7 @@ final class AppState {
         }
         workspaces.removeValue(forKey: projectID)
         for window in windows {
-            window.expandedProjects.remove(projectID)
+            window.expandedRows.remove(projectID)
         }
         vacateWindows(showing: projectID)
         // Every removal path comes through here, so a removed project's
@@ -2257,14 +2335,48 @@ final class AppState {
     /// immediately when no pane in the project is busy; otherwise stage it
     /// for the confirmation alert — removal kills every pane's zmx session.
     func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        guard closeNeedsConfirmation(projectID: projectID) else {
-            removal()
-            return
+        judgeClose(panes(inProject: projectID), target: "project:\(projectID)") { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                removal()
+                return
+            }
+            confirmRemoveProject(projectID, host: host, removal: removal)
         }
+    }
+
+    private func confirmRemoveProject(_ projectID: UUID, host: DialogHost, removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeProject(projectID),
             title: String(localized: "Remove project with running processes?"),
             message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
+            confirmTitle: String(localized: "Remove"),
+            host: host,
+            onConfirm: removal
+        ))
+    }
+
+    /// Remove a sidebar group (design 013). An empty group goes at once. A
+    /// group with projects always asks, and says how many: the removal ends
+    /// the sessions of each project inside, at any depth. Ungroup is the
+    /// path that keeps them.
+    func requestRemoveGroup(
+        _ group: Project,
+        projectCount: Int,
+        host: DialogHost = .mainWindow,
+        removal: @escaping @MainActor () -> Void
+    ) {
+        guard projectCount > 0 else {
+            removal()
+            return
+        }
+        present(PendingDialog(
+            kind: .removeGroup(group.id),
+            title: String(localized: "Remove the group “\(group.name)”?"),
+            message: String(localized: """
+            This group contains \(projectCount) projects. Macterm removes them and stops all processes \
+            in their tabs. To keep the projects, cancel and select Ungroup in the menu of the group.
+            """),
             confirmTitle: String(localized: "Remove"),
             host: host,
             onConfirm: removal
@@ -2283,10 +2395,17 @@ final class AppState {
         tabs: [(tabID: UUID, projectID: UUID)],
         removal: @escaping @MainActor () -> Void
     ) {
-        guard closeNeedsConfirmation(projectIDs: projectIDs, tabs: tabs) else {
-            removal()
-            return
+        judgeClose(panes(inProjects: projectIDs, tabs: tabs), target: "selection") { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                removal()
+                return
+            }
+            confirmRemoveSelection(removal: removal)
         }
+    }
+
+    private func confirmRemoveSelection(removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeSelection,
             title: String(localized: "Remove items with running processes?"),
@@ -2438,11 +2557,22 @@ final class AppState {
     /// foreground program — closing kills the panes' zmx sessions, so the
     /// destructive-confirmation lives here (quit will detach, not kill).
     func requestCloseTab(_ tabID: UUID, projectID: UUID) {
-        let tab = workspaces[projectID]?.tabs.first { $0.id == tabID }
-        guard let tab, closeNeedsConfirmation(tab: tab) else {
+        guard let tab = workspaces[projectID]?.tabs.first(where: { $0.id == tabID }) else {
             closeTab(tabID, projectID: projectID)
             return
         }
+        judgeClose(tab.splitRoot.allPanes(), target: "tab:\(tabID)") { [weak self] needsConfirmation in
+            // A wait for a host can end after the tab closed.
+            guard let self, workspaces[projectID]?.tabs.contains(where: { $0.id == tabID }) == true else { return }
+            guard needsConfirmation else {
+                closeTab(tabID, projectID: projectID)
+                return
+            }
+            confirmCloseTab(tabID, projectID: projectID)
+        }
+    }
+
+    private func confirmCloseTab(_ tabID: UUID, projectID: UUID) {
         present(PendingDialog(
             kind: .closeTab(tabID: tabID, projectID: projectID),
             title: String(localized: "Close running processes?"),
@@ -2465,6 +2595,13 @@ final class AppState {
         ModelWriter.tabSelect(tabID, in: ws)
         if ws.activeTabID != before {
             saveWorkspaces()
+        } else if ws.tabs.contains(where: { $0.id == tabID }) {
+            // The tab that a project screen replaced: no change for the hook
+            // to see, so end the screen of the window that the hook targets.
+            let onProject = windows.filter { $0.activeProjectID == projectID }
+            if let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first {
+                endProjectScreen(in: target)
+            }
         }
     }
 
@@ -2736,6 +2873,14 @@ final class AppState {
 
     func cycleRecentTab(projectID: UUID) {
         guard let ws = workspaces[projectID] else { return }
+        // The project screen has no current tab to cycle away from: Recent
+        // Tab shows the tab that the screen replaced, with no switcher.
+        if let key = keyWindow, key.activeProjectID == projectID, key.showsProjectScreen,
+           let current = ws.activeTabID
+        {
+            selectTab(current, projectID: projectID)
+            return
+        }
         tabCycler.startIfNeeded(recency: ws.recencyOrder(), in: ws) {
             Set(workspaces.values.flatMap { $0.tabs.flatMap { $0.splitRoot.allPanes().map(\.id) } })
         }
@@ -3033,7 +3178,6 @@ final class AppState {
         if let closing = tab.splitRoot.findPane(id: paneID) {
             releaseSessions([closing])
         }
-        reconnectPolicy.forget(paneID)
         switch ModelWriter.paneClose(tab, paneID: paneID) {
         case .onlyPaneLeft:
             closeTab(tab.id, projectID: projectID)
@@ -3068,10 +3212,23 @@ final class AppState {
         let pane = workspaces[projectID]?.tabs
             .compactMap { $0.splitRoot.findPane(id: paneID) }
             .first
-        guard let pane, closeNeedsConfirmation([pane]) else {
+        guard let pane else {
             closePane(paneID, projectID: projectID)
             return
         }
+        judgeClose([pane], target: "pane:\(paneID)") { [weak self] needsConfirmation in
+            // A wait for a host can end after the pane closed.
+            guard let self, workspaces[projectID]?.tabs.contains(where: { $0.splitRoot.findPane(id: paneID) != nil }) == true
+            else { return }
+            guard needsConfirmation else {
+                closePane(paneID, projectID: projectID)
+                return
+            }
+            confirmClosePane(paneID, projectID: projectID)
+        }
+    }
+
+    private func confirmClosePane(_ paneID: UUID, projectID: UUID) {
         present(PendingDialog(
             kind: .closePane(paneID: paneID, projectID: projectID),
             title: String(localized: "Close running process?"),
@@ -3442,9 +3599,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it.
+    /// but never leave it. A project with no folder is no slot: the sidebar
+    /// draws it as a group row, with no tabs (`SidebarTree`).
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.map(\.id)
+        var slots = projects.filter(\.hasFolder).map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }
@@ -3530,5 +3688,25 @@ final class AppState {
         if workspaces[projectID] == nil {
             workspaces[projectID] = Workspace(id: projectID, projectPath: path)
         }
+    }
+}
+
+/// The answers of one `AppState.judgeClose` that waits for hosts.
+@MainActor
+private final class CloseJudgement {
+    /// The panes whose host has not answered yet.
+    private(set) var waiting: Set<UUID>
+    /// The verdict of each pane whose host answered.
+    private(set) var answers: [UUID: Bool] = [:]
+    var isDone = false
+    var deadline: Task<Void, Never>?
+
+    init(waiting: Set<UUID>) {
+        self.waiting = waiting
+    }
+
+    func record(_ answer: Bool?, for pane: UUID) {
+        waiting.remove(pane)
+        if let answer { answers[pane] = answer }
     }
 }

@@ -328,8 +328,6 @@ struct WindowStateTests {
             #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(a.id)) === forA, "the same surface for the same window")
             #expect(SurfaceRegistry.shared.surface(for: pane, in: .window(b.id)) === forB)
             #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 2)
-            #expect(forA.isFeed, "the first window to draw the pane has its feed")
-            #expect(!forB.isFeed)
         }
         #expect(!state.showsTabOfEarlierWindow(a))
         #expect(state.showsTabOfEarlierWindow(b))
@@ -430,28 +428,6 @@ struct WindowStateTests {
 
         #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1, "b's client goes with its view of the tab")
         #expect(SurfaceRegistry.shared.surfaces(of: pane).first === forA)
-    }
-
-    @Test
-    func the_feed_passes_to_the_next_surface_when_its_window_moves_on() throws {
-        let state = makeAppState()
-        let (project, ws) = try seedProject(state, tabs: 2)
-        let a = WindowState(activeProjectID: project.id)
-        let b = WindowState(activeProjectID: project.id)
-        state.registerWindow(a)
-        state.registerWindow(b)
-        state.noteKeyWindow(a)
-        state.selectTab(ws.tabs[0].id, projectID: project.id)
-        state.selectTab(ws.tabs[0].id, projectID: project.id, in: b)
-        let pane = try #require(ws.tabs[0].splitRoot.allPanes().first)
-        _ = SurfaceRegistry.shared.surface(for: pane, in: .window(a.id))
-        let forB = SurfaceRegistry.shared.surface(for: pane, in: .window(b.id))
-        #expect(!forB.isFeed)
-
-        state.selectTab(ws.tabs[1].id, projectID: project.id)
-
-        #expect(SurfaceRegistry.shared.surfaces(of: pane).count == 1)
-        #expect(forB.isFeed, "the pane keeps a feed while any window draws it")
     }
 
     @Test
@@ -864,9 +840,9 @@ struct WindowStateTests {
         let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         writer.restoreSelection(projects: [p, q, r])
         let w1 = WindowState(activeProjectID: p.id)
-        w1.expandedProjects = [q.id, r.id]
+        w1.expandedRows = [q.id, r.id]
         let w2 = WindowState(activeProjectID: q.id)
-        w2.expandedProjects = [q.id, p.id]
+        w2.expandedRows = [q.id, p.id]
         writer.registerWindow(w1)
         writer.registerWindow(w2)
         writer.saveWorkspaces()
@@ -880,13 +856,13 @@ struct WindowStateTests {
         reader.registerWindow(second)
 
         #expect(first.activeProjectID == p.id)
-        #expect(first.expandedProjects == [q.id, r.id], "the closed active project stays closed")
-        #expect(second.expandedProjects == [q.id, p.id])
+        #expect(first.expandedRows == [q.id, r.id], "the closed active project stays closed")
+        #expect(second.expandedRows == [q.id, p.id])
 
         // A window the user opens afterwards opens only its active project.
         let opened = WindowState()
         reader.registerWindow(opened)
-        #expect(opened.expandedProjects == Set([opened.activeProjectID].compactMap(\.self)))
+        #expect(opened.expandedRows == Set([opened.activeProjectID].compactMap(\.self)))
     }
 
     @Test
@@ -897,17 +873,17 @@ struct WindowStateTests {
         state.restoreSelection(projects: [p, q])
         let window = WindowState(activeProjectID: p.id)
         state.registerWindow(window)
-        #expect(window.expandedProjects == [p.id])
+        #expect(window.expandedRows == [p.id])
 
-        window.expandedProjects.remove(p.id)
+        window.expandedRows.remove(p.id)
         window.activeProjectID = q.id
-        #expect(window.expandedProjects == [q.id], "only a change of project opens a section")
+        #expect(window.expandedRows == [q.id], "only a change of project opens a section")
 
         window.activeProjectID = PinnedTabs.workspaceID
-        #expect(window.expandedProjects == [q.id], "the pinned workspace has no section")
+        #expect(window.expandedRows == [q.id], "the pinned workspace has no section")
 
         state.removeProject(q.id)
-        #expect(!window.expandedProjects.contains(q.id))
+        #expect(!window.expandedRows.contains(q.id))
     }
 
     @Test
@@ -1346,6 +1322,267 @@ struct WindowStateTests {
 
         let created = ModelWriter.tabCreate(in: pinned, projectPath: "/tmp")
         #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == created.id)
+    }
+
+    // MARK: - Project screen (0362)
+
+    /// A project with two tabs in a key window, the second tab shown. A
+    /// project selection warms the other tab, so no real surface is made in
+    /// the test host.
+    private func keyWindowOnTwoTabs(_ state: AppState) throws -> (Project, Workspace, WindowState) {
+        state.incubatePane = { _ in }
+        let (project, ws) = try seedProject(state, tabs: 2)
+        let window = WindowState(activeProjectID: project.id)
+        state.registerWindow(window)
+        state.noteKeyWindow(window)
+        state.selectTab(ws.tabs[1].id, projectID: project.id, in: window)
+        return (project, ws, window)
+    }
+
+    @Test
+    func a_project_row_shows_the_project_screen_also_when_the_project_has_tabs() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+
+        state.showProjectScreen(project, in: window)
+
+        #expect(window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) == nil, "the window shows no tab")
+        #expect(state.keyWindowShowsProjectScreen)
+        #expect(ws.activeTabID == ws.tabs[1].id, "the workspace keeps the tab that the screen replaced")
+        #expect(ws.tabs.count == 2, "the tabs stay")
+    }
+
+    /// The palette row of `project`, run as the palette runs it.
+    private func runPaletteRow(of project: Project, in state: AppState) throws {
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
+        store.add(project)
+        let item = try #require(ProjectSource().items(
+            query: project.name,
+            context: PaletteContext(appState: state, projectStore: store)
+        ).first)
+        item.action()
+    }
+
+    @Test
+    func a_palette_project_row_shows_the_last_tab_of_the_project() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        state.selectProject(other, in: window)
+        // The workspace's active tab moves while the window is away, so the
+        // window's own record and the workspace disagree.
+        ModelWriter.tabSelect(ws.tabs[0].id, in: ws)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(window.activeProjectID == project.id)
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1], "the tab the window last showed")
+    }
+
+    @Test
+    func a_palette_project_row_ends_the_project_screen_of_the_same_project() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1])
+    }
+
+    @Test
+    func a_palette_project_row_shows_the_project_screen_of_a_project_with_no_tabs() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        for tab in ws.tabs {
+            state.closeTab(tab.id, projectID: project.id)
+        }
+        #expect(ws.tabs.isEmpty)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        state.selectProject(other, in: window)
+
+        try runPaletteRow(of: project, in: state)
+
+        #expect(window.activeProjectID == project.id)
+        #expect(state.selectedTab(for: project.id, in: window) == nil, "the window shows EmptyProjectView")
+        #expect(ws.tabs.isEmpty, "the palette makes no tab")
+    }
+
+    @Test
+    func a_sidebar_project_row_still_shows_the_project_screen_after_a_palette_switch() throws {
+        let state = makeAppState()
+        let (project, _, window) = try keyWindowOnTwoTabs(state)
+        try runPaletteRow(of: project, in: state)
+
+        state.showProjectScreen(project, in: window)
+
+        #expect(window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) == nil)
+    }
+
+    @Test
+    func tab_and_pane_commands_do_nothing_on_the_project_screen() throws {
+        let state = makeAppState()
+        let (project, _, window) = try keyWindowOnTwoTabs(state)
+        let ctx = AppCommandContext(
+            appState: state,
+            projectStore: ProjectStore(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
+        )
+        #expect(AppCommand.closeTab.action(in: ctx) != nil)
+
+        state.showProjectScreen(project, in: window)
+
+        #expect(AppCommand.closeTab.action(in: ctx) == nil, "no hidden tab closes")
+        #expect(AppCommand.closePane.action(in: ctx) == nil)
+        #expect(AppCommand.splitRight.action(in: ctx) == nil)
+        #expect(AppCommand.newTab.action(in: ctx) != nil, "New Tab still works")
+        #expect(AppCommand.recentTab.action(in: ctx) != nil)
+    }
+
+    @Test
+    func selecting_a_tab_ends_the_project_screen() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        state.selectTab(ws.tabs[0].id, projectID: project.id)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[0])
+    }
+
+    @Test
+    func selecting_the_tab_that_the_screen_replaced_ends_the_project_screen() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        state.selectTab(ws.tabs[1].id, projectID: project.id, in: window)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1])
+    }
+
+    @Test
+    func a_new_tab_ends_the_project_screen_and_a_background_new_tab_does_not() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        _ = try #require(state.createTab(projectID: project.id, projectPath: "/tmp", focus: false))
+        #expect(window.showsProjectScreen, "tab new --no-focus leaves the screen")
+
+        let id = try #require(state.createTab(projectID: project.id, projectPath: "/tmp"))
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window)?.id == id)
+        #expect(ws.activeTabID == id)
+    }
+
+    @Test
+    func another_project_clears_the_project_screen() throws {
+        let state = makeAppState()
+        let (project, _, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+
+        state.selectProject(other, in: window)
+
+        #expect(window.activeProjectID == other.id)
+        #expect(!window.showsProjectScreen, "a window that moves to a project for another reason shows a tab")
+    }
+
+    @Test
+    func next_project_back_to_a_project_shows_the_tab_the_screen_replaced() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        state.selectProject(other, in: window)
+
+        state.selectProject(project, in: window)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1])
+        #expect(ws.activeTabID == ws.tabs[1].id)
+    }
+
+    @Test
+    func the_project_screen_of_a_background_window_leaves_the_key_windows_tab() throws {
+        let state = makeAppState()
+        let (project, ws, key) = try keyWindowOnTwoTabs(state)
+        let other = WindowState(activeProjectID: project.id)
+        state.registerWindow(other)
+
+        state.showProjectScreen(project, in: other)
+
+        #expect(other.showsProjectScreen)
+        #expect(!state.keyWindowShowsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: other) == nil)
+        #expect(state.selectedTab(for: project.id, in: key) === ws.tabs[1])
+
+        state.selectTab(ws.tabs[0].id, projectID: project.id, in: other)
+        #expect(!other.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: other) === ws.tabs[0])
+    }
+
+    @Test
+    func recent_tab_from_the_project_screen_shows_the_tab_the_screen_replaced() throws {
+        let state = makeAppState()
+        let (project, ws, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        state.cycleRecentTab(projectID: project.id)
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: project.id, in: window) === ws.tabs[1])
+    }
+
+    @Test
+    func a_new_window_opens_on_the_project_screen_the_key_window_shows() throws {
+        let state = makeAppState()
+        let (project, _, window) = try keyWindowOnTwoTabs(state)
+        state.showProjectScreen(project, in: window)
+
+        let other = WindowState()
+        state.registerWindow(other)
+
+        #expect(other.activeProjectID == project.id)
+        #expect(other.showsProjectScreen)
+    }
+
+    @Test
+    func the_project_screen_and_the_tab_behind_it_survive_a_relaunch() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
+        let projects = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
+        let files = ProjectFileStore(directoryURL: projects)
+        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let (project, ws, window) = try keyWindowOnTwoTabs(writer)
+        let behind = ws.tabs[1].id
+        writer.showProjectScreen(project, in: window)
+        writer.saveWorkspaces()
+
+        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        reader.incubatePane = { _ in }
+        reader.restoreSelection(projects: [project])
+        let first = WindowState()
+        reader.restoreWindows(adopting: first)
+        reader.registerWindow(first)
+        reader.noteKeyWindow(first)
+
+        #expect(first.activeProjectID == project.id)
+        #expect(first.showsProjectScreen)
+        #expect(reader.selectedTab(for: project.id, in: first) == nil)
+        #expect(reader.workspaces[project.id]?.activeTabID == behind)
+
+        reader.cycleRecentTab(projectID: project.id)
+        #expect(reader.selectedTab(for: project.id, in: first)?.id == behind)
     }
 }
 

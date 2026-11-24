@@ -168,8 +168,8 @@ jobs:
           scripts/protocol.sh --check --base-release
 
       # A skipped test fails the step, so a missing tool cannot hide a test.
-      # daemon_responsibility.bats tests a macOS concept, so Linux leaves it
-      # out. The short TMPDIR keeps the socket paths under the macOS limit of
+      # daemon_responsibility.bats and login_macos.bats test macOS concepts,
+      # so Linux leaves them out. The short TMPDIR keeps the socket paths under the macOS limit of
       # 104 bytes.
       - name: Run the Bats Tests
         if: env.SERVER == 'true'
@@ -179,7 +179,7 @@ jobs:
         run: |
           files=()
           for f in test/*.bats; do
-            if [ "$RUNNER_OS" != macOS ] && [ "$f" = test/daemon_responsibility.bats ]; then
+            if [ "$RUNNER_OS" != macOS ] && { [ "$f" = test/daemon_responsibility.bats ] || [ "$f" = test/login_macos.bats ]; }; then
               continue
             fi
             files+=("$f")

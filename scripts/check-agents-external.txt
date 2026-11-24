@@ -15,7 +15,6 @@ Mods.ctrlOrSuper
 RenderState.RegionShifts
 RenderState.Shift.rowsAboveAt
 RenderState.resolveShift
-Screen.commandInputString
 Screen.viewport_offset_eases
 Screen.viewport_pixel_offset
 Selection.expandToLines
