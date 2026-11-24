@@ -63,10 +63,12 @@ enum SidebarTree {
         }
     }
 
-    /// The name of a project in a menu: the names of the projects above it
-    /// and its own, joined with " / ", so two projects of one name differ.
+    /// The path of names of a project (`Work/api`): the names of the
+    /// projects above it and its own, joined with "/" (Ethan, 2026-11-23).
+    /// A project name has no slash (`Project.nameRefusal`), so the path
+    /// reads one way.
     static func pathName(of project: Project, in store: ProjectStore) -> String {
         let names = store.ancestors(of: project.id).reversed().compactMap { store.row($0)?.name }
-        return (names + [project.name]).joined(separator: " / ")
+        return (names + [project.name]).joined(separator: "/")
     }
 }

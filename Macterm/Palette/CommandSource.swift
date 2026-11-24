@@ -127,7 +127,7 @@ struct CommandSource: PaletteSource {
             score: 0,
             // A command that is a palette screen opens it in place rather
             // than closing the palette to reopen it.
-            opensScope: command.paletteScope,
+            opensScope: command.paletteScope(in: commandCtx),
             searchAliases: command.searchAliases,
             action: action
         )

@@ -284,6 +284,24 @@ extension AppCommand {
             return { view.explainOutput() }
         case .openProject:
             return { _ = ctx.appState.openProject(store: ctx.projectStore) }
+        // The project tree (design 013): each acts on the active project,
+        // as the items of its sidebar menu do.
+        case .newProjectInside:
+            guard let current else { return nil }
+            return {
+                guard let project = ctx.appState.openProject(store: ctx.projectStore, inside: current) else { return }
+                // Open the parent and the projects above it, so that the
+                // new row shows.
+                ctx.appState.keyWindow?.expandedRows.formUnion(
+                    [project.id, current.id] + SidebarTree.parentsToOpen(for: current.id, in: ctx.projectStore)
+                )
+            }
+        case .moveIntoProject:
+            guard let scope = paletteScope(in: ctx) else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: scope) }
+        case .moveOutOfProject:
+            guard let current, current.parent != nil else { return nil }
+            return { ctx.projectStore.moveOut(current.id) }
         case .newRemoteProject:
             return { ctx.appState.isNewRemoteProjectSheetPresented = true }
         case .renameProject:

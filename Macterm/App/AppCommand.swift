@@ -67,6 +67,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case saveLayout
     case nextProject
     case previousProject
+    case newProjectInside
+    case moveIntoProject
+    case moveOutOfProject
     // Window
     case toggleSidebar
     case toggleProjectMemory
@@ -159,6 +162,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .saveLayout: "Save Layout"
         case .nextProject: "Next Project"
         case .previousProject: "Previous Project"
+        case .newProjectInside: "New Project Inside"
+        case .moveIntoProject: "Move Into Project"
+        case .moveOutOfProject: "Move Out of Project"
         case .toggleSidebar: "Toggle Sidebar"
         case .toggleProjectMemory: "Toggle Project Insights"
         case .toggleToolbar: "Toggle Toolbar"
@@ -230,7 +236,10 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .applyLayout,
              .saveLayout,
              .nextProject,
-             .previousProject: .projects
+             .previousProject,
+             .newProjectInside,
+             .moveIntoProject,
+             .moveOutOfProject: .projects
         case .toggleSidebar,
              .toggleProjectMemory,
              .toggleToolbar,
@@ -311,6 +320,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .capturePaletteScreenshot: .capturePaletteScreenshot
         case .applyLayout: .applyLayout
         case .saveLayout: .saveLayout
+        case .newProjectInside: .newProjectInside
+        case .moveIntoProject: .moveIntoProject
+        case .moveOutOfProject: .moveOutOfProject
         case .newRemoteProject,
              .newDesktopWidget,
              .removeProject,
@@ -328,6 +340,20 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .files: .files
         default: nil
         }
+    }
+
+    /// The palette screen this command opens now: `paletteScope`, or an
+    /// input screen about the active project (Move Into Project), which
+    /// needs the context to name it. nil when the command opens no screen,
+    /// or when it does not apply.
+    @MainActor
+    func paletteScope(in ctx: AppCommandContext) -> PaletteScopeID? {
+        guard self == .moveIntoProject else { return paletteScope }
+        guard let projectID = ctx.appState.activeProjectID,
+              !SidebarTree.moveTargets(for: projectID, in: ctx.projectStore).isEmpty,
+              ctx.projectStore.row(projectID) != nil
+        else { return nil }
+        return .input(MoveIntoProjectInput.make(projectID: projectID, appState: ctx.appState, store: ctx.projectStore))
     }
 
     /// The raw value is an identifier, never shown: `title` is the label.

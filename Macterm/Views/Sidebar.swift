@@ -839,12 +839,7 @@ struct SidebarContent: View {
             Menu("Move Into Project") {
                 ForEach(targets) { target in
                     Button(SidebarTree.pathName(of: target, in: projectStore)) {
-                        projectStore.move(project.id, into: target.id)
-                        // Open the target and the projects above it, so
-                        // that the moved row shows.
-                        windowState.expandedRows.formUnion(
-                            [target.id] + SidebarTree.parentsToOpen(for: target.id, in: projectStore)
-                        )
+                        appState.moveProject(project.id, into: target.id, store: projectStore, in: windowState)
                     }
                 }
             }
