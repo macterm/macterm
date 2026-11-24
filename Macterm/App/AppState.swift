@@ -2220,14 +2220,14 @@ final class AppState {
     }
 
     /// Rename a project from its sidebar row (the inline edit). A name that
-    /// `projectRenameRefusal` refuses gets a notice and the old name stays,
-    /// as `project rename` refuses it with a `bad_request`. The field has
-    /// closed by the time the name arrives, so the notice is the one place
-    /// left to say why.
+    /// `Project.nameRefusal` refuses (a slash, a reserved name) gets a notice
+    /// and the old name stays, as `project rename` refuses it with a
+    /// `bad_request`. The field has closed by the time the name arrives, so
+    /// the notice is the one place left to say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
         if let message = applyProjectRename(projectID, to: name, store: store) {
             present(.notice(
-                .reservedProjectName,
+                .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
@@ -2240,7 +2240,7 @@ final class AppState {
     /// refused, and then changes nothing; nil when the project has the name.
     /// An unchanged name writes nothing.
     func applyProjectRename(_ projectID: UUID, to name: String, store: ProjectStore) -> String? {
-        if let message = Project.reservedNameMessage(for: name) { return message }
+        if let message = Project.nameRefusal(for: name) { return message }
         guard store.projects.first(where: { $0.id == projectID })?.name != name else { return nil }
         store.rename(id: projectID, to: name)
         return nil

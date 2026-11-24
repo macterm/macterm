@@ -252,7 +252,7 @@ struct NewRemoteProjectDialogTests {
     }
 
     @Test
-    func a_typed_name_wins_and_a_reserved_name_disables_add() async throws {
+    func a_typed_name_wins_and_a_refused_name_disables_add() async throws {
         let check = Check()
         let created = Created()
         let draft = try #require(NewRemoteProjectDraft(path: "me@devbox:/"))
@@ -263,6 +263,9 @@ struct NewRemoteProjectDialogTests {
         type("Pinned", in: dialog.nameField, of: dialog)
         #expect(!dialog.alert.buttons[0].isEnabled)
         #expect(!dialog.statusText.isEmpty)
+        type("Work/api", in: dialog.nameField, of: dialog)
+        #expect(!dialog.alert.buttons[0].isEnabled)
+        #expect(dialog.statusText == Project.slashMessage)
         type("API box", in: dialog.nameField, of: dialog)
         #expect(dialog.alert.buttons[0].isEnabled)
         dialog.alert.buttons[0].performClick(nil)

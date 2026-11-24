@@ -193,7 +193,7 @@
       "hidden" : false,
       "options" : [
         {
-          "abstract" : "Display name. The default is the name of the directory.",
+          "abstract" : "Display name, with no slash. The default is the name of the directory.",
           "debug" : false,
           "hidden" : false,
           "names" : [
@@ -343,7 +343,7 @@
           "repeating" : false
         },
         {
-          "abstract" : "New name for the project.",
+          "abstract" : "New name for the project, with no slash.",
           "hidden" : false,
           "name" : "name",
           "optional" : false,

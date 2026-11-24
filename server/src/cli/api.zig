@@ -82,6 +82,15 @@ pub fn describe(arena: std.mem.Allocator, method: metadata.Method) error{OutOfMe
     return .{ .object = o };
 }
 
+/// One type as a JSON Schema that stands alone: the types that it names are
+/// in its own `$defs` (an MCP tool's `inputSchema` and `outputSchema`).
+pub fn schema(arena: std.mem.Allocator, type_name: []const u8) error{OutOfMemory}!Value {
+    var defs: ObjectMap = .empty;
+    var root = try definition(arena, typeDef(type_name), &defs);
+    if (defs.count() > 0) try root.object.put(arena, "$defs", .{ .object = defs });
+    return root;
+}
+
 fn typeDef(name: []const u8) metadata.TypeDef {
     for (metadata.metadata.types) |t| if (std.mem.eql(u8, t.name, name)) return t;
     // `build` collects every type that a method holds.

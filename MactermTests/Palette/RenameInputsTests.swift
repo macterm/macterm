@@ -156,6 +156,15 @@ struct RenameInputsTests {
     }
 
     @Test
+    func project_name_with_a_slash_is_refused_on_the_screen() throws {
+        let (state, store, project) = makeState()
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
+        #expect(!screen.commit("work/api"))
+        #expect(screen.failure?.title == Project.nameRefusal(for: "work/api"))
+        #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
+    }
+
+    @Test
     func project_escape_changes_nothing() throws {
         let (state, store, project) = makeState()
         try typeThenEscape(
