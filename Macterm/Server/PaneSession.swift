@@ -341,7 +341,12 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 // Only the first attach makes the session. A session that is
                 // gone later ended: the server ends a session whose shell
                 // exited, and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: endpoint.connection(), launch) }
+                if firstAttach, let launch {
+                    // On the relay's link when the channel goes there, so
+                    // that the create and the channel are one connection.
+                    let link = try await (channels as? any ServerLink) ?? endpoint.connection()
+                    try await createSession(on: link, launch)
+                }
                 let channel = try await channels.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()

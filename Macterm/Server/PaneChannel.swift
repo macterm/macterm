@@ -176,7 +176,7 @@ final class PaneChannel: @unchecked Sendable {
 
     /// The events of the channel. Each event that the consumer takes gives
     /// the reader room for one more.
-    struct Events: AsyncSequence, Sendable {
+    struct Events: AsyncSequence {
         typealias Element = PaneChannelEvent
         fileprivate let stream: AsyncStream<PaneChannelEvent>
         fileprivate let credit: Credit?
