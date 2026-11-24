@@ -497,10 +497,10 @@ final class Pane: Identifiable {
     /// only as a fallback when the report has none. The idle verdict
     /// (`foreground.isIdle`) is foreground pgid == the process that the
     /// session started, and the shell verdict (`foreground.isShell`) is the
-    /// host's `/etc/shells`. Under login(1) the session takes the shell's
-    /// group as its own (issue 0448), so a nested shell is a running child,
-    /// as libghostty reads it, in a local and a remote pane. A
-    /// prompt hook never names the pane (`isPromptHook`). For the run
+    /// host's `/etc/shells`. Under login(1), the session takes the shell's
+    /// group as its own (issue 0448). Therefore, a nested shell is a running
+    /// child in a local and a remote pane, as libghostty reads it. A prompt
+    /// hook never names the pane (`isPromptHook`). For the run
     /// tracker only, a shell that runs `-c` or a script is a program
     /// (`trackerForeground`): `pane run '/bin/sh -c "…"'` is a run.
     ///
