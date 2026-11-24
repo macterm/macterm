@@ -326,6 +326,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         switch self {
         case .passwordManager: .passwords
         case .files: .files
+        case .newRemoteProject: .remoteHosts
         default: nil
         }
     }

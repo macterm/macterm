@@ -95,21 +95,23 @@ struct DirectorySource: PaletteSource {
             title: name,
             subtitle: String(localized: "Add remote project: \(spec)"),
             category: Self.category,
-            score: 0
-        ) { [appState = context.appState] in
-            Self.addRemote(spec, appState: appState)
-        }
+            score: 0,
+            opensScope: Self.remoteFolderScope(spec, context: context)
+        ) {}
         return [addItem]
     }
 
-    /// A new remote project goes through the New Remote Project dialog,
-    /// filled in, which checks the folder on the host at once (0358): the
-    /// login, the install question and a refusal show there, and the user
-    /// can correct a field. The name follows the folder
-    /// (`ProjectPath.remoteDisplayName`) until the user types one.
-    private static func addRemote(_ spec: String, appState: AppState) {
-        guard let draft = NewRemoteProjectDraft(path: spec) else { return }
-        appState.presentNewRemoteProject(draft)
+    /// A new remote project goes through step 2 of New Remote Project, the
+    /// folder on the host, filled in (`RemoteHostsPaletteScope.folderInput`):
+    /// Return checks the folder on the host (0358), and the user can
+    /// correct it there.
+    private static func remoteFolderScope(_ spec: String, context: PaletteContext) -> PaletteScopeID? {
+        guard case let .remote(user, host, directory) = ProjectPath.parse(spec) else { return nil }
+        return .input(RemoteHostsPaletteScope.folderInput(
+            destination: HostCommands.destination(user: user, host: host),
+            directory: directory,
+            context: context
+        ))
     }
 
     private func directoryItem(
@@ -160,13 +162,10 @@ struct DirectorySource: PaletteSource {
             title: name,
             subtitle: String(localized: "Add another project: \(fullPath)"),
             category: Self.category,
-            score: score
+            score: score,
+            opensScope: Self.remoteFolderScope(fullPath, context: context)
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            guard ProjectPath.isRemote(fullPath) else {
-                appState.selectProject(projectStore.create(name: name, path: fullPath))
-                return
-            }
-            Self.addRemote(fullPath, appState: appState)
+            appState.selectProject(projectStore.create(name: name, path: fullPath))
         }
     }
 }

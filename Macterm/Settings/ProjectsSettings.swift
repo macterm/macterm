@@ -216,16 +216,16 @@ struct ProjectsSettings: View {
         appState.openProject(store: projectStore)
     }
 
-    /// The remote sheet is attached to `MainWindow`, so it would open behind the
-    /// settings window. Front the terminal window first — the sheet is where the
-    /// host/dir get entered, and it has to be visible to be filled in.
+    /// New Remote Project is a palette flow in a terminal window, so it
+    /// would open behind the settings window. Front the terminal window
+    /// first.
     private func addRemoteProject() {
         for window in NSApp.windows where window.isVisible && !(window is NSPanel) {
             guard window.contentViewController != nil, window.canBecomeMain else { continue }
             window.makeKeyAndOrderFront(nil)
             break
         }
-        appState.isNewRemoteProjectSheetPresented = true
+        appState.openCommandPalette(scope: .remoteHosts)
     }
 
     // MARK: - Layouts

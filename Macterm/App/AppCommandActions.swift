@@ -285,7 +285,7 @@ extension AppCommand {
         case .openProject:
             return { _ = ctx.appState.openProject(store: ctx.projectStore) }
         case .newRemoteProject:
-            return { ctx.appState.isNewRemoteProjectSheetPresented = true }
+            return { ctx.appState.openCommandPalette(scope: .remoteHosts) }
         case .renameProject:
             guard let current else { return nil }
             let projectID = current.id

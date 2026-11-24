@@ -343,9 +343,7 @@ struct SidebarContent: View {
             HStack(spacing: 0) {
                 Menu {
                     Button("Local Folder…") { openProject() }
-                    Button("Remote Machine…") {
-                        windowState.isNewRemoteProjectSheetPresented = true
-                    }
+                    Button("Remote Machine…") { appState.openCommandPalette(scope: .remoteHosts) }
                 } label: {
                     Label("New Project", systemImage: "plus")
                         .font(.body)
@@ -825,7 +823,7 @@ struct SidebarContent: View {
             // Right-click on empty space.
             Menu("New Project") {
                 Button("Local Folder…") { openProject() }
-                Button("Remote Machine…") { windowState.isNewRemoteProjectSheetPresented = true }
+                Button("Remote Machine…") { appState.openCommandPalette(scope: .remoteHosts) }
             }
             Button("New Scratch Tab") { appState.createScratchTab() }
             Button("New Group") { createGroup(beside: nil) }

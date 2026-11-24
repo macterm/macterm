@@ -80,11 +80,32 @@ enum PaletteCommit: Equatable {
     case done
     /// The value is not allowed; the screen stays and shows the reason.
     case refused(String)
+    /// The value needs a check that takes time (a host to ask): the screen
+    /// stays, shows the check's message as it loads, and acts on the
+    /// commit that the check returns.
+    case check(PaletteCheck)
+}
+
+/// A commit that waits on work: `message` shows while `run` runs. `run`
+/// does the action itself before it returns `.done`, and must do nothing
+/// when its task is cancelled: the screen cancels it when it leaves the
+/// stack (Escape, a pop, the palette closes).
+struct PaletteCheck: Equatable {
+    let message: String
+    let run: @MainActor () async -> PaletteCommit
+
+    static func == (lhs: PaletteCheck, rhs: PaletteCheck) -> Bool {
+        lhs.message == rhs.message
+    }
 }
 
 /// The scope of an input screen (`PaletteInput`). It keeps the text of its
 /// field, so that the field has it again when the screen comes back to the
 /// top of the stack.
+///
+/// A commit that checks (`PaletteCommit.check`) runs as the screen's
+/// `loading`. Return does nothing until it ends. Its `.done` sets
+/// `isFinished`, and the palette closes on the next `onChange`.
 @MainActor
 final class InputPaletteScope: PaletteScope {
     let input: PaletteInput
@@ -94,6 +115,11 @@ final class InputPaletteScope: PaletteScope {
     /// changes.
     private var refusedText: String?
     private var completions: [PaletteCompletion] = []
+    private(set) var loading: PaletteLoading?
+    /// A checked commit ran its action: the palette closes.
+    private(set) var isFinished = false
+    private var check: Task<Void, Never>?
+    private var onChange: (@MainActor () -> Void)?
     /// True until the screen has shown once: only then does the panel
     /// select the field's text, the initial value.
     var isFirstShow = true
@@ -122,10 +148,25 @@ final class InputPaletteScope: PaletteScope {
         completions.first { Self.itemID($0) == item.id }?.value
     }
 
+    func activate(context _: PaletteContext, onChange: @escaping @MainActor () -> Void) {
+        self.onChange = onChange
+    }
+
+    func deactivate() {
+        check?.cancel()
+        check = nil
+        loading = nil
+    }
+
     /// Commit `text`. True when the palette closes; false when the value
-    /// was refused, and `failure` has the reason.
+    /// was refused, and `failure` has the reason, or a check started.
     func commit(_ text: String) -> Bool {
-        switch input.commit(text) {
+        guard check == nil else { return false }
+        return apply(input.commit(text), for: text)
+    }
+
+    private func apply(_ result: PaletteCommit, for text: String) -> Bool {
+        switch result {
         case .done:
             failure = nil
             refusedText = nil
@@ -133,6 +174,19 @@ final class InputPaletteScope: PaletteScope {
         case let .refused(reason):
             failure = PaletteFailure(title: reason, retryable: false)
             refusedText = text
+            return false
+        case let .check(pending):
+            failure = nil
+            refusedText = nil
+            loading = PaletteLoading(message: pending.message)
+            check = Task { [weak self] in
+                let result = await pending.run()
+                guard let self, !Task.isCancelled else { return }
+                check = nil
+                loading = nil
+                if apply(result, for: text) { isFinished = true }
+                onChange?()
+            }
             return false
         }
     }

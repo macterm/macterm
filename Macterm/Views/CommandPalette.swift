@@ -464,7 +464,15 @@ struct CommandPalettePanel: View {
     private func activateScope() {
         guard let scope else { return }
         let context = PaletteContext(appState: appState, projectStore: projectStore)
-        scope.activate(context: context) { refresh() }
+        scope.activate(context: context) {
+            // A checked commit of an input screen ran its action.
+            if let inputScope = scope as? InputPaletteScope, inputScope.isFinished {
+                query = ""
+                windowState.isCommandPaletteVisible = false
+                return
+            }
+            refresh()
+        }
     }
 
     private func refresh() {

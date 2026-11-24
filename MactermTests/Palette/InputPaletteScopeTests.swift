@@ -89,6 +89,83 @@ struct InputPaletteScopeTests {
         #expect(log.committed == ["ab"])
     }
 
+    /// Waits until `condition` holds, sleeping between reads.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0 ..< 200 where !condition() {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// A check whose answer the test gives.
+    final class Gate {
+        var continuation: CheckedContinuation<PaletteCommit, Never>?
+    }
+
+    private func checkingInput(gate: Gate, log: Log) -> PaletteInput {
+        PaletteInput(id: "test.check", pill: PalettePill(title: "Check", icon: "network"), prompt: "Folder") { text in
+            .check(PaletteCheck(message: "Checking \(text)…") {
+                let result = await withCheckedContinuation { gate.continuation = $0 }
+                guard !Task.isCancelled else { return .refused("") }
+                if result == .done { log.committed.append(text) }
+                return result
+            })
+        }
+    }
+
+    @Test
+    func a_checked_commit_loads_then_finishes_and_tells_the_palette() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        var changes = 0
+        scope.activate(context: makeContext()) { changes += 1 }
+
+        #expect(!scope.commit("~/api"), "a check keeps the screen")
+        #expect(scope.loading == PaletteLoading(message: "Checking ~/api…"))
+        try await waitUntil { gate.continuation != nil }
+        #expect(!scope.commit("~/api"), "Return does nothing while the check runs")
+
+        gate.continuation?.resume(returning: .done)
+        try await waitUntil { scope.isFinished }
+        #expect(scope.isFinished)
+        #expect(scope.loading == nil)
+        #expect(changes == 1)
+        #expect(log.committed == ["~/api"])
+    }
+
+    @Test
+    func a_checked_refusal_keeps_the_screen_with_its_line() async throws {
+        let gate = Gate()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: Log()))
+        scope.activate(context: makeContext()) {}
+
+        #expect(!scope.commit("~/none"))
+        try await waitUntil { gate.continuation != nil }
+        gate.continuation?.resume(returning: .refused("There is no path ~/none on devbox."))
+        try await waitUntil { scope.loading == nil }
+        #expect(!scope.isFinished)
+        #expect(scope.failure == PaletteFailure(title: "There is no path ~/none on devbox.", retryable: false))
+    }
+
+    @Test
+    func leaving_the_screen_cancels_its_check() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        var changes = 0
+        scope.activate(context: makeContext()) { changes += 1 }
+
+        #expect(!scope.commit("~/api"))
+        try await waitUntil { gate.continuation != nil }
+        scope.deactivate()
+        #expect(scope.loading == nil)
+        gate.continuation?.resume(returning: .done)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!scope.isFinished)
+        #expect(changes == 0)
+        #expect(log.committed.isEmpty, "a cancelled check does not act")
+    }
+
     @Test
     func completions_are_rows_that_fill_the_field() throws {
         let scope = InputPaletteScope(input: makeInput(log: Log()) { text in

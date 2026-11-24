@@ -21,6 +21,10 @@ import Foundation
 enum PaletteScopeID: Hashable {
     case passwords
     case files
+    /// New Remote Project, step 1: the hosts of the ssh config
+    /// (`RemoteHostsPaletteScope`). The step of a command of the Projects
+    /// category, so it is not in `builtIn`.
+    case remoteHosts
     /// A screen of a custom palette (`CustomPaletteFile`): its file, node,
     /// the values exported above it and the pill naming it.
     case custom(CustomPaletteTarget)
@@ -36,6 +40,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PalettePill(title: AppCommand.passwordManager.title, icon: "key.fill")
         case .files: PalettePill(title: AppCommand.files.title, icon: "doc.text.magnifyingglass")
+        case .remoteHosts: PalettePill(title: AppCommand.newRemoteProject.title, icon: RemoteHostsPaletteScope.icon)
         case let .custom(target): target.pill
         case let .input(input): input.pill
         }
@@ -49,6 +54,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
+        case .remoteHosts: String(localized: "Add a folder on an ssh host as a project")
         case .custom,
              .input: ""
         }
@@ -60,6 +66,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: .passwordManager
         case .files: .files
+        case .remoteHosts: .newRemoteProject
         case .custom,
              .input: nil
         }
@@ -70,6 +77,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PasswordPaletteScope()
         case .files: FilesPaletteScope()
+        case .remoteHosts: RemoteHostsPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
         case let .input(input): InputPaletteScope(input: input)
         }

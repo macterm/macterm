@@ -47,6 +47,11 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
+      - A commit that takes time returns `PaletteCommit.check`. The screen shows its message as `loading`, and Return does nothing until it ends. Its `.done` sets `InputPaletteScope.isFinished`, and the palette closes. A pop or a close cancels it, and a cancelled check does nothing.
+    - `RemoteHostsPaletteScope`: New Remote Project (`PaletteScopeID.remoteHosts`, the screen of `AppCommand.newRemoteProject`).
+      - Step 1 lists the hosts of `~/.ssh/config` (`SSHConfigHosts`: each `Host` name with no wildcard, `Include` followed, `Match` not read), with `HostName` and `User` as the subtitle. A typed `[user@]host` that no row names is the first row. Each open reads the file again.
+      - Step 2 is an input screen for the folder (`folderInput`, `~` first). Return checks the folder on the host (`RemoteHosts.refusal`) and adds the project. The sidebar's New Project menu, Settings → Projects and the palette's typed `host:folder` open this flow. There is no sheet.
+      - It is the step of a Projects command, so it is not in `PaletteScopeID.builtIn` and has no chord of the Palettes section.
     - `PasswordPaletteScope`.
     - `FilesPaletteScope`: the files and directories of the active local project.
       - `FileIndex.scan` walks a level at a time, so that the cap of 20k cuts the deepest level, never the top. It skips hidden directories and the directories for dependencies and builds. It lists a linked directory, and it never enters it.

@@ -155,10 +155,6 @@ final class WindowState: Identifiable {
         popped.forEach { $0.scope.deactivate() }
     }
 
-    var isNewRemoteProjectSheetPresented = false
-    /// The fields that the palette filled in for the sheet: it checks them
-    /// at once. nil: the sheet opens empty.
-    var newRemoteProjectDraft: NewRemoteProjectDraft?
     /// The password editor sheet up in this window — the palette's Password
     /// Manager adding an entry.
     var passwordEditor: PasswordEditorRequest?
