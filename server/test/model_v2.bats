@@ -61,7 +61,7 @@ assert c.call("project.create", id="p1", name="One", path="/tmp/one") == {}
 b = batch_of(c, rid)
 assert b["seq"] == seq + 1
 names = [e["e"] for e in b["ev"]]
-assert names == ["project.set", "project.order", "tab.order"], names
+assert names == ["project.set", "project.order"], names
 assert b["ev"][0]["a"]["project"]["name"] == "One"
 # The other client gets the same batch with no cause.
 ob = other.wait(lambda: [v for v in other.control() if isinstance(v, dict) and v.get("seq") == seq + 1], what="the batch")
@@ -71,12 +71,12 @@ assert ob.get("cause") is None and [e["e"] for e in ob["ev"]] == names
 pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
 tree = {"t": "split", "a": {"id": "s1", "dir": "horizontal", "ratio": 0.5, "first": pane("a"), "second": pane("b")}}
 rid = c.next_id
-c.call("tab.create", workspace="p1", id="t1", root=tree)
+c.call("tab.create", project="p1", id="t1", root=tree)
 b = batch_of(c, rid)
 tab = next(e["a"] for e in b["ev"] if e["e"] == "tab.set")
-assert tab["workspace"] == "p1" and tab["tab"]["focused"] == "a", tab
+assert tab["project"] == "p1" and tab["tab"]["focused"] == "a", tab
 order = next(e["a"] for e in b["ev"] if e["e"] == "tab.order")
-assert order == {"workspace": "p1", "kind": "project", "ids": ["t1"], "active_tab": "t1"}, order
+assert order == {"project": "p1", "ids": ["t1"], "active_tab": "t1"}, order
 
 rid = c.next_id
 c.call("pane.split", tab="t1", target="b", new={"id": "c", "session": "macterm-x-c"}, split_id="s2", dir="vertical")
@@ -105,7 +105,7 @@ assert c.call("project.reorder", parent="p1", ids=["p2"]) == {}
 assert c.call("project.remove", id="p2").get("panes", []) == []
 
 # Errors: an id in use, an unknown id, a request that the model refuses.
-assert c.request("tab.create", workspace="p1", id="t2", root=pane("a"))["err"]["code"] == "duplicate_id"
+assert c.request("tab.create", project="p1", id="t2", root=pane("a"))["err"]["code"] == "duplicate_id"
 assert c.request("pane.focus", id="nope")["err"]["code"] == "not_found"
 assert c.request("project.reorder", ids=["p1", "p1"])["err"]["code"] == "invalid_args"
 assert c.request("pane.split", tab="t1", target="b", new={"id": "d", "session": "x"}, split_id="s3", dir="sideways")["err"]["code"] == "invalid_args"
@@ -124,7 +124,7 @@ assert sorted(p["id"] for p in res["panes"]) == ["a", "b", "c"], res
 b = batch_of(c, rid)
 gone = sorted(e["a"]["id"] for e in b["ev"] if e["e"] == "pane.removed")
 assert gone == ["a", "b", "c"], b
-assert [e["a"] for e in b["ev"] if e["e"] == "tab.remove"] == [{"workspace": "p1", "id": "t1"}]
+assert [e["a"] for e in b["ev"] if e["e"] == "tab.remove"] == [{"project": "p1", "id": "t1"}]
 PY
 }
 
@@ -136,11 +136,11 @@ c = ServerClient(level=3)
 st = c.call("state.subscribe")
 c.call("project.create", id="p1", name="One", path="/tmp/one")
 pane = {"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}}
-c.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"workspace": "p1", "id": "t1", "root": pane}})
+c.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"project": "p1", "id": "t1", "root": pane}})
 c.wait(lambda: [v for v in c.control() if isinstance(v, dict) and v.get("re") == 50], what="the reply")
 batches = lambda cl: [v for v in cl.control() if isinstance(v, dict) and "seq" in v]
 n = len(batches(c))
-c.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"workspace": "p1", "id": "t1", "root": pane}})
+c.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"project": "p1", "id": "t1", "root": pane}})
 c.wait(lambda: len([v for v in c.control() if isinstance(v, dict) and v.get("re") == 50]) == 2, what="the second reply")
 replies = [v for v in c.control() if isinstance(v, dict) and v.get("re") == 50]
 assert replies[0] == replies[1] and "ok" in replies[1], replies
@@ -148,14 +148,14 @@ assert len(batches(c)) == n, "no second batch"
 
 # A new connection: the same request id is a new request.
 d = ServerClient(level=3)
-d.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"workspace": "p1", "id": "t1", "root": pane}})
+d.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"project": "p1", "id": "t1", "root": pane}})
 d.wait(lambda: [v for v in d.control() if isinstance(v, dict) and v.get("re") == 50], what="the reply")
 assert [v for v in d.control() if isinstance(v, dict) and v.get("re") == 50][0]["err"]["code"] == "duplicate_id"
 
 # A connection that resumes as the first client gets the first reply.
 e = ServerClient(level=3)
 e.call("control.resume", epoch=st["epoch"], seq=st["seq"], client=st["client"])
-e.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"workspace": "p1", "id": "t1", "root": pane}})
+e.send_msg(CONTROL, {"id": 50, "m": "tab.create", "a": {"project": "p1", "id": "t1", "root": pane}})
 e.wait(lambda: [v for v in e.control() if isinstance(v, dict) and v.get("re") == 50], what="the reply")
 assert "ok" in [v for v in e.control() if isinstance(v, dict) and v.get("re") == 50][0]
 PY
@@ -169,13 +169,15 @@ from v2client import ServerClient
 path = os.path.join(os.environ["MACTERM_STATE_DIR"], "model.json")
 c = ServerClient(level=3)
 c.call("project.create", id="p1", name="One", path="/tmp/one")
-c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}})
+c.call("tab.create", project="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}})
 deadline = time.time() + 5
 while not os.path.exists(path):
     assert time.time() < deadline, "no model.json"
     time.sleep(0.02)
 time.sleep(0.3)
-assert json.load(open(path))["workspaces"][0]["tabs"][0]["id"] == "t1"
+saved = json.load(open(path))
+assert saved["version"] == 2 and "workspaces" not in saved, saved
+assert saved["projects"][0]["tabs"][0]["id"] == "t1"
 
 # A change, then server.exit at once: the old server writes before it
 # answers, and the new one reads it.
@@ -185,7 +187,7 @@ assert os.system(os.environ["ZMX"] + " server") == 0
 n = ServerClient(level=3)
 model = n.call("state.subscribe")["model"]
 assert model["projects"][0]["id"] == "p1"
-assert model["workspaces"][0]["tabs"][0]["custom_title"] == "kept", model
+assert model["projects"][0]["tabs"][0]["custom_title"] == "kept", model
 PY
 }
 
@@ -228,18 +230,17 @@ PY
 from v2client import ServerClient
 c = ServerClient(level=3)
 c.call("state.subscribe")
-bad = {"projects": [{"id": "p1", "name": "One", "path": "/a"}], "workspaces": []}
+bad = {"projects": [{"id": "p1", "name": "One", "path": "/a", "active_tab": "zz"}]}
 res = c.request("model.import", model=bad, source="test")
-assert res["err"]["code"] == "invalid_args" and "workspaces" in res["err"]["message"], res
+assert res["err"]["code"] == "invalid_args" and "projects[0].active_tab" in res["err"]["message"], res
 good = {
-    "projects": [{"id": "p1", "name": "One", "path": "/a"}],
-    "workspaces": [{"id": "p1", "kind": "project", "tabs": [
+    "projects": [{"id": "p1", "name": "One", "path": "/a", "tabs": [
         {"id": "t1", "root": {"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}}, "focused": "a"}], "active_tab": "t1"}],
     "selection": {"active_project": "p1"},
 }
 c.call("model.import", model=good, source="test")
 st = c.call("state.subscribe")
-assert st["model"]["imported_v1"] is True and st["model"]["workspaces"][0]["tabs"][0]["id"] == "t1", st
+assert st["model"]["imported_v1"] is True and st["model"]["projects"][0]["tabs"][0]["id"] == "t1", st
 assert c.request("model.import", model=good, source="test")["err"]["code"] == "refused"
 PY
 }
@@ -251,18 +252,17 @@ PY
 from v2client import ServerClient
 c = ServerClient(level=3)
 c.call("state.subscribe")
-bad = {"projects": [{"id": "p1", "name": "One", "path": "/a"}], "workspaces": []}
+bad = {"projects": [{"id": "p1", "name": "One", "path": "/a", "active_tab": "zz"}]}
 assert c.request("model.replace", model=bad)["err"]["code"] == "invalid_args"
 def model(tab):
     return {
-        "projects": [{"id": "p1", "name": "One", "path": "/a"}],
-        "workspaces": [{"id": "p1", "kind": "project", "tabs": [
+        "projects": [{"id": "p1", "name": "One", "path": "/a", "tabs": [
             {"id": tab, "root": {"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}}, "focused": "a"}], "active_tab": tab}],
     }
 c.call("model.replace", model=model("t1"))
 c.call("model.replace", model=model("t2"))
 st = c.call("state.subscribe")
-assert st["model"]["imported_v1"] is False and st["model"]["workspaces"][0]["tabs"][0]["id"] == "t2", st
+assert st["model"]["imported_v1"] is False and st["model"]["projects"][0]["tabs"][0]["id"] == "t2", st
 # The pane of t1 left with its tab, and its session stays.
 assert c.call("model.replace", model={}) == {}
 assert any(s["id"] == "macterm-x-a" for s in c.call("session.list")["sessions"])
@@ -279,7 +279,7 @@ from v2client import ServerClient, wait_dead
 c = ServerClient(level=3)
 s = c.call("session.create", id="macterm-x-a", command=[b"/bin/sh"])["session"]
 c.call("project.create", id="p1", name="One", path="/tmp/one")
-c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}})
+c.call("tab.create", project="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "macterm-x-a"}})
 c.call("pane.close", id="a")
 c.wait_event("session.exit", lambda a: a["id"] == "macterm-x-a")
 wait_dead(s["pid"])
@@ -295,9 +295,9 @@ c = ServerClient(level=3)
 s = c.call("session.create", id="shared", command=[b"/bin/sh"])["session"]
 r = c.call("session.create", id="remote-name", command=[b"/bin/sh"])["session"]
 c.call("project.create", id="p1", name="One", path="/tmp/one")
-c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "shared"}})
-c.call("tab.create", workspace="p1", id="t2", root={"t": "pane", "a": {"id": "b", "session": "shared"}})
-c.call("tab.create", workspace="p1", id="t3", root={"t": "pane", "a": {"id": "c", "session": "remote-name", "host": "me@host"}})
+c.call("tab.create", project="p1", id="t1", root={"t": "pane", "a": {"id": "a", "session": "shared"}})
+c.call("tab.create", project="p1", id="t2", root={"t": "pane", "a": {"id": "b", "session": "shared"}})
+c.call("tab.create", project="p1", id="t3", root={"t": "pane", "a": {"id": "c", "session": "remote-name", "host": "me@host"}})
 assert [p["id"] for p in c.call("pane.close", id="b")["panes"]] == ["b"]
 res = c.call("tab.close", id="t3")
 assert res["panes"] == [{"id": "c", "session": "remote-name", "host": "me@host"}], res
@@ -307,31 +307,98 @@ assert set(c.sessions()) == {"shared", "remote-name"}
 PY
 }
 
-@test "model: tabs and panes move between tabs and workspaces with no pane lost" {
+@test "model: tabs and panes move between tabs and projects with no pane lost" {
   "$ZMX" server
   python3 - <<'PY'
 from v2client import ServerClient
 c = ServerClient(level=3)
 pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
 c.call("project.create", id="p1", name="One", path="/tmp/one")
-c.call("workspace.create", id="pin", kind="pinned")
-assert c.request("workspace.create", id="p1", kind="quick")["err"]["code"] == "duplicate_id"
-c.call("tab.create", workspace="p1", id="t1", root=pane("a"))
-c.call("tab.create", workspace="p1", id="t2", root=pane("b"))
-c.call("tab.move", id="t2", to_workspace="pin")
+c.call("project.create", id="pin", name="Pinned", sidebar="top", removable=False, alias="pinned")
+c.call("tab.create", project="p1", id="t1", root=pane("a"))
+c.call("tab.create", project="p1", id="t2", root=pane("b"))
+c.call("tab.move", id="t2", to_project="pin")
 c.call("pane.move", id="a", dest="b", zone="left", split_id="s1")
 c.call("pane.separate", id="a", tab_id="t3")
 c.call("tab.merge", src="t3", dst="t2", target_pane="b", zone="bottom", split_id="s2")
 m = c.call("state.subscribe")["model"]
-pin = next(w for w in m["workspaces"] if w["id"] == "pin")
+pin = next(p for p in m["projects"] if p["id"] == "pin")
 assert [t["id"] for t in pin["tabs"]] == ["t2"] and pin["active_tab"] == "t2", pin
 root = pin["tabs"][0]["root"]
 assert root["t"] == "split" and root["a"]["dir"] == "vertical", root
-assert next(w for w in m["workspaces"] if w["id"] == "p1")["tabs"] == []
+assert next(p for p in m["projects"] if p["id"] == "p1").get("tabs", []) == []
 assert "pane.removed" not in [e["e"] for e in c.events()]
-res = c.call("workspace.remove", id="pin")
-assert sorted(p["id"] for p in res["panes"]) == ["a", "b"], res
-c.wait_event("workspace.remove", lambda a: a["id"] == "pin")
+PY
+}
+
+@test "model: the capability fields of a project refuse what they do not allow" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("project.create", id="pin", name="Pinned", sidebar="top", removable=False, alias="pinned")
+c.call("project.create", id="w1", name="Widget", sidebar="none", single_tab=True)
+st = c.call("state.subscribe")["model"]
+pin = next(p for p in st["projects"] if p["id"] == "pin")
+assert pin["sidebar"] == "top" and pin["removable"] is False and pin["alias"] == "pinned", pin
+# An alias is unique. A hidden project is at the top level and holds no project.
+assert c.request("project.create", id="pin2", name="P", sidebar="top", alias="pinned")["err"]["code"] == "duplicate_id"
+assert c.request("project.create", id="x", name="X", path="/x", parent="pin")["err"]["code"] == "invalid_args"
+assert c.request("project.create", id="y", name="Y", sidebar="bottom", parent="p1")["err"]["code"] == "invalid_args"
+assert c.request("project.set", id="pin", parent="p1")["err"]["code"] == "invalid_args"
+# A single_tab project holds one tab.
+c.call("tab.create", project="w1", id="t1", root=pane("a"))
+assert c.request("tab.create", project="w1", id="t2", root=pane("b"))["err"]["code"] == "refused"
+c.call("tab.create", project="p1", id="t3", root=pane("c"))
+assert c.request("tab.move", id="t3", to_project="w1")["err"]["code"] == "refused"
+# No window selects a project that no window draws.
+assert c.request("select.set", project="w1")["err"]["code"] == "refused"
+assert c.call("select.set", project="pin") == {}
+# A project that is not removable stays; a widget goes with its tab.
+assert c.request("project.remove", id="pin")["err"]["code"] == "refused"
+res = c.call("project.remove", id="w1")
+assert [p["id"] for p in res["panes"]] == ["a"], res
+c.wait_event("project.remove", lambda a: a["id"] == "w1")
+# The order of the top level has the tree projects only.
+assert c.call("project.reorder", ids=["p1"]) == {}
+assert c.request("project.reorder", ids=["p1", "pin"])["err"]["code"] == "invalid_args"
+PY
+}
+
+@test "model: a model.json of version 1 with workspaces loads, and the server writes version 2" {
+  mkdir -p "$RT/state"
+  cat > "$RT/state/model.json" <<'JSON'
+{"version": 1,
+ "projects": [{"id": "p1", "name": "One", "path": "/a", "kind": "project"},
+              {"id": "g1", "name": "G", "path": "", "kind": "group"}],
+ "workspaces": [{"id": "p1", "kind": "project", "active_tab": "t1",
+                 "tabs": [{"id": "t1", "root": {"pane": {"id": "a", "session": "macterm-x-a"}}}]},
+                {"id": "pin", "kind": "pinned"},
+                {"id": "q", "kind": "quick", "tabs": [{"id": "t2", "root": {"pane": {"id": "b", "session": "macterm-x-b"}}}]}],
+ "selection": {"active_project": "p1"}}
+JSON
+  "$ZMX" server
+  python3 - <<'PY'
+import json, os, time
+from v2client import ServerClient
+c = ServerClient(level=3)
+st = c.call("state.subscribe")
+assert st["readonly"] is False, st
+projects = {p["id"]: p for p in st["model"]["projects"]}
+assert set(projects) == {"p1", "g1", "pin", "q"}, projects
+assert projects["p1"]["tabs"][0]["id"] == "t1" and projects["p1"]["active_tab"] == "t1"
+assert projects["pin"]["alias"] == "pinned" and projects["pin"]["sidebar"] == "top"
+assert projects["q"]["alias"] == "quick" and projects["q"]["single_tab"] is True and projects["q"]["tabs"][0]["id"] == "t2"
+c.call("tab.set", id="t1", title="new")
+path = os.path.join(os.environ["MACTERM_STATE_DIR"], "model.json")
+deadline = time.time() + 5
+while json.load(open(path))["version"] != 2:
+    assert time.time() < deadline, "no version 2"
+    time.sleep(0.05)
+saved = json.load(open(path))
+assert "workspaces" not in saved and all("kind" not in p for p in saved["projects"]), saved
 PY
 }
 
@@ -342,14 +409,14 @@ from v2client import ServerClient
 c = ServerClient(level=3)
 pane = lambda pid: {"id": pid, "session": "macterm-x-" + pid}
 c.call("project.create", id="p1", name="One", path="/tmp/one")
-c.call("tab.create", workspace="p1", id="t1", root={"t": "pane", "a": pane("a")})
+c.call("tab.create", project="p1", id="t1", root={"t": "pane", "a": pane("a")})
 c.call("pane.split", tab="t1", target="a", new=pane("b"), split_id="s1", dir="horizontal")
 c.call("pane.split", tab="t1", target="b", new=pane("c"), split_id="s2", dir="horizontal")
-root = c.call("state.subscribe")["model"]["workspaces"][0]["tabs"][0]["root"]
+root = c.call("state.subscribe")["model"]["projects"][0]["tabs"][0]["root"]
 assert root["a"]["ratio"] == 0.5, root
 c.call("model.options", auto_tiling=True)
 c.call("pane.split", tab="t1", target="c", new=pane("d"), split_id="s3", dir="horizontal")
-root = c.call("state.subscribe")["model"]["workspaces"][0]["tabs"][0]["root"]
+root = c.call("state.subscribe")["model"]["projects"][0]["tabs"][0]["root"]
 assert abs(root["a"]["ratio"] - 0.25) < 1e-9, root
 PY
 }
