@@ -500,16 +500,19 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
+                "description": "The version of the format of the model.",
                 "default": 2
               },
               "epoch_hint": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 18446744073709551615,
+                "description": "A number that the server keeps and sends back with no change. It has no other use.",
                 "default": 0
               },
               "imported_v1": {
                 "type": "boolean",
+                "description": "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused. The server sets it: it ignores the value that a client sends.",
                 "default": false
               },
               "projects": {
@@ -517,10 +520,12 @@
                 "items": {
                   "$ref": "#/$defs/Project"
                 },
+                "description": "Every project of the model.",
                 "default": []
               },
               "selection": {
                 "$ref": "#/$defs/Selection",
+                "description": "What is selected in the model.",
                 "default": {}
               }
             },
@@ -530,56 +535,69 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the project."
               },
               "name": {
-                "type": "string"
+                "type": "string",
+                "description": "The name of the project."
               },
               "path": {
-                "type": "string"
+                "type": "string",
+                "description": "The folder of the project: a local path, or user@host:dir for a remote project. Can be empty."
               },
               "color": {
-                "type": "string"
+                "type": "string",
+                "description": "The color tag of the project. Null when the project has no color tag."
               },
               "sort_order": {
                 "type": "integer",
                 "minimum": -9223372036854775808,
                 "maximum": 9223372036854775807,
+                "description": "Orders the projects that have the same parent.",
                 "default": 0
               },
               "created_at": {
                 "type": "integer",
                 "minimum": -9223372036854775808,
                 "maximum": 9223372036854775807,
+                "description": "When the project was made, in Unix time in milliseconds.",
                 "default": 0
               },
               "parent": {
-                "type": "string"
+                "type": "string",
+                "description": "The project that holds this project. Null or empty is the top level."
               },
               "sidebar": {
                 "$ref": "#/$defs/ProjectSidebar",
+                "description": "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes.",
                 "default": "tree"
               },
               "single_tab": {
                 "type": "boolean",
+                "description": "If true, the project holds at most one tab. project.create sets it, and it never changes.",
                 "default": false
               },
               "removable": {
                 "type": "boolean",
+                "description": "If true, project.remove can remove the project. project.create sets it, and it never changes.",
                 "default": true
               },
               "alias": {
-                "type": "string"
+                "type": "string",
+                "description": "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes."
               },
               "tabs": {
                 "type": "array",
                 "items": {
                   "$ref": "#/$defs/Tab"
                 },
+                "description": "The tabs of the project, in their order.",
                 "default": []
               },
               "active_tab": {
-                "type": "string"
+                "type": "string",
+                "description": "The tab that the project shows."
               }
             },
             "required": [
@@ -602,16 +620,20 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the tab."
               },
               "custom_title": {
-                "type": "string"
+                "type": "string",
+                "description": "The name that the user gave the tab. Null when the tab has no name."
               },
               "root": {
-                "$ref": "#/$defs/SplitNode"
+                "$ref": "#/$defs/SplitNode",
+                "description": "The split tree of the panes of the tab."
               },
               "focused": {
-                "type": "string"
+                "type": "string",
+                "description": "The pane that has the focus in the tab."
               }
             },
             "required": [
@@ -660,30 +682,38 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the pane. It is the id of its session."
               },
               "session": {
-                "type": "string"
+                "type": "string",
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
-                "type": "string"
+                "type": "string",
+                "description": "The ssh destination of a remote pane. Null for a pane on this Mac."
               },
               "slug": {
                 "type": "string",
+                "description": "The slug part of the session name.",
                 "default": ""
               },
               "origin_path": {
                 "type": "string",
+                "description": "The path of the project when the pane was made.",
                 "default": ""
               },
               "cwd": {
-                "type": "string"
+                "type": "string",
+                "description": "The working directory that a client last gave for the pane."
               },
               "host_session_dir": {
-                "type": "string"
+                "type": "string",
+                "description": "For a remote pane, the folder of its shell on the host after its session started there."
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },
@@ -705,20 +735,25 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the split."
               },
               "dir": {
-                "$ref": "#/$defs/Dir"
+                "$ref": "#/$defs/Dir",
+                "description": "The axis of the split: horizontal puts the nodes side by side, vertical puts one above the other."
               },
               "ratio": {
                 "type": "number",
+                "description": "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85.",
                 "default": 0.5
               },
               "first": {
-                "$ref": "#/$defs/SplitNode"
+                "$ref": "#/$defs/SplitNode",
+                "description": "The left node of a horizontal split, or the top node of a vertical split."
               },
               "second": {
-                "$ref": "#/$defs/SplitNode"
+                "$ref": "#/$defs/SplitNode",
+                "description": "The right node of a horizontal split, or the bottom node of a vertical split."
               }
             },
             "required": [
@@ -740,7 +775,8 @@
             "type": "object",
             "properties": {
               "active_project": {
-                "type": "string"
+                "type": "string",
+                "description": "The project that is selected."
               }
             },
             "additionalProperties": false
@@ -1422,30 +1458,38 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the pane. It is the id of its session."
               },
               "session": {
-                "type": "string"
+                "type": "string",
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
-                "type": "string"
+                "type": "string",
+                "description": "The ssh destination of a remote pane. Null for a pane on this Mac."
               },
               "slug": {
                 "type": "string",
+                "description": "The slug part of the session name.",
                 "default": ""
               },
               "origin_path": {
                 "type": "string",
+                "description": "The path of the project when the pane was made.",
                 "default": ""
               },
               "cwd": {
-                "type": "string"
+                "type": "string",
+                "description": "The working directory that a client last gave for the pane."
               },
               "host_session_dir": {
-                "type": "string"
+                "type": "string",
+                "description": "For a remote pane, the folder of its shell on the host after its session started there."
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },
@@ -1467,20 +1511,25 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the split."
               },
               "dir": {
-                "$ref": "#/$defs/Dir"
+                "$ref": "#/$defs/Dir",
+                "description": "The axis of the split: horizontal puts the nodes side by side, vertical puts one above the other."
               },
               "ratio": {
                 "type": "number",
+                "description": "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85.",
                 "default": 0.5
               },
               "first": {
-                "$ref": "#/$defs/SplitNode"
+                "$ref": "#/$defs/SplitNode",
+                "description": "The left node of a horizontal split, or the top node of a vertical split."
               },
               "second": {
-                "$ref": "#/$defs/SplitNode"
+                "$ref": "#/$defs/SplitNode",
+                "description": "The right node of a horizontal split, or the bottom node of a vertical split."
               }
             },
             "required": [
@@ -1696,30 +1745,38 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "description": "The id of the pane. It is the id of its session."
               },
               "session": {
-                "type": "string"
+                "type": "string",
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
-                "type": "string"
+                "type": "string",
+                "description": "The ssh destination of a remote pane. Null for a pane on this Mac."
               },
               "slug": {
                 "type": "string",
+                "description": "The slug part of the session name.",
                 "default": ""
               },
               "origin_path": {
                 "type": "string",
+                "description": "The path of the project when the pane was made.",
                 "default": ""
               },
               "cwd": {
-                "type": "string"
+                "type": "string",
+                "description": "The working directory that a client last gave for the pane."
               },
               "host_session_dir": {
-                "type": "string"
+                "type": "string",
+                "description": "For a remote pane, the folder of its shell on the host after its session started there."
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },

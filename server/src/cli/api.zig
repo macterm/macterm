@@ -505,24 +505,46 @@ test "describe gives the doc of each field as description, and its limits" {
     try testing.expectEqualStrings("The new session.", create.get("session").?.object.get("description").?.string);
 }
 
-test "every field of the args and the result of a listed method has a doc" {
+test "every field of each type that a listed method holds has a doc" {
+    // The args, the result and each type in their `$defs`.
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(testing.allocator);
+    var missing: usize = 0;
     for (methods) |method| {
-        for ([_][]const u8{ method.args, method.result }) |name| {
-            for (typeDef(name).fields) |f| {
-                if (f.doc == null) std.debug.print("{s}: {s}.{s} has no doc\n", .{ method.name, name, f.name });
-                try testing.expect(f.doc != null);
-            }
-        }
+        for ([_][]const u8{ method.args, method.result }) |name| missing += try fieldsWithoutDoc(method.name, name, &seen);
     }
+    try testing.expectEqual(0, missing);
+
+    // A model type in `$defs` has its descriptions too.
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const defs = (try describe(arena_state.allocator(), find("state.subscribe").?)).object.get("$defs").?.object;
+    const path = defs.get("Project").?.object.get("properties").?.object.get("path").?.object;
+    try testing.expect(path.get("description") != null);
 }
 
-test "every field of a type of messages.zig in a result has a doc" {
-    inline for (.{ m.Session, m.TerminalState, m.Zoom, m.RemovedPane }) |T| {
-        inline for (comptime std.meta.fieldNames(T)) |name| {
-            if (!@hasField(@TypeOf(T.field_doc), name)) std.debug.print("{s}.{s} has no doc\n", .{ @typeName(T), name });
-            try testing.expect(@hasField(@TypeOf(T.field_doc), name));
+/// The fields with no doc in the type of the wire type `wire` and in each
+/// type that it holds. It skips a type in `seen` and prints each field that
+/// it counts, with the method that holds it.
+fn fieldsWithoutDoc(method: []const u8, wire: []const u8, seen: *std.StringHashMapUnmanaged(void)) !usize {
+    if (wire[0] == '[') return fieldsWithoutDoc(method, wire[1 .. wire.len - 1], seen);
+    for ([_][]const u8{ "bool", "f64", "str", "bin", "secret", "raw" }) |p| if (std.mem.eql(u8, wire, p)) return 0;
+    if (intRange(wire) != null) return 0;
+    // `typeDef` stops at a name that is not in the schema.
+    const named = typeDef(wire);
+    if ((try seen.getOrPut(testing.allocator, named.name)).found_existing) return 0;
+    var missing: usize = 0;
+    for (named.fields) |f| {
+        if (f.doc == null) {
+            std.debug.print("{s}: {s}.{s} has no doc\n", .{ method, named.name, f.name });
+            missing += 1;
         }
+        missing += try fieldsWithoutDoc(method, f.type, seen);
     }
+    for (named.variants) |v| if (v.type) |payload| {
+        missing += try fieldsWithoutDoc(method, payload, seen);
+    };
+    return missing;
 }
 
 test "describe gives a schema for every method" {

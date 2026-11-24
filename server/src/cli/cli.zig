@@ -16,7 +16,6 @@ const client = @import("client.zig");
 const output = @import("output.zig");
 const m = @import("../protocol/messages.zig");
 const chord = @import("../chord.zig");
-const skills = @import("skills.zig");
 const api = @import("api.zig");
 const mcp = @import("mcp.zig");
 const ssh = @import("ssh.zig");
@@ -149,55 +148,46 @@ const session_command: Command = .{
     .default = &session_list_command,
 };
 
-// ── skills (design 011 issue 4) ─────────────────────────────────────────────
+// ── skills: replaced by mcp (design 014 step H) ─────────────────────────────
+
+/// How to add `macterm mcp` to each agent (design 014 §3). `mcp --help` and
+/// the notice of `skills` print it, so the two cannot disagree. Each command
+/// is one line, so that it copies whole.
+const mcp_setup =
+    \\To add the server to an agent, run the command for that agent:
+    \\
+    \\  Claude Code:
+    \\    claude mcp add --scope user macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp
+    \\  Codex:
+    \\    codex mcp add macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp
+    \\  Gemini CLI:
+    \\    gemini mcp add -s user macterm /Applications/Macterm.app/Contents/Resources/bin/macterm mcp
+    \\  OpenCode, in opencode.json:
+    \\    "mcp": {"macterm": {"type": "local", "command": ["/Applications/Macterm.app/Contents/Resources/bin/macterm", "mcp"]}}
+    \\
+    \\For other agents (for example Cursor), add `/Applications/Macterm.app/Contents/Resources/bin/macterm mcp` to their MCP config as a stdio server.
+;
+
+/// The notice that `skills` prints in place of the skills, for one release
+/// before the verb goes (design 014 §3).
+const skills_notice =
+    \\An MCP server, `macterm mcp`, replaces the Macterm skills. Remove the Macterm skills from the skills folder of your agent. Then add the server.
+    \\
+    \\
+++ mcp_setup;
 
 const skills_command: Command = .{
     .name = "skills",
-    .abstract = "Print skills that teach AI coding agents to use Macterm. It works with no running app.",
-    .discussion =
-    \\Prints Agent Skills: SKILL.md files that Claude Code, Codex, OpenCode, Gemini CLI, Cursor and other agents load from a skills directory. They teach an agent to run commands in panes and read their output, to build a workspace that persists, to run sub-agents in panes of their own, and to write extensions that add screens to the command palette. There is no installer. The agent installs them itself. To set one up, give it this prompt:
-    \\
-    \\  Run `macterm skills` and install each skill it prints into your skills
-    \\  directory as <name>/SKILL.md, exactly as printed. Then tell me what you
-    \\  installed and where. (Outside a Macterm pane, `macterm` is
-    \\  /Applications/Macterm.app/Contents/Resources/bin/macterm.)
-    \\
-    \\With no arguments, it prints every skill after a short header about the install. A line with its path introduces each skill (==> <name>/SKILL.md <==). With a name, it prints only that SKILL.md, exactly as it is, ready to redirect into place.
-    ,
-    .options = &.{
-        .{ .names = &.{"--list"}, .abstract = "List the names and descriptions of the skills instead." },
-        .{ .names = &.{"--json"}, .abstract = "Print JSON: the name, description, path and (without --list) text of each skill." },
-    },
-    .arguments = &.{.{ .name = "name", .abstract = "Print only the SKILL.md of this skill, exactly as it is.", .optional = true }},
+    .abstract = "Show how to add the MCP server that replaces the skills for AI coding agents.",
+    .discussion = skills_notice,
+    .arguments = &.{.{ .name = "ignored", .abstract = "Ignored, so that an earlier script that gives a skill name, --list or --json gets this notice.", .optional = true, .repeating = true, .unrecognized = true }},
 };
 
-/// `skills`: the text is in the binary, so it needs no server.
+/// `skills`: the notice, on stdout with exit 0, so that a script that pipes
+/// it into a skill file gets no stale skill.
 fn skillsRun(ctx: Context, parsed: command.Parsed) error{ OutOfMemory, WriteFailed }!u8 {
-    const list = parsed.flag("--list");
-    const name: ?[]const u8 = if (parsed.positionals.len > 0) parsed.positionals[0] else null;
-    if (list and name != null) {
-        try output.writeError(ctx.err, "pass a skill name or --list, not both", null);
-        return 1;
-    }
-    var chosen: []const skills.Skill = &skills.all;
-    if (name) |n| {
-        const s = skills.named(n) orelse {
-            try output.writeError(ctx.err, try std.fmt.allocPrint(ctx.arena, "no skill named \"{s}\"", .{n}), "run `macterm skills --list` for their names");
-            return 1;
-        };
-        chosen = s[0..1];
-    }
-    if (parsed.flag("--json")) {
-        // `--list` leaves out the text, as v1 left out a nil field.
-        const Row = struct { name: []const u8, description: []const u8, path: []const u8, text: ?[]const u8 };
-        const rows = try ctx.arena.alloc(Row, chosen.len);
-        for (chosen, rows) |s, *r| r.* = .{ .name = s.name, .description = s.description, .path = s.path, .text = if (list) null else s.text };
-        try output.writeJson(ctx.arena, ctx.out, try toJson(ctx.arena, struct { skills: []const Row }{ .skills = rows }));
-    } else if (list) {
-        try skills.writeList(ctx.out);
-    } else if (name != null) {
-        try ctx.out.writeAll(chosen[0].text);
-    } else try skills.writeCatalog(ctx.out);
+    _ = parsed;
+    try command.writeText(ctx.out, skills_notice);
     return 0;
 }
 
@@ -378,7 +368,9 @@ const mcp_command: Command = .{
     .abstract = "Run an MCP server on stdin and stdout for AI coding agents. It works with no running app.",
     .discussion =
     \\The agent starts this command and sends JSON-RPC messages, one on each line. Each tool is one method of the server's protocol (see `macterm api list`). The tools connect to Macterm at each call. While Macterm is not running, a tool call fails and tells the agent so.
-    ,
+    \\
+    \\
+    ++ mcp_setup,
     .options = &.{socket_option},
 };
 
@@ -972,7 +964,6 @@ const golden_help = .{
     .{ [_]*const Command{ &session_command, &session_list_command }, @embedFile("golden/help/session-list.txt") },
     .{ [_]*const Command{ &session_command, &session_info_command }, @embedFile("golden/help/session-info.txt") },
     .{ [_]*const Command{ &session_command, &session_kill_command }, @embedFile("golden/help/session-kill.txt") },
-    .{ [_]*const Command{&skills_command}, @embedFile("golden/help/skills.txt") },
     .{ [_]*const Command{&ssh_command}, @embedFile("golden/help/ssh.txt") },
     .{ [_]*const Command{&askpass_command}, @embedFile("golden/help/askpass.txt") },
 };
@@ -987,9 +978,10 @@ fn collapse(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
     return out.items;
 }
 
-/// The commands that v1 did not have (design 011 §4). The contract has no
-/// line for them.
-const new_in_v2 = [_]*const Command{ &api_command, &mcp_command };
+/// The commands that v1 did not have (design 011 §4), and `skills`, which
+/// v2 replaced with a notice (design 014 step H). The contract has no line
+/// for them, or a line that no longer holds.
+const new_in_v2 = [_]*const Command{ &api_command, &mcp_command, &skills_command };
 
 fn expectCommandMatchesContract(arena: std.mem.Allocator, spec: contract.Contract, path: []const *const Command) !void {
     const c = path[path.len - 1];
@@ -1108,8 +1100,8 @@ test "the root help lists the ported commands as the golden text does, and api a
         \\  session                 Inspect and kill terminal sessions that zmx runs.
         \\  ssh                     Run ssh with terminfo install and environment
         \\                          forwarding. It works with no running app.
-        \\  skills                  Print skills that teach AI coding agents to use
-        \\                          Macterm. It works with no running app.
+        \\  skills                  Show how to add the MCP server that replaces the
+        \\                          skills for AI coding agents.
         \\  api                     List, describe and call the methods of the server's
         \\                          protocol.
         \\  mcp                     Run an MCP server on stdin and stdout for AI coding
@@ -1641,46 +1633,42 @@ test "session info and kill name a missing session as v1 did" {
 
 // ── Tests: skills ───────────────────────────────────────────────────────────
 
-test "skills prints the catalog, one skill, the list and JSON with no server" {
+test "skills prints the notice with exit 0 and no server, whatever the arguments" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const one = try runOffline(arena, &.{ "skills", "macterm-panes" }, &.{});
-    try testing.expectEqual(0, one.exit);
-    try testing.expectEqualStrings(skills.all[0].text, one.out);
-
-    var catalog: std.Io.Writer.Allocating = .init(arena);
-    try skills.writeCatalog(&catalog.writer);
-    try testing.expectEqualStrings(catalog.written(), (try runOffline(arena, &.{"skills"}, &.{})).out);
-    var list: std.Io.Writer.Allocating = .init(arena);
-    try skills.writeList(&list.writer);
-    try testing.expectEqualStrings(list.written(), (try runOffline(arena, &.{ "skills", "--list" }, &.{})).out);
-
-    const Payload = struct { skills: []const struct { name: []const u8, description: []const u8, path: []const u8, text: ?[]const u8 = null } };
-    const full = try std.json.parseFromSliceLeaky(Payload, arena, (try runOffline(arena, &.{ "skills", "--json" }, &.{})).out, .{});
-    try testing.expectEqual(skills.all.len, full.skills.len);
-    for (skills.all, full.skills) |s, j| {
-        try testing.expectEqualStrings(s.name, j.name);
-        try testing.expectEqualStrings(s.description, j.description);
-        try testing.expectEqualStrings(s.path, j.path);
-        try testing.expectEqualStrings(s.text, j.text.?);
+    var notice: std.Io.Writer.Allocating = .init(arena);
+    try command.writeText(&notice.writer, skills_notice);
+    try testing.expect(std.mem.startsWith(u8, notice.written(), "An MCP server, `macterm mcp`, replaces the Macterm skills."));
+    // Each command line of the setup is one line, so that it copies whole.
+    for ([_][]const u8{
+        "claude mcp add --scope user macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "codex mcp add macterm -- /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "gemini mcp add -s user macterm /Applications/Macterm.app/Contents/Resources/bin/macterm mcp",
+        "\"mcp\": {\"macterm\": {\"type\": \"local\", \"command\": [\"/Applications/Macterm.app/Contents/Resources/bin/macterm\", \"mcp\"]}}",
+    }) |line| {
+        const at = std.mem.indexOf(u8, notice.written(), try std.mem.concat(arena, u8, &.{ "\n    ", line, "\n" }));
+        try testing.expect(at != null);
     }
-    // `--list` leaves the text out. The slash is escaped, as `JSONEncoder` does.
-    const listed = try runOffline(arena, &.{ "skills", "--list", "--json" }, &.{});
-    try testing.expect(std.mem.indexOf(u8, listed.out, "\"text\"") == null);
-    try testing.expect(std.mem.indexOf(u8, listed.out, "\"path\" : \"macterm-palettes\\/SKILL.md\"") != null);
-    try testing.expectEqual(skills.all.len, (try std.json.parseFromSliceLeaky(Payload, arena, listed.out, .{})).skills.len);
 
-    // stdout only on success; the error and its hint go to stderr.
-    const unknown = try runOffline(arena, &.{ "skills", "nope" }, &.{});
-    try testing.expectEqual(1, unknown.exit);
-    try testing.expectEqualStrings("", unknown.out);
-    try testing.expectEqualStrings("macterm: no skill named \"nope\"\n  hint: run `macterm skills --list` for their names\n", unknown.err);
-    const both = try runOffline(arena, &.{ "skills", "--list", "macterm-panes" }, &.{});
-    try testing.expectEqual(1, both.exit);
-    try testing.expectEqualStrings("", both.out);
-    try testing.expectEqualStrings("macterm: pass a skill name or --list, not both\n", both.err);
+    // The words of v1 still parse, so a script gets the notice, not a usage error.
+    for ([_][]const []const u8{ &.{"skills"}, &.{ "skills", "macterm-panes" }, &.{ "skills", "--list" }, &.{ "skills", "--json" }, &.{ "skills", "--list", "--json" }, &.{ "skills", "nope" } }) |words| {
+        const r = try runOffline(arena, words, &.{});
+        try testing.expectEqual(0, r.exit);
+        try testing.expectEqualStrings(notice.written(), r.out);
+        try testing.expectEqualStrings("", r.err);
+    }
+}
+
+test "the help of mcp tells how to add the server to each agent" {
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try command.writeHelp(&out.writer, &.{ &root, &mcp_command });
+    var setup: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer setup.deinit();
+    try command.writeText(&setup.writer, mcp_setup);
+    try testing.expect(std.mem.indexOf(u8, out.written(), setup.written()) != null);
 }
 
 // ── Tests: api ──────────────────────────────────────────────────────────────
