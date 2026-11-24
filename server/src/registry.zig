@@ -987,6 +987,14 @@ test "the error text is the first line without its prefix" {
     try testing.expectEqualStrings("The session did not start.", errorText("error: \xff\n"));
 }
 
+test "only a canonical read with echo off is a password read" {
+    try testing.expect(readsPassword(.{ .canonical = true, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = true, .echo = true }));
+    // Raw mode passes: a full-screen program, or a prompt that draws its own mask.
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = false }));
+    try testing.expect(!readsPassword(.{ .canonical = false, .echo = true }));
+}
+
 test "the server signals no pid that reaches a group or every process" {
     try testing.expect(validPid(2));
     try testing.expect(!validPid(1));

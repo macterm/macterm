@@ -560,6 +560,7 @@ pub const Server = struct {
                 registry.startReplacements(s, e);
                 e.replacing.deinit(s.gpa);
                 e.conn.deinit(s.gpa);
+                for (e.waiters.items) |w| if (w.input) |input| input.deinit(s.gpa);
                 e.waiters.deinit(s.gpa);
                 s.gpa.free(e.build);
                 if (e.build_key) |k| s.gpa.free(k);
