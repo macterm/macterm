@@ -24,7 +24,7 @@ extension PaletteInput {
                     icon: "folder"
                 ) { context in
                     guard let project = context.appState.newProjectFromFolderPanel(store: context.projectStore) else { return }
-                    NewProjectInput.expandRow(of: project, appState: context.appState)
+                    context.appState.expandProjectRow(project.id)
                 },
             ],
             completions: PaletteInput.pathCompletions,
@@ -66,13 +66,6 @@ enum NewProjectInput {
     @MainActor
     private static func select(_ project: Project, appState: AppState) {
         appState.selectProject(project)
-        expandRow(of: project, appState: appState)
-    }
-
-    /// Open the project's row in the sidebar, as the sidebar's own New
-    /// Project did.
-    @MainActor
-    static func expandRow(of project: Project, appState: AppState) {
         appState.expandProjectRow(project.id)
     }
 }

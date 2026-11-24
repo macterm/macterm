@@ -421,8 +421,10 @@ struct CommandPalettePanel: View {
         // the press rather than `optionHeld`, which is display state. On an
         // input screen it commits the field.
         .onKeyPress(keys: [.return]) { press in
-            // A selected action row of an input screen runs, as a click does.
-            if let inputScope, !selectedIsAction(of: inputScope) {
+            // A selected action row of an input screen runs, as a click
+            // does, but only while the field is empty: typed text is what
+            // the user means, and a hover can select a row by itself.
+            if let inputScope, !(query.isEmpty && selectedIsAction(of: inputScope)) {
                 commit(inputScope)
             } else {
                 execute(alt: press.modifiers.contains(.option))
@@ -524,10 +526,10 @@ struct CommandPalettePanel: View {
     /// traversal in that case.
     private func completeQuery() -> KeyPress.Result {
         // An input screen's rows are its completions: the selected one, or
-        // the top one when none is selected. Its action rows complete
-        // nothing.
+        // the top one when no completion is selected. Its action rows
+        // complete nothing.
         if let inputScope {
-            let index = flatItems.indices.contains(selectedIndex)
+            let index = flatItems.indices.contains(selectedIndex) && !inputScope.isAction(flatItems[selectedIndex])
                 ? selectedIndex
                 : flatItems.firstIndex { !inputScope.isAction($0) }
             guard let index, flatItems.indices.contains(index),

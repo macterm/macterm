@@ -9,10 +9,11 @@ import Foundation
 /// it. Return commits the text in the field. The rows under the field are
 /// completions: Tab or a click puts the selected one in the field, and
 /// never commits. Over the completions, `actions` are rows that do
-/// something in place of the typed value (Select in Finder): a click, or
-/// Return while one is selected, runs it. Escape, or Backspace at an empty
-/// field, pops the screen like any screen. A commit that `commit` refuses keeps the screen and
-/// shows the reason as one line above the rows, until the text changes.
+/// something in place of the typed value (Select in Finder): a click runs
+/// one, and so does Return while one is selected and the field is empty.
+/// Escape, or Backspace at an empty field, pops the screen like any screen.
+/// A commit that `commit` refuses keeps the screen and shows the reason as
+/// one line above the rows, until the text changes.
 ///
 /// Its identity is `id`: two inputs with one id are one screen to the
 /// palette (a chord toggles it). An input about one thing (a tab, a pane)

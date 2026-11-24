@@ -71,6 +71,26 @@ struct NewProjectInputTests {
     }
 
     @Test
+    func a_remote_spec_that_a_project_has_selects_that_project() {
+        let (context, _) = makeContext()
+        let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
+
+        #expect(NewProjectInput.commit("devbox:~/dev/api", context: context) == .done)
+        #expect(context.projectStore.projects.map(\.id) == [existing.id])
+        #expect(context.appState.activeProjectID == existing.id)
+    }
+
+    @Test
+    func a_new_remote_spec_opens_the_remote_dialog_filled_in() {
+        let (context, window) = makeContext()
+
+        #expect(NewProjectInput.commit("devbox:~/dev/api", context: context) == .done)
+        #expect(context.projectStore.projects.isEmpty, "the dialog adds the project")
+        #expect(window.isNewRemoteProjectSheetPresented)
+        #expect(window.newRemoteProjectDraft != nil)
+    }
+
+    @Test
     func a_path_that_is_not_a_folder_is_refused() throws {
         let folder = try makeFolder("api")
         let file = folder.appendingPathComponent("notes.txt")

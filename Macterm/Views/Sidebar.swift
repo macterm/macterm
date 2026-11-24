@@ -1143,9 +1143,7 @@ struct SidebarContent: View {
         }
     }
 
-    /// The New Project screen in this window's palette. The project it adds
-    /// becomes the window's active project, whose row expands
-    /// (`WindowState`).
+    /// The New Project screen in this window's palette.
     private func openNewProjectScreen() {
         appState.openCommandPalette(scope: .input(.newProject))
     }
