@@ -208,6 +208,51 @@ final class Pane: Identifiable {
     @ObservationIgnored
     private(set) var sessionShell: SessionShell?
 
+    /// The pane's link to its session: made at the first surface that runs
+    /// from a channel, and kept for the pane's life. It makes the session,
+    /// runs a remote pane's driver, and gives the pane the session's
+    /// messages and its end once (`receiveLinkEvent`), however many windows
+    /// show the pane.
+    @ObservationIgnored
+    private var link: PaneLink?
+
+    var sessionLink: PaneLink {
+        if let link { return link }
+        let made = PaneLink.make(for: self)
+        made.onEvent = { [weak self] event in self?.receiveLinkEvent(event) }
+        link = made
+        return made
+    }
+
+    /// A message of the pane's session, once for the pane.
+    func receiveLinkEvent(_ event: PaneLinkEvent) {
+        switch event {
+        case let .state(state): receiveSessionState(state)
+        case let .foreground(foreground): applyForeground(foreground)
+        case let .title(title): receiveReportedTitle(title)
+        case let .ttyMode(mode): lineMode = mode
+        case let .mark(mark, host): receiveSessionMark(mark, view: host?.terminalView)
+        case let .status(status): receiveSessionStatus(status)
+        case let .attention(flags): receiveAttention(flags)
+        case .ended: sessionDidEnd()
+        case let .plainShellRunsIn(host): plainShellSurfaceID = host?.surfaceID
+        }
+    }
+
+    /// The surface that runs the pane's plain ssh shell (a host with no
+    /// server), or nil. A pty is one terminal and no session holds it, so
+    /// no other window can take it: the pane's other surfaces show a notice
+    /// in place of the terminal. When that surface goes, the pane gets a
+    /// fresh shell. Live state only; the link sets it (`receiveLinkEvent`).
+    var plainShellSurfaceID: UUID?
+
+    /// Whether the surface `surfaceID` shows the notice that the pane's
+    /// plain ssh shell runs in another window.
+    func plainShellRunsElsewhere(than surfaceID: UUID) -> Bool {
+        guard let owner = plainShellSurfaceID else { return false }
+        return owner != surfaceID
+    }
+
     /// The channel's `state` message. A remote session's pid is on the
     /// host, so it is not kept.
     func receiveSessionState(_ state: MactermProtocol.State) {
