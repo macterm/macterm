@@ -93,9 +93,8 @@ jobs:
           KEY: ${{ needs.server.outputs.key }}
         run: |
           scripts/build-server.sh verify build/server "$KEY"
-          name="macterm-$KEY-universal-macos.tar.gz"
           mkdir -p zmx
-          tar xzf "build/server/$name" -C zmx zmx
+          tar xzf "$(scripts/build-server.sh file build/server universal-macos)" -C zmx zmx
           zmx/zmx version
 
       - name: Download v1
@@ -190,9 +189,8 @@ jobs:
           KEY: ${{ needs.server.outputs.key }}
         run: |
           scripts/build-server.sh verify build/server "$KEY"
-          name="macterm-$KEY-x86_64-linux.tar.gz"
           mkdir -p zmx
-          tar xzf "build/server/$name" -C zmx zmx
+          tar xzf "$(scripts/build-server.sh file build/server x86_64-linux)" -C zmx zmx
           zmx/zmx version
 
       - name: Download v1
