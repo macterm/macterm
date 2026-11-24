@@ -2007,6 +2007,12 @@ pub const Wait = struct {
     tag: u64,
     text: ?[]const u8 = null,
     timeout_ms: u32,
+
+    pub const field_doc = .{
+        .tag = "The id of the wait. Waited carries the same tag.",
+        .text = "The marker. The wait ends when a line starts with it. Null: the wait ends when no command runs and the pane is quiet.",
+        .timeout_ms = "The longest time to wait, in milliseconds.",
+    };
 };
 
 /// The client of a `session.wait` left: the session stops the wait with
@@ -2017,6 +2023,8 @@ pub const WaitCancel = struct {
     pub const senders = from_client;
 
     tag: u64,
+
+    pub const field_doc = .{ .tag = "The tag of the wait to stop." };
 };
 
 pub const Waited = struct {
@@ -2027,6 +2035,12 @@ pub const Waited = struct {
     tag: u64,
     end: WaitEnd,
     line: ?msgpack.Bin = null,
+
+    pub const field_doc = .{
+        .tag = "The tag of the wait that ended.",
+        .end = "Why the wait ended: matched, done, exited or timeout.",
+        .line = "With matched: the newest line that starts with the marker, cut at 4 KiB.",
+    };
 };
 
 /// The server asks for the terminal's state (`session.inspect`). The session

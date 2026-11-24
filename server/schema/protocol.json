@@ -4469,19 +4469,22 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the wait. Waited carries the same tag."
         },
         {
           "name": "text",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The marker. The wait ends when a line starts with it. Null: the wait ends when no command runs and the pane is quiet."
         },
         {
           "name": "timeout_ms",
           "type": "u32",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The longest time to wait, in milliseconds."
         }
       ],
       "cases": [],
@@ -4495,19 +4498,22 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tag of the wait that ended."
         },
         {
           "name": "end",
           "type": "WaitEnd",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Why the wait ended: matched, done, exited or timeout."
         },
         {
           "name": "line",
           "type": "bin",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "With matched: the newest line that starts with the marker, cut at 4 KiB."
         }
       ],
       "cases": [],
@@ -4521,7 +4527,8 @@
           "name": "tag",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tag of the wait to stop."
         }
       ],
       "cases": [],
