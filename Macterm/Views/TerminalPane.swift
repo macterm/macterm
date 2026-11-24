@@ -119,7 +119,8 @@ struct TerminalPane: View {
                         ModePill(
                             title: label,
                             systemImage: "character.cursor.ibeam",
-                            help: String(localized: "Leave copy mode")
+                            help: String(localized: "Leave copy mode"),
+                            peeksOnChange: true
                         ) { [weak surface] in
                             surface?.nsView?.copyMode.exit()
                         }

@@ -1225,10 +1225,12 @@ struct ModePill: View {
     let title: String
     let systemImage: String
     let help: String
+    /// See `PanePill.peeksOnChange`.
+    var peeksOnChange = false
     let action: () -> Void
 
     var body: some View {
-        PanePill(title: title, action: action) { Image(systemName: systemImage) }
+        PanePill(title: title, peeksOnChange: peeksOnChange, action: action) { Image(systemName: systemImage) }
             .help(help)
     }
 }
@@ -1256,14 +1258,13 @@ struct StatusPill<Icon: View>: View {
 /// pane's view gets every hit test under the row, and the status pills get
 /// none.
 ///
-/// A new title opens the pill for `peekDuration` (Copy Mode to Visual,
-/// Reconnecting to Connection Lost). Thus a pill that shows its icon only
-/// also shows the change. The first title of a pill is not a change. The
-/// pill opens and closes on the same curve as a hover.
+/// With `peeksOnChange`, a new title opens the pill for `peekDuration`, so
+/// that a pill that shows its icon only also shows the change. The first
+/// title of a pill is not a change.
 ///
 /// An open pill does not get narrower (`heldTitles`). The row is aligned to
-/// the trailing edge. Thus a narrower pill moves out from under the pointer,
-/// and then it closes.
+/// the trailing edge, so a narrower pill moves out from under the pointer,
+/// and then the pill closes.
 struct PanePill<Icon: View>: View {
     /// The least height of every pill's content: the tallest icon. The
     /// glass button sizes to its label, and the icons have different heights.
@@ -1272,6 +1273,10 @@ struct PanePill<Icon: View>: View {
     static var contentHeight: CGFloat { 15 }
 
     let title: String
+    /// A new title opens the pill for `peekDuration` (the copy mode pill).
+    /// The remote-link pill does not peek: its title changes two times at
+    /// each try while a host is down.
+    var peeksOnChange = false
     var action: (() -> Void)?
     @ViewBuilder let icon: () -> Icon
 
@@ -1282,7 +1287,7 @@ struct PanePill<Icon: View>: View {
     static var closeDelay: Duration { .milliseconds(150) }
 
     /// The time that a new title keeps the pill open: enough to read a
-    /// short title.
+    /// short title. The UI review sets the final value.
     static var peekDuration: Duration { .milliseconds(1500) }
 
     /// The pointer is on the pill (after `closeDelay` for an exit).
@@ -1315,7 +1320,11 @@ struct PanePill<Icon: View>: View {
         // `onChange` does not run for the first title of the pill.
         .onChange(of: title) { old, _ in
             if isRevealed, !heldTitles.contains(old) { heldTitles.append(old) }
-            peek()
+            if peeksOnChange { peek() }
+        }
+        .onDisappear {
+            peekTask?.cancel()
+            closeTask?.cancel()
         }
         .allowsHitTesting(action != nil)
         .focusable(action != nil)
@@ -1367,7 +1376,12 @@ struct PanePill<Icon: View>: View {
     /// The held titles go after the close. If they went at its start, the
     /// pill would get narrower in one frame.
     private func setReveal(_ change: () -> Void) {
-        withAnimation(reduceMotion ? nil : PaletteMotion.animation) {
+        guard !reduceMotion else {
+            change()
+            if !isRevealed { heldTitles = [] }
+            return
+        }
+        withAnimation(PaletteMotion.animation) {
             change()
         } completion: {
             if !isRevealed { heldTitles = [] }
