@@ -194,6 +194,9 @@ enum LayoutFileError: Error, LocalizedError, EnglishDescribedError {
     /// A central project file matches but has no/empty `tabs:` — a bare
     /// declaration with nothing to apply.
     case noTabs
+    /// The project has no folder (`Project.hasFolder`). A layout file
+    /// matches a project by its folder.
+    case noFolder
     /// A delete was asked for a file outside the projects directory — a guard
     /// against a stale URL ever reaching `removeItem`.
     case outsideProjectsDirectory(filename: String)
@@ -205,6 +208,7 @@ enum LayoutFileError: Error, LocalizedError, EnglishDescribedError {
         case .parse: "The layout file is invalid and was not applied.\n\n\(detail)"
         case let .noProjectFile(projectPath): "No layout file declares \(projectPath). Use “Save Layout” to create one."
         case .noTabs: "The layout file declares no tabs, so there is no layout to apply."
+        case .noFolder: "This project has no folder, so it has no layout file."
         case let .outsideProjectsDirectory(filename): "“\(filename)” is not in the projects directory."
         }
     }

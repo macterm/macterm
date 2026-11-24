@@ -26,6 +26,20 @@ struct ProjectMemoryStoreTests {
         #expect(reread.entries(for: project).last?.exitCode == 2)
     }
 
+    /// A failure is recorded after its screen read, so a success that ended
+    /// after it can come first. The list stays in the order of the ends.
+    @Test
+    func an_entry_that_comes_late_goes_in_the_order_of_its_end() {
+        let store = ProjectMemoryStore(directory: makeDirectory())
+        let project = UUID()
+        let now = Date()
+        store.append(entry("make", at: now.addingTimeInterval(-10)), to: project)
+        store.append(entry("make test", at: now), to: project)
+        store.append(entry("make lint", exit: 1, at: now.addingTimeInterval(-1)), to: project)
+        store.append(entry("make", at: now), to: project)
+        #expect(store.entries(for: project).map(\.command) == ["make", "make lint", "make test", "make"])
+    }
+
     @Test
     func the_ring_drops_the_oldest_entries() {
         let store = ProjectMemoryStore(directory: makeDirectory())

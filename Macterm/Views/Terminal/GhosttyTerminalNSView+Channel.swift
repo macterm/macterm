@@ -11,25 +11,15 @@ private let logger = Logger(subsystem: appBundleID, category: "SurfaceChannel")
 /// (`ghostty_launch_resolve`, fork patch 0023); its bytes are fed to the
 /// surface, and the surface's input, size and claims go back on the channel.
 extension GhosttyTerminalNSView {
-    /// The session and its host, for the callbacks that libghostty makes on
-    /// its io thread.
+    /// The pane's route and its host, for the callbacks that libghostty
+    /// makes on its io thread.
     final class ChannelRuntime: @unchecked Sendable {
-        let route: any PaneInputRoute
+        let route: PaneRoute
         let host: SurfaceChannelHost
-        /// Ends the reading: the session, or the driver.
-        let start: @Sendable () -> Void
-        let stop: @Sendable () -> Void
 
-        init(
-            route: any PaneInputRoute,
-            host: SurfaceChannelHost,
-            start: @escaping @Sendable () -> Void,
-            stop: @escaping @Sendable () -> Void
-        ) {
+        init(route: PaneRoute, host: SurfaceChannelHost) {
             self.route = route
             self.host = host
-            self.start = start
-            self.stop = stop
         }
     }
 
@@ -70,7 +60,7 @@ extension GhosttyTerminalNSView {
         config.manual_write = { userdata, bytes, count in
             guard let userdata else { return }
             let view = Unmanaged<GhosttyTerminalNSView>.fromOpaque(userdata).takeUnretainedValue()
-            view.channelRuntime?.route.sendInput(Data(bytes: bytes, count: count))
+            view.channelRuntime?.route.input.sendInput(Data(bytes: bytes, count: count))
         }
         config.manual_resize = { userdata, columns, rows, widthPx, heightPx in
             guard let userdata else { return }
@@ -78,7 +68,7 @@ extension GhosttyTerminalNSView {
             guard let runtime = view.channelRuntime else { return }
             let grid = PaneGrid(cols: columns, rows: rows, widthPx: widthPx, heightPx: heightPx)
             runtime.host.setGrid(grid)
-            runtime.route.sendSize(grid)
+            runtime.route.input.sendSize(grid)
         }
     }
 
@@ -93,13 +83,13 @@ extension GhosttyTerminalNSView {
         }
         let host = SurfaceChannelHost(view: self)
         let link = pane.sessionLink
-        let route = link.attach(host, launch: launch)
-        channelRuntime = ChannelRuntime(
-            route: route,
-            host: host,
+        let input = link.attach(host, launch: launch)
+        let route = PaneRoute(
+            input: input,
             start: { [weak link] in Self.onMain { link?.viewReady(host) } },
             stop: { [weak link] in Self.onMain { link?.detach(host) } }
         )
+        channelRuntime = ChannelRuntime(route: route, host: host)
     }
 
     /// Runs `body` on the main actor: at once from the main thread, so a view
@@ -118,7 +108,7 @@ extension GhosttyTerminalNSView {
         let size = ghostty_surface_size(surface)
         runtime.host.setSurface(surface)
         runtime.host.setGrid(PaneGrid(cols: size.columns, rows: size.rows, widthPx: size.width_px, heightPx: size.height_px))
-        runtime.start()
+        runtime.route.start()
     }
 
     /// Ends the reading and cuts the host from the surface, before the
@@ -127,7 +117,7 @@ extension GhosttyTerminalNSView {
         guard let runtime = channelRuntime else { return }
         channelRuntime = nil
         runtime.host.invalidate()
-        runtime.stop()
+        runtime.route.stop()
     }
 }
 
@@ -156,6 +146,11 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     /// The id of the surface that owns this channel, nil in a test.
     @MainActor var surfaceID: UUID? {
         view?.owningSurface?.id
+    }
+
+    /// The terminal view of this channel, nil in a test.
+    @MainActor var terminalView: GhosttyTerminalNSView? {
+        view
     }
 
     func setSurface(_ new: ghostty_surface_t) {
@@ -236,7 +231,7 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneMark(_ mark: MactermProtocol.Mark) {
-        toLink(.mark(mark))
+        toLink(.mark(mark, self))
     }
 
     func paneStatus(_ status: MactermProtocol.Status) {

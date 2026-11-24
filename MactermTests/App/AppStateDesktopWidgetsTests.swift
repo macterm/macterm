@@ -755,7 +755,7 @@ extension AppStateDesktopWidgetsTests {
 
         let state = makeState(storeURL: storeURL, dir: dir)
         var sessionClient = recordingClient(into: WidgetKills())
-        sessionClient.listSessions = { [LocalSession(name: survivorSession)] }
+        sessionClient.listSessions = { [SessionInfo(name: survivorSession)] }
         state.sessionClient = sessionClient
         let presenter = RecordingPresenter()
         state.attachDesktopWidgetPresenter(presenter)

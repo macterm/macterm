@@ -11308,6 +11308,22 @@
         }
       }
     },
+    "This project has no folder, so it has no layout file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트에는 폴더가 없으므로 레이아웃 파일이 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目没有文件夹，因此没有布局文件。"
+          }
+        }
+      }
+    },
     "This session is from an older version of Macterm. It can lose access to folders. Click to restart it." : {
       "localizations" : {
         "ko" : {

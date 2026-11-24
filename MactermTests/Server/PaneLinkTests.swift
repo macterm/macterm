@@ -10,7 +10,7 @@ struct PaneLinkTests {
     @Test
     func two_views_give_the_pane_each_message_and_the_end_once() async throws {
         try await withServer { server in
-            let link = PaneLink(name: "pl-\(UInt32.random(in: 0 ... .max))", transport: .local(connect: { try await server.connect() }))
+            let link = PaneLink(name: "pl-\(UInt32.random(in: 0 ... .max))", transport: .local(TestServerEndpoint(server)))
             var titles = 0
             var ends = 0
             link.onEvent = { event in
@@ -50,7 +50,7 @@ struct PaneLinkTests {
     @Test
     func a_view_that_goes_leaves_the_session_running_for_the_other() async throws {
         try await withServer { server in
-            let link = PaneLink(name: "pl-\(UInt32.random(in: 0 ... .max))", transport: .local(connect: { try await server.connect() }))
+            let link = PaneLink(name: "pl-\(UInt32.random(in: 0 ... .max))", transport: .local(TestServerEndpoint(server)))
             var titles: [String] = []
             var ends = 0
             link.onEvent = { event in
@@ -88,11 +88,8 @@ struct PaneLinkTests {
     /// only when a view comes or goes.
     @Test
     func the_first_ready_view_counts_until_it_goes() {
-        // A create that never ends: the rule needs no session.
-        let link = PaneLink(name: "pl-count", transport: .local(connect: {
-            try await Task.sleep(for: .seconds(600))
-            throw ServerClientError.noAnswer
-        }))
+        // An endpoint with no server: the rule needs no session.
+        let link = PaneLink(name: "pl-count", transport: .local(FakeEndpoint([])))
         let launch = PaneSession.Launch(cwd: nil, argv: nil, env: [])
         let first = SurfaceChannelHost(view: nil)
         let second = SurfaceChannelHost(view: nil)

@@ -312,7 +312,7 @@ final class RemotePaneDriver {
             // The one create of the pane: every view attaches to it.
             do {
                 let grid = views.first(where: \.ready)?.host.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
-                try await PaneSession.create(on: link.connection, name: name, launch: made.launch, grid: grid)
+                try await PaneSession.create(on: link.connection(), name: name, launch: made.launch, grid: grid)
             } catch {
                 let reason = String(describing: error)
                 logger.info("remote pane: session=\(self.name, privacy: .public) create failed: \(reason, privacy: .public)")
@@ -334,9 +334,9 @@ final class RemotePaneDriver {
         guard view.session == nil else { return }
         let forward = Forward(driver: self, view: view)
         let session = PaneSession(
-            name: name, wantsForeground: true, wantsTty: true, reconnects: false, missingIsExit: false,
+            name: name, launch: nil, wantsForeground: true, wantsTty: true,
             host: forward,
-            connect: { link.connection }
+            endpoint: OneAttach(link)
         )
         forward.session = session
         view.session = session
@@ -549,6 +549,28 @@ final class RemotePaneDriver {
     }
 
     // MARK: - The session's host
+
+    /// The host's link for one attach. The host owns the next connection:
+    /// after the channel ends, or an attach fails, the session has no next
+    /// connection and ends, and the driver waits for the host's try.
+    private final class OneAttach: ServerEndpoint, @unchecked Sendable {
+        private let link: RemoteServers.Link
+        private let lock = NSLock()
+        private var given = false
+
+        init(_ link: RemoteServers.Link) {
+            self.link = link
+        }
+
+        func connection() async throws -> any ServerLink {
+            let first = lock.withLock {
+                defer { given = true }
+                return !given
+            }
+            guard first else { throw ServerClientError.disconnected }
+            return try await link.connection()
+        }
+    }
 
     /// What a session of this driver reports: everything goes to its view,
     /// and the end of the channel goes to the driver. A report counts only

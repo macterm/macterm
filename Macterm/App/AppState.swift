@@ -3473,9 +3473,10 @@ final class AppState {
     /// Project cycling treats the pinned workspace as a slot ABOVE the first
     /// project and the scratch workspace as a slot BELOW the last (where the
     /// sidebar draws them) — without it, the keyboard could enter a section
-    /// but never leave it.
+    /// but never leave it. A project with no folder is no slot: the sidebar
+    /// draws it as a group row, with no tabs (`SidebarTree`).
     private func stepProject(_ step: Int, projects: [Project]) {
-        var slots = projects.map(\.id)
+        var slots = projects.filter(\.hasFolder).map(\.id)
         if !pinnedRecords.isEmpty {
             slots.insert(PinnedTabs.workspaceID, at: 0)
         }

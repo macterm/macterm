@@ -71,8 +71,8 @@ final class RemoteHosts {
         /// made (`RemoteHost.SessionState.created`).
         var creationGrace: TimeInterval = 30
         /// A host's link to its server is up: its background work starts
-        /// (the terminfo install).
-        var linkReady: @MainActor (String) -> Void = { _ in }
+        /// over it (the terminfo install).
+        var linkReady: @MainActor (String, RemoteServers.Link) -> Void = { _, _ in }
         /// Whether to open a roaming link (design/009) after a connect. Off
         /// by default, so that a test never opens a UDP port.
         var roamingEnabled: @MainActor () -> Bool = { false }
@@ -83,7 +83,7 @@ final class RemoteHosts {
             Configuration(
                 key: ServerBuilds.bundledKey,
                 declines: .preferences,
-                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0) },
+                linkReady: { RemoteTerminfoInstaller.shared.ensureInstalled(destination: $0, over: $1) },
                 roamingEnabled: { Preferences.shared.remoteRoamingLink }
             )
         }
@@ -196,13 +196,13 @@ final class RemoteHosts {
         let host = hosts[destination]
         host?.forget(session)
         if let link = host?.link {
-            await Self.kill(session, over: link)
+            await link.kill(session)
             return
         }
         if case .plain = host?.state { return }
         do {
             let link = try await servers.connect(destination, login: false, install: false)
-            await Self.kill(session, over: link)
+            await link.kill(session)
             link.close()
         } catch {
             logger.info("remote session \(session, privacy: .public) stays: \(String(describing: error), privacy: .public)")
@@ -221,12 +221,12 @@ final class RemoteHosts {
         timeout: Duration
     ) async -> MactermProtocol.CommandRun.Result? {
         let host = hosts[destination]
-        if let link = host?.link { return await Self.run(argv, timeout: timeout, over: link) }
+        if let link = host?.link { return await link.run(argv, timeout: timeout) }
         if case .plain = host?.state { return nil }
         do {
             let link = try await servers.connect(destination, login: false, install: false)
             defer { link.close() }
-            return await Self.run(argv, timeout: timeout, over: link)
+            return await link.run(argv, timeout: timeout)
         } catch {
             logger.info("remote command on \(destination, privacy: .public) not run: \(String(describing: error), privacy: .public)")
             return nil
@@ -289,9 +289,9 @@ final class RemoteHosts {
     /// The check by the host's server. nil when the link closed: it is
     /// dropped, and the check goes over ssh.
     private func checkFolder(_ directory: String, destination: String, over link: RemoteServers.Link) async -> FolderCheck? {
-        // 8 s: the request itself gives up at 10 s (`LocalSessions.bounded`).
+        // 8 s: the request itself gives up at 10 s (`serverRequestTimeout`).
         let argv = HostCommands.folderCheckArgv(directory: directory)
-        if let result = await Self.run(argv, timeout: .seconds(8), over: link) {
+        if let result = await link.run(argv, timeout: .seconds(8)) {
             return answer(status: result.signal == nil ? result.code.map(Int32.init) : nil, destination: destination)
         }
         // Only a closed connection is dropped: a slow folder (a network
@@ -395,10 +395,8 @@ final class RemoteHosts {
     /// environment settled for a terminal. The line is Macterm's note for the
     /// pane when the folder was not there. nil when the host did not answer.
     func createLaunch(link: RemoteServers.Link, directory: String) async -> (launch: PaneSession.Launch, note: String?)? {
-        guard let result = await Self.run(
-            HostCommands.createProbeArgv(directory: directory),
-            timeout: .seconds(10), over: link
-        ), result.code == 0
+        guard let result = await link.run(HostCommands.createProbeArgv(directory: directory), timeout: .seconds(10)),
+              result.code == 0
         else { return nil }
         return Self.parseCreateProbe(String(decoding: result.output.bytes, as: UTF8.self), directory: directory)
     }
@@ -420,54 +418,6 @@ final class RemoteHosts {
         }
         let launch = PaneSession.Launch(cwd: cwd, argv: nil, env: env)
         return (launch, found ? nil : "macterm: cannot cd to \(directory)")
-    }
-
-    // MARK: - The link
-
-    static func list(over link: RemoteServers.Link) async -> [LocalSession]? {
-        let connection = link.connection
-        do {
-            return try await LocalSessions.bounded {
-                try await connection.call(MactermProtocol.SessionList.self, .init()).sessions
-            }.map(LocalSession.init)
-        } catch {
-            logger.warning("remote session list failed: \(String(describing: error), privacy: .public)")
-            return nil
-        }
-    }
-
-    private static func run(
-        _ argv: [String],
-        timeout: Duration,
-        over link: RemoteServers.Link
-    ) async -> MactermProtocol.CommandRun.Result? {
-        let connection = link.connection
-        let args = MactermProtocol.CommandRun.Args(
-            argv: argv.map { ProtocolBin(Data($0.utf8)) },
-            cwd: nil,
-            timeoutMs: UInt32(timeout.components.seconds * 1000)
-        )
-        do {
-            return try await LocalSessions.bounded {
-                try await connection.call(MactermProtocol.CommandRun.self, args)
-            }
-        } catch {
-            logger.warning("remote command failed: \(String(describing: error), privacy: .public)")
-            return nil
-        }
-    }
-
-    static func kill(_ session: String, over link: RemoteServers.Link) async {
-        let connection = link.connection
-        do {
-            _ = try await LocalSessions.bounded {
-                try await connection.call(MactermProtocol.SessionKill.self, .init(id: session))
-            }
-        } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
-            return
-        } catch {
-            logger.warning("remote session kill \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-        }
     }
 }
 

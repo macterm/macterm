@@ -186,9 +186,12 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
         .cols = size.cols,
         .rows = size.rows,
         .env = env.items,
+        // A session of this name whose shell exited (while no client was
+        // there to read it): the server ends it and makes a new one, as
+        // v1's `zmx attach` made a new session.
+        .replace_exited = true,
     };
-    // 1: the create. 2: the kill of an exited session. 3: the create again.
-    var request_id: u64 = 1;
+    const request_id: u64 = 1;
 
     var greeted = false;
     while (true) {
@@ -213,26 +216,8 @@ fn createOnce(gpa: std.mem.Allocator, dir: []const u8, name: []const u8, spec: C
             } },
             .response => |res| {
                 if (res.re != request_id) continue;
-                switch (request_id) {
-                    1 => {
-                        const err = res.err orelse return null;
-                        if (!std.mem.eql(u8, err.code, @tagName(m.ErrorCode.exited)))
-                            return .{ .not_created = try gpa.dupe(u8, err.message) };
-                        // The shell of a session of this name exited (while
-                        // no app was there to end it): end it, and make a
-                        // new one, as v1's `zmx attach` made a new session.
-                        request_id = 2;
-                        try sendRequest(&c, arena, request_id, m.SessionKill, .{ .id = name });
-                    },
-                    2 => {
-                        request_id = 3;
-                        try sendRequest(&c, arena, request_id, m.SessionCreate, args);
-                    },
-                    else => {
-                        const err = res.err orelse return null;
-                        return .{ .not_created = try gpa.dupe(u8, err.message) };
-                    },
-                }
+                const err = res.err orelse return null;
+                return .{ .not_created = try gpa.dupe(u8, err.message) };
             },
             else => {},
         }

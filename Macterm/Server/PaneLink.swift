@@ -10,7 +10,9 @@ enum PaneLinkEvent {
     case foreground(SessionForeground)
     case title(String)
     case ttyMode(TerminalLineMode)
-    case mark(MactermProtocol.Mark)
+    /// A mark, with the channel host of the view that counts it: project
+    /// memory reads that view's folder and screen.
+    case mark(MactermProtocol.Mark, SurfaceChannelHost?)
     case status(MactermProtocol.Status)
     case attention(MactermProtocol.Attention)
     /// The session ended: its shell exited, it is gone, or the host has none.
@@ -33,8 +35,8 @@ enum PaneLinkEvent {
 @MainActor
 final class PaneLink {
     enum Transport {
-        /// The local server. `connect` gives a connection that is up.
-        case local(connect: PaneSession.Connect)
+        /// The local server (`LocalSessions`), or a test's endpoint.
+        case local(any ServerEndpoint)
         /// A host. The driver asks `hosts` what to do.
         case remote(RemoteHosts)
     }
@@ -65,6 +67,11 @@ final class PaneLink {
         }
     }
 
+    /// A create that fails is tried again this many times, this far apart,
+    /// as a channel is. Then the pane ends.
+    private static let createTries = 12
+    private static let createWait: Duration = .milliseconds(500)
+
     private enum Creation {
         case none
         /// The number tells a create that was cancelled from the current one.
@@ -94,7 +101,7 @@ final class PaneLink {
     static func make(for pane: Pane) -> PaneLink {
         let transport: Transport = pane.isRemote
             ? .remote(.shared)
-            : .local(connect: { try await LocalSessions.shared.channelConnection() })
+            : .local(LocalSessions.shared)
         return PaneLink(name: pane.sessionName, transport: transport)
     }
 
@@ -108,9 +115,10 @@ final class PaneLink {
         if self.launch == nil { self.launch = launch }
         let view: View
         switch transport {
-        case let .local(connect):
+        case let .local(endpoint):
+            // No launch: the link makes the session once (`create`).
             let session = PaneSession(
-                name: name, wantsForeground: true, wantsTty: true, host: host, connect: connect
+                name: name, launch: nil, wantsForeground: true, wantsTty: true, host: host, endpoint: endpoint
             )
             view = View(host: host, session: session)
         case let .remote(hosts):
@@ -180,7 +188,7 @@ final class PaneLink {
     /// channel of each ready view. A server that does not come back ends
     /// the pane, as a channel that cannot reconnect does.
     private func create() {
-        guard case let .local(connect) = transport, let launch else { return }
+        guard case let .local(endpoint) = transport, let launch else { return }
         let name = name
         let grid = views.first(where: \.ready)?.host.paneGrid() ?? PaneGrid(cols: 80, rows: 24)
         creations += 1
@@ -189,7 +197,7 @@ final class PaneLink {
             var tries = 0
             while !Task.isCancelled {
                 do {
-                    let connection = try await connect()
+                    let connection = try await endpoint.connection()
                     try await PaneSession.create(on: connection, name: name, launch: launch, grid: grid)
                     self?.made(number)
                     return
@@ -199,11 +207,11 @@ final class PaneLink {
                     logger.info("pane \(name, privacy: .public): create failed: \(String(describing: error), privacy: .public)")
                 }
                 tries += 1
-                if tries > PaneSession.reconnectTries {
+                if tries > Self.createTries {
                     self?.sessionEnded()
                     return
                 }
-                try? await Task.sleep(for: PaneSession.reconnectWait)
+                try? await Task.sleep(for: Self.createWait)
             }
         })
     }

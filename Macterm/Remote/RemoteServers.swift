@@ -52,7 +52,7 @@ final class RemoteServers {
             Configuration(
                 scripts: HostCommands.Scripts.bundled,
                 builds: .bundled,
-                askConsent: { await RemoteServerConsent.ask($0) },
+                askConsent: { await SSHConnections.shared.loginUI?.askToInstallServer(on: $0) ?? false },
                 consents: .preferences
             )
         }
@@ -114,9 +114,10 @@ final class RemoteServers {
         }
     }
 
-    /// One connection to a host's server. Call `close()` when done.
-    /// Its parts are thread-safe and never change.
-    final class Link: @unchecked Sendable {
+    /// One connection to a host's server. As a `ServerEndpoint` it gives
+    /// only its own connection, for `list`, `kill` and `run`. Call `close()`
+    /// when done. Its parts are thread-safe and never change.
+    final class Link: ServerEndpoint, @unchecked Sendable {
         let connection: ServerConnection
         /// The ssh process of the proxy. Nil for a roaming link.
         let process: Process?
@@ -165,6 +166,11 @@ final class RemoteServers {
                 logger.info("link heartbeat: link is dead, closing it")
                 self?.close()
             }
+        }
+
+        func connection() async throws -> any ServerLink {
+            guard connection.isOpen else { throw ServerClientError.disconnected }
+            return connection
         }
 
         func close() {

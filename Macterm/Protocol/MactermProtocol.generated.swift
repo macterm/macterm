@@ -1012,6 +1012,7 @@ extension MactermProtocol.SessionCreate {
         var cols: UInt16 = 80
         var rows: UInt16 = 24
         var env: [ProtocolBin]?
+        var replaceExited: Bool = false
     }
 }
 
@@ -1023,6 +1024,7 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
         var cols: UInt16?
         var rows: UInt16?
         var env: [ProtocolBin]?
+        var replaceExited: Bool?
         try reader.readMap { key, reader in
             switch key {
             case "id": id = try String(from: &reader)
@@ -1031,6 +1033,7 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
             case "cols": cols = try UInt16(from: &reader)
             case "rows": rows = try UInt16(from: &reader)
             case "env": env = try reader.readOptional([ProtocolBin].self)
+            case "replace_exited": replaceExited = try Bool(from: &reader)
             default: return false
             }
             return true
@@ -1041,10 +1044,11 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
         self.cols = cols ?? 80
         self.rows = rows ?? 24
         self.env = env
+        self.replaceExited = replaceExited ?? false
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        var keyCount = 3
+        var keyCount = 4
         if cwd != nil { keyCount += 1 }
         if command != nil { keyCount += 1 }
         if env != nil { keyCount += 1 }
@@ -1067,6 +1071,8 @@ extension MactermProtocol.SessionCreate.Args: ProtocolValue {
             writer.writeString("env")
             env.encode(to: &writer)
         }
+        writer.writeString("replace_exited")
+        replaceExited.encode(to: &writer)
     }
 }
 

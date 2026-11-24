@@ -889,9 +889,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let handler = ControlHandler(appState: appState, projectStore: projectStore)
         controlHandler = handler
         controlServer.attach { raw, peer in await handler.handle(raw, peerPID: peer) }
-        // A master that exits takes its login questions with it.
-        SSHConnections.shared.onConnectionExit = { SSHLoginPrompts.shared.cancel(sshPID: $0) }
-        SSHConnections.shared.onLoginNotice = { SSHLoginPrompts.shared.showNotice(host: $0, sshPID: $1, line: $2) }
+        // The sheets of a login, and the question before a server install.
+        SSHConnections.shared.loginUI = SSHLoginPrompts.shared
         // The unit-test host must not end a master of the developer's Debug app.
         if SessionClient.liveBypass != .unitTestHost {
             Task { await SSHConnections.shared.endStaleConnections() }

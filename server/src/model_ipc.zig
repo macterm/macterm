@@ -164,6 +164,7 @@ pub fn replySubscribe(s: *Server, peer: u64, re: u64) void {
         .sessions = list.items,
         .client = p.client,
     });
+    registry.listRead(s);
 }
 
 // ── Requests ────────────────────────────────────────────────────────────────
