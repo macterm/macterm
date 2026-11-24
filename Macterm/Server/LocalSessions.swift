@@ -5,8 +5,9 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 
 /// The app's one connection to the local server, for the sessions of its
-/// local panes: the local `ServerEndpoint`. Each local pane's `PaneSession`
-/// opens its channel on it, and it lists and ends the sessions.
+/// local panes: the local `ServerEndpoint`. It makes, lists and ends the
+/// sessions. A local pane's `PaneSession` opens its channel on the
+/// session's own socket (`paneChannels`), not on this connection.
 ///
 /// It connects at the first use, and again after the connection ends (the
 /// server exits when it has no session and no client). The server ends a
