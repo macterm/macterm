@@ -99,6 +99,23 @@ extension GhosttyConfigKey where Value == String {
     }
 }
 
+extension GhosttyConfigKey where Value == ThemeResolver.Sides {
+    /// The `theme` key, as the two sides that libghostty merged from every
+    /// config file and include (`ghostty_config_theme_s`, a fork patch of
+    /// macterm/ghostty). Each side is a pointer and a length with no NUL.
+    /// The getter fails when no file sets a theme.
+    static func theme(_ name: String) -> Self {
+        Self(name) { config in
+            var value = ghostty_config_theme_s()
+            guard get(config, name, into: &value), let light = value.light, let dark = value.dark else { return nil }
+            func text(_ start: UnsafePointer<CChar>, _ count: Int) -> String {
+                String(decoding: UnsafeRawBufferPointer(start: start, count: count), as: UTF8.self)
+            }
+            return ThemeResolver.Sides(light: text(light, value.light_len), dark: text(dark, value.dark_len))
+        }
+    }
+}
+
 extension GhosttyConfigKey where Value == NSColor {
     /// A `Color` key, arriving as 8-bit sRGB components.
     static func color(_ name: String) -> Self {
