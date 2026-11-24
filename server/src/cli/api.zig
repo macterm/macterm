@@ -505,24 +505,38 @@ test "describe gives the doc of each field as description, and its limits" {
     try testing.expectEqualStrings("The new session.", create.get("session").?.object.get("description").?.string);
 }
 
-test "every field of the args and the result of a listed method has a doc" {
+test "every field of each type that a listed method holds has a doc" {
+    // The args, the result and each type in their `$defs`.
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(testing.allocator);
+    var missing: usize = 0;
     for (methods) |method| {
-        for ([_][]const u8{ method.args, method.result }) |name| {
-            for (typeDef(name).fields) |f| {
-                if (f.doc == null) std.debug.print("{s}: {s}.{s} has no doc\n", .{ method.name, name, f.name });
-                try testing.expect(f.doc != null);
-            }
-        }
+        for ([_][]const u8{ method.args, method.result }) |name| missing += try fieldsWithoutDoc(name, &seen);
     }
+    try testing.expectEqual(0, missing);
 }
 
-test "every field of a type of messages.zig in a result has a doc" {
-    inline for (.{ m.Session, m.TerminalState, m.Zoom, m.RemovedPane }) |T| {
-        inline for (comptime std.meta.fieldNames(T)) |name| {
-            if (!@hasField(@TypeOf(T.field_doc), name)) std.debug.print("{s}.{s} has no doc\n", .{ @typeName(T), name });
-            try testing.expect(@hasField(@TypeOf(T.field_doc), name));
+/// The fields with no doc in the type of the wire type `wire` and in each
+/// type that it holds. It skips a type in `seen` and prints each field that
+/// it counts.
+fn fieldsWithoutDoc(wire: []const u8, seen: *std.StringHashMapUnmanaged(void)) !usize {
+    if (wire[0] == '[') return fieldsWithoutDoc(wire[1 .. wire.len - 1], seen);
+    const named = for (metadata.metadata.types) |t| {
+        if (std.mem.eql(u8, t.name, wire)) break t;
+    } else return 0;
+    if ((try seen.getOrPut(testing.allocator, named.name)).found_existing) return 0;
+    var missing: usize = 0;
+    for (named.fields) |f| {
+        if (f.doc == null) {
+            std.debug.print("{s}.{s} has no doc\n", .{ named.name, f.name });
+            missing += 1;
         }
+        missing += try fieldsWithoutDoc(f.type, seen);
     }
+    for (named.variants) |v| if (v.type) |payload| {
+        missing += try fieldsWithoutDoc(payload, seen);
+    };
+    return missing;
 }
 
 test "describe gives a schema for every method" {
