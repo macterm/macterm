@@ -806,13 +806,14 @@ final class AppState {
     }
 
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
-    /// screens was up. A different screen starts from an empty query — text
-    /// typed for one search means nothing to another.
+    /// screens was up. A different screen starts from its own text
+    /// (`PaletteScope.initialQuery`: empty for a search) — text typed for
+    /// one search means nothing to another.
     func openCommandPalette(scope: PaletteScopeID?) {
         guard let window = keyOrFirstWindow else { return }
         if window.paletteScope != scope || window.paletteStack.count > 1 {
-            commandPaletteQuery = ""
             window.showPaletteScope(scope)
+            commandPaletteQuery = window.paletteStack.last?.scope.initialQuery ?? ""
         }
         window.isCommandPaletteVisible = true
     }
