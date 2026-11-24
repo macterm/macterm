@@ -111,8 +111,8 @@ struct PaneZoomTests {
         zoom.pinch(by: 0.1, at: .zero, in: size)
         // A 16x34 pixel cell at 1.1x draws as 18x37 (design/012, E4).
         let drawn = zoom.drawn(cellPixels: CGSize(width: 16, height: 34), in: size)
-        #expect(drawn.scaleX == 18.0 / 16.0)
-        #expect(drawn.scaleY == 37.0 / 34.0)
+        #expect(drawn.scaleX == CGFloat(18) / 16)
+        #expect(drawn.scaleY == CGFloat(37) / 34)
         #expect(drawn.offsetX <= 0)
         #expect(drawn.scaleX * size.width + drawn.offsetX >= size.width)
         #expect(drawn.scaleY * size.height + drawn.offsetY >= size.height)

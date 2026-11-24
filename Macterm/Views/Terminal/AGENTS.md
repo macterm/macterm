@@ -80,6 +80,18 @@ Read-only is a mode of libghostty. The control is the **Read-Only Mode** `AppCom
 - `GHOSTTY_ACTION_READONLY` is only the notice. `GhosttyCallbacks` sends it to `PaneSurface.isReadOnly` (live only, never persisted). `PaneSurface.destroy` clears it, because a new surface starts writable.
 - **The pill is the first `ModePill` in the trailing badge row of `TerminalPane`** (Read-Only, Copy Mode, Zoomed, then the lock). A click sends `toggle_readonly` to the surface.
 
+## Picture zoom (design/012)
+
+A pinch scales the picture of the pane under the pointer, up to 3x (`PaneZoom`, `PaneZoomController`). The font size, the grid and the pty size do not change: libghostty draws the zoom (`ghostty_surface_set_zoom`, fork patches 0025 and 0026) and applies its inverse where a pointer becomes a cell, so Macterm maps no mouse point.
+
+- **A pinch never changes the tile zoom.** One gesture has one action (Ethan, 2026-11-16, option A). Zoom Pane is a keybind, a palette row and a menu item only. The pinch that toggled the tile (#767) is gone.
+- **While the pinch moves, the layer scales the last frame.** `settleDelay` after the last magnify event, libghostty gets the zoom and draws it sharp. The layer transform always maps the zoom of the frame that the layer shows to the zoom that the user asked for, and it is set again at each new frame, inside libghostty's main-thread set of the layer's `contents` (a key-value observer). The sharp frame and the identity transform therefore land in one Core Animation transaction.
+- **The layer takes the whole-pixel steps that libghostty draws** (`PaneZoom.drawn`: `round(scale x cell)` on each axis). Without them the picture jumps when the sharp frame comes (design/012, E4).
+- **A two-finger scroll pans first.** Only the part that the pan cannot take at its edge goes to the terminal (`forwardScrollWheel(_:deltaX:deltaY:)`). A wheel that is not precise always scrolls.
+- The zoom is not in the model and is not persisted, as read-only is not. `destroySurface` sets it back to 1x. After a change of the content scale, libghostty must get the zoom again (it keeps pixels).
+- **Reset Zoom** is an `AppCommand` (`HotkeyAction.resetZoom`, no default chord: ghostty binds ⌘0 to `reset_font_size`). Its action is nil at 1x.
+- No CLI verb drives the zoom yet: `control.sock` is frozen, so `pane pinch` waits for the relayed app actions (issue 0235).
+
 ## Animations (Settings → Animations)
 
 This is the motion pane. It is directly under Appearance in the sidebar of Settings. It has six toggles. **Smooth scrolling**, **Snap to whole row** and **Animate splits** ship **on**. The three cursor effects are opt-in. The pane was Settings → Experimental until the smooth-scrolling and split toggles graduated. Anything that is still settling in belongs here too, off by default, until it graduates.
