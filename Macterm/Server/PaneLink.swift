@@ -130,6 +130,16 @@ final class PaneLink {
         return view.route
     }
 
+    /// The remote driver runs a plain ssh shell now.
+    var runsPlainShell: Bool {
+        driver?.runsPlainShell ?? false
+    }
+
+    /// The host's answer for the plain shell (`RemotePaneDriver.plainShellIsIdle`).
+    func plainShellIsIdle(timeout: Duration) async -> Bool? {
+        await driver?.plainShellIsIdle(timeout: timeout)
+    }
+
     private func makeDriver(_ hosts: RemoteHosts) -> RemotePaneDriver {
         let driver = RemotePaneDriver(name: name, hosts: hosts)
         driver.onPlainOwner = { [weak self] host in

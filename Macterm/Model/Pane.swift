@@ -233,6 +233,19 @@ final class Pane: Identifiable {
         return made
     }
 
+    /// The pane runs a plain ssh shell (a host with no server).
+    var runsPlainShell: Bool {
+        link?.runsPlainShell ?? false
+    }
+
+    /// `needsConfirmClose` for a pane that runs a plain shell, after its
+    /// host answered (0494, `ForegroundPolicy.plainShellNeedsConfirmClose`).
+    /// nil when the pane runs none.
+    func plainShellNeedsConfirmClose(timeout: Duration) async -> Bool? {
+        guard let idle = await link?.plainShellIsIdle(timeout: timeout) else { return nil }
+        return ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: idle, executionState: executionState)
+    }
+
     /// A message of the pane's session, once for the pane.
     func receiveLinkEvent(_ event: PaneLinkEvent) {
         switch event {
