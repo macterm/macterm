@@ -16,8 +16,8 @@ struct ProjectScreenGridTests {
 
     @Test
     func every_card_has_one_size_from_the_column_width_and_the_aspect() {
-        let size = ProjectScreenGridLayout.cardSize(width: 412, aspect: 2)
-        // Two columns with one 12 pt gap.
+        let size = ProjectScreenGridLayout.cardSize(width: 420, aspect: 2)
+        // Two columns with one 20 pt gap.
         #expect(size.width == 200)
         #expect(size.height == 100)
     }
@@ -26,13 +26,32 @@ struct ProjectScreenGridTests {
     func the_cards_fill_row_by_row_and_the_second_column_starts_half_a_card_lower() {
         let size = CGSize(width: 200, height: 100)
         #expect(ProjectScreenGridLayout.origin(of: 0, cardSize: size) == .zero)
-        #expect(ProjectScreenGridLayout.origin(of: 1, cardSize: size) == CGPoint(x: 212, y: 50))
-        #expect(ProjectScreenGridLayout.origin(of: 2, cardSize: size) == CGPoint(x: 0, y: 112))
-        #expect(ProjectScreenGridLayout.origin(of: 3, cardSize: size) == CGPoint(x: 212, y: 162))
+        #expect(ProjectScreenGridLayout.origin(of: 1, cardSize: size) == CGPoint(x: 220, y: 50))
+        #expect(ProjectScreenGridLayout.origin(of: 2, cardSize: size) == CGPoint(x: 0, y: 120))
+        #expect(ProjectScreenGridLayout.origin(of: 3, cardSize: size) == CGPoint(x: 220, y: 170))
         // The lowest card is the last of the second column.
-        #expect(ProjectScreenGridLayout.height(count: 4, cardSize: size) == 262)
-        #expect(ProjectScreenGridLayout.height(count: 3, cardSize: size) == 212)
+        #expect(ProjectScreenGridLayout.height(count: 4, cardSize: size) == 270)
+        #expect(ProjectScreenGridLayout.height(count: 3, cardSize: size) == 220)
         #expect(ProjectScreenGridLayout.height(count: 0, cardSize: size) == 0)
+    }
+
+    @Test
+    func the_grid_takes_more_than_half_the_screen_and_leaves_the_left_side_its_width() {
+        // A wide screen: the grid's share.
+        #expect(ProjectScreenGridLayout.gridWidth(screenWidth: 1200) == 660)
+        // A narrow screen: the left side keeps its least width.
+        #expect(ProjectScreenGridLayout.gridWidth(screenWidth: 600) == 240)
+        #expect(ProjectScreenGridLayout.gridWidth(screenWidth: 300) == 0)
+        // The padding to the left side and to the window's edge.
+        #expect(ProjectScreenGridLayout.contentWidth(gridWidth: 660) == 588)
+        #expect(ProjectScreenGridLayout.contentWidth(gridWidth: 50) == 0)
+    }
+
+    @Test
+    func a_card_is_rounded_in_proportion_to_its_width_within_limits() {
+        #expect(ProjectScreenGridLayout.cornerRadius(cardWidth: 250) == 20)
+        #expect(ProjectScreenGridLayout.cornerRadius(cardWidth: 100) == 12)
+        #expect(ProjectScreenGridLayout.cornerRadius(cardWidth: 600) == 28)
     }
 
     @Test

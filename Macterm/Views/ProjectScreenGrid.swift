@@ -24,7 +24,32 @@ enum ProjectScreenCard: Identifiable {
 enum ProjectScreenGridLayout {
     static let columns = 2
     /// The gap between two cards, in both directions.
-    static let spacing: CGFloat = 12
+    static let spacing: CGFloat = 20
+    /// The part of the screen's width that the grid takes, padding included.
+    static let screenShare: CGFloat = 0.55
+    /// The width that the left side (name, path, keys) keeps at the least.
+    static let infoMinWidth: CGFloat = 360
+    /// The space around the cards: a gap to the left side, and space to the
+    /// window's edge and its scroller.
+    static let padding = EdgeInsets(top: 40, leading: 24, bottom: 40, trailing: 48)
+    /// The narrowest card that the grid shows. A narrower screen shows no grid.
+    static let minCardWidth: CGFloat = 120
+
+    /// The width of the grid, padding included, on a screen of `screenWidth`.
+    static func gridWidth(screenWidth: CGFloat) -> CGFloat {
+        max(0, min(screenWidth * screenShare, screenWidth - infoMinWidth))
+    }
+
+    /// The width of the cards' area in a grid of `gridWidth`.
+    static func contentWidth(gridWidth: CGFloat) -> CGFloat {
+        max(0, gridWidth - padding.leading - padding.trailing)
+    }
+
+    /// The corner radius of a card of `width`: round as the reference image,
+    /// in proportion to the card.
+    static func cornerRadius(cardWidth: CGFloat) -> CGFloat {
+        min(max(cardWidth * 0.08, 12), 28)
+    }
 
     /// The cards in the order of the sidebar: the tabs in tab order, then
     /// the child projects in the order that `children` has
@@ -82,6 +107,8 @@ enum ProjectScreenGridLayout {
 struct ProjectScreenGrid: View {
     let project: Project
     let cards: [ProjectScreenCard]
+    /// The size of the grid, padding included. Its height is the screen's.
+    let size: CGSize
     /// Width over height of the terminal area: the area of the project screen.
     let aspect: CGFloat
 
@@ -111,15 +138,25 @@ struct ProjectScreenGrid: View {
     }
 
     var body: some View {
+        let layout = ProjectScreenGridLayout.self
+        let contentWidth = layout.contentWidth(gridWidth: size.width)
+        let cardSize = layout.cardSize(width: contentWidth, aspect: aspect)
+        // The grid has a fixed size: its height comes from the same width that
+        // places the cards, so the last card is never cut.
         ScrollView(.vertical) {
             StaggeredCardGrid(aspect: aspect) {
                 ForEach(cards) { card in
-                    ProjectScreenCardView(card: card, aspect: aspect) { open(card) }
+                    ProjectScreenCardView(card: card, cardSize: cardSize, aspect: aspect) { open(card) }
                 }
             }
-            .padding(32)
+            .frame(width: contentWidth, height: layout.height(count: cards.count, cardSize: cardSize))
+            .padding(layout.padding)
+            // A grid shorter than the screen is centered, as the left side is.
+            .frame(width: size.width)
+            .frame(minHeight: size.height)
         }
-        .scrollIndicators(.automatic)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: size.width, height: size.height)
         .background(WindowVisibilityReader { windowIsVisible = $0 })
         .onChange(of: samplingKey, initial: true) { _, key in
             if key.isVisible {
@@ -164,17 +201,25 @@ private struct StaggeredCardGrid: Layout {
     }
 }
 
-/// One card: a rounded rectangle on the theme's surface fill with a thin
-/// border. The hover is the tab switcher's selection fill around it.
+/// One card: a rounded rectangle with a soft fill and a thin border, as in
+/// the reference image. A tab's preview sits inside it, inset by `inset`,
+/// with corners that follow the card's. The hover is the tab switcher's
+/// selection fill around it.
 private struct ProjectScreenCardView: View {
     let card: ProjectScreenCard
+    let cardSize: CGSize
     let aspect: CGFloat
     let action: () -> Void
 
     @State
     private var isHovered = false
 
-    private static let cornerRadius: CGFloat = 8
+    /// The rim of card fill around a tab's preview.
+    private static let inset: CGFloat = 8
+    private var cornerRadius: CGFloat {
+        ProjectScreenGridLayout.cornerRadius(cardWidth: cardSize.width)
+    }
+
     /// How far the hover fill reaches out of the card, as in the tab
     /// switcher (`TabSwitcherCard.selectionHalo`). It is drawn in the gap
     /// between cards, so the card keeps the size of its slot and its aspect.
@@ -185,13 +230,13 @@ private struct ProjectScreenCardView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MactermTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .strokeBorder(MactermTheme.border.opacity(0.6), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(MactermTheme.border, lineWidth: 1)
                 )
                 .background(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius + Self.halo, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius + Self.halo, style: .continuous)
                         .fill(isHovered ? MactermTheme.fg.opacity(0.14) : .clear)
                         .padding(-Self.halo)
                 )
@@ -207,15 +252,15 @@ private struct ProjectScreenCardView: View {
     private var content: some View {
         switch card {
         case let .tab(tab):
-            GeometryReader { geo in
-                TabPreviewMosaic(node: tab.splitRoot)
-                    .frame(size: ProjectScreenGridLayout.fitted(aspect: aspect, in: geo.size))
-                    .frame(width: geo.size.width, height: geo.size.height)
-            }
+            let inner = CGSize(width: cardSize.width - Self.inset * 2, height: cardSize.height - Self.inset * 2)
+            TabPreviewMosaic(node: tab.splitRoot)
+                .frame(size: ProjectScreenGridLayout.fitted(aspect: aspect, in: inner))
+                .clipShape(RoundedRectangle(cornerRadius: max(cornerRadius - Self.inset, 4), style: .continuous))
+                .frame(size: inner)
         case let .project(child):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(child.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(MactermTheme.fg)
                     .lineLimit(2)
                 if child.hasFolder {
@@ -226,7 +271,7 @@ private struct ProjectScreenCardView: View {
                         .truncationMode(.middle)
                 }
             }
-            .padding(12)
+            .padding(cornerRadius * 0.75)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }

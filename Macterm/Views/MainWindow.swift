@@ -1050,11 +1050,19 @@ struct EmptyProjectView: View {
 
     var body: some View {
         let cards = cards
+        let layout = ProjectScreenGridLayout.self
+        let gridWidth = layout.gridWidth(screenWidth: size.width)
+        let showsGrid = !cards.isEmpty && size.height > 0
+            && layout.cardSize(width: layout.contentWidth(gridWidth: gridWidth), aspect: 1).width >= layout.minCardWidth
         HStack(spacing: 0) {
             info
-            if !cards.isEmpty, size.width > 0, size.height > 0 {
-                ProjectScreenGrid(project: project, cards: cards, aspect: size.width / size.height)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if showsGrid {
+                ProjectScreenGrid(
+                    project: project,
+                    cards: cards,
+                    size: CGSize(width: gridWidth, height: size.height),
+                    aspect: size.width / size.height
+                )
             }
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
