@@ -5,8 +5,8 @@ private let logger = Logger(subsystem: appBundleID, category: "FirstRunSeed")
 
 extension AppState {
     /// Give a genuinely fresh install something to look at: a pinned
-    /// "Welcome" row and a Home project with one tab, each printing a short
-    /// tutorial as terminal output. See `FirstRunSeed` for the policy and
+    /// "Welcome" row that prints a short tutorial as terminal output, and a
+    /// Home project with one plain shell tab. See `FirstRunSeed` for the policy and
     /// `Tutorial` for the text.
     ///
     /// Runs from `MainWindow`'s launch task, AFTER `restoreSelection` — which
@@ -42,29 +42,10 @@ extension AppState {
         Preferences.shared.hasSeededFirstRun = true
 
         let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath)
-        // A pure-spawn reconcile is how the declared `run:` reaches the pane
-        // as a typed `PaneStartCommand`. Its tab takes the place of the first
-        // tab that `projectAdded` gave the project: no window drew that tab,
-        // so it has no surface and no session.
-        let plan = LayoutReconciler.plan(
-            layout: FirstRunSeed.projectLayout,
-            workspace: nil,
-            projectRoot: project.path,
-            projectID: project.id
-        )
-        if let planned = plan.tabs.first {
-            let tab = TerminalTab(
-                id: UUID(),
-                splitRoot: planned.root,
-                focusedPaneID: planned.focusedPaneID,
-                customTitle: planned.title
-            )
-            if let workspace = workspaces[project.id] {
-                ModelWriter.tabReplaceAll(in: workspace, with: [tab], activeTabID: tab.id)
-            } else {
-                workspaces[project.id] = Workspace(id: project.id, tabs: [tab], activeTabID: tab.id)
-            }
-        }
+        // The project's first tab is a plain shell with no `run:`, the same
+        // tab that every added project gets. `projectAdded` does nothing when
+        // the `onAdd` hook of the store already gave the tab.
+        projectAdded(project)
 
         // The pinned half is added as a record with no live tab — exactly the
         // state a relaunch restores from a declaration-only `pinned.yaml`
@@ -80,7 +61,7 @@ extension AppState {
 
         // Selects, warms and (via the pinned membership change) writes
         // `pinned.yaml`. The project tab is the one on screen; the pinned row
-        // sits above it with its own tutorial already printed.
+        // sits above it with its tutorial already printed.
         selectProject(project)
         saveWorkspaces()
         Task { await materializeRestoredPinnedTabs() }
