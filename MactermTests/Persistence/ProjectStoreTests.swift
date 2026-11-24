@@ -58,9 +58,18 @@ struct ProjectStoreTests {
         // An offset past the end is the end.
         #expect(store.move(a.id, into: parent.id, at: 99))
         #expect(store.children(of: parent.id).map(\.id) == [b.id, inner.id, a.id])
-        // Never into itself or a project inside it.
+        // Its own slot, or the slot after it: no change.
+        #expect(store.move(b.id, into: parent.id, at: 0))
+        #expect(store.move(b.id, into: parent.id, at: 1))
+        #expect(store.children(of: parent.id).map(\.id) == [b.id, inner.id, a.id])
+        // A negative offset is the first slot.
+        #expect(store.move(a.id, into: parent.id, at: -3))
+        #expect(store.children(of: parent.id).map(\.id) == [a.id, b.id, inner.id])
+        // Never into itself or a project inside it, and no change of order.
+        let topLevel = store.children(of: nil).map(\.id)
         #expect(!store.move(parent.id, into: inner.id, at: 0))
         #expect(store.row(parent.id)?.parent == nil)
+        #expect(store.children(of: nil).map(\.id) == topLevel)
     }
 
     @Test

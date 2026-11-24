@@ -54,15 +54,6 @@ enum SidebarTree {
         return store.move(id, into: target.id)
     }
 
-    /// A project dropped in a drop slot among the projects of `parent` (nil:
-    /// the top level) goes to that slot. The gap of the drag shows the slot
-    /// (`OutlineGapDropGuard.branchSlot`). Returns false when the store
-    /// refuses the move.
-    @discardableResult
-    static func drop(_ id: UUID, into parent: UUID?, at offset: Int, in store: ProjectStore) -> Bool {
-        store.move(id, into: parent, at: offset)
-    }
-
     /// The projects that `id` can move into with Move Into Project: every
     /// project except its own parent, itself, and the projects inside it.
     static func moveTargets(for id: UUID, in store: ProjectStore) -> [Project] {

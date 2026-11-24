@@ -188,7 +188,8 @@ enum TabSlotDropItem: Transferable {
 /// The union that the `ForEach` of the projects inside a project accepts
 /// while the gap guard is on (`SidebarPresentationState.hasProjectDropSlots`):
 /// a project goes to the drop slot, and a tab or a pane goes after the last
-/// tab of that project.
+/// tab of that project. Without the guard, that `ForEach` takes
+/// `TabSlotDropItem`, which refuses projects. Keep the two in step.
 enum ProjectSlotDropItem: Transferable {
     case tab(MovableTab)
     case project(MovableProject)
@@ -334,10 +335,11 @@ struct SidebarContent: View {
             //   (OutlineListCoordinator.outlineView(_:acceptDrop:…) →
             //   HeterogeneousCollection.element(at:) assertion; macOS 27).
             //   The insertion LINE renders fine during the hover — it is the
-            //   accept that dies. A fake drag on a hosted List
-            //   (`SidebarDragFeedbackTests`) drops at the guard's slots with
-            //   no crash; SwiftUI crashes on a slot in an item with no rows,
-            //   which the guard never proposes.
+            //   accept that dies. With the guard, a fake drag on a hosted List
+            //   (`SidebarDragFeedbackTests`) drops at each slot of the guard
+            //   with no crash. That List is smaller than this one, so a
+            //   ui-review checks this List. SwiftUI crashes on a slot in an
+            //   item with no rows. The guard never proposes one.
             // - A List-level catch-all never fires: the outline view claims
             //   every drag over the sidebar, so unhandled drops don't bubble
             //   to enclosing views.
@@ -639,12 +641,12 @@ struct SidebarContent: View {
         appState.workspaces[project.id]?.tabs.count ?? 0
     }
 
-    /// Projects dropped in a drop slot among the projects of `parent` (nil:
-    /// the top level). Each one goes to the slot, in drag order.
+    /// A project dropped in a drop slot among the projects of `parent` (nil:
+    /// the top level) goes to that slot, where the gap of the drag showed.
+    /// A project drag carries one project (`projectHeader`).
     private func receiveProjectSlotDrop(_ items: [MovableProject], into parent: UUID?, at offset: Int) {
-        for (index, item) in items.enumerated() {
-            SidebarTree.drop(item.projectID, into: parent, at: offset + index, in: projectStore)
-        }
+        guard let item = items.first else { return }
+        projectStore.move(item.projectID, into: parent, at: offset)
     }
 
     private func receiveSlotDrop(_ items: [TabSlotDropItem], into project: Project, at slot: Int) {

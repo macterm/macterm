@@ -11,8 +11,11 @@ struct SidebarDragFeedbackTests {
     /// keeps the default insertion line.
     @Test
     func only_the_list_with_the_probe_gets_the_gap_feedback() async throws {
+        let guarded = GuardFlag()
         let content = HStack(spacing: 0) {
-            sidebarList().background { SidebarDragFeedback(isGuarded: .constant(false)) }
+            sidebarList().background {
+                SidebarDragFeedback(isGuarded: Binding(get: { guarded.value }, set: { guarded.value = $0 }))
+            }
             sidebarList()
         }
         let window = NSWindow(
@@ -36,6 +39,9 @@ struct SidebarDragFeedbackTests {
         let probed = await poll { sorted[0].draggingDestinationFeedbackStyle == .gap ? true : nil }
         #expect(probed == true)
         #expect(sorted[1].draggingDestinationFeedbackStyle == .sourceList)
+        // The List adds the project drop slots only when it knows that the
+        // guard is on.
+        #expect(await poll { guarded.value ? true : nil } == true)
     }
 
     @Test
@@ -109,10 +115,9 @@ struct SidebarDragFeedbackTests {
     }
 
     /// A project drag opens its gap at the project slot nearest to the
-    /// pointer, and the drop lands at that slot (ui-review 0585: the gap
-    /// stayed at the start slot, and the drop went somewhere else). The rows:
-    /// A (A0, A1), B (B0, B.x (Bx0), B.y), C, and a scratch row S0, as the
-    /// sidebar has them. The test calls the outline view, so the header rows
+    /// pointer, and the drop lands at that slot. The rows: A (A0, A1),
+    /// B (B0, B.x (Bx0), B.y), C, D (D0, D.e), and a scratch row S0, as the
+    /// sidebar has them. B.y, C and D.e have no rows. The test calls the outline view, so the header rows
     /// do not take the drag here as their own drop views do in the app.
     @Test
     func a_project_drag_drops_at_the_slot_of_its_gap() async throws {
@@ -124,6 +129,7 @@ struct SidebarDragFeedbackTests {
                 ProbeNode(name: "B.y", tabs: [], children: []),
             ]),
             ProbeNode(name: "C", tabs: [], children: []),
+            ProbeNode(name: "D", tabs: ["D0"], children: [ProbeNode(name: "D.e", tabs: [], children: [])]),
         ]
         let projectType = NSPasteboard.PasteboardType(UTType.mactermProject.identifier)
         let content = List {
@@ -139,7 +145,7 @@ struct SidebarDragFeedbackTests {
         .listStyle(.sidebar)
         .background { SidebarDragFeedback(branchTypes: [projectType], isGuarded: .constant(false)) }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 240, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 600),
             styleMask: [.titled],
             backing: .buffered,
             defer: false
@@ -149,10 +155,11 @@ struct SidebarDragFeedbackTests {
         window.contentView = NSHostingView(rootView: content)
         window.layoutIfNeeded()
 
-        // Rows: 0 A, 1 A0, 2 A1, 3 B, 4 B0, 5 B.x, 6 Bx0, 7 B.y, 8 C, 9 S0.
+        // Rows: 0 A, 1 A0, 2 A1, 3 B, 4 B0, 5 B.x, 6 Bx0, 7 B.y, 8 C, 9 D,
+        // 10 D0, 11 D.e, 12 S0.
         let outline = try #require(await poll {
             window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
-                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 10 ? $0 : nil
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 13 ? $0 : nil
             }
         })
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
@@ -185,10 +192,15 @@ struct SidebarDragFeedbackTests {
         #expect(await drop(row: 6, fraction: 0.5) == ["into B 1"])
         // On the upper half of C's row: before C.
         #expect(await drop(row: 8, fraction: 0.1) == ["top 2"])
-        // Below C, the scratch rows own the slot: no drop, and no crash on
-        // C or B.y, which have no rows.
-        #expect(await drop(row: 8, fraction: 0.9).isEmpty)
+        // Below B.y and below C, which have no rows (no crash): after them.
         #expect(await drop(row: 7, fraction: 0.9) == ["into B 2"])
+        #expect(await drop(row: 8, fraction: 0.9) == ["top 3"])
+        // On D's tab, where the only project inside has no rows: inside D.
+        #expect(await drop(row: 10, fraction: 0.5) == ["into D 0"])
+        #expect(await drop(row: 11, fraction: 0.9) == ["into D 1"])
+        // On the scratch row, which owns the slot after the last project:
+        // no drop.
+        #expect(await drop(row: 12, fraction: 0.5).isEmpty)
     }
 
     private func sidebarList() -> some View {
@@ -250,6 +262,11 @@ private struct ProbeProjectRow: View {
             Text(node.name)
         }
     }
+}
+
+@MainActor
+private final class GuardFlag {
+    var value = false
 }
 
 @MainActor

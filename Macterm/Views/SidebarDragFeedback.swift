@@ -36,8 +36,15 @@ struct SidebarDragFeedback: NSViewRepresentable {
 
     func updateNSView(_ view: ProbeView, context _: Context) {
         view.branchTypes = branchTypes
-        view.onGuardChange = { guarded in
+        let report: (Bool) -> Void = { guarded in
             if isGuarded != guarded { isGuarded = guarded }
+        }
+        view.onGuardChange = report
+        // A new binding (a new sidebar state) gets the state of the probe.
+        // Not during this update: SwiftUI does not allow a state change here.
+        if view.isGuarded != isGuarded {
+            let guarded = view.isGuarded
+            DispatchQueue.main.async { report(guarded) }
         }
         view.scheduleApply()
     }
@@ -55,6 +62,10 @@ struct SidebarDragFeedback: NSViewRepresentable {
         private static let maxTries = 20
         var branchTypes: Set<NSPasteboard.PasteboardType> = []
         var onGuardChange: (Bool) -> Void = { _ in }
+        /// True while the guard is on the outline view of this probe.
+        var isGuarded: Bool {
+            gapIsAllowed && outline?.window != nil
+        }
 
         override func hitTest(_: NSPoint) -> NSView? {
             nil
@@ -153,14 +164,14 @@ struct SidebarDragFeedback: NSViewRepresentable {
     }
 }
 
-/// Keeps the drop proposals of a SwiftUI outline view in the gap style to
-/// the ones that SwiftUI can take. Never set `.gap` on a SwiftUI outline view
-/// without it.
+/// Gives SwiftUI only the drop proposals that it can take, on an outline
+/// view in the gap style. Never set `.gap` on a SwiftUI outline view without
+/// it.
 ///
-/// It replaces the `validateDrop` method of the data source class. On an
-/// outline view in the gap style it does two things. All other calls go to
-/// SwiftUI with no change. Other Lists keep the default style, so the guard
-/// does not touch their drags.
+/// It replaces the `validateDrop` method of the data source class. Calls
+/// for an outline view in another style go to SwiftUI with no change. Other
+/// Lists keep the default style, so the guard does not touch their drags. On
+/// an outline view in the gap style, the guard does two things:
 ///
 /// 1. **The exit.** `NSOutlineView.draggingExited` validates one more drop
 ///    to close the gap. That call has no item and the child index -2.
@@ -168,18 +179,17 @@ struct SidebarDragFeedback: NSViewRepresentable {
 ///    with "index -2 out of bounds". A drag leaves the outline view each time
 ///    that it goes onto a row with its own `.dropDestination`, for example a
 ///    project header. The guard answers "no drop" and does not call SwiftUI.
-/// 2. **A branch drag** (a pasteboard type of `branchTypes(of:)`: a project). Only
-///    the `ForEach`s of expandable rows take it, but AppKit proposes the slots
-///    between the leaf rows (the tabs). SwiftUI refuses them, so the gap stays
-///    at the slot where the drag started and the drop lands somewhere else.
-///    The guard moves each proposal to the nearest slot among expandable rows
-///    (`branchSlot`) and gives that slot to AppKit, so the gap and the drop
-///    are at the same slot. It never proposes a slot in an item with no
-///    children or in a closed item: SwiftUI crashes on those.
+/// 2. **A branch drag** (a pasteboard type of `branchTypes(of:)`: a project).
+///    Only the `ForEach`s of expandable rows take it. AppKit proposes the
+///    slots between the leaf rows (the tabs), and SwiftUI refuses them. Then
+///    the gap stays at the slot where the drag started. The guard moves each
+///    proposal to the nearest slot among expandable rows (`branchSlot`) and
+///    gives that slot to AppKit. The gap and the drop are then at the same
+///    slot. The guard never proposes a slot in an item with no children or in
+///    a closed item, because SwiftUI crashes on those.
 ///
-/// Measured with a fake drag on a hosted List (`SidebarDragFeedbackTests`):
-/// without the guard, the exit crashes. With it, the gap closes, a new drag
-/// opens the gap again, and the drop lands at its slot.
+/// `SidebarDragFeedbackTests` drives a fake drag on a hosted List. Without
+/// the guard, the exit crashes, and a project drag drops at the wrong slots.
 @MainActor
 enum OutlineGapDropGuard {
     private typealias Validate = @convention(c) (
@@ -270,6 +280,8 @@ enum OutlineGapDropGuard {
     /// - Else: after `item`.
     /// - At the top level: the proposal with no change. SwiftUI refuses it
     ///   when a `ForEach` of leaf rows owns that slot.
+    /// - A drop on an item (the index -1): no drop. A header takes that drag
+    ///   with its own drop view.
     static func branchSlot(in outline: NSOutlineView, item: AnyObject?, index: Int, location: NSPoint) -> Slot? {
         guard index >= 0 else { return nil }
         guard let item else { return Slot(item: nil, index: index) }

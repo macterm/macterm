@@ -122,9 +122,8 @@ final class ProjectStore {
     }
 
     /// Move a project into the project `parent` (nil: the top level), at
-    /// the place `offset` among the rows of `parent`. The offset counts the
-    /// rows before the move, as a drop slot does: a project that is already
-    /// in `parent` keeps the place that the slot shows. Returns false where
+    /// the drop slot `offset` among the rows of `parent`. The offset counts
+    /// the rows before the move, with the project itself. Returns false where
     /// `move(_:into:)` does.
     @discardableResult
     func move(_ id: UUID, into parent: UUID?, at offset: Int) -> Bool {
