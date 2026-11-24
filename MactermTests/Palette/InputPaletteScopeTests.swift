@@ -110,7 +110,7 @@ struct InputPaletteScopeTests {
             id: "test.with-action",
             title: "Pick",
             prompt: "Path",
-            actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in ran += 1 }],
+            actions: [PaletteInputAction(id: "browse", title: "Browse") { _ in ran += 1 }],
             completions: { _ in [PaletteCompletion(title: "notes", value: "notes/")] },
             commit: { _, _ in .done }
         )
@@ -139,7 +139,7 @@ struct InputPaletteScopeTests {
             id: "test.with-results",
             title: "Pick",
             prompt: "Path",
-            actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in }],
+            actions: [PaletteInputAction(id: "browse", title: "Browse") { _ in }],
             completions: { _ in [PaletteCompletion(title: "never", value: "never")] },
             results: { text, _ in
                 ["notes", "novel"].filter { $0.hasPrefix(text) }.map { name in

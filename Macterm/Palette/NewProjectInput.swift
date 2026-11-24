@@ -22,8 +22,7 @@ extension PaletteInput {
             actions: [
                 PaletteInputAction(
                     id: "select-in-finder",
-                    title: String(localized: "Select in Finder"),
-                    icon: "folder"
+                    title: String(localized: "Select in Finder")
                 ) { context in
                     context.appState.newProjectFromFolderPanel(store: context.projectStore)
                 },

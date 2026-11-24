@@ -98,11 +98,11 @@ struct PaletteInput: Hashable {
 
 /// A row of an input screen that does something in place of the typed
 /// value. It runs after the palette has closed (`AppState.postPaletteAction`),
-/// so that it can show a modal panel or a sheet.
+/// so that it can show a modal panel or a sheet. It has no glyph, so that
+/// its title lines up with the rows below it.
 struct PaletteInputAction {
     let id: String
     let title: String
-    let icon: PaletteIcon
     let run: @MainActor (PaletteContext) -> Void
 }
 
@@ -160,7 +160,7 @@ final class InputPaletteScope: PaletteScope {
             refusedText = nil
         }
         let actions = input.actions.map { action in
-            PaletteItem(id: Self.actionID(action), title: action.title, icon: action.icon) {
+            PaletteItem(id: Self.actionID(action), title: action.title) {
                 context.appState.postPaletteAction = { action.run(context) }
             }
         }
