@@ -59,7 +59,8 @@ end = c.wait_msg("mark", count=4)
 kinds = [m["a"]["kind"] for m in c.messages("mark")]
 assert kinds[:4] == ["prompt", "input", "output", "end"], kinds
 assert c.messages("mark")[2]["a"]["command"] == b"make test"
-assert end == {"kind": "end", "command": b"make test", "exit_code": 3}, end
+# A failed command's end carries the end of its output.
+assert end == {"kind": "end", "command": b"make test", "exit_code": 3, "output_tail": b"tail-9"}, end
 # The command's last output comes before its end mark, also in one write.
 end_at = next(i for i, (ch, kind, v) in enumerate(c.frames) if kind == 0 and ch == 1 and v["t"] == "mark" and v["a"]["kind"] == "end")
 assert b"tail-9" in b"".join(v for ch, kind, v in c.frames[:end_at] if kind == 1)
