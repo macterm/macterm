@@ -222,10 +222,10 @@ struct MactermApp: App {
                 )
                 AppCommandMenuItem(command: .removeProject, appState: appState, projectStore: projectStore, titleOverride: "Remove Project")
                 AppCommandMenuItem(
-                    command: .replaceProjectPathWithCurrentDir,
+                    command: .changeProjectDirectory,
                     appState: appState,
                     projectStore: projectStore,
-                    titleOverride: "Set Project Path to Current Directory"
+                    titleOverride: "Change Project Directory…"
                 )
                 Divider()
                 AppCommandMenuItem(command: .nextProject, appState: appState, projectStore: projectStore, titleOverride: "Next Project")

@@ -62,7 +62,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case newRemoteProject
     case renameProject
     case removeProject
-    case replaceProjectPathWithCurrentDir
+    case changeProjectDirectory
     case applyLayout
     case saveLayout
     case nextProject
@@ -95,7 +95,16 @@ enum AppCommand: String, CaseIterable, Identifiable {
     /// What a search matches besides `title`: the English title, when the
     /// shown title is a translation.
     var searchAliases: [String] {
-        englishTitle == title ? [] : [englishTitle]
+        (englishTitle == title ? [] : [englishTitle]) + otherNames
+    }
+
+    /// Other words a user may search for, in English. Change Project
+    /// Directory keeps the words of the old command that it replaced.
+    private var otherNames: [String] {
+        switch self {
+        case .changeProjectDirectory: ["set project folder", "set project path", "replace project path", "cwd"]
+        default: []
+        }
     }
 
     /// Resolved one time: the English text never changes while the app runs,
@@ -153,7 +162,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newRemoteProject: "New Remote Project"
         case .renameProject: "Rename Current Project"
         case .removeProject: "Remove Current Project"
-        case .replaceProjectPathWithCurrentDir: "Replace Project Path with Current Directory"
+        case .changeProjectDirectory: "Change Project Directory"
         case .files: "Files"
         case .applyLayout: "Apply Layout"
         case .saveLayout: "Save Layout"
@@ -226,7 +235,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .newRemoteProject,
              .renameProject,
              .removeProject,
-             .replaceProjectPathWithCurrentDir,
+             .changeProjectDirectory,
              .applyLayout,
              .saveLayout,
              .nextProject,
@@ -298,6 +307,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .toggleQuickTerminal: .toggleQuickTerminal
         case .renameTab: .renameTab
         case .renameProject: .renameProject
+        case .changeProjectDirectory: .changeProjectDirectory
         case .copySessionID: .copySessionID
         case .capturePane: .capturePane
         case .copyMode: .copyMode
@@ -314,7 +324,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newRemoteProject,
              .newDesktopWidget,
              .removeProject,
-             .replaceProjectPathWithCurrentDir,
              .checkForUpdate: nil
         }
     }

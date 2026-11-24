@@ -171,8 +171,10 @@ struct CommandPalettePanel: View {
     private var inputScope: InputPaletteScope? { scope as? InputPaletteScope }
 
     /// Where the selection rests on a new list: the top row, or no row on
-    /// an input screen, whose Return commits the field and not a row.
-    private var restingIndex: Int { inputScope == nil ? 0 : -1 }
+    /// an input screen with text in its field, whose Return commits the
+    /// field and not a row. An empty field has nothing to commit, so there
+    /// the selection rests on the top row, if there is one.
+    private var restingIndex: Int { inputScope == nil || query.isEmpty ? 0 : -1 }
 
     private var flatItems: [PaletteItem] { sections.flatMap(\.items) }
 
@@ -484,7 +486,7 @@ struct CommandPalettePanel: View {
         // rows) — Return would have nothing to run. An input screen's
         // selection may rest on no row: its Return commits the field.
         if inputScope != nil, !flatItems.indices.contains(selectedIndex) {
-            selectedIndex = -1
+            selectedIndex = query.isEmpty && !flatItems.isEmpty ? 0 : -1
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
         {
@@ -621,11 +623,19 @@ struct CommandPalettePanel: View {
         let itemID: String
     }
 
-    /// Commit an input screen's field: the palette closes when the action
-    /// ran, and stays with the reason when the value was refused.
+    /// Commit an input screen's selected row, or its field when no row is
+    /// selected: the palette closes when the action ran, and stays with the
+    /// reason when the value was refused. A refused row puts its value in
+    /// the field, so the reason shows with the text it is about.
     private func commit(_ inputScope: InputPaletteScope) {
-        guard inputScope.commit(query) else {
-            refresh()
+        let row = flatItems.indices.contains(selectedIndex) ? inputScope.completion(for: flatItems[selectedIndex]) : nil
+        let value = row ?? query
+        guard inputScope.commit(value) else {
+            if value != query {
+                query = value
+            } else {
+                refresh()
+            }
             return
         }
         query = ""
@@ -948,6 +958,7 @@ private struct CommandPaletteRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(item.isEnabled ? MactermTheme.fgMuted : MactermTheme.fgDim)
                         .lineLimit(1)
+                        .truncationMode(item.subtitleIsPath && !showsAlt ? .middle : .tail)
                 }
             }
             // At least a key-cap tall, so a row with a keybind and one

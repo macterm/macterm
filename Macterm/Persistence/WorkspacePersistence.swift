@@ -482,8 +482,8 @@ enum WorkspaceSerializer {
             // process's kernel cwd). It is deliberately nil for remote panes —
             // `currentPwd` there is a REMOTE-filesystem path (OSC 7 from the
             // remote shell) that would parse as a bogus local dir on restore
-            // and orphan the remote session (the hazard
-            // `AppState.replaceProjectPathWithCurrentDir` gates the same way).
+            // and orphan the remote session (the reason that Change Project
+            // Directory is not available for a remote project).
             let liveCwd = p.isRemote
                 ? nil
                 : (SurfaceRegistry.shared.view(of: p)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: p))

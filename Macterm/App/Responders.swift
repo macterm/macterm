@@ -28,12 +28,12 @@ final class PaletteResponder: KeyResponder {
         // A palette screen's chord with the palette already up: the app-level
         // responder that runs bindings stands aside while the palette is
         // visible, so switch to the screen (or close it) here.
+        let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
         if appState.isCommandPaletteVisible,
            let action = HotkeyAction.allCases.first(where: {
-               $0.appCommand.paletteScope != nil && HotkeyRegistry.matches(event, action: $0)
+               HotkeyRegistry.matches(event, action: $0) && $0.appCommand.paletteScreen(in: ctx) != nil
            })
         {
-            let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
             if let run = action.appCommand.action(in: ctx) {
                 run()
             } else if let notice = action.appCommand.unavailableNotice(in: ctx) {

@@ -53,6 +53,7 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
     case toggleQuickTerminal = "toggle_quick_terminal"
     case renameTab = "rename_tab"
     case renameProject = "rename_project"
+    case changeProjectDirectory = "change_project_directory"
     case copySessionID = "copy_session_id"
     case capturePane = "capture_pane"
     case copyMode = "copy_mode"
@@ -183,6 +184,7 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
         case .toggleQuickTerminal: "ctrl+`"
         case .renameTab: "cmd+r"
         case .renameProject: "none"
+        case .changeProjectDirectory: "none"
         case .copySessionID: "none"
         case .capturePane: "none"
         // Space is the one key that no ghostty default binds with ⌘⇧, and

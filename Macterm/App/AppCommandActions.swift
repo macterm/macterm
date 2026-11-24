@@ -47,8 +47,7 @@ extension AppCommand {
              .resetZoom,
              .restartSession,
              .explainOutput,
-             .autofillPassword,
-             .replaceProjectPathWithCurrentDir:
+             .autofillPassword:
             true
         default:
             false
@@ -57,8 +56,7 @@ extension AppCommand {
 
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
-    /// project is active, "Replace path" when the pane's pwd matches the
-    /// project's). Single source of truth for execution — used by both the
+    /// project is active, Change Project Directory for a remote project). Single source of truth for execution — used by both the
     /// command palette and the menu bar so the two stay in sync.
     @MainActor
     func action(in ctx: AppCommandContext) -> (@MainActor () -> Void)? {
@@ -302,16 +300,11 @@ extension AppCommand {
                     ctx.projectStore.remove(id: projectID)
                 }
             }
-        case .replaceProjectPathWithCurrentDir:
-            // Remote projects (#104): OSC 7 reports a directory on the REMOTE
-            // host — writing it into `Project.path` would corrupt the
-            // project's identity into a local-looking path.
-            guard let current, !current.isRemote,
-                  let pane = ctx.appState.focusedPane(for: current.id),
-                  let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd, !pwd.isEmpty,
-                  current.path != pwd
-            else { return nil }
-            return { ctx.appState.replaceProjectPathWithCurrentDir(projectStore: ctx.projectStore) }
+        case .changeProjectDirectory:
+            // Always there for a local project, also when the pane is in the
+            // project's folder: only the screen's pane row hides then.
+            guard let scope = paletteScreen(in: ctx) else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: scope) }
         case .applyLayout:
             // Requires an applicable central file. `.invalid` stays enabled on
             // purpose: invoking it surfaces the parse-error dialog instead of
@@ -425,7 +418,7 @@ extension AppCommand {
         if self == .passwordManager {
             return Preferences.shared.passwordManagerEnabled ? nil : String(localized: "Turned off in Settings → Password Manager")
         }
-        if self == .files || self == .explainOutput { return unavailableNotice(in: ctx) }
+        if self == .files || self == .explainOutput || self == .changeProjectDirectory { return unavailableNotice(in: ctx) }
         guard self == .applyLayout,
               let projectID = ctx.appState.activeProjectID,
               let current = ctx.projectStore.projects.first(where: { $0.id == projectID })
@@ -454,11 +447,34 @@ extension AppCommand {
                 ? String(localized: "Turn on Apple Intelligence in System Settings to explain output")
                 : nil
         }
-        guard self == .files,
-              let projectID = ctx.appState.activeProjectID,
+        guard let projectID = ctx.appState.activeProjectID,
               let current = ctx.projectStore.projects.first(where: { $0.id == projectID })
         else { return nil }
-        return Self.filesUnavailableReason(for: current)
+        switch self {
+        case .files: return Self.filesUnavailableReason(for: current)
+        case .changeProjectDirectory: return current.isRemote ? Self.changeProjectDirectoryUnavailableReason : nil
+        default: return nil
+        }
+    }
+
+    /// Why a remote project has no Change Project Directory: its folder is
+    /// on the host, and Macterm cannot complete or check a path there.
+    static var changeProjectDirectoryUnavailableReason: String {
+        String(localized: "Change Project Directory is not available for remote projects")
+    }
+
+    /// The palette screen that this command opens now: a built-in screen
+    /// (`paletteScope`), or the input screen of Change Project Directory
+    /// for the active local project. Nil when the command opens no screen.
+    @MainActor
+    func paletteScreen(in ctx: AppCommandContext) -> PaletteScopeID? {
+        if let paletteScope { return paletteScope }
+        guard self == .changeProjectDirectory,
+              let projectID = ctx.appState.activeProjectID,
+              let current = ctx.projectStore.projects.first(where: { $0.id == projectID }),
+              let input = ctx.appState.changeProjectDirectoryInput(for: current, projectStore: ctx.projectStore)
+        else { return nil }
+        return .input(input)
     }
 
     /// Why `project` has no Files screen, or nil when it has one: the index

@@ -6,7 +6,8 @@ import Foundation
 /// sheet.
 ///
 /// The field starts on `initialValue`, selected, so a keystroke replaces
-/// it. Return commits the text in the field. The rows under the field are
+/// it. Return commits the text in the field, or the value of the selected
+/// row when an arrow key selected one. The rows under the field are
 /// completions: Tab or a click puts the selected one in the field, and
 /// never commits. Escape, or Backspace at an empty field, pops the screen
 /// like any screen. A commit that `commit` refuses keeps the screen and
@@ -68,10 +69,18 @@ struct PaletteInput: Hashable {
 }
 
 /// A row under an input field: what it shows, and the text the field takes
-/// when the row is picked.
+/// when the row is picked. `subtitle` is a path when there is one: the row
+/// cuts it in the middle, so that both ends stay.
 struct PaletteCompletion: Equatable {
     let title: String
     let value: String
+    let subtitle: String?
+
+    init(title: String, value: String, subtitle: String? = nil) {
+        self.title = title
+        self.value = value
+        self.subtitle = subtitle
+    }
 }
 
 /// What a commit of an input screen did.
@@ -113,7 +122,9 @@ final class InputPaletteScope: PaletteScope {
             refusedText = nil
         }
         completions = input.completions(text)
-        let items = completions.map { PaletteItem(id: Self.itemID($0), title: $0.title, action: {}) }
+        let items = completions.map {
+            PaletteItem(id: Self.itemID($0), title: $0.title, subtitle: $0.subtitle, subtitleIsPath: true, action: {})
+        }
         return items.isEmpty ? [] : [PaletteSection(header: nil, items: items)]
     }
 

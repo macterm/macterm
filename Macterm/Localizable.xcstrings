@@ -2103,6 +2103,54 @@
         }
       }
     },
+    "Change Project Directory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 디렉토리 변경"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改项目目录"
+          }
+        }
+      }
+    },
+    "Change Project Directory is not available for remote projects" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원격 프로젝트에서는 프로젝트 디렉토리 변경을 사용할 수 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程项目不可使用“更改项目目录”"
+          }
+        }
+      }
+    },
+    "Change Project Directory…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 디렉토리 변경…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改项目目录…"
+          }
+        }
+      }
+    },
     "Change the order in the menu of a row. Each group of the sidebar has a section below." : {
       "localizations" : {
         "ko" : {
@@ -2859,6 +2907,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "创建项目"
+          }
+        }
+      }
+    },
+    "Current Pane's Directory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 페인의 디렉토리"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前窗格的目录"
           }
         }
       }
@@ -6027,6 +6091,22 @@
         }
       }
     },
+    "No folder at %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 폴더 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 处没有文件夹"
+          }
+        }
+      }
+    },
     "No keybinds match “%@”." : {
       "localizations" : {
         "ko" : {
@@ -8452,22 +8532,6 @@
         }
       }
     },
-    "Replace Project Path with Current Directory" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 경로를 현재 디렉토리로 대체"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将项目路径替换为当前目录"
-          }
-        }
-      }
-    },
     "Require authentication" : {
       "localizations" : {
         "ko" : {
@@ -9514,22 +9578,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将 Macterm 设为文本文件的默认 App。Macterm 会在 shell 中 $VISUAL 或 $EDITOR 指定的编辑器中打开它们。"
-          }
-        }
-      }
-    },
-    "Set Project Path to Current Directory" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 경로를 현재 디렉토리로 설정"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将项目路径设为当前目录"
           }
         }
       }
@@ -10903,6 +10951,22 @@
         }
       }
     },
+    "The project is not available" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트를 사용할 수 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目不可用"
+          }
+        }
+      }
+    },
     "The row has no directory" : {
       "localizations" : {
         "ko" : {
@@ -11610,6 +11674,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在窗格的 shell 中输入命令。"
+          }
+        }
+      }
+    },
+    "Type a folder path" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 경로 입력"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入文件夹路径"
           }
         }
       }
