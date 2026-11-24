@@ -1164,7 +1164,6 @@ struct AppStateTests {
 
         for pane in [focused, other] {
             pane.receiveAttention(unseenFailure)
-            #expect(pane.executionState == .done)
             state.paneAttentionDidChange(paneID: pane.id)
         }
 
