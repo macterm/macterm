@@ -1254,6 +1254,73 @@ struct AppStateTests {
         #expect(tab.splitRoot.allPanes().count == 1)
     }
 
+    // MARK: - A plain shell's host decides the close (0494)
+
+    /// A tab with two panes whose surfaces read busy, as libghostty reads a
+    /// plain ssh shell with no OSC 133 marks. The host answers `answer` for
+    /// the pane that runs the plain shell.
+    private func plainShellTab(answer: Bool?) throws -> (state: AppState, project: Project, tab: TerminalTab, target: UUID) {
+        let state = makeAppState()
+        let p = seedProject(state)
+        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
+        let target = try #require(tab.focusedPaneID)
+        state.paneNeedsConfirmClose = { _ in true }
+        state.paneRunsPlainShell = { $0.id == target }
+        state.askPlainShellNeedsConfirmClose = { $0.id == target ? answer : nil }
+        return (state, p, tab, target)
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async {
+        for _ in 0 ..< 200 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @Test
+    func a_plain_shell_that_its_host_calls_idle_closes_with_no_warning() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.tab.splitRoot.allPanes().count == 1 }
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
+        #expect(fx.state.pendingDialog == nil)
+    }
+
+    @Test
+    func a_plain_shell_that_its_host_calls_busy_warns() async throws {
+        let fx = try plainShellTab(answer: true)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+        #expect(fx.tab.splitRoot.allPanes().count == 2)
+    }
+
+    @Test
+    func a_plain_shell_whose_host_does_not_answer_warns() async throws {
+        let fx = try plainShellTab(answer: nil)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_tab_with_an_idle_plain_shell_still_warns_for_its_other_busy_pane() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.requestCloseTab(fx.tab.id, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closeTab(tabID: fx.tab.id, projectID: fx.project.id))
+    }
+
+    @Test
+    func the_hosts_answer_replaces_only_its_own_panes_reading() throws {
+        let fx = try plainShellTab(answer: false)
+        let panes = fx.tab.splitRoot.allPanes()
+        let plain = try #require(panes.first { $0.id == fx.target })
+        #expect(!fx.state.closeNeedsConfirmation([plain], plainAnswers: [plain.id: false]))
+        #expect(fx.state.closeNeedsConfirmation([plain]))
+        #expect(fx.state.closeNeedsConfirmation(panes, plainAnswers: [plain.id: false]))
+    }
+
     // MARK: - applyLayout
 
     /// Create a temp project directory and seed a workspace rooted there.

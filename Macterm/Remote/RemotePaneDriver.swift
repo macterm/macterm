@@ -238,6 +238,21 @@ final class RemotePaneDriver: PaneInputRoute {
         return await withCheckedContinuation { ending = $0 }
     }
 
+    /// The view runs a plain shell now.
+    var runsPlainShell: Bool {
+        if case .plain = state { true } else { false }
+    }
+
+    /// Asks the host whether the plain shell of this view waits at its
+    /// prompt (0494). nil when the view runs no plain shell. false while a
+    /// program runs, and when the host gives no clear answer: never kill an
+    /// unknown foreground in silence.
+    func plainShellIsIdle(timeout: Duration) async -> Bool? {
+        guard case let .plain(shell) = state else { return nil }
+        guard let host, let pid = shell.hostShellPID else { return false }
+        return await host.plainShellHoldsTerminal(pid: pid, timeout: timeout) ?? false
+    }
+
     private func plainExited(_ status: Int32) {
         guard case .plain = state else { return }
         // ssh exits 255 when the connection stops: the pane waits. Any other

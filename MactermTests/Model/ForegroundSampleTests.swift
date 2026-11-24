@@ -10,6 +10,16 @@ struct ForegroundSampleTests {
         ForegroundSample(name: name, isIdleShell: isIdleShell, sampledAt: Date())
     }
 
+    // MARK: - plainShellNeedsConfirmClose (a host with no server, 0494)
+
+    @Test
+    func a_plain_shell_warns_unless_its_host_says_idle() {
+        #expect(!ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: true, executionState: .idle))
+        #expect(ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: false, executionState: .idle))
+        // A run that the pane's own marks show wins over the host's answer.
+        #expect(ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: true, executionState: .running))
+    }
+
     // MARK: - needsConfirmClose (the full verdict)
 
     @Test

@@ -35,10 +35,11 @@ enum ForegroundPolicy {
     /// verdict derives from the remote-side signals instead — the OSC
     /// 133/heartbeat execution state (catches a command mid-output), else
     /// the host's latest report (an idle shell is not worth a dialog;
-    /// anything else is). A pane with no report (a host with no server, or
-    /// before the first report) falls back to the surface's reading, which
-    /// for the ssh client is always busy: never silently kill an unknown
-    /// foreground.
+    /// anything else is). A pane with no report (before the first report,
+    /// or a plain shell whose host did not answer, see
+    /// `plainShellNeedsConfirmClose`) falls back to the surface's reading,
+    /// which reads busy wherever no OSC 133 prompt mark is seen: never
+    /// silently kill an unknown foreground.
     static func needsConfirmClose(
         sample: ForegroundSample?,
         executionState: TerminalExecutionState,
@@ -49,6 +50,16 @@ enum ForegroundPolicy {
         guard hasSurface else { return false }
         guard isRemote else { return surfaceBusy() }
         return remoteNeedsConfirmClose(sample: sample, executionState: executionState) ?? surfaceBusy()
+    }
+
+    /// The verdict for a pane on a host with no server (a plain shell,
+    /// 0494). It has no sample, and libghostty's own check reads a busy
+    /// pane wherever the host's shell sends no OSC 133 prompt marks. So the
+    /// close asks the host first (`HostCommands.shellStateScript`):
+    /// `shellIdle` is true only when every view's shell answered that it
+    /// holds its terminal.
+    static func plainShellNeedsConfirmClose(shellIdle: Bool, executionState: TerminalExecutionState) -> Bool {
+        executionState == .running || !shellIdle
     }
 
     /// The remote-side busy verdict alone, nil when no sample has ever

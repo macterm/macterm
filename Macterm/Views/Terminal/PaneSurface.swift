@@ -540,6 +540,30 @@ extension Pane {
         )
     }
 
+    /// The drivers of this pane's views that run a plain ssh shell (a host
+    /// with no server). Each window's view runs a shell of its own.
+    var plainShellDrivers: [RemotePaneDriver] {
+        SurfaceRegistry.shared.surfaces(of: self)
+            .compactMap { $0.nsView?.channelRuntime?.route.input as? RemotePaneDriver }
+            .filter(\.runsPlainShell)
+    }
+
+    /// `needsConfirmClose` for a pane that runs a plain shell, after its
+    /// host answered (0494, `ForegroundPolicy.plainShellNeedsConfirmClose`).
+    /// nil when no view of the pane runs one.
+    func plainShellNeedsConfirmClose(timeout: Duration) async -> Bool? {
+        let drivers = plainShellDrivers
+        guard !drivers.isEmpty else { return nil }
+        var idle = true
+        for driver in drivers {
+            guard await driver.plainShellIsIdle(timeout: timeout) == true else {
+                idle = false
+                break
+            }
+        }
+        return ForegroundPolicy.plainShellNeedsConfirmClose(shellIdle: idle, executionState: executionState)
+    }
+
     /// Returns a local pane's cwd. Remote cwd values omit the host, so remote
     /// panes return nil.
     func liveLocalWorkingDirectory() -> String? {

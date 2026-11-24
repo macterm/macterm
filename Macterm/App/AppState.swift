@@ -2073,9 +2073,39 @@ final class AppState {
     /// of the overloads below. The raw `allPanes().contains(where:
     /// \.needsConfirmClose)` ignores the retention, so it would warn about a
     /// kill that the close does not do.
-    func closeNeedsConfirmation(_ closing: [Pane]) -> Bool {
+    ///
+    /// `plainAnswers` holds the verdicts that the hosts of plain shells gave
+    /// (`judgeClose`), by pane id. They replace the surface's reading.
+    func closeNeedsConfirmation(_ closing: [Pane], plainAnswers: [UUID: Bool] = [:]) -> Bool {
         let retained = pendingPinnedSessionNames()
-        return closing.contains { paneNeedsConfirmClose($0) && !retained.contains($0.sessionName) }
+        return closing.contains { (plainAnswers[$0.id] ?? paneNeedsConfirmClose($0)) && !retained.contains($0.sessionName) }
+    }
+
+    /// Judges the close of `closing` and gives the verdict to `decide`.
+    /// When a pane runs a plain shell (a host with no server, 0494), the
+    /// close first asks each such host whether its shell waits at its
+    /// prompt, at most `plainShellAnswerTimeout`, and `decide` runs after
+    /// the answers. With no plain shell, `decide` runs at once. A host that
+    /// does not answer gives the surface's reading, which warns.
+    func judgeClose(_ closing: [Pane], _ decide: @escaping @MainActor (Bool) -> Void) {
+        let plain = closing.filter(paneRunsPlainShell)
+        guard !plain.isEmpty else {
+            decide(closeNeedsConfirmation(closing))
+            return
+        }
+        let ask = askPlainShellNeedsConfirmClose
+        Task { @MainActor in
+            var answers: [UUID: Bool] = [:]
+            await withTaskGroup(of: (UUID, Bool?).self) { group in
+                for pane in plain {
+                    group.addTask { @MainActor in await (pane.id, ask(pane)) }
+                }
+                for await (id, answer) in group {
+                    if let answer { answers[id] = answer }
+                }
+            }
+            decide(self.closeNeedsConfirmation(closing, plainAnswers: answers))
+        }
     }
 
     /// Whether closing (or, for a pinned tab, unloading) `tab` needs
@@ -2092,12 +2122,16 @@ final class AppState {
 
     /// Every pane of the given projects (removed whole) and tabs.
     func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
+        closeNeedsConfirmation(panes(inProjects: projectIDs, tabs: tabs))
+    }
+
+    private func panes(inProjects projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> [Pane] {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {
             guard let tab = workspaces[tab.projectID]?.tabs.first(where: { $0.id == tab.tabID }) else { continue }
             closing += tab.splitRoot.allPanes()
         }
-        return closeNeedsConfirmation(closing)
+        return closing
     }
 
     private func panes(inProject projectID: UUID) -> [Pane] {
@@ -2111,6 +2145,23 @@ final class AppState {
     /// against an always-idle pane.
     @ObservationIgnored
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
+
+    /// Whether a view of the pane runs a plain shell (`Pane.plainShellDrivers`).
+    /// A seam, as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var paneRunsPlainShell: (Pane) -> Bool = { !$0.plainShellDrivers.isEmpty }
+
+    /// The host's verdict for a plain shell's pane
+    /// (`Pane.plainShellNeedsConfirmClose`). nil when it runs none. A seam,
+    /// as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var askPlainShellNeedsConfirmClose: (Pane) async -> Bool? = {
+        await $0.plainShellNeedsConfirmClose(timeout: AppState.plainShellAnswerTimeout)
+    }
+
+    /// How long a close waits for the host of a plain shell. Over a
+    /// connection that is up, `ps` answers in well under a second.
+    static let plainShellAnswerTimeout: Duration = .seconds(2)
 
     /// Shows an open panel, adds or finds the selected directory as a project,
     /// and selects it. Returns the selected project, nil if cancelled.
@@ -2247,10 +2298,17 @@ final class AppState {
     /// immediately when no pane in the project is busy; otherwise stage it
     /// for the confirmation alert — removal kills every pane's zmx session.
     func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        guard closeNeedsConfirmation(projectID: projectID) else {
-            removal()
-            return
+        judgeClose(panes(inProject: projectID)) { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                removal()
+                return
+            }
+            confirmRemoveProject(projectID, host: host, removal: removal)
         }
+    }
+
+    private func confirmRemoveProject(_ projectID: UUID, host: DialogHost, removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeProject(projectID),
             title: String(localized: "Remove project with running processes?"),
@@ -2300,10 +2358,17 @@ final class AppState {
         tabs: [(tabID: UUID, projectID: UUID)],
         removal: @escaping @MainActor () -> Void
     ) {
-        guard closeNeedsConfirmation(projectIDs: projectIDs, tabs: tabs) else {
-            removal()
-            return
+        judgeClose(panes(inProjects: projectIDs, tabs: tabs)) { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                removal()
+                return
+            }
+            confirmRemoveSelection(removal: removal)
         }
+    }
+
+    private func confirmRemoveSelection(removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeSelection,
             title: String(localized: "Remove items with running processes?"),
@@ -2455,11 +2520,21 @@ final class AppState {
     /// foreground program — closing kills the panes' zmx sessions, so the
     /// destructive-confirmation lives here (quit will detach, not kill).
     func requestCloseTab(_ tabID: UUID, projectID: UUID) {
-        let tab = workspaces[projectID]?.tabs.first { $0.id == tabID }
-        guard let tab, closeNeedsConfirmation(tab: tab) else {
+        guard let tab = workspaces[projectID]?.tabs.first(where: { $0.id == tabID }) else {
             closeTab(tabID, projectID: projectID)
             return
         }
+        judgeClose(tab.splitRoot.allPanes()) { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                closeTab(tabID, projectID: projectID)
+                return
+            }
+            confirmCloseTab(tabID, projectID: projectID)
+        }
+    }
+
+    private func confirmCloseTab(_ tabID: UUID, projectID: UUID) {
         present(PendingDialog(
             kind: .closeTab(tabID: tabID, projectID: projectID),
             title: String(localized: "Close running processes?"),
@@ -3099,10 +3174,21 @@ final class AppState {
         let pane = workspaces[projectID]?.tabs
             .compactMap { $0.splitRoot.findPane(id: paneID) }
             .first
-        guard let pane, closeNeedsConfirmation([pane]) else {
+        guard let pane else {
             closePane(paneID, projectID: projectID)
             return
         }
+        judgeClose([pane]) { [weak self] needsConfirmation in
+            guard let self else { return }
+            guard needsConfirmation else {
+                closePane(paneID, projectID: projectID)
+                return
+            }
+            confirmClosePane(paneID, projectID: projectID)
+        }
+    }
+
+    private func confirmClosePane(_ paneID: UUID, projectID: UUID) {
         present(PendingDialog(
             kind: .closePane(paneID: paneID, projectID: projectID),
             title: String(localized: "Close running process?"),

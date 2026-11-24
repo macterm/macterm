@@ -312,6 +312,33 @@ enum HostCommands {
         return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
     }
 
+    /// Asks the host about a plain shell before its pane closes (0494):
+    /// `ps` prints the state of the shell's pid (`PlainShellAnnouncement`).
+    /// The pid is `$1`, so no shell parses it.
+    static let shellStateScript = "ps -o stat= -p \"$1\""
+
+    /// The command of `shellStateScript` for `pid`, for the host's login
+    /// shell over the ssh connection.
+    static func shellStateCommand(pid: Int32) -> String? {
+        command(shellStateScript, [String(pid)])
+    }
+
+    /// Whether the shell holds its terminal: its state has a `+`, so its
+    /// process group is in the foreground and it waits at its prompt. A job
+    /// control shell gives the terminal to each command that it runs. nil
+    /// when the host gives no clear answer (no such pid, a `ps` that does
+    /// not know the options, other text): the caller then warns.
+    static func shellHoldsTerminal(status: Int32, output: String) -> Bool? {
+        guard status == 0 else { return nil }
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard lines.count == 1, let state = lines.first, state.count <= 8,
+              let first = state.first, first.isLetter, first.isUppercase
+        else { return nil }
+        return state.contains("+")
+    }
+
     static func hasHistoryMark(_ script: String) -> Bool {
         let characters = Array(script)
         return characters.indices.contains { index in
