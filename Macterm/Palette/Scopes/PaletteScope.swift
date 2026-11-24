@@ -87,7 +87,9 @@ enum PaletteScopeID: Hashable {
 /// A pill in the breadcrumb above the input: a frame's name and glyph.
 struct PalettePill: Hashable {
     let title: String
-    let icon: PaletteIcon
+    /// Nil for an input screen: its pill is its text only (Ethan, ui-review
+    /// 0561).
+    let icon: PaletteIcon?
 }
 
 /// A listing in flight: what the scope is waiting on, shown with a spinner
@@ -98,15 +100,15 @@ struct PaletteLoading: Equatable {
 }
 
 /// A listing that failed — a command not found, exiting non-zero, or
-/// printing something that isn't the shape asked for. Shown as a row at
-/// the top of the results, above any rows an earlier listing left, with
-/// Retry (`PaletteScope.retry`, also ⌘R). `detail` is the reason as the
+/// printing something that isn't the shape asked for. Shown as the
+/// palette's one notice, centered, above any rows an earlier listing left,
+/// with Retry (`PaletteScope.retry`, also ⌘R). `detail` is the reason as the
 /// user can act on it: the command's stderr, or where the output stopped
 /// parsing.
 ///
 /// A failure that is not `retryable` is a refusal: an input screen's value
-/// that is not allowed (`InputPaletteScope`). It shows as one line, with no
-/// Retry, because the user acts on it by changing the text.
+/// that is not allowed (`InputPaletteScope`). It shows as the same notice,
+/// with no Retry, because the user acts on it by changing the text.
 struct PaletteFailure: Error, Equatable {
     let title: String
     let detail: String?

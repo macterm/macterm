@@ -10,14 +10,16 @@ import Foundation
 /// completions: Tab or a click puts the selected one in the field, and
 /// never commits. Escape, or Backspace at an empty field, pops the screen
 /// like any screen. A commit that `commit` refuses keeps the screen and
-/// shows the reason as one line above the rows, until the text changes.
+/// shows the reason as the palette's notice, until the text changes.
 ///
 /// Its identity is `id`: two inputs with one id are one screen to the
 /// palette (a chord toggles it). An input about one thing (a tab, a pane)
 /// puts that thing's id in its own, so that two targets are two screens.
 struct PaletteInput: Hashable {
     let id: String
-    let pill: PalettePill
+    /// The text of the screen's pill. An input screen's pill has no icon.
+    let title: String
+    var pill: PalettePill { PalettePill(title: title, icon: nil) }
     /// The field's placeholder: what to type.
     let prompt: String
     let initialValue: String
@@ -30,14 +32,14 @@ struct PaletteInput: Hashable {
 
     init(
         id: String,
-        pill: PalettePill,
+        title: String,
         prompt: String,
         initialValue: String = "",
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
         commit: @escaping @MainActor (String) -> PaletteCommit
     ) {
         self.id = id
-        self.pill = pill
+        self.title = title
         self.prompt = prompt
         self.initialValue = initialValue
         self.completions = completions

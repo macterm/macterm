@@ -233,29 +233,13 @@ struct CommandPalettePanel: View {
                         // query lists every command, and an eager stack built
                         // all of them on each open and on the first keystroke.
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            // A screen's notices: centered in the results, and
-                            // filling them when there are no rows — a compact
-                            // strip above rows an earlier listing left.
-                            if let failure {
-                                // A refusal is one line under the field, never
-                                // a notice that fills the list.
-                                PaletteFailureNotice(failure: failure) { scope?.retry() }
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        minHeight: sections.isEmpty && failure.retryable ? noticeHeight : 0
-                                    )
-                            }
-                            if sections.isEmpty, failure == nil, let loading {
-                                PaletteLoadingNotice(loading: loading)
-                                    .frame(maxWidth: .infinity, minHeight: noticeHeight)
-                            }
-                            // An input screen's field is a value, not a
-                            // search, so no completion is not "no matches".
-                            if sections.isEmpty, failure == nil, loading == nil, inputScope == nil,
-                               !PaletteQuery(raw: query).isEmpty
-                            {
-                                PaletteNoMatchesNotice()
-                                    .frame(maxWidth: .infinity, minHeight: noticeHeight)
+                            // The one notice: centered in the results, and
+                            // filling them when there are no rows — above rows
+                            // that are still up (an earlier listing, or the
+                            // completions of a refused value).
+                            if let notice {
+                                PaletteNoticeView(notice: notice) { scope?.retry() }
+                                    .frame(maxWidth: .infinity, minHeight: sections.isEmpty ? noticeHeight : 0)
                             }
                             ForEach(Array(sections.enumerated()), id: \.offset) { sectionIndex, section in
                                 if let header = section.header {
@@ -562,6 +546,19 @@ struct CommandPalettePanel: View {
     /// The list's padding above the first row and below the last.
     private static let listPadding: CGFloat = 6
 
+    /// What the results say instead of, or above, their rows: a failure
+    /// first, then a first listing in flight, then a search with no match.
+    /// An input screen's field is a value, not a search, so no completion is
+    /// not "no matches".
+    private var notice: PaletteNotice? {
+        if let failure { return .failure(failure) }
+        if sections.isEmpty, let loading { return .loading(loading) }
+        if sections.isEmpty, inputScope == nil, !PaletteQuery(raw: query).isEmpty {
+            return .empty(String(localized: "No matches."))
+        }
+        return nil
+    }
+
     /// The height of a notice that fills a list with no rows: the viewport
     /// less the list's padding. A notice of the full viewport height made the
     /// list 12 pt taller than its view, so it scrolled and showed a scroll bar.
@@ -785,8 +782,11 @@ private struct PaletteScopePill: View {
         Label {
             Text(pill.title)
         } icon: {
-            PaletteIconImage(icon: pill.icon, side: 14)
+            if let icon = pill.icon {
+                PaletteIconImage(icon: icon, side: 14)
+            }
         }
+        .labelStyle(PillLabelStyle(hasIcon: pill.icon != nil))
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)
         .lineLimit(1)
@@ -794,6 +794,19 @@ private struct PaletteScopePill: View {
         .padding(.horizontal, 9)
         .frame(height: Self.height)
         .modifier(PillBackground())
+    }
+
+    /// The title alone when the pill has no icon, so no gap is left for one.
+    private struct PillLabelStyle: LabelStyle {
+        let hasIcon: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            if hasIcon {
+                Label(configuration)
+            } else {
+                configuration.title
+            }
+        }
     }
 
     private struct PillBackground: ViewModifier {
@@ -812,92 +825,72 @@ private struct PaletteScopePill: View {
     }
 }
 
-// MARK: - Loading
+// MARK: - Notice
 
-/// The results while a screen's first listing is in flight: a spinner and
-/// what it waits on, centered.
-private struct PaletteLoadingNotice: View {
-    let loading: PaletteLoading
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text(loading.message)
-                .font(.system(size: 13))
-                .foregroundStyle(MactermTheme.fgMuted)
-                .lineLimit(1)
-        }
-        .padding(20)
-    }
+/// The one message of the results, never a row: it is never selected and
+/// Enter never lands on it.
+private enum PaletteNotice {
+    /// A first listing in flight: a spinner and what it waits on.
+    case loading(PaletteLoading)
+    /// A search with no match.
+    case empty(String)
+    /// A listing that failed (with Retry), or a value that an input screen
+    /// refused (no Retry: the user changes the text).
+    case failure(PaletteFailure)
 }
 
-/// The results when a query matches no row: one muted line, centered.
-private struct PaletteNoMatchesNotice: View {
-    var body: some View {
-        Text("No matches.")
-            .font(.system(size: 13))
-            .foregroundStyle(MactermTheme.fgMuted)
-            .padding(20)
-    }
-}
-
-/// A screen's listing that failed: the failure color's warning glyph, what
-/// failed over why, and Retry, centered — or a value that an input screen
-/// refused, as one line. Not a result row — it is never selected and Enter
-/// never lands on it — so it is a notice.
-private struct PaletteFailureNotice: View {
-    let failure: PaletteFailure
+/// Every notice of the palette draws here, centered, in one style: a
+/// failure has the failure color's warning glyph over what failed, then
+/// why, then Retry when the listing can run again.
+private struct PaletteNoticeView: View {
+    let notice: PaletteNotice
     let retry: () -> Void
 
     var body: some View {
-        if failure.retryable {
-            listingFailure
-        } else {
-            refusal
-        }
+        content
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 20)
     }
 
-    /// A refused value: one line, the glyph and the reason, and no Retry —
-    /// the user acts on it by changing the text.
-    private var refusal: some View {
-        Label {
-            Text(failure.title)
-                .foregroundStyle(MactermTheme.fg)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        } icon: {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(MactermTheme.failure)
-        }
-        .font(.system(size: 13))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-    }
-
-    private var listingFailure: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(MactermTheme.failure)
-            Text(failure.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MactermTheme.fg)
-            if let detail = failure.detail {
-                Text(detail)
-                    .font(.system(size: 11, design: .monospaced))
+    @ViewBuilder
+    private var content: some View {
+        switch notice {
+        case let .loading(loading):
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(loading.message)
+                    .font(.system(size: 13))
                     .foregroundStyle(MactermTheme.fgMuted)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(4)
-                    .textSelection(.enabled)
+                    .lineLimit(1)
             }
-            Button("Retry", action: retry)
-                .controlSize(.small)
-                .padding(.top, 4)
+        case let .empty(message):
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(MactermTheme.fgMuted)
+        case let .failure(failure):
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(MactermTheme.failure)
+                Text(failure.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(MactermTheme.fg)
+                if let detail = failure.detail {
+                    Text(detail)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(MactermTheme.fgMuted)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                }
+                if failure.retryable {
+                    Button("Retry", action: retry)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                }
+            }
         }
-        .padding(.horizontal, 40)
-        .padding(.vertical, 20)
     }
 }
 

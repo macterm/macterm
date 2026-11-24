@@ -15,7 +15,7 @@ struct InputPaletteScopeTests {
     private func makeInput(log: Log, completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] }) -> PaletteInput {
         PaletteInput(
             id: "test.folder-name",
-            pill: PalettePill(title: "New Folder", icon: "folder.badge.plus"),
+            title: "New Folder",
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
@@ -51,6 +51,7 @@ struct InputPaletteScopeTests {
         let frame = PaletteFrame(.input(input))
         let scope = try #require(frame.scope as? InputPaletteScope)
         #expect(frame.pill == input.pill)
+        #expect(frame.pill == PalettePill(title: "New Folder", icon: nil), "an input screen's pill has no icon")
         #expect(scope.placeholder == "Folder name")
         #expect(scope.initialQuery == "untitled")
         #expect(PaletteScopeID.input(input).command == nil)
@@ -102,7 +103,7 @@ struct InputPaletteScopeTests {
     }
 
     private func checkingInput(gate: Gate, log: Log) -> PaletteInput {
-        PaletteInput(id: "test.check", pill: PalettePill(title: "Check", icon: "network"), prompt: "Folder") { text in
+        PaletteInput(id: "test.check", title: "Check", prompt: "Folder") { text in
             .check(PaletteCheck(message: "Checking \(text)…") {
                 let result = await withCheckedContinuation { gate.continuation = $0 }
                 guard !Task.isCancelled else { return .refused("") }

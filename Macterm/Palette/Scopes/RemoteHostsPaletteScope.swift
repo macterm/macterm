@@ -122,7 +122,7 @@ final class RemoteHostsPaletteScope: PaletteScope {
     ) -> PaletteInput {
         PaletteInput(
             id: "remote-folder:\(destination)",
-            pill: PalettePill(title: destination, icon: icon),
+            title: destination,
             prompt: String(localized: "Folder on \(destination)"),
             initialValue: directory
         ) { [appState = context.appState, projectStore = context.projectStore] text in

@@ -39,13 +39,15 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The panel appears and vanishes in one frame. A view inside the window cannot get the fade at window level. It cannot get the blur of the backdrop either. The panel of the quick terminal gets both for free. A transition that we drew in its place read as a slower fade.
       - The breadcrumb and each pill come and go through `PaletteMotion`. This is `blurReplace` of SwiftUI on an ease-out of 120 ms. Reduce Motion lands them in one frame.
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
+      - An input screen's pill has no icon (`PaletteInput.title`).
+      - **The results have one notice** (`PaletteNotice`, drawn by `PaletteNoticeView`): a failure, a first listing in flight, or a search with no match. It is centered, and it fills the results when there are no rows. A failure is the same notice for a listing (with Retry) and for a refused value of an input screen (with no Retry). Do not draw a message of a screen in any other place.
       - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill and a chevron.
       - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
       - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
-      - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
+      - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as the notice of the palette (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
       - A commit that takes time returns `PaletteCommit.check`. The screen shows its message as `loading`, and Return does nothing until it ends. Its `.done` sets `InputPaletteScope.isFinished`, and the palette closes. A pop or a close cancels it, and a cancelled check does nothing.
     - `RemoteHostsPaletteScope`: New Remote Project (`PaletteScopeID.remoteHosts`, the screen of `AppCommand.newRemoteProject`).
