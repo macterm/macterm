@@ -353,6 +353,14 @@ extension MactermProtocol {
 }
 
 extension MactermProtocol {
+    enum SessionWait: ProtocolMethod {
+        static let name = "session.wait"
+        static let since: UInt32 = 3
+        static let senders: [MactermProtocol.Trust] = [.local]
+    }
+}
+
+extension MactermProtocol {
     struct Hello: Equatable {
         var level: UInt32
         var minLevel: UInt32
@@ -424,6 +432,7 @@ extension MactermProtocol {
         case cli
         case server
         case session
+        case mcp
         case unknown
     }
 }
@@ -1534,6 +1543,7 @@ extension MactermProtocol.SessionHistory {
     struct Args: Equatable {
         var id: String
         var scrollback: Bool = false
+        var tailLines: UInt32?
     }
 }
 
@@ -1541,24 +1551,33 @@ extension MactermProtocol.SessionHistory.Args: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         var id: String?
         var scrollback: Bool?
+        var tailLines: UInt32?
         try reader.readMap { key, reader in
             switch key {
             case "id": id = try String(from: &reader)
             case "scrollback": scrollback = try Bool(from: &reader)
+            case "tail_lines": tailLines = try reader.readOptional(UInt32.self)
             default: return false
             }
             return true
         }
         self.id = try MessagePackReader.required(id, "id")
         self.scrollback = scrollback ?? false
+        self.tailLines = tailLines
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        writer.writeMapHeader(2)
+        var keyCount = 2
+        if tailLines != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
         writer.writeString("id")
         id.encode(to: &writer)
         writer.writeString("scrollback")
         scrollback.encode(to: &writer)
+        if let tailLines {
+            writer.writeString("tail_lines")
+            tailLines.encode(to: &writer)
+        }
     }
 }
 
@@ -1566,6 +1585,7 @@ extension MactermProtocol.SessionHistory {
     struct Result: Equatable {
         var text: ProtocolBin
         var truncated: Bool = false
+        var linesCut: UInt64 = 0
     }
 }
 
@@ -1573,24 +1593,29 @@ extension MactermProtocol.SessionHistory.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         var text: ProtocolBin?
         var truncated: Bool?
+        var linesCut: UInt64?
         try reader.readMap { key, reader in
             switch key {
             case "text": text = try ProtocolBin(from: &reader)
             case "truncated": truncated = try Bool(from: &reader)
+            case "lines_cut": linesCut = try UInt64(from: &reader)
             default: return false
             }
             return true
         }
         self.text = try MessagePackReader.required(text, "text")
         self.truncated = truncated ?? false
+        self.linesCut = linesCut ?? 0
     }
 
     func encode(to writer: inout MessagePackWriter) {
-        writer.writeMapHeader(2)
+        writer.writeMapHeader(3)
         writer.writeString("text")
         text.encode(to: &writer)
         writer.writeString("truncated")
         truncated.encode(to: &writer)
+        writer.writeString("lines_cut")
+        linesCut.encode(to: &writer)
     }
 }
 
@@ -3932,6 +3957,105 @@ extension MactermProtocol.ModelOptions.Result: ProtocolValue {
     }
 }
 
+extension MactermProtocol.SessionWait {
+    struct Args: Equatable {
+        var id: String
+        var text: String?
+        var timeoutMs: UInt32 = 30000
+    }
+}
+
+extension MactermProtocol.SessionWait.Args: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var id: String?
+        var text: String?
+        var timeoutMs: UInt32?
+        try reader.readMap { key, reader in
+            switch key {
+            case "id": id = try String(from: &reader)
+            case "text": text = try reader.readOptional(String.self)
+            case "timeout_ms": timeoutMs = try UInt32(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.id = try MessagePackReader.required(id, "id")
+        self.text = text
+        self.timeoutMs = timeoutMs ?? 30000
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        var keyCount = 2
+        if text != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
+        writer.writeString("id")
+        id.encode(to: &writer)
+        if let text {
+            writer.writeString("text")
+            text.encode(to: &writer)
+        }
+        writer.writeString("timeout_ms")
+        timeoutMs.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.SessionWait {
+    struct Result: Equatable {
+        var end: MactermProtocol.WaitEnd
+        var line: ProtocolBin?
+    }
+}
+
+extension MactermProtocol.SessionWait.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var end: MactermProtocol.WaitEnd?
+        var line: ProtocolBin?
+        try reader.readMap { key, reader in
+            switch key {
+            case "end": end = try MactermProtocol.WaitEnd(from: &reader)
+            case "line": line = try reader.readOptional(ProtocolBin.self)
+            default: return false
+            }
+            return true
+        }
+        self.end = try MessagePackReader.required(end, "end")
+        self.line = line
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        var keyCount = 1
+        if line != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
+        writer.writeString("end")
+        end.encode(to: &writer)
+        if let line {
+            writer.writeString("line")
+            line.encode(to: &writer)
+        }
+    }
+}
+
+extension MactermProtocol {
+    enum WaitEnd: String, Equatable {
+        case matched
+        case done
+        case exited
+        case timeout
+        case unknown
+    }
+}
+
+extension MactermProtocol.WaitEnd: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        let tag = try reader.readString()
+        self = Self(rawValue: tag) ?? .unknown
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeString(rawValue)
+    }
+}
+
 extension MactermProtocol {
     struct SessionExit: Equatable {
         var id: String
@@ -5436,6 +5560,130 @@ extension MactermProtocol.Inspect: ProtocolValue {
     }
 }
 
+extension MactermProtocol {
+    struct Wait: Equatable {
+        var tag: UInt64
+        var text: String?
+        var timeoutMs: UInt32
+    }
+}
+
+extension MactermProtocol.Wait: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var tag: UInt64?
+        var text: String?
+        var timeoutMs: UInt32?
+        try reader.readMap { key, reader in
+            switch key {
+            case "tag": tag = try UInt64(from: &reader)
+            case "text": text = try reader.readOptional(String.self)
+            case "timeout_ms": timeoutMs = try UInt32(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.tag = try MessagePackReader.required(tag, "tag")
+        self.text = text
+        self.timeoutMs = try MessagePackReader.required(timeoutMs, "timeout_ms")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        var keyCount = 2
+        if text != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
+        writer.writeString("tag")
+        tag.encode(to: &writer)
+        if let text {
+            writer.writeString("text")
+            text.encode(to: &writer)
+        }
+        writer.writeString("timeout_ms")
+        timeoutMs.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol {
+    struct Waited: Equatable {
+        var tag: UInt64
+        var end: MactermProtocol.WaitEnd
+        var line: ProtocolBin?
+    }
+}
+
+extension MactermProtocol.Waited: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var tag: UInt64?
+        var end: MactermProtocol.WaitEnd?
+        var line: ProtocolBin?
+        try reader.readMap { key, reader in
+            switch key {
+            case "tag": tag = try UInt64(from: &reader)
+            case "end": end = try MactermProtocol.WaitEnd(from: &reader)
+            case "line": line = try reader.readOptional(ProtocolBin.self)
+            default: return false
+            }
+            return true
+        }
+        self.tag = try MessagePackReader.required(tag, "tag")
+        self.end = try MessagePackReader.required(end, "end")
+        self.line = line
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        var keyCount = 2
+        if line != nil { keyCount += 1 }
+        writer.writeMapHeader(keyCount)
+        writer.writeString("tag")
+        tag.encode(to: &writer)
+        writer.writeString("end")
+        end.encode(to: &writer)
+        if let line {
+            writer.writeString("line")
+            line.encode(to: &writer)
+        }
+    }
+}
+
+extension MactermProtocol {
+    struct WaitCancel: Equatable {
+        var tag: UInt64
+    }
+}
+
+extension MactermProtocol.WaitCancel: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var tag: UInt64?
+        try reader.readMap { key, reader in
+            switch key {
+            case "tag": tag = try UInt64(from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.tag = try MessagePackReader.required(tag, "tag")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(1)
+        writer.writeString("tag")
+        tag.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol {
+    struct TtyRead: Equatable {}
+}
+
+extension MactermProtocol.TtyRead: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
+    }
+}
+
 extension MactermProtocol.Hello: ProtocolMessage {
     static let name = "hello"
     static let since: UInt32 = 1
@@ -5682,6 +5930,30 @@ extension MactermProtocol.Inspect: ProtocolMessage {
     static let senders: [MactermProtocol.Trust] = [.session]
 }
 
+extension MactermProtocol.Wait: ProtocolMessage {
+    static let name = "wait"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
+extension MactermProtocol.Waited: ProtocolMessage {
+    static let name = "waited"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.session]
+}
+
+extension MactermProtocol.WaitCancel: ProtocolMessage {
+    static let name = "wait_cancel"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
+extension MactermProtocol.TtyRead: ProtocolMessage {
+    static let name = "tty_read"
+    static let since: UInt32 = 3
+    static let senders: [MactermProtocol.Trust] = [.local]
+}
+
 extension MactermProtocol {
     /// The codes of `ErrorInfo.code`. `unknown` holds a code that a later build added.
     enum ErrorCode: Equatable {
@@ -5759,6 +6031,10 @@ extension MactermProtocol {
         case history(History)
         case inspectRead(InspectRead)
         case inspect(Inspect)
+        case wait(Wait)
+        case waited(Waited)
+        case waitCancel(WaitCancel)
+        case ttyRead(TtyRead)
         case unknown(String)
     }
 }
@@ -5796,6 +6072,10 @@ extension MactermProtocol.PaneMessage {
         case MactermProtocol.History.name: try .history(message(of: MactermProtocol.History.self))
         case MactermProtocol.InspectRead.name: try .inspectRead(message(of: MactermProtocol.InspectRead.self))
         case MactermProtocol.Inspect.name: try .inspect(message(of: MactermProtocol.Inspect.self))
+        case MactermProtocol.Wait.name: try .wait(message(of: MactermProtocol.Wait.self))
+        case MactermProtocol.Waited.name: try .waited(message(of: MactermProtocol.Waited.self))
+        case MactermProtocol.WaitCancel.name: try .waitCancel(message(of: MactermProtocol.WaitCancel.self))
+        case MactermProtocol.TtyRead.name: try .ttyRead(message(of: MactermProtocol.TtyRead.self))
         default: .unknown(t)
         }
     }

@@ -6,6 +6,23 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["path"],
+  "examples": [
+    {
+      "path": "~/dev/api",
+      "tabs": [
+        {
+          "name": "server",
+          "split": {
+            "direction": "horizontal",
+            "ratio": 0.6,
+            "first": { "run": "npm run dev" },
+            "second": { "cwd": "web", "run": "npm test -- --watch" }
+          }
+        },
+        { "name": "shell" }
+      ]
+    }
+  ],
   "properties": {
     "name": {
       "type": "string",

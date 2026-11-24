@@ -2,7 +2,7 @@ import ArgumentParser
 import Foundation
 
 /// `macterm tutor [topic]` — print a short tutorial as terminal output. Seeded
-/// into a fresh install's panes as their `run:` (see `FirstRunSeed`), and
+/// into a fresh install's pinned tab as its `run:` (see `FirstRunSeed`), and
 /// re-runnable by hand afterwards.
 ///
 /// Deliberately NOT offline like `macterm ssh`: the text is rendered by the

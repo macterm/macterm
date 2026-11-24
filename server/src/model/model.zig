@@ -49,6 +49,13 @@ pub const Tab = struct {
     custom_title: ?[]const u8 = null,
     root: SplitNode,
     focused: ?PaneId = null,
+
+    pub const field_doc = .{
+        .id = "The id of the tab.",
+        .custom_title = "The name that the user gave the tab. Null when the tab has no name.",
+        .root = "The split tree of the panes of the tab.",
+        .focused = "The pane that has the focus in the tab.",
+    };
 };
 
 /// One project: a row of the tree, or a hidden project (Pinned, Scratch
@@ -58,29 +65,37 @@ pub const Tab = struct {
 pub const Project = struct {
     id: ProjectId,
     name: []const u8,
-    /// A local path, or `user@host:dir`. Can be empty (design/013, "Ethan
-    /// chose B" §1).
+    /// design/013, "Ethan chose B" §1.
     path: []const u8,
     color: ?[]const u8 = null,
-    /// Orders the children of one parent.
     sort_order: i64 = 0,
-    /// Unix time in milliseconds.
     created_at: i64 = 0,
-    /// The project that holds this one. Null or empty is the top level.
     /// A project can hold tabs and projects at the same time. `Model.parentOf`
     /// reads an unknown parent as the top level. The file stays valid
     /// (design/013, "Ethan chose B" §1).
     parent: ?ProjectId = null,
     sidebar: ProjectSidebar = .tree,
-    /// The project holds at most one tab.
     single_tab: bool = false,
-    /// `project.remove` may remove it.
     removable: bool = true,
-    /// The one short word that finds this project (`pinned`, `scratch`,
-    /// `quick`). Unique in the model.
     alias: ?[]const u8 = null,
     tabs: []Tab = &.{},
     active_tab: ?TabId = null,
+
+    pub const field_doc = .{
+        .id = "The id of the project.",
+        .name = "The name of the project.",
+        .path = "The folder of the project: a local path, or user@host:dir for a remote project. Can be empty.",
+        .color = "The color tag of the project. Null when the project has no color tag.",
+        .sort_order = "Orders the projects that have the same parent.",
+        .created_at = "When the project was made, in Unix time in milliseconds.",
+        .parent = "The project that holds this project. Null or empty is the top level.",
+        .sidebar = "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes.",
+        .single_tab = "If true, the project holds at most one tab. project.create sets it, and it never changes.",
+        .removable = "If true, project.remove can remove the project. project.create sets it, and it never changes.",
+        .alias = "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes.",
+        .tabs = "The tabs of the project, in their order.",
+        .active_tab = "The tab that the project shows.",
+    };
 
     /// Reads a project of `model.json`, and drops the `kind` that an older
     /// build wrote: the parser refuses an unknown key. Only the token
@@ -138,6 +153,8 @@ pub const Project = struct {
 
 pub const Selection = struct {
     active_project: ?ProjectId = null,
+
+    pub const field_doc = .{ .active_project = "The project that is selected." };
 };
 
 /// What `model.json` holds. The protocol carries it too (`state.subscribe`,
@@ -149,6 +166,14 @@ pub const ModelData = struct {
     imported_v1: bool = false,
     projects: []Project = &.{},
     selection: Selection = .{},
+
+    pub const field_doc = .{
+        .version = "The version of the format of the model.",
+        .epoch_hint = "A number that the server keeps and sends back with no change. It has no other use.",
+        .imported_v1 = "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused. The server sets it: it ignores the value that a client sends.",
+        .projects = "Every project of the model.",
+        .selection = "What is selected in the model.",
+    };
 };
 
 pub const Error = error{
