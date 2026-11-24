@@ -342,8 +342,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 // gone later ended: the server ends a session whose shell
                 // exited, and a new shell here would hide that.
                 if firstAttach, let launch {
-                    // On the relay's link when the channel goes there, so
-                    // that the create and the channel are one connection.
+                    // Only a test gives a launch here (`PaneLink` makes the
+                    // session). On a relay, the create goes on the channel's
+                    // own connection: a second `connection()` can be another
+                    // link.
                     let link: any ServerLink = if let relay = channels as? any ServerLink {
                         relay
                     } else {
@@ -395,7 +397,10 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
-                if uninstall() { channelEnded() }
+                if let channel = uninstall() {
+                    await channel.close()
+                    channelEnded()
+                }
                 tries += 1
             }
             if tries > Self.channelTries {
@@ -598,13 +603,13 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
         return true
     }
 
-    /// True when a channel was installed.
+    /// The channel that was installed.
     @discardableResult
-    private func uninstall() -> Bool {
+    private func uninstall() -> PaneChannel? {
         lock.lock()
         defer { lock.unlock() }
         defer { channel = nil }
-        return channel != nil
+        return channel
     }
 
     /// An attach went out. The input from before the first attach becomes

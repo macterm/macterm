@@ -107,17 +107,31 @@ actor LocalSessions: ServerEndpoint {
         }
     }
 
-    /// A pane's channel read the exit of `session` from the session's own
-    /// socket. `session.info` tells the server, which then ends the session
-    /// (`registry.statusRead`). A server that is down reads it at its next
-    /// list.
+    /// A pane's channel read the exit of `session` on the session's own
+    /// socket. `session.info` tells the server: the server ends a session
+    /// when a reply shows the status that it read (`registry.statusRead`).
+    /// The server hears the exit on its own connection to the session, which
+    /// can come after this request: while the reply says `running`, it asks
+    /// again. A server that is down is started again by the request.
     private func exitRead(_ session: String) async {
-        do {
-            _ = try await call(MactermProtocol.SessionInfo.self, .init(id: session))
-        } catch {
-            logger.info("session info \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        for _ in 0 ..< Self.exitReadTries {
+            do {
+                let info = try await call(MactermProtocol.SessionInfo.self, .init(id: session))
+                if info.session.state != .running { return }
+            } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
+                return
+            } catch {
+                logger.info("session info \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+            try? await Task.sleep(for: Self.exitReadWait)
         }
+        logger.warning("session \(session, privacy: .public): the server did not see its exit")
     }
+
+    /// `exitRead` asks this many times, this far apart.
+    private static let exitReadTries = 40
+    private static let exitReadWait: Duration = .milliseconds(50)
 
     /// The connection to the server, made when there is none or when the
     /// last one ended. A pane opens its channel on it. It tries again for a

@@ -31,9 +31,13 @@ final class SessionSockets: PaneChannelOpener {
     func openChannel(session: String) async throws -> PaneChannel {
         let path = directory.appending(path: session).path
         let exitRead = exitRead
-        return try await Task.detached {
-            try SessionSocket.open(path: path) { exitRead(session) }
-        }.value
+        // The connect and the handshake block: not on the pool of Swift's
+        // tasks.
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try SessionSocket.open(path: path) { exitRead(session) } })
+            }
+        }
     }
 }
 
@@ -58,8 +62,9 @@ final class SessionSocket: PaneChannelTransport, @unchecked Sendable {
         self.fd = fd
     }
 
-    /// Connects and greets. `exitRead` runs once when the channel delivers
-    /// the session's exit. It blocks: call it off the main thread.
+    /// Connects and greets: this blocks for up to `handshakeTimeout`.
+    /// `exitRead` runs on the reader thread, once, when the channel gets the
+    /// session's exit.
     static func open(path: String, exitRead: @escaping @Sendable () -> Void) throws -> PaneChannel {
         let fd: Int32
         do {
