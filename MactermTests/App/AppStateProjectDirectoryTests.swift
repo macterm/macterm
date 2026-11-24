@@ -66,6 +66,12 @@ struct AppStateProjectDirectoryTests {
         let row = try #require(action(input, ""))
         #expect(row.title == "Current Pane's Directory")
         #expect(row.subtitle == sub)
+        let scope = InputPaletteScope(input: input)
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let item = scope.sections(for: PaletteQuery(raw: ""), context: context).first?.items.first
+        #expect(item?.title == "Current Pane's Directory")
+        #expect(item?.subtitle == sub, "the row shows the pane's full path")
+        #expect(item?.subtitleIsPath == true, "a long path is cut in the middle")
         #expect(row.run() == .done)
         #expect(path(of: fixture) == sub)
     }

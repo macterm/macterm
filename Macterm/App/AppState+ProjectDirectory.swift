@@ -15,11 +15,10 @@ extension AppState {
     /// `Change to "<path>"`, and the rows under it complete the path. At an
     /// empty field the action row is "Current Pane's Directory", with the
     /// pane's folder as its subtitle (`paneDirectoryOffer`). The screen
-    /// reads the pane's folder when it shows, not when the palette builds
-    /// its row:
-    /// `paneDirectory` (`currentPaneDirectory` by default). Nil for a remote
-    /// project: its folder is on the host, and nothing completes or checks
-    /// a path there.
+    /// reads the pane's folder through `paneDirectory`
+    /// (`currentPaneDirectory` by default) when it shows, not when the
+    /// palette builds its row. Nil for a remote project: its folder is on
+    /// the host, and nothing completes or checks a path there.
     func changeProjectDirectoryInput(
         for project: Project,
         projectStore: ProjectStore,
