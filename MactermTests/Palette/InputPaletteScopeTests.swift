@@ -137,7 +137,7 @@ struct InputPaletteScopeTests {
     func an_empty_field_with_an_action_row_rests_on_the_action_row() {
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.empty-action",
-            pill: PalettePill(title: "Here", icon: "folder"),
+            title: "Here",
             prompt: "Folder"
         ) { _ in .action(PaletteInputAction(title: "Current Pane's Directory") { .done }) })
         #expect(rows(scope, "").map(\.id) == [InputPaletteScope.actionItemID, InputPaletteScope.cancelItemID])
