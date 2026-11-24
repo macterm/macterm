@@ -88,7 +88,7 @@ final class SessionSocket: PaneChannelTransport, @unchecked Sendable {
             number: paneChannel,
             epoch: hello.epoch,
             caps: hello.caps,
-            readAhead: SessionSockets.readAhead
+            buffering: .readAhead(SessionSockets.readAhead)
         )
         socket.startReading(reader, into: channel.sink, exitRead: exitRead)
         return channel
