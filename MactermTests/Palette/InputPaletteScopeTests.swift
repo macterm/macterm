@@ -15,7 +15,7 @@ struct InputPaletteScopeTests {
     private func makeInput(log: Log, completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] }) -> PaletteInput {
         PaletteInput(
             id: "test.folder-name",
-            pill: PalettePill(title: "New Folder", icon: "folder.badge.plus"),
+            title: "New Folder",
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
@@ -50,7 +50,8 @@ struct InputPaletteScopeTests {
         let input = makeInput(log: Log())
         let frame = PaletteFrame(.input(input))
         let scope = try #require(frame.scope as? InputPaletteScope)
-        #expect(frame.pill == input.pill)
+        #expect(frame.pill == PalettePill(title: "New Folder"))
+        #expect(frame.pill.icon == nil, "an input screen's pill has no icon")
         #expect(scope.placeholder == "Folder name")
         #expect(scope.initialQuery == "untitled")
         #expect(PaletteScopeID.input(input).command == nil)
@@ -107,7 +108,7 @@ struct InputPaletteScopeTests {
         var ran = 0
         let input = PaletteInput(
             id: "test.with-action",
-            pill: PalettePill(title: "Pick", icon: "folder"),
+            title: "Pick",
             prompt: "Path",
             actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in ran += 1 }],
             completions: { _ in [PaletteCompletion(title: "notes", value: "notes/")] },
@@ -129,6 +130,38 @@ struct InputPaletteScopeTests {
         let deferred = try #require(context.appState.postPaletteAction)
         deferred()
         #expect(ran == 1)
+    }
+
+    @Test
+    func results_are_rows_that_run_and_complete_the_field() throws {
+        var ran: [String] = []
+        let input = PaletteInput(
+            id: "test.with-results",
+            title: "Pick",
+            prompt: "Path",
+            actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in }],
+            completions: { _ in [PaletteCompletion(title: "never", value: "never")] },
+            results: { text, _ in
+                ["notes", "novel"].filter { $0.hasPrefix(text) }.map { name in
+                    PaletteInputResult(
+                        item: PaletteItem(id: "row:\(name)", title: name, category: "Things") { ran.append(name) },
+                        completion: name + "/"
+                    )
+                }
+            },
+            commit: { _, _ in .done }
+        )
+        let scope = InputPaletteScope(input: input)
+
+        let sections = scope.sections(for: PaletteQuery(raw: "no"), context: makeContext())
+        #expect(sections.map(\.header) == [nil, "Things"], "the results replace the completions, under their category")
+        #expect(sections.map { $0.items.map(\.title) } == [["Browse"], ["notes", "novel"]])
+        let novel = try #require(sections.last?.items.last)
+        #expect(scope.isResult(novel))
+        #expect(scope.completion(for: novel) == "novel/")
+        #expect(try !scope.isResult(#require(sections.first?.items.first)))
+        novel.action()
+        #expect(ran == ["novel"])
     }
 
     @Test

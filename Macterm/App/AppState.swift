@@ -2259,12 +2259,6 @@ final class AppState {
         return project
     }
 
-    /// Open a project's row in the sidebar of the window the user is in, so
-    /// that its tabs show: a project that the New Project screen added.
-    func expandProjectRow(_ projectID: UUID) {
-        keyOrFirstWindow?.expandedRows.insert(projectID)
-    }
-
     /// A project per directory, in order, with the last one selected in
     /// `window` (the key window's selection when nil) — what the Finder
     /// service, Open With and a folder dropped on the sidebar all do. Always

@@ -171,7 +171,8 @@ struct CommandPalettePanel: View {
     private var inputScope: InputPaletteScope? { scope as? InputPaletteScope }
 
     /// Where the selection rests on a new list: the top row, or no row on
-    /// an input screen, whose Return commits the field and not a row.
+    /// an input screen until `refresh` rests it on the first result row
+    /// (`InputPaletteScope.isResult`).
     private var restingIndex: Int { inputScope == nil ? 0 : -1 }
 
     private var flatItems: [PaletteItem] { sections.flatMap(\.items) }
@@ -270,7 +271,7 @@ struct CommandPalettePanel: View {
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
                                         selectedIndex = idx
-                                        if let inputScope, !inputScope.isAction(item) {
+                                        if let inputScope, !inputScope.isAction(item), !inputScope.isResult(item) {
                                             _ = completeQuery()
                                         } else {
                                             execute(alt: NSEvent.modifierFlags.contains(.option))
@@ -424,7 +425,8 @@ struct CommandPalettePanel: View {
             // A selected action row of an input screen runs, as a click
             // does, but only while the field is empty: typed text is what
             // the user means, and a hover can select a row by itself.
-            if let inputScope, !(query.isEmpty && selectedIsAction(of: inputScope)) {
+            // A selected result row runs, as in the root.
+            if let inputScope, !selectedIsResult(of: inputScope), !(query.isEmpty && selectedIsAction(of: inputScope)) {
                 commit(inputScope)
             } else {
                 execute(alt: press.modifiers.contains(.option))
@@ -485,9 +487,10 @@ struct CommandPalettePanel: View {
         // match after a query change), nor past the end of a list that just
         // got shorter (a screen's redraw, a hover resolved against the old
         // rows) — Return would have nothing to run. An input screen's
-        // selection may rest on no row: its Return commits the field.
-        if inputScope != nil, !flatItems.indices.contains(selectedIndex) {
-            selectedIndex = -1
+        // selection rests on its first result row, or on no row: its Return
+        // then commits the field.
+        if let inputScope, !flatItems.indices.contains(selectedIndex) {
+            selectedIndex = flatItems.firstIndex { inputScope.isResult($0) } ?? -1
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
         {
@@ -526,16 +529,20 @@ struct CommandPalettePanel: View {
     /// the keypress fall through (`.ignored`) to default focus traversal in
     /// that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's rows are its completions: the selected one, or
-        // the top one when no completion is selected. Its action rows
-        // complete nothing.
+        // An input screen's rows complete the field: the first that changes
+        // it, from the selected row down (from the top when no row that
+        // completes is selected). A path that a Tab just filled in is its
+        // own top row, so the next Tab takes its first child, as in the
+        // root. Action rows complete nothing.
         if let inputScope {
-            let index = flatItems.indices.contains(selectedIndex) && !inputScope.isAction(flatItems[selectedIndex])
+            let start = flatItems.indices.contains(selectedIndex) && !inputScope.isAction(flatItems[selectedIndex])
                 ? selectedIndex
-                : flatItems.firstIndex { !inputScope.isAction($0) }
-            guard let index, flatItems.indices.contains(index),
-                  let completion = inputScope.completion(for: flatItems[index]),
-                  completion != query
+                : 0
+            guard flatItems.indices.contains(start),
+                  let completion = flatItems[start...].lazy
+                  .filter({ !inputScope.isAction($0) })
+                  .compactMap({ inputScope.completion(for: $0) })
+                  .first(where: { $0 != query })
             else { return .ignored }
             query = completion
             return .handled
@@ -628,6 +635,11 @@ struct CommandPalettePanel: View {
     /// True when the selected row of `inputScope` is one of its action rows.
     private func selectedIsAction(of inputScope: InputPaletteScope) -> Bool {
         flatItems.indices.contains(selectedIndex) && inputScope.isAction(flatItems[selectedIndex])
+    }
+
+    /// True when the selected row of `inputScope` is one of its result rows.
+    private func selectedIsResult(of inputScope: InputPaletteScope) -> Bool {
+        flatItems.indices.contains(selectedIndex) && inputScope.isResult(flatItems[selectedIndex])
     }
 
     /// Run the selected row: its alt action when `alt` and it has one, else
@@ -786,10 +798,16 @@ private struct PaletteScopePill: View {
     let isCurrent: Bool
 
     var body: some View {
-        Label {
-            Text(pill.title)
-        } icon: {
-            PaletteIconImage(icon: pill.icon, side: 14)
+        Group {
+            if let icon = pill.icon {
+                Label {
+                    Text(pill.title)
+                } icon: {
+                    PaletteIconImage(icon: icon, side: 14)
+                }
+            } else {
+                Text(pill.title)
+            }
         }
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)

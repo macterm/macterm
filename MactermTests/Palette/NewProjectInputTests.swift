@@ -30,24 +30,60 @@ struct NewProjectInputTests {
     }
 
     @Test
-    func the_screen_has_the_finder_row_over_the_completions() throws {
+    func the_screen_has_the_finder_row_over_the_rows_of_path_mode() throws {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
+        #expect(PaletteInput.newProject.pill == PalettePill(title: "New Project"), "a pill with no icon")
 
         let empty = scope.sections(for: PaletteQuery(raw: ""), context: context)
         #expect(empty.map { $0.items.map(\.title) } == [["Select in Finder"]])
 
-        let parent = folder.deletingLastPathComponent().path + "/"
-        let sections = scope.sections(for: PaletteQuery(raw: parent), context: context)
-        #expect(sections.map { $0.items.map(\.title) } == [["Select in Finder"], ["api"]])
+        // The rows are the root's rows for the same text: the typed folder,
+        // then its children, each with its full path.
+        let parentPath = folder.deletingLastPathComponent().path
+        let typed = parentPath + "/"
+        let sections = scope.sections(for: PaletteQuery(raw: typed), context: context)
+        let rootRows = DirectorySource().items(query: typed, context: context)
+        #expect(sections.count == 2)
         #expect(try scope.isAction(#require(sections.first?.items.first)))
+        #expect(sections.last?.items.map(\.id) == rootRows.map(\.id))
+        #expect(sections.last?.items.map(\.subtitle) == rootRows.map(\.subtitle))
+        #expect(sections.last?.header == rootRows.first?.category)
+        let child = try #require(sections.last?.items.last)
+        #expect(child.title == "api")
+        #expect(scope.isResult(child))
+        #expect(
+            try scope.completion(for: child) == #require(DirectorySource.path(of: child)) + "/",
+            "Tab fills the folder, ready to go into it"
+        )
+    }
+
+    @Test
+    func a_row_adds_its_folder_as_the_root_row_does() throws {
+        let folder = try makeFolder("api")
+        let scope = InputPaletteScope(input: .newProject)
+        let (context, _) = makeContext()
+
+        let rows = scope.sections(for: PaletteQuery(raw: folder.path), context: context).last?.items ?? []
+        let top = try #require(rows.first)
+        #expect(scope.isResult(top))
+        top.action()
+        let project = try #require(context.projectStore.projects.first)
+        #expect(project.name == "api")
+        #expect(context.appState.activeProjectID == project.id)
+
+        // The folder has a project now: the top row switches to it, and the
+        // row below adds another.
+        let again = scope.sections(for: PaletteQuery(raw: folder.path), context: context).last?.items ?? []
+        #expect(again.map(\.id).first == "dir-switch:\(DirectorySource.path(of: top) ?? "")")
+        #expect(again.count == 2)
     }
 
     @Test
     func a_typed_folder_adds_a_project_and_selects_it() throws {
         let folder = try makeFolder("api")
-        let (context, window) = makeContext()
+        let (context, _) = makeContext()
 
         // The field's completions end in a slash; the project's path does not.
         #expect(NewProjectInput.commit(folder.path + "/", context: context) == .done)
@@ -56,7 +92,6 @@ struct NewProjectInputTests {
         #expect(project.name == "api")
         #expect(project.path == ProjectPath.normalizedForStorage(folder.path))
         #expect(context.appState.activeProjectID == project.id)
-        #expect(window.expandedRows.contains(project.id))
     }
 
     @Test

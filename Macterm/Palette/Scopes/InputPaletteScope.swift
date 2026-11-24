@@ -15,12 +15,20 @@ import Foundation
 /// A commit that `commit` refuses keeps the screen and shows the reason as
 /// one line above the rows, until the text changes.
 ///
+/// A screen with `results` shows them in place of completions: rows as the
+/// root shows them, that run. The top one is selected, Return runs the
+/// selected one, and Tab puts the first that changes the field in it.
+/// Return commits the field only when no result is selected.
+///
+/// The pill of an input screen is its `title` alone, with no icon.
+///
 /// Its identity is `id`: two inputs with one id are one screen to the
 /// palette (a chord toggles it). An input about one thing (a tab, a pane)
 /// puts that thing's id in its own, so that two targets are two screens.
 struct PaletteInput: Hashable {
     let id: String
-    let pill: PalettePill
+    /// The pill's text.
+    let title: String
     /// The field's placeholder: what to type.
     let prompt: String
     let initialValue: String
@@ -32,6 +40,9 @@ struct PaletteInput: Hashable {
     let actions: [PaletteInputAction]
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
+    /// Rows that run, for the text in the field, best first. When set, the
+    /// screen shows them and not `completions`.
+    let results: (@MainActor (String, PaletteContext) -> [PaletteInputResult])?
     /// Do the action with the text in the field, or refuse it. On `.done`
     /// the palette closes. An action that must run after the palette has
     /// closed and focus is back in the pane sets `AppState.postPaletteAction`.
@@ -39,23 +50,27 @@ struct PaletteInput: Hashable {
 
     init(
         id: String,
-        pill: PalettePill,
+        title: String,
         prompt: String,
         initialValue: String = "",
         summary: String = "",
         actions: [PaletteInputAction] = [],
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
+        results: (@MainActor (String, PaletteContext) -> [PaletteInputResult])? = nil,
         commit: @escaping @MainActor (String, PaletteContext) -> PaletteCommit
     ) {
         self.id = id
-        self.pill = pill
+        self.title = title
         self.prompt = prompt
         self.initialValue = initialValue
         self.summary = summary
         self.actions = actions
         self.completions = completions
+        self.results = results
         self.commit = commit
     }
+
+    var pill: PalettePill { PalettePill(title: title) }
 
     static func == (lhs: PaletteInput, rhs: PaletteInput) -> Bool {
         lhs.id == rhs.id
@@ -90,6 +105,13 @@ struct PaletteInputAction {
     let run: @MainActor (PaletteContext) -> Void
 }
 
+/// A row of an input screen that runs (`PaletteInput.results`): the row, and
+/// the text that Tab puts in the field for it, nil for none.
+struct PaletteInputResult {
+    let item: PaletteItem
+    let completion: String?
+}
+
 /// A row under an input field: what it shows, and the text the field takes
 /// when the row is picked.
 struct PaletteCompletion: Equatable {
@@ -117,6 +139,7 @@ final class InputPaletteScope: PaletteScope {
     /// changes.
     private var refusedText: String?
     private var completions: [PaletteCompletion] = []
+    private var results: [PaletteInputResult] = []
     /// True until the screen has shown once: only then does the panel
     /// select the field's text, the initial value.
     var isFirstShow = true
@@ -135,14 +158,28 @@ final class InputPaletteScope: PaletteScope {
             failure = nil
             refusedText = nil
         }
-        completions = input.completions(text)
         let actions = input.actions.map { action in
             PaletteItem(id: Self.actionID(action), title: action.title, icon: action.icon) {
                 context.appState.postPaletteAction = { action.run(context) }
             }
         }
+        let actionSection = actions.isEmpty ? [] : [PaletteSection(header: nil, items: actions)]
+        if let makeResults = input.results {
+            completions = []
+            results = makeResults(text, context)
+            let items = results.map(\.item)
+            return actionSection + (items.isEmpty ? [] : [PaletteSection(header: items.first?.category, items: items)])
+        }
+        results = []
+        completions = input.completions(text)
         let items = completions.map { PaletteItem(id: Self.itemID($0), title: $0.title, action: {}) }
-        return [actions, items].filter { !$0.isEmpty }.map { PaletteSection(header: nil, items: $0) }
+        return actionSection + (items.isEmpty ? [] : [PaletteSection(header: nil, items: items)])
+    }
+
+    /// True when `item`, a row of this screen, is one of its `results`:
+    /// Return and a click run it.
+    func isResult(_ item: PaletteItem) -> Bool {
+        results.contains { $0.item.id == item.id }
     }
 
     /// True when `item`, a row of this screen, is one of its `actions`:
@@ -153,7 +190,8 @@ final class InputPaletteScope: PaletteScope {
 
     /// The text that `item`, a row of this screen, puts in the field.
     func completion(for item: PaletteItem) -> String? {
-        completions.first { Self.itemID($0) == item.id }?.value
+        if let result = results.first(where: { $0.item.id == item.id }) { return result.completion }
+        return completions.first { Self.itemID($0) == item.id }?.value
     }
 
     /// Commit `text`. True when the palette closes; false when the value
