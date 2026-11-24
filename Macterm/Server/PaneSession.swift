@@ -344,7 +344,11 @@ final class PaneSession: PaneInputRoute, @unchecked Sendable {
                 if firstAttach, let launch {
                     // On the relay's link when the channel goes there, so
                     // that the create and the channel are one connection.
-                    let link = try await (channels as? any ServerLink) ?? endpoint.connection()
+                    let link: any ServerLink = if let relay = channels as? any ServerLink {
+                        relay
+                    } else {
+                        try await endpoint.connection()
+                    }
                     try await createSession(on: link, launch)
                 }
                 let channel = try await channels.openChannel(session: name)
