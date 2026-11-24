@@ -396,9 +396,9 @@ actor PaneSession: PaneInputRoute {
         var reconnected = false
         var tries = 0
         while !Task.isCancelled {
-            let link: any ServerLink
+            let channels: any PaneChannelOpener
             do {
-                link = try await endpoint.connection()
+                channels = try await endpoint.paneChannels()
             } catch {
                 if !(error is CancellationError), !Task.isCancelled {
                     logger.info("pane \(self.name, privacy: .public): no connection: \(String(describing: error), privacy: .public)")
@@ -414,8 +414,19 @@ actor PaneSession: PaneInputRoute {
                 // Only the first attach makes the session. A session that is
                 // gone later ended: the server ends a session whose shell
                 // exited, and a new shell here would hide that.
-                if firstAttach, let launch { try await createSession(on: link, launch) }
-                let channel = try await link.openChannel(session: name)
+                if firstAttach, let launch {
+                    // Only a test gives a launch here (`PaneLink` makes the
+                    // session). On a relay, the create goes on the channel's
+                    // own connection: a second `connection()` can be another
+                    // link.
+                    let link: any ServerLink = if let relay = channels as? any ServerLink {
+                        relay
+                    } else {
+                        try await endpoint.connection()
+                    }
+                    try await createSession(on: link, launch)
+                }
+                let channel = try await channels.openChannel(session: name)
                 guard install(channel) else {
                     await channel.close()
                     return
@@ -451,9 +462,18 @@ actor PaneSession: PaneInputRoute {
             } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound && !firstAttach {
                 deliver { $0.paneExited(code: nil, signal: nil) }
                 return
+            } catch is SessionSocket.Gone where !firstAttach {
+                // The session's socket has no listener: the session ended
+                // with no exit status (killed, or crashed), as a relay's
+                // channel ends with an empty `exit`.
+                deliver { $0.paneExited(code: nil, signal: nil) }
+                return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
-                if uninstall() { channelEnded() }
+                if let channel = uninstall() {
+                    await channel.close()
+                    channelEnded()
+                }
                 tries += 1
             }
             if tries > Self.channelTries {
@@ -646,11 +666,11 @@ actor PaneSession: PaneInputRoute {
         return true
     }
 
-    /// True when a channel was installed.
+    /// The channel that was installed.
     @discardableResult
-    private func uninstall() -> Bool {
+    private func uninstall() -> PaneChannel? {
         defer { channel = nil }
-        return channel != nil
+        return channel
     }
 
     /// An attach went out. The input from before the first attach becomes

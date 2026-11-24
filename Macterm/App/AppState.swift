@@ -806,13 +806,14 @@ final class AppState {
     }
 
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
-    /// screens was up. A different screen starts from an empty query — text
-    /// typed for one search means nothing to another.
+    /// screens was up. A different screen starts from its own text
+    /// (`PaletteScope.initialQuery`: empty for a search) — text typed for
+    /// one search means nothing to another.
     func openCommandPalette(scope: PaletteScopeID?) {
         guard let window = keyOrFirstWindow else { return }
         if window.paletteScope != scope || window.paletteStack.count > 1 {
-            commandPaletteQuery = ""
             window.showPaletteScope(scope)
+            commandPaletteQuery = window.paletteStack.last?.scope.initialQuery ?? ""
         }
         window.isCommandPaletteVisible = true
     }
@@ -2202,14 +2203,15 @@ final class AppState {
     }
 
     /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name the pinned workspace reserves is
-    /// refused with a notice and the old name stays — as `project rename`
-    /// refuses it with a `bad_request`. The field has closed by the time the
-    /// name arrives, so the notice is the one place left to say why.
+    /// Current Project opens too). A name that `Project.nameRefusal` refuses
+    /// (a slash, a reserved name) gets a notice and the old name stays — as
+    /// `project rename` refuses it with a `bad_request`. The field has closed
+    /// by the time the name arrives, so the notice is the one place left to
+    /// say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.reservedNameMessage(for: name) {
+        if let message = Project.nameRefusal(for: name) {
             present(.notice(
-                .reservedProjectName,
+                .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow

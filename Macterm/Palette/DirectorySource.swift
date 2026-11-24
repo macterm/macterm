@@ -1,11 +1,12 @@
 import AppKit
 import Foundation
 
-/// Palette source for directory completions. Consulted only when the query
-/// looks like a path. If the exact path matches a directory, it's surfaced
-/// as the top result — and if that directory is already an opened project,
-/// the top item switches to it, with an "add another project" item below
-/// (a directory is not an identity; it can back several projects).
+/// Palette source for directory completions (`PathCompleter`). Consulted
+/// only when the query looks like a path. If the exact path matches a
+/// directory, it's surfaced as the top result — and if that directory is
+/// already an opened project, the top item switches to it, with an "add
+/// another project" item below (a directory is not an identity; it can
+/// back several projects).
 @MainActor
 struct DirectorySource: PaletteSource {
     private static var category: String {
@@ -19,25 +20,7 @@ struct DirectorySource: PaletteSource {
         if PaletteQuery.isRemoteSpecQuery(query) {
             return remoteItems(spec: query, context: context)
         }
-        let expanded = (query as NSString).expandingTildeInPath
-        guard expanded.hasPrefix("/") else { return [] }
-
-        let fm = FileManager.default
-        let dir: String
-        let prefix: String
-        let exactMatch: String?
-
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
-            dir = expanded
-            prefix = ""
-            exactMatch = expanded
-        } else {
-            dir = (expanded as NSString).deletingLastPathComponent
-            prefix = (expanded as NSString).lastPathComponent
-            exactMatch = nil
-        }
-        guard fm.fileExists(atPath: dir) else { return [] }
+        guard let completion = PathCompleter.complete(query) else { return [] }
 
         var items: [PaletteItem] = []
 
@@ -66,33 +49,16 @@ struct DirectorySource: PaletteSource {
         }
 
         // Exact match at the top (when the typed path is itself a directory).
-        if let exact = exactMatch {
+        if let exact = completion.exactMatch {
             appendRows(name: (exact as NSString).lastPathComponent, fullPath: exact)
         }
 
-        // Children rank below every exact-match row.
-        let entries = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
-        entries
-            .filter { name in
-                let full = (dir as NSString).appendingPathComponent(name)
-                var childIsDir: ObjCBool = false
-                guard fm.fileExists(atPath: full, isDirectory: &childIsDir), childIsDir.boolValue else { return false }
-                // Hide dotdirs — unless the user's typed prefix itself opts into
-                // the hidden namespace (e.g. `~/.conf` should complete `.config`).
-                if !prefix.hasPrefix("."), name.hasPrefix(".") { return false }
-                if prefix.isEmpty { return true }
-                // Completion, not search: a prefix, folded as `Search` folds.
-                return Search.hasPrefix(name, prefix)
-            }
-            // `contentsOfDirectory` order is unspecified; sort so BOTH which 10
-            // children survive the cap AND their ranking are deterministic
-            // across runs and filesystems. The cap counts directories, not
-            // rows — a backed child's add-another row rides along.
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            .prefix(10)
-            .forEach { name in
-                appendRows(name: name, fullPath: (dir as NSString).appendingPathComponent(name))
-            }
+        // Children rank below every exact-match row. The completer's cap
+        // counts directories, not rows — a backed child's add-another row
+        // rides along.
+        for child in completion.children {
+            appendRows(name: (child as NSString).lastPathComponent, fullPath: child)
+        }
 
         return items
     }

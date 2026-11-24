@@ -484,6 +484,24 @@ struct ControlHandlerTests {
     }
 
     @Test
+    func project_create_refuses_a_name_with_a_slash() async throws {
+        let (handler, _, projectStore) = makeHandler()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-create-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for name in ["Work/api", "/", "api/"] {
+            let response = await handler.handle(request(
+                "project.create", args: ControlArgs(path: dir.path, name: name)
+            ))
+            #expect(response.error?.code == .badRequest)
+            #expect(response.error?.message == "a project name cannot contain a slash")
+        }
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
     func project_create_trims_a_padded_name() async throws {
         // The trim `project.rename` applies: padding doesn't show in the
         // sidebar or `project list`, so it must not be part of the name.
@@ -676,6 +694,9 @@ struct ControlHandlerTests {
         #expect(reserved.error?.message == "\"Pinned\" is a reserved name for the pinned tabs")
         let reservedCase = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: " pInNeD ")))
         #expect(reservedCase.error?.code == .badRequest)
+        let slash = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: "Work/api")))
+        #expect(slash.error?.code == .badRequest)
+        #expect(slash.error?.message == "a project name cannot contain a slash")
         #expect(projectStore.projects.first?.name == "alpha")
 
         // Unknown project

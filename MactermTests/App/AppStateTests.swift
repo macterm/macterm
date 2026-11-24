@@ -353,7 +353,7 @@ struct AppStateTests {
         state.renameProject(project.id, to: "pinned", store: store)
         #expect(store.projects.first?.name == "alpha")
         let notice = try #require(state.pendingDialog)
-        #expect(notice.kind == .reservedProjectName)
+        #expect(notice.kind == .refusedProjectName)
         #expect(notice.confirmTitle == nil)
         #expect(notice.message == PinnedTabs.reservedNameMessage)
         state.dismissPendingDialog()
@@ -361,6 +361,20 @@ struct AppStateTests {
         state.renameProject(project.id, to: "beta", store: store)
         #expect(store.projects.first?.name == "beta")
         #expect(state.pendingDialog == nil)
+    }
+
+    @Test
+    func sidebar_rename_refuses_a_slash_with_a_notice() throws {
+        let state = makeAppState()
+        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json"))
+        let project = store.create(name: "alpha", path: "/tmp")
+
+        state.renameProject(project.id, to: "Work/api", store: store)
+        #expect(store.projects.first?.name == "alpha")
+        let notice = try #require(state.pendingDialog)
+        #expect(notice.kind == .refusedProjectName)
+        #expect(notice.message == Project.slashMessage)
     }
 
     @Test

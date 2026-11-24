@@ -11,8 +11,8 @@ ARGUMENTS:
                           remote [user@]host:dir.
 
 OPTIONS:
-  --name <name>           Display name. The default is the name of the
-                          directory.
+  --name <name>           Display name, with no slash. The default is the name
+                          of the directory.
   --select                Select the project too.
   --skip-folder-check     [debug] Do not check the remote directory.
   --socket <socket>       Control socket path. It overrides discovery.

@@ -177,9 +177,10 @@ Pinned tabs belong to no project. The sidebar shows them above the projects. The
 - At launch, every record materializes. `materializeRestoredPinnedTabs` asks the server which sessions survived. A session that is dead starts again from the declaration. The declaration refreshes at pin time, when the pinned foreground changes (debounced), and at quit. It never refreshes at unload.
 - Sidebar drag: the pinned rows and the tab lists share one `.dropDestination` at the level of the ForEach. It drives the native insertion line. Rows have no destinations of their own. A target on a row kills the line and swallows clicks. `PinTabDropZone` above the List makes the first pin possible by drag. `--project pinned` addresses the workspace over the CLI.
 - **No project may have the name `Pinned`** (any case, padding ignored). `ControlHandler.resolveProject` reads it as this workspace before any project, so such a project cannot be reached by name.
-  - `PinnedTabs.reservesName` is the one test that every naming path applies. A typed name is refused where the user typed it. These paths are CLI `project create --name` and `project rename`, the notice of the sidebar rename, the New Project intent, and the remote sheet.
+  - `Project.nameRefusal` is the one test that every naming path applies (`PinnedTabs.reservesName` for this name). A typed name is refused where the user typed it. These paths are CLI `project create --name` and `project rename`, the notice of the sidebar rename, the New Project intent, and the remote sheet.
   - A name that nobody chose (the own name of a folder) becomes `Pinned 2` in `ProjectStore.create`. `ProjectStore.rename` refuses it outright.
   - Projects that got their names before the rule keep their names.
+- **No project name may contain a slash.** A nested project is named by the path of names from the top level (`Work/api`). `Project.nameRefusal` refuses a slash on the same paths as a reserved name. `ProjectStore.create` changes each slash to a hyphen in a name that nobody typed (the `name:` of a layout file), and `ProjectStore.rename` refuses it. Names from before the rule load as they are.
 
 ## Desktop widgets
 
