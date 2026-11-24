@@ -114,13 +114,13 @@ pub const resources = [_]Resource{
     .{
         .uri = "macterm://formats/palette",
         .name = "palette",
-        .description = "The JSON Schema of a palette file of an extension (YAML), with an example.",
+        .description = "The JSON Schema for a palette file (YAML) of an extension, with an example.",
         .text = formats.palette,
     },
     .{
         .uri = "macterm://formats/layout",
         .name = "layout",
-        .description = "The JSON Schema of a project layout file in ~/.config/macterm/projects/ (YAML), with an example.",
+        .description = "The JSON Schema for a project layout file (YAML) in ~/.config/macterm/projects/, with an example.",
         .text = formats.layout,
     },
 };
@@ -537,6 +537,7 @@ test "initialize gives the instructions and the client's version, or the newest"
     try testing.expectEqualStrings("2025-06-18", first.get("protocolVersion").?.string);
     try testing.expectEqualStrings(instructions, first.get("instructions").?.string);
     try testing.expect(first.get("capabilities").?.object.get("tools") != null);
+    try testing.expect(first.get("capabilities").?.object.get("resources") != null);
     try testing.expectEqualStrings("macterm", first.get("serverInfo").?.object.get("name").?.string);
     try testing.expectEqualStrings("two", replies[1].object.get("id").?.string);
     try testing.expectEqualStrings(protocol_versions[protocol_versions.len - 1], replies[1].object.get("result").?.object.get("protocolVersion").?.string);
