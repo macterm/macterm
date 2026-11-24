@@ -466,7 +466,7 @@ actor PaneSession: PaneInputRoute {
                 // The session's socket has no listener: the session ended
                 // with no exit status (killed, or crashed), as a relay's
                 // channel ends with an empty `exit`.
-                host.paneExited(code: nil, signal: nil)
+                deliver { $0.paneExited(code: nil, signal: nil) }
                 return
             } catch {
                 logger.info("pane \(self.name, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -666,13 +666,7 @@ actor PaneSession: PaneInputRoute {
 
     /// The channel that was installed.
     @discardableResult
-<<<<<<< HEAD
     private func uninstall() -> PaneChannel? {
-        lock.lock()
-        defer { lock.unlock() }
-=======
-    private func uninstall() -> Bool {
->>>>>>> origin/main
         defer { channel = nil }
         return channel
     }
