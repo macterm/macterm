@@ -2082,29 +2082,46 @@ final class AppState {
     }
 
     /// Judges the close of `closing` and gives the verdict to `decide`.
-    /// When a pane runs a plain shell (a host with no server, 0494), the
-    /// close first asks each such host whether its shell waits at its
-    /// prompt, at most `plainShellAnswerTimeout`, and `decide` runs after
-    /// the answers. With no plain shell, `decide` runs at once. A host that
-    /// does not answer gives the surface's reading, which warns.
-    func judgeClose(_ closing: [Pane], _ decide: @escaping @MainActor (Bool) -> Void) {
+    /// With no plain shell (a host with no server, 0494), `decide` runs at
+    /// once. Else the close first asks the host of each plain shell whether
+    /// the shell is idle. The asks run at the same time. `decide` runs at
+    /// the first busy answer, after the last answer, or after
+    /// `plainShellAnswerTimeout`. A pane with no answer then gets the
+    /// surface's reading, which warns. `target` names the request: a second
+    /// request for a target that is still judged does nothing.
+    func judgeClose(_ closing: [Pane], target: String, _ decide: @escaping @MainActor (Bool) -> Void) {
         let plain = closing.filter(paneRunsPlainShell)
         guard !plain.isEmpty else {
             decide(closeNeedsConfirmation(closing))
             return
         }
+        guard closesBeingJudged.insert(target).inserted else { return }
+        let judgement = CloseJudgement(waiting: Set(plain.map(\.id)))
+        let finish: @MainActor () -> Void = { [weak self] in
+            guard let self, !judgement.isDone else { return }
+            judgement.isDone = true
+            judgement.deadline?.cancel()
+            closesBeingJudged.remove(target)
+            decide(closeNeedsConfirmation(closing, plainAnswers: judgement.answers))
+        }
         let ask = askPlainShellNeedsConfirmClose
-        Task { @MainActor in
-            var answers: [UUID: Bool] = [:]
-            for pane in plain {
-                guard let answer = await ask(pane) else { continue }
-                answers[pane.id] = answer
-                // One busy pane is the verdict: ask no more hosts.
-                if answer { break }
+        let timeout = plainShellAnswerTimeout
+        for pane in plain {
+            Task { @MainActor in
+                let answer = await ask(pane, timeout)
+                judgement.record(answer, for: pane.id)
+                if answer == true || judgement.waiting.isEmpty { finish() }
             }
-            decide(self.closeNeedsConfirmation(closing, plainAnswers: answers))
+        }
+        judgement.deadline = Task { @MainActor in
+            try? await Task.sleep(for: timeout)
+            finish()
         }
     }
+
+    /// The targets of `judgeClose` that wait for a host.
+    @ObservationIgnored
+    private var closesBeingJudged: Set<String> = []
 
     /// Whether closing (or, for a pinned tab, unloading) `tab` needs
     /// confirmation. Closing a tab ends every session its panes hold alone.
@@ -2153,13 +2170,14 @@ final class AppState {
     /// (`Pane.plainShellNeedsConfirmClose`). nil when it runs none. A seam,
     /// as `paneNeedsConfirmClose`.
     @ObservationIgnored
-    var askPlainShellNeedsConfirmClose: (Pane) async -> Bool? = {
-        await $0.plainShellNeedsConfirmClose(timeout: AppState.plainShellAnswerTimeout)
+    var askPlainShellNeedsConfirmClose: (Pane, Duration) async -> Bool? = {
+        await $0.plainShellNeedsConfirmClose(timeout: $1)
     }
 
-    /// How long a close waits for the host of a plain shell. Over a
-    /// connection that is up, `ps` answers in well under a second.
-    static let plainShellAnswerTimeout: Duration = .seconds(2)
+    /// How long a close waits for the hosts of plain shells, in total. Over
+    /// a connection that is up, `ps` answers in well under a second.
+    @ObservationIgnored
+    var plainShellAnswerTimeout: Duration = .seconds(2)
 
     /// Shows an open panel, adds or finds the selected directory as a project,
     /// and selects it. Returns the selected project, nil if cancelled.
@@ -2296,7 +2314,7 @@ final class AppState {
     /// immediately when no pane in the project is busy; otherwise stage it
     /// for the confirmation alert — removal kills every pane's zmx session.
     func requestRemoveProject(_ projectID: UUID, host: DialogHost = .mainWindow, removal: @escaping @MainActor () -> Void) {
-        judgeClose(panes(inProject: projectID)) { [weak self] needsConfirmation in
+        judgeClose(panes(inProject: projectID), target: "project:\(projectID)") { [weak self] needsConfirmation in
             guard let self else { return }
             guard needsConfirmation else {
                 removal()
@@ -2356,7 +2374,7 @@ final class AppState {
         tabs: [(tabID: UUID, projectID: UUID)],
         removal: @escaping @MainActor () -> Void
     ) {
-        judgeClose(panes(inProjects: projectIDs, tabs: tabs)) { [weak self] needsConfirmation in
+        judgeClose(panes(inProjects: projectIDs, tabs: tabs), target: "selection") { [weak self] needsConfirmation in
             guard let self else { return }
             guard needsConfirmation else {
                 removal()
@@ -2522,8 +2540,9 @@ final class AppState {
             closeTab(tabID, projectID: projectID)
             return
         }
-        judgeClose(tab.splitRoot.allPanes()) { [weak self] needsConfirmation in
-            guard let self else { return }
+        judgeClose(tab.splitRoot.allPanes(), target: "tab:\(tabID)") { [weak self] needsConfirmation in
+            // A wait for a host can end after the tab closed.
+            guard let self, workspaces[projectID]?.tabs.contains(where: { $0.id == tabID }) == true else { return }
             guard needsConfirmation else {
                 closeTab(tabID, projectID: projectID)
                 return
@@ -3176,8 +3195,10 @@ final class AppState {
             closePane(paneID, projectID: projectID)
             return
         }
-        judgeClose([pane]) { [weak self] needsConfirmation in
-            guard let self else { return }
+        judgeClose([pane], target: "pane:\(paneID)") { [weak self] needsConfirmation in
+            // A wait for a host can end after the pane closed.
+            guard let self, workspaces[projectID]?.tabs.contains(where: { $0.splitRoot.findPane(id: paneID) != nil }) == true
+            else { return }
             guard needsConfirmation else {
                 closePane(paneID, projectID: projectID)
                 return
@@ -3646,5 +3667,25 @@ final class AppState {
         if workspaces[projectID] == nil {
             workspaces[projectID] = Workspace(id: projectID, projectPath: path)
         }
+    }
+}
+
+/// The answers of one `AppState.judgeClose` that waits for hosts.
+@MainActor
+private final class CloseJudgement {
+    /// The panes whose host has not answered yet.
+    private(set) var waiting: Set<UUID>
+    /// The verdict of each pane whose host answered.
+    private(set) var answers: [UUID: Bool] = [:]
+    var isDone = false
+    var deadline: Task<Void, Never>?
+
+    init(waiting: Set<UUID>) {
+        self.waiting = waiting
+    }
+
+    func record(_ answer: Bool?, for pane: UUID) {
+        waiting.remove(pane)
+        if let answer { answers[pane] = answer }
     }
 }

@@ -215,28 +215,63 @@ struct HostCommandsTests {
         #expect(shown == "\(pid)\n")
     }
 
+    private static func shellState(_ pid: Int32) throws -> (idle: Bool?, output: String) {
+        let command = try #require(HostCommands.shellStateCommand(pid: pid))
+        let result = try run(["/bin/sh", "-c", command], environment: ["PATH": "/usr/bin:/bin"], in: URL(fileURLWithPath: "/"))
+        return (HostCommands.shellIsIdle(status: result.status, output: result.output), result.output)
+    }
+
     @Test
-    func the_shell_state_check_reads_a_live_pid() throws {
-        // `ps` of this Mac runs the same text as a host does, and gives a
-        // clear answer for a pid that runs.
-        let command = try #require(HostCommands.shellStateCommand(pid: getpid()))
-        let result = try Self.run(["/bin/sh", "-c", command], environment: ["PATH": "/usr/bin:/bin"], in: URL(fileURLWithPath: "/"))
-        #expect(HostCommands.shellHoldsTerminal(status: result.status, output: result.output) != nil, "\(result.output)")
-        let gone = try #require(HostCommands.shellStateCommand(pid: Int32.max))
-        let missing = try Self.run(["/bin/sh", "-c", gone], environment: ["PATH": "/usr/bin:/bin"], in: URL(fileURLWithPath: "/"))
-        #expect(HostCommands.shellHoldsTerminal(status: missing.status, output: missing.output) == nil)
+    func the_shell_state_check_tells_a_prompt_from_a_command() async throws {
+        // An interactive shell on a pty of its own, as a plain shell on a
+        // host. `ps` of this Mac runs the same text as a host does.
+        // script(1) makes the pty the shell's controlling terminal, as sshd
+        // does; `PTYProcess` alone does not.
+        let shell = try PTYProcess(
+            ["/usr/bin/script", "-q", "/dev/null", "/bin/zsh", "-f", "-i"],
+            environment: ["PATH": "/usr/bin:/bin", "TERM": "dumb"]
+        )
+        defer { shell.terminate() }
+        // zsh drops input that comes before its first prompt (its line
+        // editor turns on bracketed paste there).
+        #expect(await shell.wait(for: "\u{1B}[?2004h"))
+        // The prompt is `READY` and `%`: the echo of the line has a quote between them.
+        shell.type("PS1=READY%#' '; echo PID=$$.\n")
+        #expect(await shell.wait(for: "READY% "), "\(shell.output)")
+        let pidText = try #require(shell.output.components(separatedBy: "PID=").last?.split(separator: ".").first)
+        let pid = try #require(Int32(pidText))
+        defer { kill(pid, SIGKILL) }
+        let idle = try Self.shellState(pid)
+        #expect(idle.idle == true, "\(idle.output)")
+        shell.type("sleep 30\n")
+        try await Task.sleep(for: .milliseconds(500))
+        let busy = try Self.shellState(pid)
+        #expect(busy.idle == false, "\(busy.output)")
+    }
+
+    @Test
+    func the_shell_state_check_refuses_what_is_not_a_shell() throws {
+        // This test process is no shell of /etc/shells.
+        #expect(try Self.shellState(getpid()).idle == false)
+        #expect(try Self.shellState(Int32.max).idle == nil)
     }
 
     @Test
     func the_shell_state_answer_is_read_only_when_it_is_clear() {
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "Ss+\n") == true)
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "  S+  \n") == true)
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "Ss\n") == false)
-        #expect(HostCommands.shellHoldsTerminal(status: 1, output: "Ss+\n") == nil)
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "") == nil)
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "Ss+\nS+\n") == nil)
-        #expect(HostCommands.shellHoldsTerminal(status: 0, output: "ps: unknown option +\n") == nil)
-        #expect(HostCommands.shellStateCommand(pid: 42) == "sh -c 'ps -o stat= -p \"$1\"' macterm 42")
+        #expect(HostCommands.shellIsIdle(status: 0, output: "Ss+\n0\nshell\n") == true)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "  I+  \n 0\nshell\n") == true)
+        // A command runs: no `+`, a child in front, or a loop of its own.
+        #expect(HostCommands.shellIsIdle(status: 0, output: "Ss\n0\nshell\n") == false)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "Ss+\n1\nshell\n") == false)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "R+\n0\nshell\n") == false)
+        // The login shell ran `exec vim`.
+        #expect(HostCommands.shellIsIdle(status: 0, output: "Ss+\n0\nother\n") == false)
+        // No clear answer.
+        #expect(HostCommands.shellIsIdle(status: 1, output: "Ss+\n0\nshell\n") == nil)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "") == nil)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "Ss+\n\nshell\n") == nil)
+        #expect(HostCommands.shellIsIdle(status: 0, output: "ps: unknown option\n0\nshell\n") == nil)
+        #expect(HostCommands.shellStateCommand(pid: 42)?.hasSuffix("' macterm 42") == true)
     }
 
     @Test

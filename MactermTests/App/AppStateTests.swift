@@ -1267,7 +1267,7 @@ struct AppStateTests {
         let target = try #require(tab.focusedPaneID)
         state.paneNeedsConfirmClose = { _ in true }
         state.paneRunsPlainShell = { $0.id == target }
-        state.askPlainShellNeedsConfirmClose = { $0.id == target ? answer : nil }
+        state.askPlainShellNeedsConfirmClose = { pane, _ in pane.id == target ? answer : nil }
         return (state, p, tab, target)
     }
 
@@ -1309,6 +1309,38 @@ struct AppStateTests {
         fx.state.requestCloseTab(fx.tab.id, projectID: fx.project.id)
         await waitUntil { fx.state.pendingDialog != nil }
         #expect(fx.state.pendingDialog?.kind == .closeTab(tabID: fx.tab.id, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_host_that_does_not_answer_in_time_gets_a_warning() async throws {
+        let fx = try plainShellTab(answer: false)
+        fx.state.plainShellAnswerTimeout = .milliseconds(50)
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            try? await Task.sleep(for: .seconds(30))
+            return false
+        }
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { fx.state.pendingDialog != nil }
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+    }
+
+    @Test
+    func a_pane_that_closed_during_the_wait_gets_no_warning() async throws {
+        let fx = try plainShellTab(answer: true)
+        var asked = false
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            asked = true
+            try? await Task.sleep(for: .milliseconds(100))
+            return true
+        }
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        // A second request for the same pane while the host is asked does nothing.
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        await waitUntil { asked }
+        fx.state.closePane(fx.target, projectID: fx.project.id)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(fx.state.pendingDialog == nil)
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
     }
 
     @Test

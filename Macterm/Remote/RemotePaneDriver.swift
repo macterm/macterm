@@ -250,7 +250,7 @@ final class RemotePaneDriver: PaneInputRoute {
     func plainShellIsIdle(timeout: Duration) async -> Bool? {
         guard case let .plain(shell) = state else { return nil }
         guard let host, let pid = shell.hostShellPID else { return false }
-        return await host.plainShellHoldsTerminal(pid: pid, timeout: timeout) ?? false
+        return await host.plainShellIsIdle(pid: pid, timeout: timeout) ?? false
     }
 
     private func plainExited(_ status: Int32) {

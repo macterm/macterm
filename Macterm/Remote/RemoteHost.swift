@@ -223,15 +223,15 @@ final class RemoteHost {
         }
     }
 
-    /// Whether the plain shell with the host's pid `pid` holds its terminal
-    /// (0494, `HostCommands.shellStateScript`): true at its prompt, false
-    /// while a program runs. Only over a connection that is up: it never
-    /// logs in. nil when the host gives no clear answer in `timeout`.
-    func plainShellHoldsTerminal(pid: Int32, timeout: Duration) async -> Bool? {
+    /// Whether the plain shell with the host's pid `pid` waits at its
+    /// prompt (0494, `HostCommands.shellIsIdle`). Only over a connection
+    /// that is up: it never logs in. nil when the host gives no clear
+    /// answer in `timeout`.
+    func plainShellIsIdle(pid: Int32, timeout: Duration) async -> Bool? {
         guard let command = HostCommands.shellStateCommand(pid: pid),
               let outcome = try? await owner.connections.run(destination, command, login: false, timeout: timeout)
         else { return nil }
-        return HostCommands.shellHoldsTerminal(status: outcome.status, output: outcome.stdout)
+        return HostCommands.shellIsIdle(status: outcome.status, output: outcome.stdout)
     }
 
     /// Waits until the connect that runs ends. Throws when it failed.
