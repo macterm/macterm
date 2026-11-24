@@ -48,7 +48,7 @@ struct NewMactermProjectIntent: AppIntent {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         // A typed name is refused like the CLI's `--name`; the folder's own
         // name is `ProjectStore.create`'s to disambiguate.
-        if let trimmed, let message = Project.reservedNameMessage(for: trimmed) {
+        if let trimmed, let message = Project.nameRefusal(for: trimmed) {
             throw MactermIntentError.badInput(message)
         }
         logger.info("intent: new project at \(path, privacy: .public)")

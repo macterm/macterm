@@ -2148,14 +2148,14 @@ final class AppState {
     }
 
     /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name the pinned workspace reserves is
-    /// refused with a notice and the old name stays — as `project rename`
-    /// refuses it with a `bad_request`. The field has closed by the time the
+    /// Current Project opens too). A name that `Project.nameRefusal` refuses
+    /// (a slash, a reserved name) gets a notice and the old name stays — as
+    /// `project rename` refuses it with a `bad_request`. The field has closed by the time the
     /// name arrives, so the notice is the one place left to say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.reservedNameMessage(for: name) {
+        if let message = Project.nameRefusal(for: name) {
             present(.notice(
-                .reservedProjectName,
+                .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
