@@ -27,7 +27,7 @@ When you hold the Recent Tab chord, `TabSwitcherOverlay` shows one card for each
 - **Never leave persistent window state to an autosave of SwiftUI**. We measured every one of them (sidebar column, window frame). Each one uses a key with a runtime address, so it resets in silence at every launch and update. A stable key in `WindowSnapshot` is the rule.
 - **The overlay sidebar peek is a side panel, the same as the Project Insights panel** (`SidebarOverlayPanel`). It has the same surface (`glassPanel`) and the same corner and inset (`GlassPanelMetrics.sidePanelCornerRadius` and `sidePanelInset`), and it starts below the toolbar. Its hover exit edge counts the inset (`SidebarOverlayMetrics.exitEdge`).
 
-  - `Sidebar` (with `SidebarOverlay`, `SidebarPresentationState` and `SidebarFolderDrop`).
+  - `Sidebar` (with `SidebarOverlay`, `SidebarPresentationState`, `SidebarFolderDrop` and `SidebarDragFeedback`).
 
   - `PasswordBubble`.
   - `PaletteScreenshot`. This is Capture Palette. It takes the screen around the palette. `WindowState.paletteAnchor`, an invisible view under the palette, marks the place. `MactermExtension.screenshotRect` frames it. ScreenCaptureKit captures it. The glass of the palette shows what is behind it, and a render of a view cannot draw that. The capture needs Screen Recording, and it asks the first time. `PaletteResponder` answers its chord while the palette is up. If you run it in any other way, it opens the palette and captures the first screen.

@@ -324,7 +324,7 @@ struct SidebarContent: View {
         // outline view's drop hazards (see the notes inside the List body),
         // and it exists even with zero pinned rows, so the FIRST pin can be a
         // drag too. It only draws its "Pin Tab" band in exactly that case:
-        // once a pinned row exists, the native insertion line above it says
+        // once a pinned row exists, the native drop gap above it says
         // the same thing, and the band on top of it is noise.
         .safeAreaInset(edge: .top, spacing: 0) {
             // Same handlers as the insertion line, fixed at the first slot
@@ -422,6 +422,9 @@ struct SidebarContent: View {
                 openDroppedFolders(paths)
             }
         }
+        // A drag over the rows opens a gap at the drop slot, as in the
+        // Finder sidebar, in place of the insertion line.
+        .background { SidebarDragFeedback() }
     }
 
     /// Folders dropped on the sidebar: a project each, the last selected in
