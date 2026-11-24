@@ -142,7 +142,15 @@ struct AdaptiveIconRendererTests {
 
     /// The real helper, against the test host's own compiled icon. Runs only
     /// where the helper can: macOS 26 or later, in a bundle that has it.
-    @Test
+    ///
+    /// The test waits for the helper to exit, not for the app's timeout,
+    /// which is a bound for a hung helper on a real Mac. The tests above
+    /// check that timeout with stand-in helpers. On a CI runner, a virtual
+    /// Mac, a render is 7 to 9 times slower: the first one took 2.0 s and
+    /// the next ones 0.65 s, where a Mac takes 0.3 s and 0.07 s. The first
+    /// render runs while all the suites start, and on a loaded runner it
+    /// took more than 10 s (PR 961). The time limit stops a helper that hangs.
+    @Test(.timeLimit(.minutes(1)))
     func theBundledHelperRendersTheIconOnTheSystemGrid() async throws {
         guard #available(macOS 26, *) else { return }
         try #require(
@@ -167,19 +175,7 @@ struct AdaptiveIconRendererTests {
             element: AdaptiveIcon.crossElement,
             color: .init(red: 0, green: 1, blue: 0)
         )]
-        // DIAGNOSTIC (issue 0576, removed before merge): time three runs.
-        let clock = ContinuousClock()
-        var times: [String] = []
-        var result: Result<Data, AdaptiveIconRenderer.Failure> = .failure(.timedOut)
-        for _ in 0 ..< 3 {
-            let started = clock.now
-            result = await AdaptiveIconRenderer.render(request, timeout: 120)
-            times.append("\(started.duration(to: clock.now)) \(result.map { _ in "ok" })")
-        }
-        let started = clock.now
-        let echo = await AdaptiveIconRenderer.render(Self.request, helper: URL(fileURLWithPath: "/bin/echo"), timeout: 120)
-        times.append("echo \(started.duration(to: clock.now)) \(echo)")
-        throw RenderSummary(text: "DIAG0576 " + times.joined(separator: " | "))
+        let result = await AdaptiveIconRenderer.render(request, timeout: .infinity)
         let png = try result.get()
         let image = try #require(NSBitmapImageRep(data: png))
         // The body fills 824/1024 of the canvas: the corner is empty, and the
