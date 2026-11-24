@@ -75,7 +75,7 @@ struct ModelConversionTests {
         #expect(pinned?.id == PinnedTabs.workspaceID.uuidString)
         #expect(pinned?.sidebar == .top)
         #expect(pinned?.removable == false)
-        #expect(pinned?.path == "")
+        #expect(pinned?.path.isEmpty == true)
         #expect(pinned?.tabs.map(\.id) == [tab.id.uuidString])
         let scratch = model.projects.first { $0.alias == "scratch" }
         #expect(scratch?.id == ScratchTabs.workspaceID.uuidString)
