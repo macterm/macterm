@@ -83,7 +83,12 @@ final class SessionSocket: PaneChannelTransport, @unchecked Sendable {
             throw error
         }
         let socket = SessionSocket(fd: fd)
-        let channel = PaneChannel(transport: socket, number: paneChannel, epoch: hello.epoch, readAhead: SessionSockets.readAhead)
+        let channel = PaneChannel(
+            transport: socket,
+            number: paneChannel,
+            epoch: hello.epoch,
+            buffering: .readAhead(SessionSockets.readAhead)
+        )
         socket.startReading(reader, into: channel.sink, exitRead: exitRead)
         return channel
     }
@@ -105,6 +110,10 @@ final class SessionSocket: PaneChannelTransport, @unchecked Sendable {
         }
         sink?.finish()
     }
+
+    /// A session's socket does not pause: its reader waits at the read-ahead
+    /// limit, and the session holds the output.
+    func setPaused(_: Bool, channel _: UInt32) async throws {}
 
     private func startReading(_ reader: FrameReader, into sink: PaneChannel.Sink, exitRead: @escaping @Sendable () -> Void) {
         fdLock.withLock { self.sink = sink }

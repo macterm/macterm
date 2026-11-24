@@ -564,6 +564,62 @@ struct PaneSessionEndpointTests {
     }
 
     @Test
+    func a_hidden_surface_pauses_its_channel_before_the_attach_and_a_show_resumes_it() async throws {
+        let link = FakeServerLink(epoch: 7)
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.setVisible(false)
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        #expect(link.calls == [MactermProtocol.ChannelOpen.name, MactermProtocol.ChannelPause.name])
+
+        session.setVisible(true)
+        try await host.waitFor { _ in link.calls.contains(MactermProtocol.ChannelResume.name) }
+        // The same visibility again sends nothing.
+        session.setVisible(true)
+        session.setVisible(false)
+        try await host.waitFor { _ in link.calls.count == 4 }
+        #expect(link.calls == [
+            MactermProtocol.ChannelOpen.name,
+            MactermProtocol.ChannelPause.name,
+            MactermProtocol.ChannelResume.name,
+            MactermProtocol.ChannelPause.name,
+        ])
+        session.stop()
+    }
+
+    @Test
+    func output_that_the_channel_skipped_leaves_no_resume_point_until_the_snapshot() async throws {
+        // A limit of 0: each output byte that is not in a snapshot skips.
+        let link = FakeServerLink(epoch: 7, buffering: .skipAhead(bytes: 0))
+        let host = RecordingPaneHost()
+        let session = PaneSession(name: "s", launch: nil, wantsForeground: false, host: host, endpoint: FakeEndpoint([link]))
+        session.start()
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Attach.name) }
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 100), to: "s")
+        link.deliver(output: "one", to: "s")
+        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        try await host.waitFor { $0.screen == "one" }
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 100))
+
+        link.deliver(output: "lost", to: "s")
+        try await host.waitFor { _ in link.sent(on: "s").contains(MactermProtocol.Refresh.name) }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while await session.resumePoint != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await session.resumePoint == nil)
+        #expect(host.snapshot().screen == "one", "the skipped output never reaches the surface")
+
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 200), to: "s")
+        link.deliver(output: "two", to: "s")
+        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+        try await host.waitFor { $0.screen == "onetwo" }
+        #expect(await session.resumePoint == PaneSession.ResumePoint(epoch: 7, offset: 200))
+        session.stop()
+    }
+
+    @Test
     func a_new_epoch_or_a_lost_offset_draws_the_snapshot_over_a_cleared_screen() async throws {
         let first = FakeServerLink(epoch: 7)
         let restarted = FakeServerLink(epoch: 8)

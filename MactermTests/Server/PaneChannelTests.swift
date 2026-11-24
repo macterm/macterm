@@ -11,7 +11,7 @@ struct PaneChannelTests {
     @Test
     func a_reader_waits_at_the_read_ahead_limit_and_a_close_wakes_it() async throws {
         let link = FakeServerLink()
-        let channel = PaneChannel(transport: link, number: 1, readAhead: 2)
+        let channel = PaneChannel(transport: link, number: 1, buffering: .readAhead(2))
         let delivered = LockedBox(0)
         let done = LockedBox(false)
         let reader = Thread {
@@ -32,6 +32,60 @@ struct PaneChannelTests {
 
         channel.sink.finish()
         try await Self.waitFor { done.value }
+    }
+
+    /// A relayed channel never waits. Over its limit it drops the output up
+    /// to the next snapshot, says so once, and asks the session for a
+    /// snapshot. The snapshot's own bytes always pass.
+    @Test
+    func a_relayed_channel_over_its_limit_skips_to_the_next_snapshot() async throws {
+        let link = FakeServerLink(buffering: .skipAhead(bytes: 4))
+        let channel = try await link.openChannel(session: "s")
+        link.deliver(output: "ab", to: "s")
+        link.deliver(output: "cd", to: "s")
+        link.deliver(output: "e", to: "s")
+        link.deliver(output: "f", to: "s")
+        try await Self.waitFor { link.sent(on: "s").contains(MactermProtocol.Refresh.name) }
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false, offset: 10), to: "s")
+        link.deliver(output: "screen", to: "s")
+        link.deliver(MactermProtocol.SnapshotEnd(), to: "s")
+
+        var events = channel.events.makeAsyncIterator()
+        var seen: [PaneChannelEvent] = []
+        for _ in 0 ..< 6 {
+            if let event = await events.next() { seen.append(event) }
+        }
+        #expect(seen == [
+            .output(Data("ab".utf8)),
+            .output(Data("cd".utf8)),
+            .skipped,
+            .snapshotStart(.init(scrollback: false, offset: 10)),
+            .output(Data("screen".utf8)),
+            .snapshotEnd,
+        ])
+
+        // Output after the snapshot passes, now that the pane took the rest.
+        link.deliver(output: "g", to: "s")
+        #expect(await events.next() == .output(Data("g".utf8)))
+        #expect(link.sent(on: "s") == [MactermProtocol.Refresh.name], "one request while the snapshot came in time")
+        channel.sink.finish()
+    }
+
+    /// A session that is behind ignores a request for a snapshot: the
+    /// channel asks again while the skip waits.
+    @Test
+    func a_skipped_channel_asks_again_until_the_snapshot_comes() async throws {
+        let link = FakeServerLink(buffering: .skipAhead(bytes: 1))
+        let channel = try await link.openChannel(session: "s")
+        link.deliver(output: "ab", to: "s")
+        try await Self.waitFor { link.sent(on: "s").count >= 2 }
+        #expect(Set(link.sent(on: "s")) == [MactermProtocol.Refresh.name])
+
+        link.deliver(MactermProtocol.SnapshotStart(scrollback: false), to: "s")
+        let asked = link.sent(on: "s").count
+        try await Task.sleep(for: .milliseconds(1500))
+        #expect(link.sent(on: "s").count == asked, "no request after the snapshot started")
+        channel.sink.finish()
     }
 
     @Test

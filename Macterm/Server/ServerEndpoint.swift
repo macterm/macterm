@@ -35,6 +35,16 @@ extension ServerLink {
         _ = try? await call(MactermProtocol.ChannelClose.self, .init(channel: number))
         releaseChannel(number)
     }
+
+    /// Asks the server to stop or start the channel's output
+    /// (`channel.pause`, `channel.resume`).
+    func setPaused(_ paused: Bool, channel number: UInt32) async throws {
+        if paused {
+            _ = try await call(MactermProtocol.ChannelPause.self, .init(channel: number), timeout: serverRequestTimeout)
+        } else {
+            _ = try await call(MactermProtocol.ChannelResume.self, .init(channel: number), timeout: serverRequestTimeout)
+        }
+    }
 }
 
 /// The longest wait for one reply. A kill waits for the session to end:

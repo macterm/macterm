@@ -67,10 +67,14 @@ protocol PaneInputRoute: AnyObject, Sendable {
     func sendSize(_ grid: PaneGrid?)
     /// The user saw the pane: the session clears its attention flags.
     func seen()
+    /// Whether a window shows the surface. A remote pane's channel pauses
+    /// while no window shows it.
+    func setVisible(_ visible: Bool)
 }
 
 extension PaneInputRoute {
     func seen() {}
+    func setVisible(_: Bool) {}
 }
 
 extension PaneSessionHost {
@@ -143,6 +147,7 @@ actor PaneSession: PaneInputRoute {
         case claim(PaneGrid?)
         case size(PaneGrid?)
         case seen
+        case visible(Bool)
         case finish(CheckedContinuation<Finished, Never>)
     }
 
@@ -199,6 +204,12 @@ actor PaneSession: PaneInputRoute {
     private var holdTimer: Task<Void, Never>?
     /// A claim that came before the first attach.
     private var claimPending = false
+    /// No window shows the surface: the channel's output pauses
+    /// (`PaneChannel.setPaused`), and the session's messages still come.
+    private var hidden = false
+    /// The last pause or resume of the channel. The next one waits for it,
+    /// so that they reach the server in order.
+    private var pausing: Task<Void, Never>?
 
     init(
         name: String,
@@ -273,6 +284,10 @@ actor PaneSession: PaneInputRoute {
             resize(grid)
         case .seen:
             write { try $0.send(MactermProtocol.Seen()) }
+        case let .visible(visible):
+            guard hidden == visible else { return }
+            hidden = !visible
+            if let channel { setPaused(channel, hidden) }
         case let .finish(done):
             shutDown()
             let reading = task
@@ -326,6 +341,14 @@ actor PaneSession: PaneInputRoute {
     /// sends them again to every client.
     nonisolated func seen() {
         commands.yield(.seen)
+    }
+
+    /// Whether a window shows the surface. While none does, the channel's
+    /// output pauses; when one shows it again, the session's snapshot draws
+    /// the screen as it is now (design/003 §6). The title, the marks, the
+    /// run state and the exit still come.
+    nonisolated func setVisible(_ visible: Bool) {
+        commands.yield(.visible(visible))
     }
 
     /// Tells the session the surface's size. Only the leader's size reaches
@@ -385,6 +408,18 @@ actor PaneSession: PaneInputRoute {
         }
     }
 
+    /// Pauses or resumes `channel`, after the request before it.
+    private func setPaused(_ channel: PaneChannel, _ paused: Bool) {
+        let previous = pausing
+        pausing = Task { [name] in
+            await previous?.value
+            do { try await channel.setPaused(paused) } catch {
+                let reason = String(describing: error)
+                logger.info("pane \(name, privacy: .public): pause=\(paused, privacy: .public) failed: \(reason, privacy: .public)")
+            }
+        }
+    }
+
     private static func clamp(_ value: UInt32) -> UInt16 {
         UInt16(min(value, UInt32(UInt16.max)))
     }
@@ -430,6 +465,12 @@ actor PaneSession: PaneInputRoute {
                 guard install(channel) else {
                     await channel.close()
                     return
+                }
+                // A hidden surface's channel pauses before its attach: the
+                // attach's snapshot still comes, and no output after it.
+                if hidden {
+                    setPaused(channel, true)
+                    await pausing?.value
                 }
                 let grid = host.paneGrid()
                 let resuming = matchingResumePoint(channel)
@@ -522,8 +563,8 @@ actor PaneSession: PaneInputRoute {
     /// It counts the output offset that the surface shows: a drawn
     /// snapshot's `offset` or a `resumed` offset, and the output bytes after
     /// it, from `start`, the offset that the screen shows at the attach. The
-    /// relay's skip-ahead drops output and sends a snapshot, which
-    /// sets the count again. When the channel ends, the count is the next
+    /// relay's skip-ahead, the channel's own (`skipped`) and a resume drop
+    /// output and bring a snapshot, which sets the count again. When the channel ends, the count is the next
     /// attach's resume point.
     private func read(_ channel: PaneChannel, reconnected: Bool, shows start: UInt64?, attachedAt grid: PaneGrid) async -> Bool {
         var needsReset = reconnected
@@ -615,6 +656,10 @@ actor PaneSession: PaneInputRoute {
                 deliver { $0.paneTitle(title) }
             case let .cwd(url):
                 deliver { $0.paneCwd(url) }
+            case .skipped:
+                // The channel dropped output that the surface did not get.
+                // The screen shows no known offset until the snapshot.
+                offset = nil
             case let .resumed(resumed):
                 // The bytes after the surface's offset follow: the screen
                 // and the scrollback stay.

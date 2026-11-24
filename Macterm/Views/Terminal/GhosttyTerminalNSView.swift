@@ -844,9 +844,11 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
     /// An occluded surface — an off-screen tab parked in the `SurfaceIncubator`
     /// window, or a covered/minimized/hidden main window — parks its renderer's
     /// display link instead of drawing every frame. With many panes that idle
-    /// redraw is the dominant background CPU cost. The pty io thread keeps
-    /// running while occluded, so off-screen output stays current and the tab
-    /// is up to date the moment it's viewed.
+    /// redraw is the dominant background CPU cost. A local pane's output
+    /// keeps coming while occluded, so off-screen output stays current and
+    /// the tab is up to date the moment it's viewed. A remote pane's channel
+    /// pauses instead (`PaneInputRoute.setVisible`), and its session's
+    /// snapshot draws the screen when the pane shows again.
     ///
     /// The bool is "visible" (matches Ghostty's own `updateOcclusionState`):
     /// true when the surface's window reports `.visible`, false otherwise —
@@ -864,6 +866,10 @@ final class GhosttyTerminalNSView: NSView, ScrollbarSurface {
             windowHasReportedOcclusion: window.map(WindowOcclusionReports.hasReported) ?? false
         )
         ghostty_surface_set_occlusion(surface, visible)
+        if let runtime = channelRuntime, runtime.visible != visible {
+            runtime.visible = visible
+            runtime.route.input.setVisible(visible)
+        }
     }
 
     /// Set while the animated split layout keeps this pane mounted but
