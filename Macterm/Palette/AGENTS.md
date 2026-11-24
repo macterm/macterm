@@ -46,7 +46,9 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
       - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected completion in the field (the top completion when none is selected), and so does a click. Neither commits.
       - `PaletteInput.actions` are rows above the completions that do something in place of the typed value. A click runs one, and so does Return while one is selected and the field is empty. It runs after the palette closes (`AppState.postPaletteAction`), so that it can show a modal panel.
-      - The New Project screen (`PaletteInput.newProject`, `NewProjectInput`) is the screen of `AppCommand.newProject`. Return on a folder selects the project that has it, or adds a project. Its action row, Select in Finder, always adds a project. The first-run seed, the Finder service and a folder that you drop on the sidebar add a folder with no screen.
+      - `PaletteInput.results` are rows that run, in place of completions. The first one is selected. Return and a click run the selected one. Tab fills the field from the selected one down. Return commits the field only when no result is selected.
+      - The pill of an input screen is its `title`, with no icon (`PaletteInput.pill`).
+      - The New Project screen (`PaletteInput.newProject`, `NewProjectInput`) is the screen of `AppCommand.newProject`. Its results are the rows of path mode of the root (`DirectorySource`), so a typed path reads and runs as it does there. Its action row, Select in Finder, always adds a project. The first-run seed, the Finder service and a folder that you drop on the sidebar add a folder with no screen.
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
     - `PasswordPaletteScope`.
