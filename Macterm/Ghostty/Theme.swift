@@ -36,6 +36,10 @@ enum MactermTheme {
     static var nsBorder: NSColor { nsFg.withAlphaComponent(0.12) }
     @MainActor
     static var hover: Color { fgAlpha(0.06) }
+    /// The fill of a pane badge that changes in place (`PanePill`): the
+    /// look of a pressed badge.
+    @MainActor
+    static var pressed: Color { fgAlpha(0.12) }
     @MainActor
     static var accent: Color { Color(nsColor: GhosttyApp.shared.accentColor) }
     @MainActor

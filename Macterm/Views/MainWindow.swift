@@ -1258,6 +1258,15 @@ struct StatusPill<Icon: View>: View {
 /// The hover comes from `RowHoverTracker`, an AppKit tracking area. The
 /// pane's view gets every hit test under the row, and the status pills get
 /// none.
+///
+/// A pill that changes in place (a new title: Copy Mode to Visual,
+/// Reconnecting to Connection Lost) shows a short highlight, at rest too, so
+/// the change shows on a pill that shows its icon only. SwiftUI has no API
+/// that sets the pressed state of a glass button, so the highlight is a fill
+/// of `MactermTheme.pressed` in the pill's shape. With Reduce Motion, the
+/// highlight comes and goes with no fade. An open pill does not get narrower
+/// while it is open (`heldTitles`): the row is aligned to the trailing edge,
+/// so a narrower pill would move out from under the pointer and close.
 struct PanePill<Icon: View>: View {
     /// The least height of every pill's content: the tallest icon. The
     /// glass button sizes to its label, and the icons have different heights.
@@ -1275,8 +1284,18 @@ struct PanePill<Icon: View>: View {
     /// and close.
     static var closeDelay: Duration { .milliseconds(150) }
 
+    /// The time that the highlight of a change stays before it fades: about
+    /// the length of a click.
+    static var highlightHold: Duration { .milliseconds(150) }
+
     @State private var isRevealed = false
     @State private var closeTask: Task<Void, Never>?
+    @State private var changes = PanePillChange()
+    @State private var isHighlighted = false
+    @State private var highlightTask: Task<Void, Never>?
+    /// The titles that the open pill showed before its title changed. The
+    /// open pill keeps the width of the widest of them until it closes.
+    @State private var heldTitles: [String] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1286,6 +1305,7 @@ struct PanePill<Icon: View>: View {
                     .buttonStyle(.glass)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
+                    .overlay { highlight(in: Capsule()) }
             } else {
                 Button(action: action ?? {}) {
                     label
@@ -1293,7 +1313,13 @@ struct PanePill<Icon: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .overlay { highlight(in: RoundedRectangle(cornerRadius: FlatPillChrome.cornerRadius, style: .continuous)) }
             }
+        }
+        .onChange(of: title, initial: true) { old, new in
+            guard changes.record(new) else { return }
+            if isRevealed, !heldTitles.contains(old) { heldTitles.append(old) }
+            showHighlight()
         }
         .allowsHitTesting(action != nil)
         .focusable(action != nil)
@@ -1302,8 +1328,25 @@ struct PanePill<Icon: View>: View {
     }
 
     private var label: some View {
-        PanePillLabel(title: title, reveal: isRevealed ? 1 : 0, icon: icon)
+        PanePillLabel(title: title, heldTitles: heldTitles, reveal: isRevealed ? 1 : 0, icon: icon)
             .frame(minHeight: Self.contentHeight)
+    }
+
+    private func highlight(in shape: some Shape) -> some View {
+        shape.fill(MactermTheme.pressed)
+            .opacity(isHighlighted ? 1 : 0)
+            .allowsHitTesting(false)
+    }
+
+    private func showHighlight() {
+        highlightTask?.cancel()
+        let animation = reduceMotion ? nil : PaletteMotion.animation
+        withAnimation(animation) { isHighlighted = true }
+        highlightTask = Task { @MainActor in
+            try? await Task.sleep(for: Self.highlightHold)
+            guard !Task.isCancelled else { return }
+            withAnimation(animation) { isHighlighted = false }
+        }
     }
 
     /// A change of the hover runs in one transaction. The row then moves the
@@ -1329,7 +1372,23 @@ struct PanePill<Icon: View>: View {
 
     private func reveal(_ open: Bool) {
         guard isRevealed != open else { return }
-        withAnimation(reduceMotion ? nil : PaletteMotion.animation) { isRevealed = open }
+        withAnimation(reduceMotion ? nil : PaletteMotion.animation) {
+            isRevealed = open
+            if !open { heldTitles = [] }
+        }
+    }
+}
+
+/// The rule of the highlight of a `PanePill`: a pill highlights when its
+/// title changes in place. Its first title is not a change.
+struct PanePillChange {
+    private var title: String?
+
+    /// Records the title that the pill shows now. True when it replaces a
+    /// different title that the pill showed before.
+    mutating func record(_ next: String) -> Bool {
+        defer { title = next }
+        return title.map { $0 != next } ?? false
     }
 }
 
@@ -1338,17 +1397,23 @@ struct PanePill<Icon: View>: View {
 /// the pill and the fade of the title, with no view that comes and goes.
 struct PanePillLabel<Icon: View>: View {
     let title: String
+    /// Earlier titles of an open pill. See `PanePill.heldTitles`.
+    var heldTitles: [String] = []
     let reveal: CGFloat
     @ViewBuilder let icon: () -> Icon
 
     var body: some View {
         RevealLayout(reveal: reveal) {
             icon().frame(minWidth: PanePill<Icon>.contentHeight)
-            // An animated change of the title morphs the text in place.
-            Text(title).contentTransition(.interpolate)
-                .lineLimit(1)
-                .fixedSize()
-                .opacity(reveal)
+            ZStack(alignment: .leading) {
+                // Hidden, so that the title keeps the width of the widest.
+                ForEach(heldTitles, id: \.self) { Text($0).hidden() }
+                // An animated change of the title morphs the text in place.
+                Text(title).contentTransition(.interpolate)
+            }
+            .lineLimit(1)
+            .fixedSize()
+            .opacity(reveal)
         }
         .clipped()
         .accessibilityElement(children: .ignore)
@@ -1400,6 +1465,8 @@ private struct RevealLayout: Layout {
 
 /// The flat chrome of a pill below macOS 26, in the theme colors.
 private struct FlatPillChrome: ViewModifier {
+    static var cornerRadius: CGFloat { 6 }
+
     func body(content: Content) -> some View {
         content
             .font(.system(size: 11, weight: .medium))
@@ -1407,10 +1474,10 @@ private struct FlatPillChrome: ViewModifier {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                     .fill(MactermTheme.surface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                             .stroke(MactermTheme.border, lineWidth: 1)
                     )
             )
