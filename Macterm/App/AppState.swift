@@ -2273,8 +2273,9 @@ final class AppState {
 
     /// The one check and write of a project rename in the GUI (the sidebar
     /// row and the palette's Rename Current Project). Returns why `name` is
-    /// refused, and then changes nothing; nil when the project has the name.
-    /// An unchanged name writes nothing.
+    /// refused, and then changes nothing. Returns nil when the rename is
+    /// done or when the name does not change. An unchanged name writes
+    /// nothing.
     func applyProjectRename(_ projectID: UUID, to name: String, store: ProjectStore) -> String? {
         if let message = Project.nameRefusal(for: name) { return message }
         guard store.projects.first(where: { $0.id == projectID })?.name != name else { return nil }

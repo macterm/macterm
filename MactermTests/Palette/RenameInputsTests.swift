@@ -113,6 +113,34 @@ struct RenameInputsTests {
     }
 
     @Test
+    func tab_that_closed_gives_no_row_and_its_row_does_nothing() throws {
+        let (state, store, project) = makeState()
+        let ws = try #require(state.workspaces[project.id])
+        let tab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
+        let action = try #require(rows(screen, "build", state, store).first)
+        ModelWriter.tabClose(tab.id, in: ws)
+        #expect(screen.press(action) == .closed, "the row of a tab that closed renames nothing")
+        #expect(tab.customTitle == nil)
+        #expect(rows(screen, "build", state, store).isEmpty)
+    }
+
+    @Test
+    func tab_typed_automatic_name_on_a_renamed_tab_is_a_rename() throws {
+        // Only the empty field gives back the automatic name. The automatic
+        // name typed in full is a name like any other, so it stays fixed.
+        let (state, store, project) = makeState()
+        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        ModelWriter.tabSet(tab, title: "build")
+        let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
+        let auto = tab.autoTitle
+        let action = try #require(rows(screen, auto, state, store).first)
+        #expect(action.title == "Rename to \"\(auto)\"")
+        #expect(screen.press(action) == .closed)
+        #expect(tab.customTitle == auto)
+    }
+
+    @Test
     func tab_escape_changes_nothing() throws {
         let (state, store, project) = makeState()
         let tab = try #require(state.workspaces[project.id]?.activeTab)
@@ -177,6 +205,15 @@ struct RenameInputsTests {
         #expect(screen.failure?.title == PinnedTabs.reservedNameMessage)
         #expect(screen.failure?.retryable == false)
         #expect(state.pendingDialog == nil, "the screen says why, so no notice")
+        #expect(store.projects.first { $0.id == project.id }?.name == "alpha")
+    }
+
+    @Test
+    func project_that_was_removed_gives_no_row() throws {
+        let (state, store, project) = makeState()
+        let screen = try scope(.renameProject(project.id, appState: state, store: store))
+        store.remove(id: project.id)
+        #expect(rows(screen, "beta", state, store).isEmpty)
     }
 
     @Test

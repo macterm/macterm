@@ -8523,13 +8523,13 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "\"%@\"(으)로 이름 변경"
+            "value" : "“%@”(으)로 이름 변경"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重命名为\"%@\""
+            "value" : "重新命名为“%@”"
           }
         }
       }
@@ -12021,13 +12021,13 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "자동 이름 \"%@\" 사용"
+            "value" : "자동 이름 “%@” 사용"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用自动名称\"%@\""
+            "value" : "使用自动名称“%@”"
           }
         }
       }

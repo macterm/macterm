@@ -378,6 +378,38 @@ struct AppStateTests {
     }
 
     @Test
+    func apply_project_rename_writes_nothing_for_an_unchanged_or_refused_name() throws {
+        let state = makeAppState()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json")
+        let store = ProjectStore(fileURL: url)
+        let project = store.create(name: "alpha", path: "/tmp")
+        try FileManager.default.removeItem(at: url)
+
+        #expect(state.applyProjectRename(project.id, to: "alpha", store: store) == nil)
+        #expect(state.applyProjectRename(project.id, to: "Pinned", store: store) == PinnedTabs.reservedNameMessage)
+        #expect(!FileManager.default.fileExists(atPath: url.path), "no write")
+        #expect(store.projects.first?.name == "alpha")
+        #expect(state.pendingDialog == nil, "the caller says why, not this function")
+
+        #expect(state.applyProjectRename(project.id, to: "beta", store: store) == nil)
+        #expect(store.projects.first?.name == "beta")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test
+    func set_tab_title_sets_and_clears_the_custom_title() throws {
+        let state = makeAppState()
+        let project = seedProject(state, path: "/project")
+        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        state.setTabTitle(tab, title: "build")
+        #expect(tab.customTitle == "build")
+        state.setTabTitle(tab, title: nil)
+        #expect(tab.customTitle == nil)
+        #expect(tab.sidebarTitle == tab.autoTitle)
+    }
+
+    @Test
     func splitPane_uses_selected_directory() throws {
         let state = makeAppState()
         state.newSplitInheritsWorkingDirectory = { true }

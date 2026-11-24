@@ -320,13 +320,15 @@ struct CommandPalettePanel: View {
                         .padding(.vertical, Self.listPadding)
                     }
                 }
+                // The height of the results. An input screen with no row and
+                // no notice has none. An input screen's results take the
+                // height of their content, up to the maximum: `fixedSize`
+                // proposes no height, so the scroll view takes the ideal
+                // height of its content, and `maxHeight` caps it. Every other
+                // screen takes the full height, so that the panel does not
+                // change size during a search.
                 .frame(height: showsResults ? nil : 0)
                 .frame(maxHeight: Self.maxResultsHeight)
-                // An input screen's results take the height of their content,
-                // up to the maximum: a proposal of no height gives the scroll
-                // view the ideal height of its content, and the frame above
-                // caps it. Every other screen takes the full height, so that
-                // the panel does not change size during a search.
                 .fixedSize(horizontal: false, vertical: inputScope != nil)
                 .coordinateSpace(name: rowSpace)
                 .background(

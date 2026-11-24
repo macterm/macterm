@@ -7,11 +7,13 @@ import Foundation
 /// as it is.
 extension PaletteInput {
     /// Rename the tab `tabID` of the workspace `workspaceID`. The field
-    /// starts on the name the sidebar shows. The name the tab has now gives
-    /// no action row, so a tab with an automatic name stays automatic until
-    /// the user types a different name. An empty field on a renamed tab
-    /// gives the action row that gives back the automatic name, as an empty
-    /// inline rename does.
+    /// starts on the name that the sidebar shows.
+    /// - A new name has the action row `Rename to "<name>"`.
+    /// - The current name has no row. Thus a tab with an automatic name
+    ///   stays automatic.
+    /// - An empty field on a renamed tab has the row
+    ///   `Use the automatic name "<name>"`, as an empty inline rename does.
+    /// - A tab that closed has no row.
     @MainActor
     static func renameTab(_ tabID: UUID, in workspaceID: UUID, appState: AppState) -> PaletteInput? {
         let find = { appState.workspaces[workspaceID]?.tabs.first(where: { $0.id == tabID }) }
@@ -45,10 +47,11 @@ extension PaletteInput {
         }
     }
 
-    /// Rename the project `projectID`. The field starts on its name. An
-    /// empty field and the name the project has now give no action row. A
-    /// name that a project may not have gives the reason in place of the
-    /// action row (`Project.nameRefusal`).
+    /// Rename the project `projectID`. The field starts on its name.
+    /// - A new name has the action row `Rename to "<name>"`.
+    /// - An empty field and the current name have no row.
+    /// - A name that `Project.nameRefusal` refuses shows the reason and no
+    ///   row. The action checks the name again when it runs.
     @MainActor
     static func renameProject(_ projectID: UUID, appState: AppState, store: ProjectStore) -> PaletteInput? {
         let find = { store.projects.first(where: { $0.id == projectID }) }
