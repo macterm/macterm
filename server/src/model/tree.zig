@@ -53,7 +53,6 @@ pub const max_ratio: f64 = 0.85;
 
 pub const Pane = struct {
     id: PaneId,
-    /// Verbatim (design/010 §1).
     session: []const u8,
     host: ?[]const u8 = null,
     slug: []const u8 = "",
@@ -64,13 +63,13 @@ pub const Pane = struct {
 
     pub const field_doc = .{
         .id = "The id of the pane. It is the id of its session.",
-        .session = "The name of the session of the pane. It never changes.",
+        .session = "The name of the session of the pane, as the session has it. It never changes.",
         .host = "The ssh destination of a remote pane. Null for a pane on this Mac.",
         .slug = "The slug part of the session name.",
         .origin_path = "The path of the project when the pane was made.",
         .cwd = "The working directory that a client last gave for the pane.",
         .host_session_dir = "For a remote pane, the folder of its shell on the host after its session started there.",
-        .attention = "The mark of the pane: none, done or failed.",
+        .attention = "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
     };
 };
 
@@ -84,7 +83,7 @@ pub const Split = struct {
     pub const field_doc = .{
         .id = "The id of the split.",
         .dir = "The axis of the split: horizontal puts the nodes side by side, vertical puts one above the other.",
-        .ratio = "The part of the split that the first node takes, from 0.15 to 0.85.",
+        .ratio = "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85.",
         .first = "The left node of a horizontal split, or the top node of a vertical split.",
         .second = "The right node of a horizontal split, or the bottom node of a vertical split.",
     };

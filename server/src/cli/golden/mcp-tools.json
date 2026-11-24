@@ -507,12 +507,12 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 18446744073709551615,
-                "description": "A number that the file keeps. The server does not read it.",
+                "description": "A number that the server keeps and sends back with no change. It has no other use.",
                 "default": 0
               },
               "imported_v1": {
                 "type": "boolean",
-                "description": "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused.",
+                "description": "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused. The server sets it: it ignores the value that a client sends.",
                 "default": false
               },
               "projects": {
@@ -570,22 +570,22 @@
               },
               "sidebar": {
                 "$ref": "#/$defs/ProjectSidebar",
-                "description": "Where the sidebar shows the project.",
+                "description": "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes.",
                 "default": "tree"
               },
               "single_tab": {
                 "type": "boolean",
-                "description": "If true, the project holds at most one tab.",
+                "description": "If true, the project holds at most one tab. project.create sets it, and it never changes.",
                 "default": false
               },
               "removable": {
                 "type": "boolean",
-                "description": "If true, project.remove can remove the project.",
+                "description": "If true, project.remove can remove the project. project.create sets it, and it never changes.",
                 "default": true
               },
               "alias": {
                 "type": "string",
-                "description": "A short word that finds the project (pinned, scratch, quick). It is unique in the model."
+                "description": "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes."
               },
               "tabs": {
                 "type": "array",
@@ -687,7 +687,7 @@
               },
               "session": {
                 "type": "string",
-                "description": "The name of the session of the pane. It never changes."
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
                 "type": "string",
@@ -713,7 +713,7 @@
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
-                "description": "The mark of the pane: none, done or failed.",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },
@@ -744,7 +744,7 @@
               },
               "ratio": {
                 "type": "number",
-                "description": "The part of the split that the first node takes, from 0.15 to 0.85.",
+                "description": "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85.",
                 "default": 0.5
               },
               "first": {
@@ -1463,7 +1463,7 @@
               },
               "session": {
                 "type": "string",
-                "description": "The name of the session of the pane. It never changes."
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
                 "type": "string",
@@ -1489,7 +1489,7 @@
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
-                "description": "The mark of the pane: none, done or failed.",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },
@@ -1520,7 +1520,7 @@
               },
               "ratio": {
                 "type": "number",
-                "description": "The part of the split that the first node takes, from 0.15 to 0.85.",
+                "description": "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85.",
                 "default": 0.5
               },
               "first": {
@@ -1750,7 +1750,7 @@
               },
               "session": {
                 "type": "string",
-                "description": "The name of the session of the pane. It never changes."
+                "description": "The name of the session of the pane, as the session has it. It never changes."
               },
               "host": {
                 "type": "string",
@@ -1776,7 +1776,7 @@
               },
               "attention": {
                 "$ref": "#/$defs/ModelAttention",
-                "description": "The mark of the pane: none, done or failed.",
+                "description": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention).",
                 "default": "none"
               }
             },

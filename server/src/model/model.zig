@@ -65,7 +65,7 @@ pub const Tab = struct {
 pub const Project = struct {
     id: ProjectId,
     name: []const u8,
-    /// Can be empty (design/013, "Ethan chose B" §1).
+    /// design/013, "Ethan chose B" §1.
     path: []const u8,
     color: ?[]const u8 = null,
     sort_order: i64 = 0,
@@ -89,10 +89,10 @@ pub const Project = struct {
         .sort_order = "Orders the projects that have the same parent.",
         .created_at = "When the project was made, in Unix time in milliseconds.",
         .parent = "The project that holds this project. Null or empty is the top level.",
-        .sidebar = "Where the sidebar shows the project.",
-        .single_tab = "If true, the project holds at most one tab.",
-        .removable = "If true, project.remove can remove the project.",
-        .alias = "A short word that finds the project (pinned, scratch, quick). It is unique in the model.",
+        .sidebar = "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes.",
+        .single_tab = "If true, the project holds at most one tab. project.create sets it, and it never changes.",
+        .removable = "If true, project.remove can remove the project. project.create sets it, and it never changes.",
+        .alias = "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes.",
         .tabs = "The tabs of the project, in their order.",
         .active_tab = "The tab that the project shows.",
     };
@@ -169,8 +169,8 @@ pub const ModelData = struct {
 
     pub const field_doc = .{
         .version = "The version of the format of the model.",
-        .epoch_hint = "A number that the file keeps. The server does not read it.",
-        .imported_v1 = "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused.",
+        .epoch_hint = "A number that the server keeps and sends back with no change. It has no other use.",
+        .imported_v1 = "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused. The server sets it: it ignores the value that a client sends.",
         .projects = "Every project of the model.",
         .selection = "What is selected in the model.",
     };
