@@ -573,7 +573,7 @@ final class ControlHandler {
         let name = args.name?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name {
             guard !name.isEmpty else { throw Self.emptyNameError }
-            try Self.checkReservedName(name)
+            try Self.checkName(name)
         }
         #if DEBUG
         // `--skip-folder-check`: the e2e suite's project on a host that never answers.
@@ -665,7 +665,7 @@ final class ControlHandler {
         // project's, so a project renamed to it becomes unreachable by name
         // (UUID and index still work, but `--project Pinned` would silently
         // target the pinned workspace instead). Refuse rather than strand it.
-        try Self.checkReservedName(trimmed)
+        try Self.checkName(trimmed)
         projectStore.rename(id: project.id, to: trimmed)
         guard let updated = projectStore.projects.first(where: { $0.id == project.id }) else {
             throw ControlError(code: .internalError, message: "project rename failed")
@@ -677,13 +677,15 @@ final class ControlHandler {
     /// once trimmed.
     private static let emptyNameError = ControlError(code: .badRequest, message: "project name cannot be empty")
 
-    /// What `project.create` and `project.rename` say to a name a sentinel
-    /// workspace reserves (`Project.reservesName`) — worded like the app's
-    /// own refusal (`PinnedTabs.reservedNameMessage`,
-    /// `ScratchTabs.reservedNameMessage`), in the CLI's quoting.
-    private static func checkReservedName(_ name: String) throws {
+    /// What `project.create` and `project.rename` say to a name that
+    /// `Project.nameRefusal` refuses — worded like the app's own refusal
+    /// (`Project.slashMessage`, `PinnedTabs.reservedNameMessage`,
+    /// `ScratchTabs.reservedNameMessage`), in English and the CLI's quoting.
+    private static func checkName(_ name: String) throws {
         let message: String
-        if PinnedTabs.reservesName(name) {
+        if Project.hasSlash(name) {
+            message = "a project name cannot contain a slash"
+        } else if PinnedTabs.reservesName(name) {
             message = "\"\(PinnedTabs.displayName)\" is a reserved name for the pinned tabs"
         } else if ScratchTabs.reservesName(name) {
             message = "\"\(ScratchTabs.displayName)\" is a reserved name for the tabs without a project"
