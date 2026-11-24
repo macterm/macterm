@@ -31,8 +31,9 @@ extension AgentSkills {
         macterm project list --json
         ```
 
-        Each project has an `id`, a `name` and a `path`. If a project already has your directory, select it.
-        If not, create it one time:
+        Each project has an `id`, a `name`, a `path` and a `parent`. A project can hold other projects. The `parent`
+        is the name of the project that holds it, or empty at the top level. If a project already has your
+        directory, select it. If not, create it one time:
 
         ```sh
         macterm project select api
