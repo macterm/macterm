@@ -105,7 +105,7 @@ pub const Refuse = struct {
 
     pub const field_doc = .{
         .reason = "Why the sender refuses, as a code and not text for people: level_too_low or build_mismatch.",
-        .needs_level = "The lowest protocol level that the sender accepts.",
+        .needs_level = "For level_too_low: the lowest protocol level that the sender accepts. For build_mismatch: the protocol level of the sender.",
     };
 };
 
@@ -170,7 +170,7 @@ pub const ErrorInfo = struct {
     level: ?u32 = null,
 
     pub const field_doc = .{
-        .code = "The error code. A receiver reads a code that it does not know as an error with no special handling.",
+        .code = "The error code: one of error_codes. A receiver reads a code that it does not know as an error with no special handling.",
         .message = "The error, as text for people.",
         .level = "The protocol level that the request needs, when the peer speaks a lower one.",
     };
@@ -1439,10 +1439,10 @@ pub const ProjectInfo = struct {
         .sort_order = "Orders the projects that have the same parent.",
         .created_at = "When the project was made, in Unix time in milliseconds.",
         .parent = "The project that holds it. Null or empty is the top level.",
-        .sidebar = "Where the sidebar shows the project: tree, top, bottom or none. It never changes.",
-        .single_tab = "True: the project holds at most one tab. It never changes.",
-        .removable = "True: project.remove can remove the project. It never changes.",
-        .alias = "One short word that finds the project: pinned, for example. It is unique, and never changes.",
+        .sidebar = "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes.",
+        .single_tab = "True: the project holds at most one tab. project.create sets it, and it never changes.",
+        .removable = "True: project.remove can remove the project. project.create sets it, and it never changes.",
+        .alias = "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes.",
     };
 
     pub fn of(p: model.Project) ProjectInfo {
@@ -1546,7 +1546,7 @@ pub const TabOrder = struct {
     pub const field_doc = .{
         .project = "The project of the tabs.",
         .ids = "Each tab of the project, in its order.",
-        .active_tab = "The tab that the project shows.",
+        .active_tab = "The tab that the project shows. Null when it shows no tab.",
     };
 };
 
@@ -1558,7 +1558,7 @@ pub const SelectionChanged = struct {
     active_project: ?ProjectId = null,
 
     pub const field_doc = .{
-        .active_project = "The project that is selected.",
+        .active_project = "The project that is selected. Null when no project is selected.",
     };
 };
 
@@ -1744,8 +1744,7 @@ pub const Lead = struct {
 };
 
 /// The `bytes` frames up to `SnapshotEnd` are a snapshot of the terminal,
-/// not output. `scrollback` is false for a snapshot after dropped output:
-/// it holds the screen only, and clears the old screen first.
+/// not output.
 pub const SnapshotStart = struct {
     pub const name = "snapshot.start";
     pub const since = 1;
@@ -2144,15 +2143,14 @@ pub const ProgramRecord = struct {
         .state = "The state of the record: idle, working, done, blocked or error.",
         .kind = "With blocked: what the program needs: permission, question or auth.",
         .progress = "With working or blocked: the progress, from 0 to 100. Null when the program gave none.",
-        .app = "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one.",
+        .app = "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one, the root record included.",
         .title = "A short label for the record, decoded: UTF-8 with no control characters. It is still the text of the program.",
         .msg = "One line that says what the record does or waits for, decoded as title.",
     };
 };
 
-/// Every record of the program status protocol (OSC 7501) that the pane
-/// holds now, oldest first. Each change sends all of them, so an empty list
-/// clears them all. It coalesces as the title does.
+/// The records of the program status protocol (OSC 7501). Each change sends
+/// all of them. It coalesces as the title does.
 ///
 /// The session keeps the records as the protocol's terminal does: a report
 /// replaces its record, `clear` removes a record and the records under it, a

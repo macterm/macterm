@@ -923,7 +923,7 @@
           "type": "u32",
           "optional": false,
           "since": 1,
-          "doc": "The lowest protocol level that the sender accepts."
+          "doc": "For level_too_low: the lowest protocol level that the sender accepts. For build_mismatch: the protocol level of the sender."
         }
       ],
       "cases": [],
@@ -996,7 +996,7 @@
           "type": "str",
           "optional": false,
           "since": 1,
-          "doc": "The error code. A receiver reads a code that it does not know as an error with no special handling."
+          "doc": "The error code: one of error_codes. A receiver reads a code that it does not know as an error with no special handling."
         },
         {
           "name": "message",
@@ -3451,7 +3451,7 @@
           "optional": false,
           "default": "tree",
           "since": 3,
-          "doc": "Where the sidebar shows the project: tree, top, bottom or none. It never changes."
+          "doc": "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes."
         },
         {
           "name": "single_tab",
@@ -3459,7 +3459,7 @@
           "optional": false,
           "default": "false",
           "since": 3,
-          "doc": "True: the project holds at most one tab. It never changes."
+          "doc": "True: the project holds at most one tab. project.create sets it, and it never changes."
         },
         {
           "name": "removable",
@@ -3467,14 +3467,14 @@
           "optional": false,
           "default": "true",
           "since": 3,
-          "doc": "True: project.remove can remove the project. It never changes."
+          "doc": "True: project.remove can remove the project. project.create sets it, and it never changes."
         },
         {
           "name": "alias",
           "type": "str",
           "optional": true,
           "since": 3,
-          "doc": "One short word that finds the project: pinned, for example. It is unique, and never changes."
+          "doc": "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes."
         }
       ],
       "cases": [],
@@ -3591,7 +3591,7 @@
           "type": "str",
           "optional": true,
           "since": 3,
-          "doc": "The tab that the project shows."
+          "doc": "The tab that the project shows. Null when it shows no tab."
         }
       ],
       "cases": [],
@@ -3606,7 +3606,7 @@
           "type": "str",
           "optional": true,
           "since": 3,
-          "doc": "The project that is selected."
+          "doc": "The project that is selected. Null when no project is selected."
         }
       ],
       "cases": [],
@@ -4144,7 +4144,7 @@
           "type": "str",
           "optional": true,
           "since": 1,
-          "doc": "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one."
+          "doc": "A stable name for the program: cargo, for example. A record that gave none has the app of its nearest ancestor that gave one, the root record included."
         },
         {
           "name": "title",
