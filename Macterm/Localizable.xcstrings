@@ -188,6 +188,22 @@
         }
       }
     },
+    "%@ is not a directory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 디렉토리가 아닙니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是目录"
+          }
+        }
+      }
+    },
     "%@ is not a project, so it has no insights." : {
       "localizations" : {
         "ko" : {
@@ -7284,6 +7300,22 @@
         }
       }
     },
+    "Path %@ doesn't exist" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 경로가 존재하지 않습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路径 %@ 不存在"
+          }
+        }
+      }
+    },
     "Peek sidebar when hidden" : {
       "localizations" : {
         "ko" : {
@@ -11095,28 +11127,6 @@
         }
       }
     },
-    "There is no path %@ on %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "There is no path %1$@ on %2$@."
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@에 %1$@ 경로가 없습니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%2$@ 上没有路径 %1$@。"
-          }
-        }
-      }
-    },
     "These features need Apple Intelligence. Apple's on-device model does all the work, so nothing leaves this Mac." : {
       "localizations" : {
         "ko" : {
@@ -11690,22 +11700,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入密码。密码有效后，Macterm 会提议更新存储的密码。"
-          }
-        }
-      }
-    },
-    "Type the path of a folder." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "폴더의 경로를 입력하십시오."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "输入文件夹的路径。"
           }
         }
       }

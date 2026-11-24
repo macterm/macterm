@@ -165,7 +165,7 @@ private struct SavedPasswordRow: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: entry.id.displayCommand ?? String(localized: "Any command"))
+                Text(verbatim: entry.id.withHost(entry.id.displayCommand ?? String(localized: "Any command")))
                     .font(.body.monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)

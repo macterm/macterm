@@ -1,17 +1,17 @@
 import Foundation
 
 /// The New Project screen (`AppCommand.newProject`): an input screen whose
-/// field holds the path of the project's folder, with one row on top,
-/// Select in Finder, that shows the folder panel in place of a typed path.
+/// field holds the path of the project's folder.
 ///
-/// Its rows are the rows of path mode of the root (`DirectorySource`), so a
-/// typed path completes and runs as it does there: a folder that a project
-/// has switches to that project, with an Add Another Project row below; any
-/// other folder becomes a new project; a remote spec (`devbox:~/api`) opens
-/// the New Remote Project dialog, filled in. Return with no row selected
-/// runs the top row (`NewProjectInput.commit`).
-/// Select in Finder always makes a new project, as the folder panel always
-/// did (`AppState.newProjectFromFolderPanel`).
+/// Its action row, the first row, is Select in Finder: it shows the folder
+/// panel and always makes a new project, as the folder panel always did
+/// (`AppState.newProjectFromFolderPanel`). Its results are the rows of path
+/// mode of the root (`DirectorySource`), so a typed path completes and runs
+/// as it does there: a folder that a project has switches to that project,
+/// with an Add Another Project row below; any other folder becomes a new
+/// project; a remote spec (`devbox:~/api`) opens the New Remote Project
+/// dialog, filled in. A path with no row gets the notice of `PathProblem`,
+/// and no action row.
 extension PaletteInput {
     static var newProject: PaletteInput {
         PaletteInput(
@@ -19,16 +19,8 @@ extension PaletteInput {
             title: AppCommand.newProject.title,
             prompt: String(localized: "Type a folder path, or select one in Finder"),
             summary: String(localized: "Add a project from a folder"),
-            actions: [
-                PaletteInputAction(
-                    id: "select-in-finder",
-                    title: String(localized: "Select in Finder")
-                ) { context in
-                    context.appState.newProjectFromFolderPanel(store: context.projectStore)
-                },
-            ],
             results: NewProjectInput.results,
-            commit: NewProjectInput.commit
+            check: NewProjectInput.check
         )
     }
 }
@@ -45,18 +37,28 @@ enum NewProjectInput {
         }
     }
 
-    /// Return with no row selected: run the top row, as the root would, or
-    /// refuse a text that names no folder.
+    /// Select in Finder, unless the text is a path that has no row: then the
+    /// notice of the path, as a local folder field gives it.
     @MainActor
-    static func commit(_ text: String, context: PaletteContext) -> PaletteCommit {
-        if let top = results(text, context: context).first {
-            top.item.action()
-            return .done
-        }
+    static func check(_ text: String, context: PaletteContext) -> PaletteInputCheck {
         let typed = PaletteQuery(raw: text).trimmed
-        if typed.isEmpty {
-            return .refused(String(localized: "Type the path of a folder."))
+        if !typed.isEmpty, !PaletteQuery.isRemoteSpecQuery(typed), !hasRows(typed),
+           let problem = PathProblem.local(atPath: typed)
+        {
+            return .notice(problem.notice(for: typed))
         }
-        return .refused(String(localized: "There is no folder at \(typed)."))
+        return .action(PaletteInputAction(title: String(localized: "Select in Finder")) {
+            context.appState.postPaletteAction = {
+                context.appState.newProjectFromFolderPanel(store: context.projectStore)
+            }
+            return .done
+        })
+    }
+
+    /// Whether path mode lists a row for the local path `typed`: the folder
+    /// itself, or a folder that completes it.
+    private static func hasRows(_ typed: String) -> Bool {
+        guard let completion = PathCompleter.complete(typed) else { return false }
+        return completion.exactMatch != nil || !completion.children.isEmpty
     }
 }

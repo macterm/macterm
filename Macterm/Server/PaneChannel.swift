@@ -28,6 +28,10 @@ enum PaneChannelEvent: Equatable {
     /// The run state of the pane. The session sends it only when it changes,
     /// and to a client that greets while it is not `idle`.
     case status(MactermProtocol.Status)
+    /// The app dropped output of a relayed channel that the pane did not
+    /// take in time (`PaneChannel.Buffering.skipAhead`). The session's
+    /// snapshot follows: the output up to it does not come.
+    case skipped
     case other(String)
 
     init?(_ frame: ProtocolFrame) {
@@ -80,6 +84,16 @@ protocol PaneChannelTransport: AnyObject, Sendable {
     func closeChannel(_ number: UInt32) async
 }
 
+/// A transport whose channels pause: a server's connection, which relays
+/// them (`ServerLink`). A session's own socket does not pause: its reader
+/// waits at the read-ahead limit, and the session holds the output.
+protocol PausingChannelTransport: PaneChannelTransport {
+    /// Stops or starts the output of the channel. The session's messages
+    /// still come while it is paused, and a resume brings a snapshot
+    /// (design/003 §6).
+    func setPaused(_ paused: Bool, channel number: UInt32) async throws
+}
+
 /// What a pane's session opens its view channels with: a server's
 /// connection (`ServerLink`), or the sockets of the local sessions
 /// (`SessionSockets`).
@@ -94,12 +108,35 @@ protocol PaneChannelOpener: AnyObject, Sendable {
 /// a write that the peer does not take fails after 10 s. Call `close()`
 /// when done.
 ///
-/// On a server's connection the events buffer without a limit, because one
-/// reader serves every channel and must never wait. On a session's own
-/// socket (`readAhead`) the reader waits while that many events are not
-/// taken: the socket then fills, and the session holds the output
-/// (design/001, Back-pressure).
+/// What waits for the consumer has a limit (`Buffering`). On a session's
+/// own socket the reader waits at the limit: the socket then fills, and the
+/// session holds the output (design/001, Back-pressure). On a server's
+/// connection one reader serves every channel and must never wait: over the
+/// limit the channel drops its output and asks the session for a snapshot,
+/// as the server's skip-ahead does (design/003 §6).
 final class PaneChannel: @unchecked Sendable {
+    /// What waits for the consumer of the events, and what the reader does
+    /// at the limit.
+    enum Buffering: Equatable {
+        /// The reader waits while this many events are not taken.
+        case readAhead(Int)
+        /// The reader never waits. When more than `bytes` of output are not
+        /// taken, it drops the output up to the next snapshot, sends
+        /// `skipped`, and asks the session for a snapshot, again after each
+        /// `askAgain` until the snapshot starts. The session's messages are
+        /// not counted: they are small, and the session coalesces them.
+        case skipAhead(bytes: Int, askAgain: DispatchTimeInterval = PaneChannel.snapshotWait)
+    }
+
+    /// The most output bytes of a relayed channel that wait for the pane:
+    /// the cap of the server's skip-ahead for one channel
+    /// (`relay.skip_bytes`).
+    static let relayLimit = 1024 * 1024
+    /// How long a skipped channel waits for its snapshot before it asks
+    /// again: the server's `relay.skip_ms`. A session that is behind sends
+    /// its snapshot when it catches up, and ignores the request before that.
+    static let snapshotWait: DispatchTimeInterval = .seconds(1)
+
     let number: UInt32
     /// The `epoch` of the session's `hello`. Nil from a server that does
     /// not give it: the channel cannot resume.
@@ -113,17 +150,45 @@ final class PaneChannel: @unchecked Sendable {
     final class Sink: @unchecked Sendable {
         private let continuation: AsyncStream<PaneChannelEvent>.Continuation
         fileprivate let credit: Credit?
+        fileprivate let skip: SkipAhead?
+        private weak var transport: (any PaneChannelTransport)?
+        private let number: UInt32
+        /// The requests for a snapshot, off the reader's thread: a write can
+        /// wait for the peer, and the reader must not. One queue for each
+        /// channel, so that a stalled link holds only its own requests.
+        private let requests = DispatchQueue(label: "PaneChannel.requests")
 
-        fileprivate init(_ continuation: AsyncStream<PaneChannelEvent>.Continuation, credit: Credit?) {
+        fileprivate init(
+            _ continuation: AsyncStream<PaneChannelEvent>.Continuation,
+            credit: Credit?,
+            skip: SkipAhead?,
+            transport: any PaneChannelTransport,
+            number: UInt32
+        ) {
             self.continuation = continuation
             self.credit = credit
+            self.skip = skip
+            self.transport = transport
+            self.number = number
         }
 
-        /// With a read-ahead limit, waits while the limit is reached.
+        /// With a read-ahead limit, waits while the limit is reached. With a
+        /// skip-ahead limit, never waits.
         func deliver(_ frame: ProtocolFrame) {
             guard let event = PaneChannelEvent(frame) else {
                 logger.error("pane channel: a frame could not be read, kind=\(frame.kind.rawValue, privacy: .public)")
                 return
+            }
+            if let skip {
+                switch skip.admit(event) {
+                case .pass: break
+                case .drop: return
+                case let .skip(generation):
+                    logger.info("pane channel \(self.number, privacy: .public): the pane fell behind, output dropped")
+                    continuation.yield(.skipped)
+                    askSnapshot(generation)
+                    return
+                }
             }
             guard credit?.take() ?? true else { return }
             continuation.yield(event)
@@ -131,7 +196,25 @@ final class PaneChannel: @unchecked Sendable {
 
         func finish() {
             credit?.end()
+            skip?.end()
             continuation.finish()
+        }
+
+        /// Asks the session for a snapshot (`refresh`), and again after each
+        /// `askAgain` while the skip waits for it.
+        private func askSnapshot(_ generation: Int) {
+            requests.async { [weak self] in
+                guard let self, let transport, let skip, skip.waits(generation) else { return }
+                do {
+                    try transport.send(frame: PaneChannel.frame(MactermProtocol.Refresh(), on: number))
+                } catch {
+                    // The channel ends with its link.
+                    return
+                }
+                requests.asyncAfter(deadline: .now() + skip.askAgain) { [weak self] in
+                    self?.askSnapshot(generation)
+                }
+            }
         }
     }
 
@@ -174,39 +257,127 @@ final class PaneChannel: @unchecked Sendable {
         }
     }
 
+    /// The output bytes that the reader gave and the consumer did not take
+    /// yet, and the skip that drops output up to the next snapshot. A
+    /// snapshot is never cut: its bytes always pass, so the pane draws it
+    /// whole.
+    fileprivate final class SkipAhead: @unchecked Sendable {
+        enum Verdict: Equatable {
+            case pass
+            case drop
+            /// The limit is reached: a skip starts.
+            case skip(generation: Int)
+        }
+
+        private let lock = NSLock()
+        private let limit: Int
+        let askAgain: DispatchTimeInterval
+        private var waiting = 0
+        private var inSnapshot = false
+        private var skipping = false
+        /// Tells a skip from the skips before it.
+        private var generation = 0
+        private var ended = false
+
+        init(limit: Int, askAgain: DispatchTimeInterval) {
+            self.limit = limit
+            self.askAgain = askAgain
+        }
+
+        func admit(_ event: PaneChannelEvent) -> Verdict {
+            lock.lock()
+            defer { lock.unlock() }
+            switch event {
+            case .snapshotStart:
+                inSnapshot = true
+                skipping = false
+            case .snapshotEnd:
+                inSnapshot = false
+            case let .output(data):
+                if inSnapshot {
+                    waiting += data.count
+                } else if skipping {
+                    return .drop
+                } else if waiting + data.count > limit {
+                    skipping = true
+                    generation += 1
+                    return .skip(generation: generation)
+                } else {
+                    waiting += data.count
+                }
+            default:
+                break
+            }
+            return .pass
+        }
+
+        /// The consumer took `event`.
+        func taken(_ event: PaneChannelEvent) {
+            guard case let .output(data) = event else { return }
+            lock.withLock { waiting -= data.count }
+        }
+
+        /// True while the skip `generation` waits for its snapshot.
+        func waits(_ generation: Int) -> Bool {
+            lock.withLock { skipping && self.generation == generation && !ended }
+        }
+
+        func end() {
+            lock.withLock { ended = true }
+        }
+    }
+
     /// The events of the channel. Each event that the consumer takes gives
     /// the reader room for one more.
     struct Events: AsyncSequence {
         typealias Element = PaneChannelEvent
         fileprivate let stream: AsyncStream<PaneChannelEvent>
         fileprivate let credit: Credit?
+        fileprivate let skip: SkipAhead?
 
         struct AsyncIterator: AsyncIteratorProtocol {
             fileprivate var base: AsyncStream<PaneChannelEvent>.AsyncIterator
             fileprivate let credit: Credit?
+            fileprivate let skip: SkipAhead?
 
             mutating func next() async -> PaneChannelEvent? {
                 let event = await base.next()
-                if event != nil { credit?.taken() }
+                if let event {
+                    credit?.taken()
+                    skip?.taken(event)
+                }
                 return event
             }
         }
 
         func makeAsyncIterator() -> AsyncIterator {
-            AsyncIterator(base: stream.makeAsyncIterator(), credit: credit)
+            AsyncIterator(base: stream.makeAsyncIterator(), credit: credit, skip: skip)
         }
     }
 
-    /// `readAhead` is the most events that wait for the consumer; nil for
-    /// no limit.
-    init(transport: any PaneChannelTransport, number: UInt32, epoch: UInt64? = nil, readAhead: Int? = nil) {
+    /// `buffering` is the limit of what waits for the consumer; nil for no
+    /// limit.
+    init(transport: any PaneChannelTransport, number: UInt32, epoch: UInt64? = nil, buffering: Buffering? = nil) {
         self.transport = transport
         self.number = number
         self.epoch = epoch
         let (stream, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
-        let credit = readAhead.map(Credit.init(limit:))
-        events = Events(stream: stream, credit: credit)
-        sink = Sink(continuation, credit: credit)
+        var credit: Credit?
+        var skip: SkipAhead?
+        switch buffering {
+        case let .readAhead(count): credit = Credit(limit: count)
+        case let .skipAhead(bytes, askAgain): skip = SkipAhead(limit: bytes, askAgain: askAgain)
+        case nil: break
+        }
+        events = Events(stream: stream, credit: credit, skip: skip)
+        sink = Sink(continuation, credit: credit, skip: skip, transport: transport, number: number)
+    }
+
+    /// A frame of a pane message on channel `number`.
+    fileprivate static func frame(_ message: some ProtocolMessage, on number: UInt32) -> ProtocolFrame {
+        var writer = MessagePackWriter()
+        MactermProtocol.PaneMessage(message).encode(to: &writer)
+        return ProtocolFrame(channel: number, kind: .msg, body: writer.data)
     }
 
     /// Keys, pastes and terminal replies for the session. Never dropped.
@@ -217,10 +388,22 @@ final class PaneChannel: @unchecked Sendable {
 
     /// A message of the pane (`attach`, `resize`, `claim`).
     func send(_ message: some ProtocolMessage) throws {
-        var writer = MessagePackWriter()
-        MactermProtocol.PaneMessage(message).encode(to: &writer)
         guard let transport else { throw ServerClientError.disconnected }
-        try transport.send(frame: ProtocolFrame(channel: number, kind: .msg, body: writer.data))
+        try transport.send(frame: Self.frame(message, on: number))
+    }
+
+    /// True when the channel can pause (`PausingChannelTransport`).
+    var pauses: Bool {
+        transport is any PausingChannelTransport
+    }
+
+    /// Stops the output of a pane that no window shows, or starts it again.
+    /// The session's messages still come. A resume brings a snapshot
+    /// (design/003 §6). A channel that cannot pause does nothing.
+    func setPaused(_ paused: Bool) async throws {
+        guard let transport else { throw ServerClientError.disconnected }
+        guard let pausing = transport as? any PausingChannelTransport else { return }
+        try await pausing.setPaused(paused, channel: number)
     }
 
     /// Ends the channel. The session keeps running.

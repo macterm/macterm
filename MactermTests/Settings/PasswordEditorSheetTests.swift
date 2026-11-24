@@ -25,4 +25,19 @@ struct PasswordEditorSheetTests {
         #expect(PasswordEditorSheet.filing(command: "deploy", prompt: "", editing: nil)
             == PasswordEntryID(command: "deploy", prompt: ""))
     }
+
+    @Test
+    func an_edited_host_entry_keeps_its_host() {
+        let current = PasswordEntryID(command: "sudo", prompt: "[sudo] password for me:", host: "me@prod:22")
+        #expect(PasswordEditorSheet.filing(command: "sudo", prompt: "[sudo] password for me:", editing: current) == current)
+        #expect(PasswordEditorSheet.filing(command: "sudo", prompt: "Password:", editing: current)
+            == PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@prod:22"))
+        #expect(PasswordEditorSheet.filing(command: "deploy", prompt: "", editing: current)
+            == PasswordEntryID(command: "deploy", prompt: "", host: "me@prod:22"))
+        // A host has no shared entries: nothing collapses, as in detection.
+        #expect(PasswordEditorSheet.filing(command: "sudo apt update", prompt: "Password:", editing: current)
+            == PasswordEntryID(command: "sudo apt update", prompt: "Password:", host: "me@prod:22"))
+        #expect(PasswordEditorSheet.filing(command: "ssh prod", prompt: "Enter passphrase for key '/k':", editing: current)
+            == PasswordEntryID(command: "ssh prod", prompt: "Enter passphrase for key '/k':", host: "me@prod:22"))
+    }
 }

@@ -21,14 +21,18 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
     /// The session epoch that `channel.open` gives. Nil is a server that
     /// gives none.
     private let epoch: UInt64?
+    /// The limit of each channel's events (`PaneChannel.Buffering`).
+    private let buffering: PaneChannel.Buffering?
 
-    init(epoch: UInt64? = nil, answer: @escaping Answer = FakeServerLink.standard) {
+    init(epoch: UInt64? = nil, buffering: PaneChannel.Buffering? = nil, answer: @escaping Answer = FakeServerLink.standard) {
         self.epoch = epoch
+        self.buffering = buffering
         self.answer = answer
     }
 
-    /// Answers `session.create`, `session.kill`, `channel.close` and
-    /// `command.run` with an empty success. `channel.open` is the link's own.
+    /// Answers `session.create`, `session.kill`, `session.list`,
+    /// `channel.close`, `channel.pause` and `channel.resume` with an empty
+    /// success. `channel.open` is the link's own.
     static let standard: Answer = { method, args in
         switch method {
         case MactermProtocol.SessionCreate.name:
@@ -41,6 +45,8 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
             ))
         case MactermProtocol.SessionKill.name: return MactermProtocol.SessionKill.Result()
         case MactermProtocol.ChannelClose.name: return MactermProtocol.ChannelClose.Result()
+        case MactermProtocol.ChannelPause.name: return MactermProtocol.ChannelPause.Result()
+        case MactermProtocol.ChannelResume.name: return MactermProtocol.ChannelResume.Result()
         case MactermProtocol.SessionList.name: return MactermProtocol.SessionList.Result(sessions: [])
         default: throw ServerClientError.protocolError
         }
@@ -101,7 +107,7 @@ final class FakeServerLink: ServerLink, @unchecked Sendable {
             methods.append(MactermProtocol.ChannelOpen.name)
             let number = nextChannel
             nextChannel += 1
-            let channel = PaneChannel(transport: self, number: number, epoch: epoch)
+            let channel = PaneChannel(transport: self, number: number, epoch: epoch, buffering: buffering)
             channels[number] = channel
             sessions[session] = number
             return channel
