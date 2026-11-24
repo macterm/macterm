@@ -11,11 +11,9 @@ on:
   pull_request:
     branches: [main]
 
-# A new push cancels the runs of the older commit of the same ref: of a pull
-# request, and of main too. Only the newest commit of main matters, so the
-# runs of older main commits do not keep the macOS runners that it needs. A
-# cancelled main commit gets no tip build (release-tip.yml), and its changes
-# get their checks in the run of the next commit (scripts/changed-areas.sh).
+# A push cancels the runs of older commits of the same pull request or of
+# main. A cancelled main commit gets no tip build, and the run of the next
+# commit checks its changes (scripts/changed-areas.sh).
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
@@ -248,7 +246,7 @@ jobs:
   #
   # Only on a push to main, not on a pull request: this job and the two Smoke
   # jobs take three macOS runners for each run. A failure here therefore shows
-  # after the merge. release-tip.yml gates on the Test run of each commit on
+  # after the merge. release-tip.yml gates on the Test run of the commit on
   # main, so a commit that fails here does not ship as tip.
   release-build:
     name: Release Build

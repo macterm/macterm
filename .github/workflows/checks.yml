@@ -9,11 +9,9 @@ on:
   pull_request:
     branches: [main]
 
-# A new push cancels the runs of the older commit of the same ref: of a pull
-# request, and of main too. Only the newest commit of main matters, so the
-# runs of older main commits do not keep the macOS runners that it needs. A
-# cancelled main commit gets no tip build (release-tip.yml), and its changes
-# get their checks in the run of the next commit (scripts/changed-areas.sh).
+# A push cancels the runs of older commits of the same pull request or of
+# main. A cancelled main commit gets no tip build, and the run of the next
+# commit checks its changes (scripts/changed-areas.sh).
 concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true

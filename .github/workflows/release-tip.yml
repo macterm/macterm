@@ -3,8 +3,8 @@ name: Release Tip
 # The `tip` channel: a universal Release build of the newest CI-passing commit
 # on main, published to a rolling `tip` prerelease and offered by Sparkle to
 # anyone who set Settings → Updates → Channel to Tip. A push to main cancels
-# the Test and Checks runs of the older main commits (their concurrency
-# groups), so only the newest commit of a burst of merges gets a tip build.
+# the Test and Checks runs of older main commits, so an older commit gets a
+# tip build only when its Test run passed before the next push.
 #
 # Modelled on ghostty's release-tip.yml (workflow_run after Test, a force-moved
 # `tip` tag, one permanent prerelease whose assets are overwritten in place), with

@@ -8,9 +8,10 @@
 #   this workflow on the branch that passed. It is not the commit before the
 #   push: a push to main cancels the run of the commit before it, so the
 #   changes of that commit get their checks in the run of the next commit.
-#   Two API calls find the base (GH_TOKEN, `actions: read`). If no run
-#   passed, if the base is not an ancestor of HEAD, if a call fails or if
-#   the script cannot fetch the base, every area is set.
+#   Two API calls find the base (GH_TOKEN; the list of runs needs
+#   `actions: read`). If no run passed, if the base is not an ancestor of
+#   HEAD, if a call fails or if the script cannot fetch the base, every area
+#   is set.
 # - any other event: every area.
 # A change to the table or to this script also sets every area.
 set -euo pipefail
@@ -45,15 +46,22 @@ case "${GITHUB_EVENT_NAME:-}" in
     workflow="${GITHUB_WORKFLOW_REF%@*}"
     workflow="${workflow##*/}"
     head="$(git rev-parse HEAD)"
-    base="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1" \
-      --jq '.workflow_runs[0].head_sha // ""' || true)"
+    base=""
+    relation=""
+    if ! base="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1" \
+      --jq '.workflow_runs[0].head_sha // ""')"; then
+      echo "Cannot list the runs of $workflow. Setting every area."
+      all=true
+    elif [[ -z "$base" ]]; then
+      echo "No run of $workflow passed. Setting every area."
+      all=true
     # "ahead" or "identical": the base is an ancestor of HEAD.
-    if [[ -n "$base" ]]; then
-      relation="$(gh api "repos/$GITHUB_REPOSITORY/compare/$base...$head" --jq '.status' || true)"
-    fi
-    if [[ -z "$base" || ! "${relation:-}" =~ ^(ahead|identical)$ ]] \
-      || ! git fetch --quiet --no-tags --depth=1 origin "$base"; then
-      echo "No passed run of $workflow to compare against. Setting every area."
+    elif ! relation="$(gh api "repos/$GITHUB_REPOSITORY/compare/$base...$head" --jq '.status')" \
+      || [[ ! "$relation" =~ ^(ahead|identical)$ ]]; then
+      echo "$base is not an ancestor of HEAD (${relation:-unknown}). Setting every area."
+      all=true
+    elif ! git fetch --quiet --no-tags --depth=1 origin "$base"; then
+      echo "Cannot fetch $base. Setting every area."
       all=true
     else
       echo "Changes since $base, the newest commit whose $workflow run passed."
