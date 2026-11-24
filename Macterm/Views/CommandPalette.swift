@@ -318,7 +318,7 @@ struct CommandPalettePanel: View {
                         .padding(.vertical, Self.listPadding)
                     }
                 }
-                .frame(maxHeight: 340)
+                .frame(height: Self.listHeight)
                 .coordinateSpace(name: rowSpace)
                 .background(
                     GeometryReader { geo in
@@ -508,7 +508,7 @@ struct CommandPalettePanel: View {
             if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
                 selectedIndex = index
             } else {
-                selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
+                selectedIndex = inputScope.restingItemID.flatMap { id in flatItems.firstIndex { $0.id == id } } ?? -1
             }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
@@ -573,6 +573,12 @@ struct CommandPalettePanel: View {
         query = completion
         return .handled
     }
+
+    /// The height of the results under the field, the same on every screen
+    /// and in every state: the panel never grows or shrinks while the user
+    /// types (Ethan, ui-review 0591). Not the rows' own height, so an input
+    /// screen with one row keeps the height of the root palette.
+    static let listHeight: CGFloat = 340
 
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
@@ -646,6 +652,8 @@ struct CommandPalettePanel: View {
             query = text
         case .refused:
             refresh()
+        case .cancelled:
+            leaveScope()
         case .closed:
             query = ""
             windowState.isCommandPaletteVisible = false

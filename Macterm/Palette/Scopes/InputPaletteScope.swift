@@ -13,7 +13,11 @@ import Foundation
 /// row is the selected row** (Ethan, 0578): with no row selected, Return
 /// does nothing, and the field text is never committed in another way.
 /// The rows under the action row are completions: Return, Tab or a click
-/// puts one in the field, and never runs the action. Escape, or Backspace
+/// puts one in the field, and never runs the action. While the field is
+/// empty, a Cancel row comes last: Return on it leaves the screen as
+/// Escape does, and the selection rests on it when there is no action row,
+/// so Return on an empty field does nothing by chance. The screen has the
+/// height of the root palette in every state. Escape, or Backspace
 /// at an empty field, pops the screen like any screen. An action that
 /// refuses when it runs keeps the screen and shows the reason, until the
 /// text changes.
@@ -107,6 +111,8 @@ enum PaletteInputPress: Equatable {
     case closed
     /// The action refused; the screen stays and shows the reason.
     case refused
+    /// The Cancel row: the screen goes, as with Escape.
+    case cancelled
 }
 
 /// The one action row of an input screen: its title names the action and
@@ -154,6 +160,8 @@ final class InputPaletteScope: PaletteScope {
 
     /// The id of the action row.
     static let actionItemID = "input-action"
+    /// The id of the Cancel row.
+    static let cancelItemID = "input-cancel"
 
     init(input: PaletteInput) {
         self.input = input
@@ -183,12 +191,22 @@ final class InputPaletteScope: PaletteScope {
         if let action {
             items.insert(PaletteItem(id: Self.actionItemID, title: action.title, action: {}), at: 0)
         }
+        if text.isEmpty {
+            items.append(PaletteItem(id: Self.cancelItemID, title: String(localized: "Cancel"), action: {}))
+        }
         return items.isEmpty ? [] : [PaletteSection(header: nil, items: items)]
     }
 
     /// Whether `item` is the action row of this screen.
     func isAction(_ item: PaletteItem) -> Bool {
         action != nil && item.id == Self.actionItemID
+    }
+
+    /// The id of the row where the selection rests on a new list: the
+    /// action row, else the Cancel row of an empty field, else no row.
+    var restingItemID: String? {
+        if action != nil { return Self.actionItemID }
+        return text.isEmpty ? Self.cancelItemID : nil
     }
 
     /// The text that `item`, a completion row of this screen, puts in the
@@ -198,11 +216,12 @@ final class InputPaletteScope: PaletteScope {
     }
 
     /// What Return or a click on `item` does, with `item` nil when no row
-    /// is selected. The action row runs its action. A completion row gives
-    /// its text for the field. No row, or the text that the field already
-    /// has, does nothing.
+    /// is selected. The action row runs its action. The Cancel row leaves
+    /// the screen. A completion row gives its text for the field. No row,
+    /// or the text that the field already has, does nothing.
     func press(_ item: PaletteItem?) -> PaletteInputPress {
         guard let item else { return .nothing }
+        if item.id == Self.cancelItemID, text.isEmpty { return .cancelled }
         guard isAction(item), let action else {
             guard let completion = completion(for: item), completion != text else { return .nothing }
             return .fill(completion)
