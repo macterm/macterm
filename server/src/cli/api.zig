@@ -143,7 +143,9 @@ fn definition(arena: std.mem.Allocator, t: metadata.TypeDef, defs: *ObjectMap) e
             var required: std.json.Array = .init(arena);
             for (t.fields) |f| {
                 var field = try schemaOf(arena, f.type, defs);
+                if (f.doc) |d| try field.object.put(arena, "description", .{ .string = d });
                 if (f.default) |d| try field.object.put(arena, "default", try defaultValue(arena, d));
+                try putLimits(arena, &field.object, f);
                 try properties.put(arena, f.name, field);
                 if (!f.optional and f.default == null) try required.append(.{ .string = f.name });
             }
@@ -184,6 +186,18 @@ fn definition(arena: std.mem.Allocator, t: metadata.TypeDef, defs: *ObjectMap) e
         },
     }
     return .{ .object = o };
+}
+
+/// The limits of a field, as the JSON Schema keywords. The schema's
+/// `minimum` and `maximum` of an integer type give way to the field's own.
+/// `minLength` and `maxLength` count characters in JSON Schema, and the
+/// server counts bytes: the field's doc says so.
+fn putLimits(arena: std.mem.Allocator, o: *ObjectMap, f: metadata.Field) error{OutOfMemory}!void {
+    if (f.min_length) |v| try o.put(arena, "minLength", .{ .integer = @intCast(v) });
+    if (f.max_length) |v| try o.put(arena, "maxLength", .{ .integer = @intCast(v) });
+    if (f.min_items) |v| try o.put(arena, "minItems", .{ .integer = @intCast(v) });
+    if (f.minimum) |v| try o.put(arena, "minimum", .{ .integer = v });
+    if (f.maximum) |v| try o.put(arena, "maximum", .{ .integer = v });
 }
 
 /// `Field.default` is JSON, except an enum tag, which is bare.
@@ -452,6 +466,45 @@ test "describe gives a JSON Schema with the required keys and the defaults" {
     try testing.expectEqualStrings("id", required[0].string);
     try testing.expectEqualStrings("text", required[1].string);
     try testing.expectEqual(null, d.get("$defs"));
+}
+
+test "describe gives the doc of each field as description, and its limits" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const send = (try describe(a, find("session.send").?)).object.get("args").?.object.get("properties").?.object;
+    const text = send.get("text").?.object;
+    try testing.expectEqualStrings("The text to type, at most 65536 bytes.", text.get("description").?.string);
+    try testing.expectEqual(m.send_max, text.get("maxLength").?.integer);
+    try testing.expect(send.get("submit").?.object.get("description") != null);
+
+    const run = (try describe(a, find("command.run").?)).object.get("args").?.object.get("properties").?.object;
+    try testing.expectEqual(1, run.get("argv").?.object.get("minItems").?.integer);
+    // The field's own limits win over the range of its type.
+    const timeout = run.get("timeout_ms").?.object;
+    try testing.expectEqual(1, timeout.get("minimum").?.integer);
+    try testing.expectEqual(m.run_timeout_max_ms, timeout.get("maximum").?.integer);
+    try testing.expectEqual(5000, timeout.get("default").?.integer);
+
+    const secret = (try describe(a, find("link.open").?)).object.get("args").?.object.get("properties").?.object.get("secret").?.object;
+    try testing.expectEqual(m.link_secret_len, secret.get("minLength").?.integer);
+    try testing.expectEqual(m.link_secret_len, secret.get("maxLength").?.integer);
+
+    // A field with a named type keeps its $ref next to its description.
+    const create = (try describe(a, find("session.create").?)).object.get("result").?.object.get("properties").?.object;
+    try testing.expectEqualStrings("#/$defs/Session", create.get("session").?.object.get("$ref").?.string);
+    try testing.expectEqualStrings("The new session.", create.get("session").?.object.get("description").?.string);
+}
+
+test "every field of the args and the result of a listed method has a doc" {
+    for (methods) |method| {
+        for ([_][]const u8{ method.args, method.result }) |name| {
+            for (typeDef(name).fields) |f| {
+                if (f.doc == null) std.debug.print("{s}: {s}.{s} has no doc\n", .{ method.name, name, f.name });
+                try testing.expect(f.doc != null);
+            }
+        }
+    }
 }
 
 test "describe gives a schema for every method" {

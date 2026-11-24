@@ -1104,19 +1104,22 @@
           "name": "epoch",
           "type": "u64",
           "optional": false,
-          "since": 2
+          "since": 2,
+          "doc": "The epoch of the state that the lost connection read."
         },
         {
           "name": "seq",
           "type": "u64",
           "optional": false,
-          "since": 2
+          "since": 2,
+          "doc": "The count of event batches that the client read in that epoch."
         },
         {
           "name": "client",
           "type": "u64",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The client key that state.subscribe gave the lost connection."
         }
       ],
       "cases": [],
@@ -1130,13 +1133,15 @@
           "name": "replayed",
           "type": "bool",
           "optional": false,
-          "since": 2
+          "since": 2,
+          "doc": "True: the missed batches came as events before this reply. False: the client must read the full state again."
         },
         {
           "name": "seq",
           "type": "u64",
           "optional": false,
-          "since": 2
+          "since": 2,
+          "doc": "The count of event batches now."
         }
       ],
       "cases": [],
@@ -1150,7 +1155,8 @@
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session."
         }
       ],
       "cases": [],
@@ -1164,13 +1170,15 @@
           "name": "channel",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The number of the new channel."
         },
         {
           "name": "epoch",
           "type": "u64",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The epoch of the hello of the session. Null from a session of an older build."
         }
       ],
       "cases": [],
@@ -1184,7 +1192,8 @@
           "name": "channel",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The number of the channel."
         }
       ],
       "cases": [],
@@ -1205,7 +1214,8 @@
           "name": "channel",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The number of the channel."
         }
       ],
       "cases": [],
@@ -1226,7 +1236,8 @@
           "name": "channel",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The number of the channel."
         }
       ],
       "cases": [],
@@ -1261,46 +1272,55 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "Made by the client: letters, digits, '-', '_' and '.', not '.' or '-' first. A request sent again with this id starts no second session."
         },
         {
           "name": "cwd",
           "type": "bin",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The folder of the session, an absolute path. Null is the home folder."
         },
         {
           "name": "command",
           "type": "[bin]",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The command in place of a login shell."
         },
         {
           "name": "cols",
           "type": "u16",
           "optional": false,
           "default": "80",
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in cells.",
+          "minimum": 1
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": false,
           "default": "24",
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in cells.",
+          "minimum": 1
         },
         {
           "name": "env",
           "type": "[bin]",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The environment of the session, as NAME=value entries, in place of the environment of the server."
         },
         {
           "name": "replace_exited",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: a session of this id whose shell exited ends, and a new one starts after the old one is gone. False: the request fails with exited."
         }
       ],
       "cases": [],
@@ -1314,7 +1334,8 @@
           "name": "session",
           "type": "Session",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The new session."
         }
       ],
       "cases": [],
@@ -1454,7 +1475,8 @@
           "name": "sessions",
           "type": "[Session]",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "Every session of the server."
         }
       ],
       "cases": [],
@@ -1468,7 +1490,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session."
         }
       ],
       "cases": [],
@@ -1482,7 +1505,8 @@
           "name": "session",
           "type": "Session",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The session."
         }
       ],
       "cases": [],
@@ -1496,7 +1520,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session."
         }
       ],
       "cases": [],
@@ -1517,7 +1542,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The id of the session."
         }
       ],
       "cases": [],
@@ -1538,20 +1564,24 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session."
         },
         {
           "name": "text",
           "type": "bin",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The text to type, at most 65536 bytes.",
+          "max_length": 65536
         },
         {
           "name": "submit",
           "type": "bool",
           "optional": false,
           "default": "true",
-          "since": 3
+          "since": 3,
+          "doc": "A newline follows the text."
         }
       ],
       "cases": [],
@@ -1572,13 +1602,15 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session."
         },
         {
           "name": "chord",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The key press: ctrl+c, escape, up or shift+1, for example."
         }
       ],
       "cases": [],
@@ -1599,14 +1631,16 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session."
         },
         {
           "name": "scrollback",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "True: the scrollback and the screen. False: the screen only."
         }
       ],
       "cases": [],
@@ -1620,14 +1654,16 @@
           "name": "text",
           "type": "bin",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The text of the terminal."
         },
         {
           "name": "truncated",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "The text was longer than a frame holds: text is its end."
         }
       ],
       "cases": [],
@@ -1641,7 +1677,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session."
         }
       ],
       "cases": [],
@@ -1655,7 +1692,8 @@
           "name": "terminal",
           "type": "TerminalState",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The state of the terminal of the session."
         }
       ],
       "cases": [],
@@ -1752,20 +1790,26 @@
           "name": "argv",
           "type": "[bin]",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The program, an absolute path, then its arguments.",
+          "min_items": 1
         },
         {
           "name": "cwd",
           "type": "bin",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The folder, an absolute path. Null is the home folder."
         },
         {
           "name": "timeout_ms",
           "type": "u32",
           "optional": false,
           "default": "5000",
-          "since": 1
+          "since": 1,
+          "doc": "After this time, the process group of the command gets SIGKILL and the request fails with timeout.",
+          "minimum": 1,
+          "maximum": 60000
         }
       ],
       "cases": [],
@@ -1779,26 +1823,30 @@
           "name": "output",
           "type": "bin",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The stdout of the command, at most 512 KiB."
         },
         {
           "name": "truncated",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "The command wrote more than 512 KiB. The rest is not in output."
         },
         {
           "name": "code",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The exit code, when the command exited."
         },
         {
           "name": "signal",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The signal number, when a signal ended the command."
         }
       ],
       "cases": [],
@@ -1812,13 +1860,17 @@
           "name": "secret",
           "type": "secret",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "32 random bytes that seal each packet. The server keeps them in memory only.",
+          "min_length": 32,
+          "max_length": 32
         },
         {
           "name": "key_id",
           "type": "u32",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Names the key in each packet. The client makes it, and no other link of this server has it."
         }
       ],
       "cases": [],
@@ -1832,7 +1884,8 @@
           "name": "port",
           "type": "u16",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The UDP port on the host."
         }
       ],
       "cases": [],
@@ -1846,7 +1899,8 @@
           "name": "key_id",
           "type": "u32",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The key id of the link."
         }
       ],
       "cases": [],
@@ -1874,45 +1928,52 @@
           "name": "epoch",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "A random id for each start of the server."
         },
         {
           "name": "seq",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The count of event batches in epoch that this state includes."
         },
         {
           "name": "model",
           "type": "ModelData",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The model. Null on a server with no model."
         },
         {
           "name": "zoomed",
           "type": "[Zoom]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The zoomed pane of each tab that has one."
         },
         {
           "name": "readonly",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "The server cannot write the model: every model request fails with model_readonly."
         },
         {
           "name": "sessions",
           "type": "[Session]",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Every session of the server."
         },
         {
           "name": "client",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The key of this connection for the ring of request ids. A client that resumes on a new connection sends it in control.resume."
         }
       ],
       "cases": [],
@@ -2275,39 +2336,45 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new project. The client makes it."
         },
         {
           "name": "name",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The name of the project."
         },
         {
           "name": "path",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 3
+          "since": 3,
+          "doc": "A local path, or user@host:dir. Can be empty."
         },
         {
           "name": "color",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The color tag of the project."
         },
         {
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that holds it. Null is the top level."
         },
         {
           "name": "created_at",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "Unix time in milliseconds."
         }
       ],
       "cases": [],
@@ -2328,31 +2395,36 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project to change."
         },
         {
           "name": "name",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The new name."
         },
         {
           "name": "path",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The new path: a local path, or user@host:dir."
         },
         {
           "name": "color",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The new color tag. An empty string removes the color."
         },
         {
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The new parent project. An empty string moves the project to the top level."
         }
       ],
       "cases": [],
@@ -2373,13 +2445,15 @@
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project whose children to order. Null is the top level."
         },
         {
           "name": "ids",
           "type": "[str]",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "Each child project one time, in the new order."
         }
       ],
       "cases": [],
@@ -2400,7 +2474,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The project to remove."
         }
       ],
       "cases": [],
@@ -2415,7 +2490,8 @@
           "type": "[RemovedPane]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The panes that left the model."
         }
       ],
       "cases": [],
@@ -2455,13 +2531,15 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new workspace: a fixed id, or the id of a widget."
         },
         {
           "name": "kind",
           "type": "Kind",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The kind of the workspace."
         }
       ],
       "cases": [],
@@ -2482,7 +2560,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace to remove."
         }
       ],
       "cases": [],
@@ -2497,7 +2576,8 @@
           "type": "[RemovedPane]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The panes that left the model."
         }
       ],
       "cases": [],
@@ -2511,38 +2591,44 @@
           "name": "workspace",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace of the new tab."
         },
         {
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new tab. The client makes it."
         },
         {
           "name": "index",
           "type": "u32",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The position of the tab in its workspace. Null puts it at the end."
         },
         {
           "name": "root",
           "type": "Node",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "One pane, or a tree of panes, with the ids that the client made."
         },
         {
           "name": "title",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The title of the tab."
         },
         {
           "name": "focus",
           "type": "bool",
           "optional": false,
           "default": "true",
-          "since": 3
+          "since": 3,
+          "doc": "The tab becomes the active tab of its workspace."
         }
       ],
       "cases": [],
@@ -2563,7 +2649,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab to close."
         }
       ],
       "cases": [],
@@ -2578,7 +2665,8 @@
           "type": "[RemovedPane]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The panes that left the model."
         }
       ],
       "cases": [],
@@ -2592,13 +2680,15 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab."
         },
         {
           "name": "title",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The new title. Null removes it."
         }
       ],
       "cases": [],
@@ -2619,13 +2709,15 @@
           "name": "workspace",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace of the tab."
         },
         {
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab that becomes active."
         }
       ],
       "cases": [],
@@ -2646,19 +2738,22 @@
           "name": "workspace",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace of the tab."
         },
         {
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab to move."
         },
         {
           "name": "index",
           "type": "u32",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The new position of the tab."
         }
       ],
       "cases": [],
@@ -2679,19 +2774,22 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab to move."
         },
         {
           "name": "to_workspace",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace that gets the tab."
         },
         {
           "name": "index",
           "type": "u32",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The position of the tab there. Null puts it at the end."
         }
       ],
       "cases": [],
@@ -2712,37 +2810,43 @@
           "name": "src",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab whose panes move. It closes."
         },
         {
           "name": "dst",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab that gets the panes."
         },
         {
           "name": "target_pane",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The pane of dst next to which the panes go. Null is the edge of the tab."
         },
         {
           "name": "zone",
           "type": "Zone",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The side of the target where the panes go."
         },
         {
           "name": "split_id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new split. The client makes it."
         },
         {
           "name": "rebalance",
           "type": "bool",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "True: every ratio of the tab is even after the change. Null takes auto_tiling of model.options."
         }
       ],
       "cases": [],
@@ -2775,57 +2879,66 @@
           "name": "tab",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab of the pane."
         },
         {
           "name": "target",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane to split."
         },
         {
           "name": "new",
           "type": "Pane",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The new pane, with the id that the client made."
         },
         {
           "name": "split_id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new split. The client makes it."
         },
         {
           "name": "dir",
           "type": "SplitDir",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The direction of the split. Auto splits along the longer side of the target."
         },
         {
           "name": "position",
           "type": "Position",
           "optional": false,
           "default": "second",
-          "since": 3
+          "since": 3,
+          "doc": "The side of the split that the new pane takes."
         },
         {
           "name": "ratio",
           "type": "f64",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The ratio of the first side. Null is 0.5."
         },
         {
           "name": "focus",
           "type": "bool",
           "optional": false,
           "default": "true",
-          "since": 3
+          "since": 3,
+          "doc": "The new pane gets the focus, and a zoom ends."
         },
         {
           "name": "rebalance",
           "type": "bool",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "True: every ratio of the tab is even after the change. Null takes auto_tiling of model.options."
         }
       ],
       "cases": [],
@@ -2868,13 +2981,15 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane to close."
         },
         {
           "name": "rebalance",
           "type": "bool",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "True: every ratio of the tab is even after the change. Null takes auto_tiling of model.options."
         }
       ],
       "cases": [],
@@ -2889,7 +3004,8 @@
           "type": "[RemovedPane]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The panes that left the model."
         }
       ],
       "cases": [],
@@ -2903,31 +3019,36 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane to move."
         },
         {
           "name": "dest",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane next to which it goes, in this tab or in another."
         },
         {
           "name": "zone",
           "type": "Zone",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The side of dest where the pane goes."
         },
         {
           "name": "split_id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new split. The client makes it."
         },
         {
           "name": "rebalance",
           "type": "bool",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "True: every ratio of the tab is even after the change. Null takes auto_tiling of model.options."
         }
       ],
       "cases": [],
@@ -2948,19 +3069,22 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane to move."
         },
         {
           "name": "tab_id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the new tab. The client makes it."
         },
         {
           "name": "workspace",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The workspace of the new tab. Null is the workspace of the pane."
         }
       ],
       "cases": [],
@@ -2981,7 +3105,8 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane that gets the focus."
         }
       ],
       "cases": [],
@@ -3002,13 +3127,15 @@
           "name": "tab",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab."
         },
         {
           "name": "pane",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The pane to zoom. Null ends the zoom."
         }
       ],
       "cases": [],
@@ -3029,13 +3156,15 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The split."
         },
         {
           "name": "ratio",
           "type": "f64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The ratio of the first side. The server keeps it inside 0.15 to 0.85."
         }
       ],
       "cases": [],
@@ -3056,13 +3185,15 @@
           "name": "project",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that the key window shows."
         },
         {
           "name": "tab",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The tab that becomes the active tab of the workspace of the project."
         }
       ],
       "cases": [],
@@ -3083,14 +3214,16 @@
           "name": "model",
           "type": "ModelData",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The model that the client made from the v1 files."
         },
         {
           "name": "source",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 3
+          "since": 3,
+          "doc": "What the client read, for the log: workspaces_v3.json, for example."
         }
       ],
       "cases": [],
@@ -3111,7 +3244,8 @@
           "name": "model",
           "type": "ModelData",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The model of the client."
         }
       ],
       "cases": [],
@@ -3132,7 +3266,8 @@
           "name": "auto_tiling",
           "type": "bool",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The rebalance of a request that gives null."
         }
       ],
       "cases": [],
