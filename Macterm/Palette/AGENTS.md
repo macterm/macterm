@@ -48,7 +48,7 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
       - Its pill has no glyph (`PaletteInput.pill`, from `PaletteInput.title`). A `PaletteInput` cannot name one. Its palette row therefore has no glyph either.
-      - Its results have the height of their content, up to the height of every other screen (`CommandPalettePanel.resultsHeight`). With no completion, no refusal and nothing loading, the screen is the field alone, with no divider. Every other screen keeps the full height, so that the panel does not change size during a search.
+      - Its results have the height of their content, up to 340 pt, the height of the other screens. The panel therefore changes height when a completion or a refusal comes or goes. With no row and no notice, the screen is the field alone, with no divider (`CommandPalettePanel.showsResults`). The other screens keep the full height, so that the panel does not change size during a search.
       - An `AppCommand` that asks its value on an input screen returns it from `AppCommand.inputScope`. Its palette row enters it in place, and its keybind and menu item open the palette on it.
       - Rename Current Tab and Rename Current Project ask the name here (`PaletteInput.renameTab`, `PaletteInput.renameProject`). The inline rename of a sidebar row (a double-click, the context menu) and ghostty's `prompt_surface_title` still edit the row.
     - `PasswordPaletteScope`.

@@ -68,6 +68,7 @@ struct CommandSourceTests {
             return
         }
         #expect(input.id == "rename-tab:\(secondTab.id.uuidString)")
+        #expect(item.icon == nil, "an input screen's pill has no glyph, so its row has none")
         #expect(state.postPaletteAction == nil)
     }
 
