@@ -299,29 +299,7 @@
       ],
       "args": "ProjectRemove.Args",
       "result": "ProjectRemove.Result",
-      "doc": "Removes a project that holds no projects, and its workspace."
-    },
-    {
-      "name": "workspace.create",
-      "type": "WorkspaceCreate",
-      "since": 3,
-      "senders": [
-        "local"
-      ],
-      "args": "WorkspaceCreate.Args",
-      "result": "WorkspaceCreate.Result",
-      "doc": "Makes a workspace that is not the workspace of a project."
-    },
-    {
-      "name": "workspace.remove",
-      "type": "WorkspaceRemove",
-      "since": 3,
-      "senders": [
-        "local"
-      ],
-      "args": "WorkspaceRemove.Args",
-      "result": "WorkspaceRemove.Result",
-      "doc": "Removes a workspace that is not the workspace of a project, with its tabs."
+      "doc": "Removes a project that holds no projects, with its tabs."
     },
     {
       "name": "tab.create",
@@ -365,7 +343,7 @@
       ],
       "args": "TabSelect.Args",
       "result": "TabSelect.Result",
-      "doc": "Sets the active tab of a workspace."
+      "doc": "Sets the active tab of a project."
     },
     {
       "name": "tab.reorder",
@@ -376,7 +354,7 @@
       ],
       "args": "TabReorder.Args",
       "result": "TabReorder.Result",
-      "doc": "Moves a tab to a position in its workspace."
+      "doc": "Moves a tab to a position in its project."
     },
     {
       "name": "tab.move",
@@ -387,7 +365,7 @@
       ],
       "args": "TabMove.Args",
       "result": "TabMove.Result",
-      "doc": "Moves a tab to another workspace and makes it the active tab there."
+      "doc": "Moves a tab to another project and makes it the active tab there."
     },
     {
       "name": "tab.merge",
@@ -596,16 +574,6 @@
     {
       "name": "tab.order",
       "type": "TabOrder",
-      "since": 3,
-      "senders": [
-        "local",
-        "session",
-        "remote"
-      ]
-    },
-    {
-      "name": "workspace.remove",
-      "type": "WorkspaceRemoved",
       "since": 3,
       "senders": [
         "local",
@@ -1920,7 +1888,7 @@
           "name": "version",
           "type": "u32",
           "optional": false,
-          "default": "1",
+          "default": "2",
           "since": 3
         },
         {
@@ -1940,13 +1908,6 @@
         {
           "name": "projects",
           "type": "[Project]",
-          "optional": false,
-          "default": "[]",
-          "since": 3
-        },
-        {
-          "name": "workspaces",
-          "type": "[Workspace]",
           "optional": false,
           "default": "[]",
           "since": 3
@@ -2009,25 +1970,32 @@
           "type": "str",
           "optional": true,
           "since": 3
-        }
-      ],
-      "cases": [],
-      "variants": []
-    },
-    {
-      "name": "Workspace",
-      "kind": "struct",
-      "fields": [
+        },
         {
-          "name": "id",
-          "type": "str",
+          "name": "sidebar",
+          "type": "ProjectSidebar",
           "optional": false,
+          "default": "tree",
           "since": 3
         },
         {
-          "name": "kind",
-          "type": "Kind",
+          "name": "single_tab",
+          "type": "bool",
           "optional": false,
+          "default": "false",
+          "since": 3
+        },
+        {
+          "name": "removable",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        },
+        {
+          "name": "alias",
+          "type": "str",
+          "optional": true,
           "since": 3
         },
         {
@@ -2048,15 +2016,14 @@
       "variants": []
     },
     {
-      "name": "Kind",
+      "name": "ProjectSidebar",
       "kind": "enum",
       "fields": [],
       "cases": [
-        "project",
-        "pinned",
-        "scratch",
-        "quick",
-        "widget"
+        "tree",
+        "top",
+        "bottom",
+        "none"
       ],
       "variants": []
     },
@@ -2078,7 +2045,7 @@
         },
         {
           "name": "root",
-          "type": "Node",
+          "type": "SplitNode",
           "optional": false,
           "since": 3
         },
@@ -2093,7 +2060,7 @@
       "variants": []
     },
     {
-      "name": "Node",
+      "name": "SplitNode",
       "kind": "union",
       "fields": [],
       "cases": [],
@@ -2203,13 +2170,13 @@
         },
         {
           "name": "first",
-          "type": "Node",
+          "type": "SplitNode",
           "optional": false,
           "since": 3
         },
         {
           "name": "second",
-          "type": "Node",
+          "type": "SplitNode",
           "optional": false,
           "since": 3
         }
@@ -2301,6 +2268,33 @@
           "type": "i64",
           "optional": false,
           "default": "0",
+          "since": 3
+        },
+        {
+          "name": "sidebar",
+          "type": "ProjectSidebar",
+          "optional": false,
+          "default": "tree",
+          "since": 3
+        },
+        {
+          "name": "single_tab",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        },
+        {
+          "name": "removable",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        },
+        {
+          "name": "alias",
+          "type": "str",
+          "optional": true,
           "since": 3
         }
       ],
@@ -2442,67 +2436,11 @@
       "variants": []
     },
     {
-      "name": "WorkspaceCreate.Args",
-      "kind": "struct",
-      "fields": [
-        {
-          "name": "id",
-          "type": "str",
-          "optional": false,
-          "since": 3
-        },
-        {
-          "name": "kind",
-          "type": "Kind",
-          "optional": false,
-          "since": 3
-        }
-      ],
-      "cases": [],
-      "variants": []
-    },
-    {
-      "name": "WorkspaceCreate.Result",
-      "kind": "struct",
-      "fields": [],
-      "cases": [],
-      "variants": []
-    },
-    {
-      "name": "WorkspaceRemove.Args",
-      "kind": "struct",
-      "fields": [
-        {
-          "name": "id",
-          "type": "str",
-          "optional": false,
-          "since": 3
-        }
-      ],
-      "cases": [],
-      "variants": []
-    },
-    {
-      "name": "WorkspaceRemove.Result",
-      "kind": "struct",
-      "fields": [
-        {
-          "name": "panes",
-          "type": "[RemovedPane]",
-          "optional": false,
-          "default": "[]",
-          "since": 3
-        }
-      ],
-      "cases": [],
-      "variants": []
-    },
-    {
       "name": "TabCreate.Args",
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -2521,7 +2459,7 @@
         },
         {
           "name": "root",
-          "type": "Node",
+          "type": "SplitNode",
           "optional": false,
           "since": 3
         },
@@ -2610,7 +2548,7 @@
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -2637,7 +2575,7 @@
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -2676,7 +2614,7 @@
           "since": 3
         },
         {
-          "name": "to_workspace",
+          "name": "to_project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -2951,7 +2889,7 @@
           "since": 3
         },
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": true,
           "since": 3
@@ -3203,8 +3141,87 @@
       "fields": [
         {
           "name": "project",
-          "type": "Project",
+          "type": "ProjectInfo",
           "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "ProjectInfo",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "color",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "sort_order",
+          "type": "i64",
+          "optional": false,
+          "default": "0",
+          "since": 3
+        },
+        {
+          "name": "created_at",
+          "type": "i64",
+          "optional": false,
+          "default": "0",
+          "since": 3
+        },
+        {
+          "name": "parent",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "sidebar",
+          "type": "ProjectSidebar",
+          "optional": false,
+          "default": "tree",
+          "since": 3
+        },
+        {
+          "name": "single_tab",
+          "type": "bool",
+          "optional": false,
+          "default": "false",
+          "since": 3
+        },
+        {
+          "name": "removable",
+          "type": "bool",
+          "optional": false,
+          "default": "true",
+          "since": 3
+        },
+        {
+          "name": "alias",
+          "type": "str",
+          "optional": true,
           "since": 3
         }
       ],
@@ -3250,7 +3267,7 @@
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -3276,7 +3293,7 @@
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
           "optional": false,
           "since": 3
@@ -3296,14 +3313,8 @@
       "kind": "struct",
       "fields": [
         {
-          "name": "workspace",
+          "name": "project",
           "type": "str",
-          "optional": false,
-          "since": 3
-        },
-        {
-          "name": "kind",
-          "type": "Kind",
           "optional": false,
           "since": 3
         },
@@ -3317,20 +3328,6 @@
           "name": "active_tab",
           "type": "str",
           "optional": true,
-          "since": 3
-        }
-      ],
-      "cases": [],
-      "variants": []
-    },
-    {
-      "name": "WorkspaceRemoved",
-      "kind": "struct",
-      "fields": [
-        {
-          "name": "id",
-          "type": "str",
-          "optional": false,
           "since": 3
         }
       ],

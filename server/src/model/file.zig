@@ -5,8 +5,12 @@
 //! never destroys the data of a newer one. A file that does not parse, or
 //! does not validate, is refused too, and nothing is written over it.
 //!
-//! Only `Data` is in the file. The zoom and the focus history of a tab stay
-//! in memory (design/010 §1).
+//! Only `ModelData` is in the file. The zoom and the focus history of a tab
+//! stay in memory (design/010 §1).
+//!
+//! The reader also takes a file of version 1, which had a list of
+//! workspaces apart from the projects (design/010 §11). The writer writes
+//! the current version only.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -37,16 +41,18 @@ pub fn peekVersion(gpa: Allocator, bytes: []const u8) ?u32 {
 /// can go away. `fault` gets the first fault when the
 /// result is `error.Invalid`.
 pub fn parse(gpa: Allocator, bytes: []const u8, fault: *model.Fault) LoadError!Model {
-    if (peekVersion(gpa, bytes)) |v| {
-        if (v > model.version) return error.NewerVersion;
-    }
+    const v = peekVersion(gpa, bytes);
+    if (v) |x| if (x > model.version) return error.NewerVersion;
     var m = Model.init(gpa);
     errdefer m.deinit();
-    m.data = std.json.parseFromSliceLeaky(model.ModelData, m.arena.allocator(), bytes, .{ .allocate = .alloc_always }) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.Syntax,
-    };
-    try addFormerGroupWorkspaces(gpa, &m, bytes);
+    const a = m.arena.allocator();
+    const options: std.json.ParseOptions = .{ .allocate = .alloc_always };
+    if (v == 1) {
+        const old = std.json.parseFromSliceLeaky(Version1, a, bytes, options) catch |err| return syntax(err);
+        m.data = try fromVersion1(a, old, fault);
+    } else {
+        m.data = std.json.parseFromSliceLeaky(model.ModelData, a, bytes, options) catch |err| return syntax(err);
+    }
     if (try model.validate(gpa, &m.data)) |f| {
         fault.* = f;
         return error.Invalid;
@@ -54,35 +60,70 @@ pub fn parse(gpa: Allocator, bytes: []const u8, fault: *model.Fault) LoadError!M
     return m;
 }
 
-/// Gives an empty workspace to each project that an older build wrote as
-/// `kind: group` (design/013, "Ethan chose B" §1). Any other project with
-/// no workspace stays a fault.
-fn addFormerGroupWorkspaces(gpa: Allocator, m: *Model, bytes: []const u8) LoadError!void {
-    const Old = struct {
-        projects: []const struct {
-            id: []const u8,
-            kind: ?enum { project, group } = null,
-        } = &.{},
+fn syntax(err: anyerror) LoadError {
+    return if (err == error.OutOfMemory) error.OutOfMemory else error.Syntax;
+}
+
+/// A file of version 1: the tabs were in workspaces. A project's workspace
+/// had the project's id; the pinned, scratch, quick-terminal and widget
+/// workspaces had ids of their own.
+const Version1 = struct {
+    version: u32,
+    epoch_hint: u64 = 0,
+    imported_v1: bool = false,
+    projects: []model.Project = &.{},
+    workspaces: []const Workspace = &.{},
+    selection: model.Selection = .{},
+
+    const Workspace = struct {
+        id: []const u8,
+        kind: enum { project, pinned, scratch, quick, widget },
+        tabs: []model.Tab = &.{},
+        active_tab: ?model.TabId = null,
     };
-    const parsed = std.json.parseFromSlice(Old, gpa, bytes, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.Syntax,
-    };
-    defer parsed.deinit();
-    const a = m.arena.allocator();
-    var added: std.ArrayList(model.Workspace) = .empty;
-    for (parsed.value.projects) |p| {
-        if (p.kind != .group) continue;
-        const id: model.WorkspaceId = .of(p.id);
-        if (m.findWorkspace(id) != null) continue;
-        try added.append(gpa, .{ .id = try id.dupe(a), .kind = .project });
+};
+
+/// The projects of a version 1 file, each with the tabs of its workspace.
+/// A pinned, scratch, quick-terminal or widget workspace with no project of
+/// its id becomes a hidden project with the fields of design/010 §11, §2.
+/// A project with no workspace (a former group) has no tabs.
+fn fromVersion1(a: Allocator, old: Version1, fault: *model.Fault) LoadError!model.ModelData {
+    var projects: std.ArrayList(model.Project) = .empty;
+    try projects.appendSlice(a, old.projects);
+    var done: std.StringHashMapUnmanaged(void) = .empty;
+    for (old.workspaces, 0..) |w, wi| {
+        if ((try done.getOrPut(a, w.id)).found_existing) {
+            fault.* = .make("workspaces[{d}].id: duplicate", .{wi});
+            return error.Invalid;
+        }
+        for (projects.items) |*p| {
+            if (!std.mem.eql(u8, p.id.text, w.id)) continue;
+            p.tabs = w.tabs;
+            p.active_tab = w.active_tab;
+            break;
+        } else {
+            const hidden: model.Project = switch (w.kind) {
+                .project => {
+                    fault.* = .make("workspaces[{d}].id: no project", .{wi});
+                    return error.Invalid;
+                },
+                .pinned => .{ .id = .of(w.id), .name = "Pinned", .path = "", .sidebar = .top, .removable = false, .alias = "pinned" },
+                .scratch => .{ .id = .of(w.id), .name = "Scratch Tabs", .path = "", .sidebar = .bottom, .removable = false, .alias = "scratch" },
+                .quick => .{ .id = .of(w.id), .name = "Quick Terminal", .path = "", .sidebar = .none, .single_tab = true, .removable = false, .alias = "quick" },
+                .widget => .{ .id = .of(w.id), .name = "Widget", .path = "", .sidebar = .none, .single_tab = true },
+            };
+            var p = hidden;
+            p.tabs = w.tabs;
+            p.active_tab = w.active_tab;
+            try projects.append(a, p);
+        }
     }
-    defer added.deinit(gpa);
-    if (added.items.len == 0) return;
-    const all = try a.alloc(model.Workspace, m.data.workspaces.len + added.items.len);
-    @memcpy(all[0..m.data.workspaces.len], m.data.workspaces);
-    @memcpy(all[m.data.workspaces.len..], added.items);
-    m.data.workspaces = all;
+    return .{
+        .epoch_hint = old.epoch_hint,
+        .imported_v1 = old.imported_v1,
+        .projects = projects.items,
+        .selection = old.selection,
+    };
 }
 
 /// Writes the model as JSON.

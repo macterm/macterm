@@ -605,7 +605,6 @@ pub const LinkClose = struct {
 // `model.options`.
 
 pub const ProjectId = model.ProjectId;
-pub const WorkspaceId = model.WorkspaceId;
 pub const TabId = model.TabId;
 pub const PaneId = model.PaneId;
 pub const SplitId = model.SplitId;
@@ -671,6 +670,13 @@ pub const ProjectCreate = struct {
         parent: ?ProjectId = null,
         /// Unix time in milliseconds.
         created_at: i64 = 0,
+        /// The capability fields (design/010 §11). They never change after
+        /// this request. The defaults make a project of the tree. An
+        /// `alias` that a project has fails with `duplicate_id`.
+        sidebar: model.ProjectSidebar = .tree,
+        single_tab: bool = false,
+        removable: bool = true,
+        alias: ?[]const u8 = null,
     };
     pub const Result = struct {};
 };
@@ -708,39 +714,16 @@ pub const ProjectReorder = struct {
     pub const Result = struct {};
 };
 
-/// Removes a project and its workspace. A project that holds projects is
-/// refused (`bad_request`).
+/// Removes a project and its tabs. A project that holds projects fails
+/// with `invalid_args`, and a project that is not `removable` with
+/// `refused`.
 pub const ProjectRemove = struct {
     pub const name = "project.remove";
-    pub const doc = "Removes a project that holds no projects, and its workspace.";
+    pub const doc = "Removes a project that holds no projects, with its tabs.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct { id: ProjectId };
-    /// The panes that left the model.
-    pub const Result = struct { panes: []const RemovedPane = &.{} };
-};
-
-/// Makes a workspace that is not a project's: pinned, scratch, quick or
-/// widget. The client gives the id (a fixed id, or a widget's id).
-pub const WorkspaceCreate = struct {
-    pub const name = "workspace.create";
-    pub const doc = "Makes a workspace that is not the workspace of a project.";
-    pub const since = 3;
-    pub const senders: []const Trust = &.{.local};
-
-    pub const Args = struct { id: WorkspaceId, kind: model.Kind };
-    pub const Result = struct {};
-};
-
-/// Removes a workspace that is not a project's, with its tabs.
-pub const WorkspaceRemove = struct {
-    pub const name = "workspace.remove";
-    pub const doc = "Removes a workspace that is not the workspace of a project, with its tabs.";
-    pub const since = 3;
-    pub const senders: []const Trust = &.{.local};
-
-    pub const Args = struct { id: WorkspaceId };
     /// The panes that left the model.
     pub const Result = struct { panes: []const RemovedPane = &.{} };
 };
@@ -754,13 +737,13 @@ pub const TabCreate = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
-        workspace: WorkspaceId,
+        project: ProjectId,
         id: TabId,
         /// At the end when null.
         index: ?u32 = null,
-        root: model.Node,
+        root: model.SplitNode,
         title: ?[]const u8 = null,
-        /// The tab becomes the workspace's active tab.
+        /// The tab becomes the project's active tab.
         focus: bool = true,
     };
     pub const Result = struct {};
@@ -788,38 +771,38 @@ pub const TabSet = struct {
     pub const Result = struct {};
 };
 
-/// The active tab of a workspace.
+/// The active tab of a project.
 pub const TabSelect = struct {
     pub const name = "tab.select";
-    pub const doc = "Sets the active tab of a workspace.";
+    pub const doc = "Sets the active tab of a project.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
-    pub const Args = struct { workspace: WorkspaceId, id: TabId };
+    pub const Args = struct { project: ProjectId, id: TabId };
     pub const Result = struct {};
 };
 
 pub const TabReorder = struct {
     pub const name = "tab.reorder";
-    pub const doc = "Moves a tab to a position in its workspace.";
+    pub const doc = "Moves a tab to a position in its project.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
-    pub const Args = struct { workspace: WorkspaceId, id: TabId, index: u32 };
+    pub const Args = struct { project: ProjectId, id: TabId, index: u32 };
     pub const Result = struct {};
 };
 
-/// Moves a tab to another workspace (pinned and scratch included) and makes
-/// it the active tab there. No session moves.
+/// Moves a tab to another project (Pinned and Scratch Tabs included) and
+/// makes it the active tab there. No session moves.
 pub const TabMove = struct {
     pub const name = "tab.move";
-    pub const doc = "Moves a tab to another workspace and makes it the active tab there.";
+    pub const doc = "Moves a tab to another project and makes it the active tab there.";
     pub const since = 3;
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
         id: TabId,
-        to_workspace: WorkspaceId,
+        to_project: ProjectId,
         index: ?u32 = null,
     };
     pub const Result = struct {};
@@ -907,7 +890,7 @@ pub const PaneMove = struct {
     pub const Result = struct {};
 };
 
-/// Moves a pane out of its tab into a new tab `tab_id`, in `workspace` (the
+/// Moves a pane out of its tab into a new tab `tab_id`, in `project` (the
 /// pane's own when null).
 pub const PaneSeparate = struct {
     pub const name = "pane.separate";
@@ -918,7 +901,7 @@ pub const PaneSeparate = struct {
     pub const Args = struct {
         id: PaneId,
         tab_id: TabId,
-        workspace: ?WorkspaceId = null,
+        project: ?ProjectId = null,
     };
     pub const Result = struct {};
 };
@@ -956,7 +939,7 @@ pub const SplitRatio = struct {
 };
 
 /// The key window's selection. `tab` becomes the active tab of the
-/// project's workspace.
+/// project. A project with `sidebar: none` fails with `refused`.
 pub const SelectSet = struct {
     pub const name = "select.set";
     pub const doc = "Sets the selection of the key window.";
@@ -1023,19 +1006,18 @@ pub const methods = .{
     ControlResume,  ChannelOpen,    ChannelClose,  ChannelPause,    ChannelResume,   Ping,           SessionCreate,
     SessionList,    SessionInfo,    SessionKill,   PaneSeen,        SessionSend,     SessionKey,     SessionHistory,
     SessionInspect, ServerExit,     CommandRun,    LinkOpen,        LinkClose,       StateSubscribe, ProjectCreate,
-    ProjectSet,     ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,      TabClose,
-    TabSet,         TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,      PaneClose,
-    PaneMove,       PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,      ModelImport,
-    ModelReplace,   ModelOptions,
+    ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,       TabClose,        TabSet,         TabSelect,
+    TabReorder,     TabMove,        TabMerge,      PaneSplit,       PaneClose,       PaneMove,       PaneSeparate,
+    PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,       ModelImport,     ModelReplace,   ModelOptions,
 };
 
 /// The methods that change the model. The server answers one of them sent
 /// again from the ring of request ids, and does it only one time.
 pub const model_writes = .{
-    ProjectCreate, ProjectSet,   ProjectReorder, ProjectRemove, WorkspaceCreate, WorkspaceRemove, TabCreate,
-    TabClose,      TabSet,       TabSelect,      TabReorder,    TabMove,         TabMerge,        PaneSplit,
-    PaneClose,     PaneMove,     PaneSeparate,   PaneFocus,     PaneZoom,        SplitRatio,      SelectSet,
-    ModelImport,   ModelReplace, ModelOptions,
+    ProjectCreate, ProjectSet, ProjectReorder, ProjectRemove, TabCreate,    TabClose,  TabSet,
+    TabSelect,     TabReorder, TabMove,        TabMerge,      PaneSplit,    PaneClose, PaneMove,
+    PaneSeparate,  PaneFocus,  PaneZoom,       SplitRatio,    SelectSet,    ModelImport, ModelReplace,
+    ModelOptions,
 };
 
 // ── Events ──────────────────────────────────────────────────────────────────
@@ -1074,13 +1056,45 @@ pub const PaneAttention = struct {
 // the newest value for a key wins when events merge. One request makes one
 // batch.
 
+/// The fields of a project without its tabs: `tab.order` and `tab.set`
+/// carry those.
+pub const ProjectInfo = struct {
+    id: ProjectId,
+    name: []const u8,
+    path: []const u8,
+    color: ?[]const u8 = null,
+    sort_order: i64 = 0,
+    created_at: i64 = 0,
+    parent: ?ProjectId = null,
+    sidebar: model.ProjectSidebar = .tree,
+    single_tab: bool = false,
+    removable: bool = true,
+    alias: ?[]const u8 = null,
+
+    pub fn of(p: model.Project) ProjectInfo {
+        return .{
+            .id = p.id,
+            .name = p.name,
+            .path = p.path,
+            .color = p.color,
+            .sort_order = p.sort_order,
+            .created_at = p.created_at,
+            .parent = p.parent,
+            .sidebar = p.sidebar,
+            .single_tab = p.single_tab,
+            .removable = p.removable,
+            .alias = p.alias,
+        };
+    }
+};
+
 /// A project was made or changed.
 pub const ProjectChanged = struct {
     pub const name = "project.set";
     pub const since = 3;
     pub const senders = everyone;
 
-    project: model.Project,
+    project: ProjectInfo,
 };
 
 pub const ProjectRemoved = struct {
@@ -1107,7 +1121,7 @@ pub const TabChanged = struct {
     pub const since = 3;
     pub const senders = everyone;
 
-    workspace: WorkspaceId,
+    project: ProjectId,
     tab: model.Tab,
     zoomed: ?PaneId = null,
 };
@@ -1117,30 +1131,19 @@ pub const TabRemoved = struct {
     pub const since = 3;
     pub const senders = everyone;
 
-    workspace: WorkspaceId,
+    project: ProjectId,
     id: TabId,
 };
 
-/// A workspace was made, or its tabs, their order or its active tab
-/// changed.
+/// The tabs of a project, their order or its active tab changed.
 pub const TabOrder = struct {
     pub const name = "tab.order";
     pub const since = 3;
     pub const senders = everyone;
 
-    workspace: WorkspaceId,
-    kind: model.Kind,
+    project: ProjectId,
     ids: []const TabId,
     active_tab: ?TabId = null,
-};
-
-/// A workspace that is not a project's was removed.
-pub const WorkspaceRemoved = struct {
-    pub const name = "workspace.remove";
-    pub const since = 3;
-    pub const senders = everyone;
-
-    id: WorkspaceId,
 };
 
 pub const SelectionChanged = struct {
@@ -1163,8 +1166,8 @@ pub const PaneRemoved = struct {
 };
 
 pub const events = .{
-    SessionExit, PaneAttention,    ProjectChanged,   ProjectRemoved, ProjectOrder, TabChanged, TabRemoved,
-    TabOrder,    WorkspaceRemoved, SelectionChanged, PaneRemoved,
+    SessionExit, PaneAttention,    ProjectChanged, ProjectRemoved, ProjectOrder, TabChanged, TabRemoved,
+    TabOrder,    SelectionChanged, PaneRemoved,
 };
 
 /// True if a connection with this trust may send message `M`. A message from
