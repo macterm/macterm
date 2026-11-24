@@ -54,9 +54,10 @@ struct ScratchTabsTests {
             #expect(!ScratchTabs.reservesName(name), "\(name)")
         }
         // The pinned name still goes through the shared test.
-        #expect(Project.reservedNameMessage(for: "Pinned") == PinnedTabs.reservedNameMessage)
-        #expect(Project.reservedNameMessage(for: "scratch") == ScratchTabs.reservedNameMessage)
-        #expect(Project.reservedNameMessage(for: "api") == nil)
+        #expect(Project.nameRefusal(for: "Pinned") == PinnedTabs.reservedNameMessage)
+        #expect(Project.nameRefusal(for: "scratch") == ScratchTabs.reservedNameMessage)
+        #expect(Project.nameRefusal(for: "api") == nil)
+        #expect(Project.nameRefusal(for: "Work/api") == Project.slashMessage)
     }
 
     // MARK: - Creation

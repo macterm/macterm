@@ -5,8 +5,9 @@ import os
 private let logger = Logger(subsystem: appBundleID, category: "LocalSessions")
 
 /// The app's one connection to the local server, for the sessions of its
-/// local panes: the local `ServerEndpoint`. Each local pane's `PaneSession`
-/// opens its channel on it, and it lists and ends the sessions.
+/// local panes: the local `ServerEndpoint`. It makes, lists and ends the
+/// sessions. A local pane's `PaneSession` opens its channel on the
+/// session's own socket (`paneChannels`), not on this connection.
 ///
 /// It connects at the first use, and again after the connection ends (the
 /// server exits when it has no session and no client). The server ends a
@@ -96,6 +97,41 @@ actor LocalSessions: ServerEndpoint {
             return try await next.call(method, args, timeout: serverRequestTimeout)
         }
     }
+
+    /// The sessions' own sockets: a local pane's bytes never pass through
+    /// the server (design/001). Throws when there is no bundled server.
+    nonisolated func paneChannels() async throws -> any PaneChannelOpener {
+        guard let server else { throw ServerClientError.noAnswer }
+        return SessionSockets(directory: server.directory) { [weak self] session in
+            Task { await self?.exitRead(session) }
+        }
+    }
+
+    /// A pane's channel read the exit of `session` on the session's own
+    /// socket. `session.info` tells the server: the server ends a session
+    /// when a reply shows the status that it read (`registry.statusRead`).
+    /// The server hears the exit on its own connection to the session, which
+    /// can come after this request: while the reply says `running`, it asks
+    /// again. A server that is down is started again by the request.
+    private func exitRead(_ session: String) async {
+        for _ in 0 ..< Self.exitReadTries {
+            do {
+                let info = try await call(MactermProtocol.SessionInfo.self, .init(id: session))
+                if info.session.state != .running { return }
+            } catch let ProtocolControlError.errorResponse(info) where info.errorCode == .notFound {
+                return
+            } catch {
+                logger.info("session info \(session, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+            try? await Task.sleep(for: Self.exitReadWait)
+        }
+        logger.warning("session \(session, privacy: .public): the server did not see its exit")
+    }
+
+    /// `exitRead` asks this many times, this far apart.
+    private static let exitReadTries = 40
+    private static let exitReadWait: Duration = .milliseconds(50)
 
     /// The connection to the server, made when there is none or when the
     /// last one ended. A pane opens its channel on it. It tries again for a

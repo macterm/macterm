@@ -117,6 +117,43 @@ struct ProjectStoreTests {
     }
 
     @Test
+    func rename_refuses_a_slash() {
+        let store = makeStore()
+        let project = store.create(name: "alpha", path: "/tmp")
+        store.rename(id: project.id, to: "Work/api")
+        #expect(store.projects.first?.name == "alpha")
+    }
+
+    @Test
+    func create_changes_each_slash_to_a_hyphen() {
+        // A name nobody typed (the `name:` of a layout file) is changed, not
+        // refused, as a reserved name is.
+        let store = makeStore()
+        #expect(store.create(name: "Work/api/lib", path: "/tmp/a").name == "Work-api-lib")
+        #expect(store.create(name: "Pinned/", path: "/tmp/b").name == "Pinned-")
+        #expect(store.create(name: "api", path: "/tmp/c").name == "api")
+    }
+
+    @Test
+    func a_stored_name_with_a_slash_still_loads() throws {
+        // Names from before the rule stay as they are.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-slash-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let first = ProjectStore(fileURL: url)
+        var project = Project(name: "placeholder", path: "/tmp")
+        project = first.add(project)
+        let data = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: "\"placeholder\"", with: "\"Work\\/api\"")
+        try data.write(to: url, atomically: true, encoding: .utf8)
+
+        let second = ProjectStore(fileURL: url)
+        #expect(!second.loadFailed)
+        #expect(second.projects.map(\.name) == ["Work/api"])
+        #expect(second.projects.first?.id == project.id)
+    }
+
+    @Test
     func find_or_create_reuses_matching_remote_path() {
         let store = makeStore()
         let existing = Project(name: "api", path: "devbox:~/dev/api", sortOrder: 0)

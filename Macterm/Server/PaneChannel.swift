@@ -70,81 +70,161 @@ enum PaneChannelEvent: Equatable {
     }
 }
 
-/// One pane's channel on a `ServerLink`: the surface's view of its
-/// session. Output and the session's messages come through `events`, in
-/// order, and end when the channel or the connection ends. A caller writes
-/// input from a queue of its own: a write that the server does not take fails
-/// after 10 s. Call `close()` when done:
-/// the events buffer without a limit until then.
+/// What carries one pane channel: a server's connection, which relays it
+/// (`ServerLink`), or a session's own socket (`SessionSocket`).
+protocol PaneChannelTransport: AnyObject, Sendable {
+    /// Sends a frame on the channel. Throws `disconnected` when the link
+    /// ended.
+    func send(frame: ProtocolFrame) throws
+    /// Ends the channel. Its events end. The session keeps running.
+    func closeChannel(_ number: UInt32) async
+}
+
+/// What a pane's session opens its view channels with: a server's
+/// connection (`ServerLink`), or the sockets of the local sessions
+/// (`SessionSockets`).
+protocol PaneChannelOpener: AnyObject, Sendable {
+    /// Opens a pane channel to `session` (design/003 §1).
+    func openChannel(session: String) async throws -> PaneChannel
+}
+
+/// One pane's channel: the surface's view of its session. Output and the
+/// session's messages come through `events`, in order, and end when the
+/// channel or its link ends. A caller writes input from a queue of its own:
+/// a write that the peer does not take fails after 10 s. Call `close()`
+/// when done.
+///
+/// On a server's connection the events buffer without a limit, because one
+/// reader serves every channel and must never wait. On a session's own
+/// socket (`readAhead`) the reader waits while that many events are not
+/// taken: the socket then fills, and the session holds the output
+/// (design/001, Back-pressure).
 final class PaneChannel: @unchecked Sendable {
     let number: UInt32
-    /// The `epoch` of the session's `hello`, from the `channel.open` result.
-    /// Nil from a server that does not give it: the channel cannot resume.
+    /// The `epoch` of the session's `hello`. Nil from a server that does
+    /// not give it: the channel cannot resume.
     let epoch: UInt64?
-    let events: AsyncStream<PaneChannelEvent>
+    let events: Events
 
-    private weak var connection: (any ServerLink)?
+    private weak var transport: (any PaneChannelTransport)?
     let sink: Sink
 
-    /// The reader thread's side: turns frames into events.
+    /// The reader's side: turns frames into events.
     final class Sink: @unchecked Sendable {
         private let continuation: AsyncStream<PaneChannelEvent>.Continuation
+        fileprivate let credit: Credit?
 
-        init(_ continuation: AsyncStream<PaneChannelEvent>.Continuation) {
+        fileprivate init(_ continuation: AsyncStream<PaneChannelEvent>.Continuation, credit: Credit?) {
             self.continuation = continuation
+            self.credit = credit
         }
 
+        /// With a read-ahead limit, waits while the limit is reached.
         func deliver(_ frame: ProtocolFrame) {
-            if let event = PaneChannelEvent(frame) {
-                continuation.yield(event)
-            } else {
+            guard let event = PaneChannelEvent(frame) else {
                 logger.error("pane channel: a frame could not be read, kind=\(frame.kind.rawValue, privacy: .public)")
+                return
             }
+            guard credit?.take() ?? true else { return }
+            continuation.yield(event)
         }
 
         func finish() {
+            credit?.end()
             continuation.finish()
         }
     }
 
-    init(connection: any ServerLink, number: UInt32, epoch: UInt64? = nil) {
-        self.connection = connection
+    /// The count of events that the reader gave and the consumer did not
+    /// take yet.
+    fileprivate final class Credit: @unchecked Sendable {
+        private let condition = NSCondition()
+        private let limit: Int
+        private var given = 0
+        private var ended = false
+
+        init(limit: Int) {
+            self.limit = limit
+        }
+
+        /// Waits for room. False once the channel ended.
+        func take() -> Bool {
+            condition.lock()
+            defer { condition.unlock() }
+            while given >= limit, !ended {
+                condition.wait()
+            }
+            guard !ended else { return false }
+            given += 1
+            return true
+        }
+
+        func taken() {
+            condition.lock()
+            given -= 1
+            condition.signal()
+            condition.unlock()
+        }
+
+        func end() {
+            condition.lock()
+            ended = true
+            condition.broadcast()
+            condition.unlock()
+        }
+    }
+
+    /// The events of the channel. Each event that the consumer takes gives
+    /// the reader room for one more.
+    struct Events: AsyncSequence {
+        typealias Element = PaneChannelEvent
+        fileprivate let stream: AsyncStream<PaneChannelEvent>
+        fileprivate let credit: Credit?
+
+        struct AsyncIterator: AsyncIteratorProtocol {
+            fileprivate var base: AsyncStream<PaneChannelEvent>.AsyncIterator
+            fileprivate let credit: Credit?
+
+            mutating func next() async -> PaneChannelEvent? {
+                let event = await base.next()
+                if event != nil { credit?.taken() }
+                return event
+            }
+        }
+
+        func makeAsyncIterator() -> AsyncIterator {
+            AsyncIterator(base: stream.makeAsyncIterator(), credit: credit)
+        }
+    }
+
+    /// `readAhead` is the most events that wait for the consumer; nil for
+    /// no limit.
+    init(transport: any PaneChannelTransport, number: UInt32, epoch: UInt64? = nil, readAhead: Int? = nil) {
+        self.transport = transport
         self.number = number
         self.epoch = epoch
-        let (events, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
-        self.events = events
-        sink = Sink(continuation)
+        let (stream, continuation) = AsyncStream.makeStream(of: PaneChannelEvent.self, bufferingPolicy: .unbounded)
+        let credit = readAhead.map(Credit.init(limit:))
+        events = Events(stream: stream, credit: credit)
+        sink = Sink(continuation, credit: credit)
     }
 
     /// Keys, pastes and terminal replies for the session. Never dropped.
     func sendInput(_ data: Data) throws {
-        guard let connection else { throw ServerClientError.disconnected }
-        try connection.send(frame: ProtocolFrame(channel: number, kind: .bytes, body: data))
+        guard let transport else { throw ServerClientError.disconnected }
+        try transport.send(frame: ProtocolFrame(channel: number, kind: .bytes, body: data))
     }
 
     /// A message of the pane (`attach`, `resize`, `claim`).
     func send(_ message: some ProtocolMessage) throws {
         var writer = MessagePackWriter()
         MactermProtocol.PaneMessage(message).encode(to: &writer)
-        guard let connection else { throw ServerClientError.disconnected }
-        try connection.send(frame: ProtocolFrame(channel: number, kind: .msg, body: writer.data))
-    }
-
-    /// Stops the output of a pane that no one sees. The session's messages
-    /// still come. `resume` brings a snapshot first (design/003 §6).
-    func pause() async throws {
-        guard let connection else { throw ServerClientError.disconnected }
-        _ = try await connection.call(MactermProtocol.ChannelPause.self, .init(channel: number))
-    }
-
-    func resume() async throws {
-        guard let connection else { throw ServerClientError.disconnected }
-        _ = try await connection.call(MactermProtocol.ChannelResume.self, .init(channel: number))
+        guard let transport else { throw ServerClientError.disconnected }
+        try transport.send(frame: ProtocolFrame(channel: number, kind: .msg, body: writer.data))
     }
 
     /// Ends the channel. The session keeps running.
     func close() async {
-        _ = try? await connection?.call(MactermProtocol.ChannelClose.self, .init(channel: number))
-        connection?.releaseChannel(number)
+        await transport?.closeChannel(number)
     }
 }

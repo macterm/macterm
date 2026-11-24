@@ -36,9 +36,9 @@ extension AppState {
             case applyLayout(projectID: UUID)
             /// A notice, not a question: the layout verb that failed.
             case layoutError(verb: LayoutVerb)
-            /// A notice: a rename refused because the pinned workspace
-            /// reserves the name (`PinnedTabs.reservesName`).
-            case reservedProjectName
+            /// A notice: a rename refused because the name is not allowed
+            /// (`Project.nameRefusal`).
+            case refusedProjectName
         }
 
         let id = UUID()
