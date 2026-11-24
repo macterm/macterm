@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: appBundleID, category: "ServerEndpoint")
 /// One connection to a server, as a pane and a session list use it.
 /// `ServerConnection` is the connection that the app runs. The unit tests
 /// use an in-memory link that speaks frames (`FakeServerLink`).
-protocol ServerLink: PaneChannelOpener, PaneChannelTransport {
+protocol ServerLink: PaneChannelOpener, PausingChannelTransport {
     /// False once the connection ended.
     var isOpen: Bool { get }
     /// Sends one request and waits for its response. A response with `err`
@@ -34,6 +34,16 @@ extension ServerLink {
     func closeChannel(_ number: UInt32) async {
         _ = try? await call(MactermProtocol.ChannelClose.self, .init(channel: number))
         releaseChannel(number)
+    }
+
+    /// Asks the server to stop or start the channel's output
+    /// (`channel.pause`, `channel.resume`).
+    func setPaused(_ paused: Bool, channel number: UInt32) async throws {
+        if paused {
+            _ = try await call(MactermProtocol.ChannelPause.self, .init(channel: number), timeout: serverRequestTimeout)
+        } else {
+            _ = try await call(MactermProtocol.ChannelResume.self, .init(channel: number), timeout: serverRequestTimeout)
+        }
     }
 }
 

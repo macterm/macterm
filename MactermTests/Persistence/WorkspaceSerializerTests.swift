@@ -146,9 +146,9 @@ struct WorkspaceSerializerTests {
     func round_trip_does_not_persist_a_done_run() {
         let ws = Workspace(id: UUID(), projectPath: "/tmp")
         if case let .pane(p) = ws.tabs[0].splitRoot {
-            p.recordUserInteraction()
-            p.markCommandRunning()
-            p.markCommandFinished()
+            p.receiveSessionStatus(MactermProtocol.Status(state: .running))
+            p.receiveSessionStatus(MactermProtocol.Status(state: .done))
+            p.receiveAttention(MactermProtocol.Attention(unseen: true))
             #expect(p.executionState == .done)
         }
         let roundTripped = roundTrip([ws.id: ws])

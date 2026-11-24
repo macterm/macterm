@@ -965,16 +965,9 @@ final class ControlHandler {
     /// what submits it, and `submit: false` withholds exactly that — leaving
     /// the text on the prompt for a human to inspect, or for a TUI that
     /// submits on its own terms. One verb rather than two, because the two
-    /// forms differ by that single character and nothing else.
-    ///
-    /// Withholding it is safe for execution tracking because `sendText` draws
-    /// the same line internally: it records command-submission evidence for
-    /// whatever it delivers but fires `onCommandSubmitted` only when the text
-    /// carries a newline. So an unsubmitted paste leaves the evidence armed
-    /// exactly as typing those characters would, and a following `pane.key`
-    /// Return reads as a REAL submission rather than a bare prompt redraw —
-    /// which is what keeps tab naming and execution state honest across a
-    /// paste-then-Return pair.
+    /// forms differ by that single character and nothing else. `sendText`
+    /// reports a submission only when the text carries a newline; a
+    /// following `pane.key` Return reports it then.
     private func paneRun(_ args: ControlArgs) throws -> ControlData {
         guard let command = args.run, !command.isEmpty else {
             throw ControlError(code: .badRequest, message: "pane.run requires a command")

@@ -340,7 +340,7 @@ extension AppState {
 
     /// Re-capture each live widget's recipe from what its pane is running —
     /// the pinned tabs' capture (`LayoutSerializer.pinnedDeclaration`) under
-    /// two of the execution tracker's rules. An idle capture never ERASES an
+    /// two rules. An idle capture never ERASES an
     /// established `run:`: a pane at its prompt says nothing about what it
     /// should respawn with. And a foreground seen while the shell is AT its
     /// prompt is a prompt hook (`starship prompt`, `mise hook-env`), not a

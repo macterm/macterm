@@ -1255,8 +1255,9 @@ struct AppStateTests {
         #expect(pane.attention == MactermProtocol.Attention())
     }
 
-    /// A run end in the focused pane of a key quick terminal ends its `.done`
-    /// state. A split pane that is not focused keeps its state and flags.
+    /// The flags of a run end in the focused pane of a key quick terminal
+    /// clear, and its `.done` state with them. A split pane that is not
+    /// focused keeps its state and flags.
     @Test
     func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
         let quick = QuickTerminalSplitState()
@@ -1273,9 +1274,8 @@ struct AppStateTests {
         let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
 
         for pane in [focused, other] {
-            pane.executionState = .done
             pane.receiveAttention(unseenFailure)
-            quick.onRunEnded(pane.id)
+            state.paneAttentionDidChange(paneID: pane.id)
         }
 
         #expect(focused.executionState == .idle)
@@ -1296,7 +1296,7 @@ struct AppStateTests {
         let project = seedProject(state)
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
-        pane.executionState = .done
+        #expect(pane.executionState == .done)
         state.saveWorkspaces()
 
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
@@ -2280,48 +2280,13 @@ struct AppStateTests {
         #expect(AppState.panesToWarm(in: ws).isEmpty)
     }
 
-    // MARK: - Quiet-settle
+    // MARK: - Run state
 
-    // The poll calls `pane.settleTerminalActivityIfQuiet()` directly (no
-    // occlusion special-casing): the OUTPUT_ACTIVITY heartbeat that sources
-    // activity is occlusion-independent, so a quiet pane settles the same
-    // whether or not it is on screen. These drive the settle in isolation:
-    // deterministic (no live surface, no `Preferences` global).
-
-    /// A pane whose activity went quiet long ago (past the 3s settle window).
-    private func quietRunningPane() -> Pane {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
-        #expect(pane.executionState == .running)
-        return pane
-    }
-
+    /// The run state comes from the session whatever the status indicator
+    /// setting is: `pane list` reports it, and the setting only chooses what
+    /// the tab row draws (#705).
     @Test
-    func quiet_activity_run_settles_to_done() {
-        let pane = quietRunningPane()
-        // 10s of silence is past the window — occluded or not, it's done.
-        pane.settleTerminalActivityIfQuiet()
-        #expect(pane.executionState == .done)
-    }
-
-    @Test
-    func activity_run_holds_until_the_quiet_window_elapses() {
-        let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        pane.recordUserInteraction()
-        let start = Date()
-        pane.markTerminalActivity(at: start)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(2), quietInterval: 3)
-        #expect(pane.executionState == .running)
-        pane.settleTerminalActivityIfQuiet(now: start.addingTimeInterval(3), quietInterval: 3)
-        #expect(pane.executionState == .done)
-    }
-
-    /// The poll tracks execution whatever the status indicator setting is:
-    /// `pane list` reports the state, and the setting only chooses what the
-    /// tab row draws (#705).
-    @Test
-    func poll_settles_a_quiet_run_with_the_status_indicator_off() throws {
+    func the_run_state_follows_the_session_with_the_status_indicator_off() throws {
         let priorIndicator = Preferences.shared.showTabStatusIndicator
         defer { Preferences.shared.showTabStatusIndicator = priorIndicator }
         Preferences.shared.showTabStatusIndicator = false
@@ -2329,10 +2294,11 @@ struct AppStateTests {
         state.isAppActive = { false }
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
-        pane.recordUserInteraction()
-        pane.markTerminalActivity(at: Date().addingTimeInterval(-10))
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
+        state.settleAllPanes()
         #expect(pane.executionState == .running)
-
+        pane.receiveSessionStatus(MactermProtocol.Status(state: .done))
+        pane.receiveAttention(MactermProtocol.Attention(unseen: true))
         state.settleAllPanes()
         #expect(pane.executionState == .done)
     }

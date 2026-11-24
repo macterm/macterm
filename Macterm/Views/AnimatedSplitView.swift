@@ -21,7 +21,6 @@ struct SplitRootView: View {
     let onFocusPane: (UUID) -> Void
     let onSplit: (UUID, SplitDirection, SplitPosition) -> Void
     let onClosePane: (UUID) -> Void
-    var onCommandFinished: (UUID) -> Void = { _ in }
     var onAdaptiveBackgroundChange: (UUID, CGColor?) -> Void = { _, _ in }
     var onToggleZoom: (UUID) -> Void = { _ in }
     var paneDrop: PaneDropContext?
@@ -38,7 +37,6 @@ struct SplitRootView: View {
                 onFocusPane: onFocusPane,
                 onSplit: onSplit,
                 onClosePane: onClosePane,
-                onCommandFinished: onCommandFinished,
                 onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
                 onToggleZoom: onToggleZoom,
                 paneDrop: paneDrop
@@ -56,7 +54,6 @@ struct SplitRootView: View {
                 onFocusPane: onFocusPane,
                 onSplit: onSplit,
                 onClosePane: onClosePane,
-                onCommandFinished: onCommandFinished,
                 onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
                 onToggleZoom: onToggleZoom,
                 paneDrop: paneDrop
@@ -174,7 +171,6 @@ struct AnimatedSplitView: View {
     let onFocusPane: (UUID) -> Void
     let onSplit: (UUID, SplitDirection, SplitPosition) -> Void
     let onClosePane: (UUID) -> Void
-    let onCommandFinished: (UUID) -> Void
     let onAdaptiveBackgroundChange: (UUID, CGColor?) -> Void
     let onToggleZoom: (UUID) -> Void
     let paneDrop: PaneDropContext?
@@ -357,7 +353,6 @@ struct AnimatedSplitView: View {
             isNonLeaderMirror: nonLeaderPaneIDs.contains(pane.id),
             onFocus: { onFocusPane(pane.id) },
             onProcessExit: { onClosePane(pane.id) },
-            onCommandFinished: { onCommandFinished(pane.id) },
             onAdaptiveBackgroundChange: { onAdaptiveBackgroundChange(pane.id, $0) },
             onSplitRequest: { dir, position in onSplit(pane.id, dir, position) },
             onZoomRequest: { onToggleZoom(pane.id) },
