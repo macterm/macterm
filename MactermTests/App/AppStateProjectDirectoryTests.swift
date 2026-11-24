@@ -91,7 +91,7 @@ struct AppStateProjectDirectoryTests {
         #expect(input.commit("  ") == .refused("Type a folder path"))
         let file = root + "/file.txt"
         try "x".write(toFile: file, atomically: true, encoding: .utf8)
-        #expect(input.commit(file) == .refused("\(file) is not a directory"), "a file is not a folder")
+        #expect(input.commit(file) == .refused("\(file) is not a directory"), "a file is refused with its own reason")
         #expect(path(of: fixture) == root)
     }
 
@@ -143,6 +143,7 @@ struct AppStateProjectDirectoryTests {
         #expect(input.pill == PalettePill(title: "Change Project Directory"), "an input screen's pill has no glyph")
         #expect(AppCommand.changeProjectDirectory.opensPaletteScreen, "its chord is answered with the palette up")
         #expect(AppCommand.changeProjectDirectory.paletteIcon == nil)
+        #expect(PaletteScopeID.files.pill.icon != nil, "a built-in screen keeps its glyph")
 
         let item = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
             .first { $0.title == AppCommand.changeProjectDirectory.title }
