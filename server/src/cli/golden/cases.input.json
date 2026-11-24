@@ -69,7 +69,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -78,9 +77,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -103,7 +102,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -112,9 +110,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -140,7 +138,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -149,9 +146,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -174,7 +171,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -183,9 +179,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -208,7 +204,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -217,9 +212,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -244,7 +239,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -253,9 +247,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },
@@ -279,7 +273,6 @@
               "active": true,
               "id": "P1",
               "index": 1,
-              "loaded": true,
               "name": "api",
               "path": "/tmp/api",
               "tabCount": 2
@@ -288,9 +281,9 @@
               "active": false,
               "id": "P2",
               "index": 2,
-              "loaded": false,
               "name": "web",
-              "path": "me@box:/srv/web"
+              "path": "me@box:/srv/web",
+              "tabCount": 1
             }
           ]
         },

@@ -346,6 +346,7 @@ struct MainWindow: View {
         }
         .task {
             guard !appState.hasRestoredSelection else { return }
+            projectStore.onAdd = { [weak appState] project in appState?.projectAdded(project) }
             appState.restoreSelection(projects: projectStore.projects)
             // After the restore, never before: "is this a fresh install?" is
             // only answerable once the snapshot is loaded, `pinned.yaml` is

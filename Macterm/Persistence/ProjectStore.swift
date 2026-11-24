@@ -28,6 +28,11 @@ final class ProjectStore {
     /// to save, because that list is not the user's.
     @ObservationIgnored
     var onSave: (([Project]) -> Void)?
+    /// Called with each project that `add` stored. `AppState.projectAdded`
+    /// gives it its first tab, so a project has tabs from the moment it is
+    /// added, whichever path added it.
+    @ObservationIgnored
+    var onAdd: ((Project) -> Void)?
 
     init(fileURL: URL = FileStorage.fileURL(filename: "projects.json")) {
         self.fileURL = fileURL
@@ -82,6 +87,7 @@ final class ProjectStore {
         project.sortOrder = children(of: project.parent).count
         rows.append(project)
         changed()
+        onAdd?(project)
         return project
     }
 

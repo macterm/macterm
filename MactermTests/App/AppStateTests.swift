@@ -1909,6 +1909,50 @@ struct AppStateTests {
     }
 
     @Test
+    func restore_gives_a_never_opened_project_its_first_tab_and_a_group_none() throws {
+        // A project holds its tabs from the start (design 010 section 11): a
+        // project with no snapshot that no window selects still gets its
+        // first tab at the restore. A group (no folder) holds no tabs.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-neveropened-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let project = Project(name: "never", path: dir.path, sortOrder: 0)
+        let group = Project(name: "Work", path: "", sortOrder: 1)
+        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
+
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+
+        let state = makeAppState(store: store)
+        state.restoreSelection(projects: [project, group])
+
+        #expect(state.activeProjectID == nil)
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+    }
+
+    @Test
+    func an_added_project_gets_its_first_tab_at_once() throws {
+        let state = makeAppState()
+        let projects = ProjectStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-added-\(UUID().uuidString).json"))
+        projects.onAdd = { [weak state] in state?.projectAdded($0) }
+        let priorActive = Preferences.shared.activeProjectID
+        Preferences.shared.activeProjectID = nil
+        defer { Preferences.shared.activeProjectID = priorActive }
+        state.restoreSelection(projects: projects.projects)
+
+        let project = projects.create(name: "fresh", path: "/tmp")
+        let group = projects.add(Project(name: "Work", path: ""))
+
+        #expect(state.workspaces[project.id]?.tabs.count == 1)
+        #expect(state.workspaces[group.id] == nil)
+        #expect(state.activeProjectID == nil)
+    }
+
+    @Test
     func a_project_with_every_tab_closed_stays_empty_after_a_relaunch() throws {
         // Closing the last tab leaves the project empty. A relaunch must keep
         // it empty: selecting it does not create a default tab.

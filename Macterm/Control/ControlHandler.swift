@@ -1472,8 +1472,7 @@ final class ControlHandler {
         guard let workspace = appState.workspaces[project.id] else {
             throw ControlError(
                 code: .notFound,
-                message: "project \"\(project.name)\" has no loaded workspace",
-                action: "select it first: `macterm project select \(project.name)`"
+                message: "project \"\(project.name)\" has no tabs"
             )
         }
         return (project, workspace)
@@ -1678,9 +1677,6 @@ final class ControlHandler {
             name: project.name,
             path: project.path,
             active: project.id == appState.activeProjectID,
-            // "Loaded" = a workspace exists (tabs/panes addressable over
-            // this protocol), whether or not its panes have started shells.
-            loaded: appState.workspaces[project.id] != nil,
             tabCount: appState.workspaces[project.id]?.tabs.count,
             parent: parent?.name ?? "",
             parentID: parent?.id.uuidString ?? ""

@@ -42,8 +42,9 @@ extension AppState {
         Preferences.shared.hasSeededFirstRun = true
 
         let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath)
-        // A pure-spawn reconcile (no live workspace → nothing to destroy) is
-        // how the declared `run:` reaches the pane as a typed `PaneStartCommand`.
+        // A pure-spawn reconcile is how the declared `run:` reaches the pane
+        // as a typed `PaneStartCommand`. Its tab replaces the first tab that
+        // `projectAdded` gave the project, which has started nothing yet.
         let plan = LayoutReconciler.plan(
             layout: FirstRunSeed.projectLayout,
             workspace: nil,
