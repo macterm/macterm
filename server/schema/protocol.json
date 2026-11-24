@@ -1982,35 +1982,40 @@
           "type": "u32",
           "optional": false,
           "default": "2",
-          "since": 3
+          "since": 3,
+          "doc": "The version of the format of the model."
         },
         {
           "name": "epoch_hint",
           "type": "u64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "A number that the server keeps and sends back with no change. It has no other use."
         },
         {
           "name": "imported_v1",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "If true, the model has the import of the v1 workspaces, and model.import and model.replace are refused. The server sets it: it ignores the value that a client sends."
         },
         {
           "name": "projects",
           "type": "[Project]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "Every project of the model."
         },
         {
           "name": "selection",
           "type": "Selection",
           "optional": false,
           "default": "{}",
-          "since": 3
+          "since": 3,
+          "doc": "What is selected in the model."
         }
       ],
       "cases": [],
@@ -2024,85 +2029,98 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the project."
         },
         {
           "name": "name",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The name of the project."
         },
         {
           "name": "path",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The folder of the project: a local path, or user@host:dir for a remote project. Can be empty."
         },
         {
           "name": "color",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The color tag of the project. Null when the project has no color tag."
         },
         {
           "name": "sort_order",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "Orders the projects that have the same parent."
         },
         {
           "name": "created_at",
           "type": "i64",
           "optional": false,
           "default": "0",
-          "since": 3
+          "since": 3,
+          "doc": "When the project was made, in Unix time in milliseconds."
         },
         {
           "name": "parent",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that holds this project. Null or empty is the top level."
         },
         {
           "name": "sidebar",
           "type": "ProjectSidebar",
           "optional": false,
           "default": "tree",
-          "since": 3
+          "since": 3,
+          "doc": "Where the sidebar shows the project: tree is a row of the project tree; top and bottom show its tabs as rows above or below the tree, with no project row; none is a project that no window shows. project.create sets it, and it never changes."
         },
         {
           "name": "single_tab",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "If true, the project holds at most one tab. project.create sets it, and it never changes."
         },
         {
           "name": "removable",
           "type": "bool",
           "optional": false,
           "default": "true",
-          "since": 3
+          "since": 3,
+          "doc": "If true, project.remove can remove the project. project.create sets it, and it never changes."
         },
         {
           "name": "alias",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "A short word that finds the project (pinned, scratch, quick). It is unique in the model. project.create sets it, and it never changes."
         },
         {
           "name": "tabs",
           "type": "[Tab]",
           "optional": false,
           "default": "[]",
-          "since": 3
+          "since": 3,
+          "doc": "The tabs of the project, in their order."
         },
         {
           "name": "active_tab",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The tab that the project shows."
         }
       ],
       "cases": [],
@@ -2128,25 +2146,29 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the tab."
         },
         {
           "name": "custom_title",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The name that the user gave the tab. Null when the tab has no name."
         },
         {
           "name": "root",
           "type": "SplitNode",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The split tree of the panes of the tab."
         },
         {
           "name": "focused",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The pane that has the focus in the tab."
         }
       ],
       "cases": [],
@@ -2176,52 +2198,60 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the pane. It is the id of its session."
         },
         {
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The name of the session of the pane, as the session has it. It never changes."
         },
         {
           "name": "host",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The ssh destination of a remote pane. Null for a pane on this Mac."
         },
         {
           "name": "slug",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 3
+          "since": 3,
+          "doc": "The slug part of the session name."
         },
         {
           "name": "origin_path",
           "type": "str",
           "optional": false,
           "default": "\"\"",
-          "since": 3
+          "since": 3,
+          "doc": "The path of the project when the pane was made."
         },
         {
           "name": "cwd",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The working directory that a client last gave for the pane."
         },
         {
           "name": "host_session_dir",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "For a remote pane, the folder of its shell on the host after its session started there."
         },
         {
           "name": "attention",
           "type": "ModelAttention",
           "optional": false,
           "default": "none",
-          "since": 3
+          "since": 3,
+          "doc": "A mark of the pane: none, done or failed. Nothing sets it yet: the session of the pane holds its marks (pane.attention)."
         }
       ],
       "cases": [],
@@ -2246,32 +2276,37 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the split."
         },
         {
           "name": "dir",
           "type": "Dir",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The axis of the split: horizontal puts the nodes side by side, vertical puts one above the other."
         },
         {
           "name": "ratio",
           "type": "f64",
           "optional": false,
           "default": "0.5",
-          "since": 3
+          "since": 3,
+          "doc": "The part of the split that the first node takes, more than 0 and less than 1. split.ratio keeps it from 0.15 to 0.85."
         },
         {
           "name": "first",
           "type": "SplitNode",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The left node of a horizontal split, or the top node of a vertical split."
         },
         {
           "name": "second",
           "type": "SplitNode",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The right node of a horizontal split, or the bottom node of a vertical split."
         }
       ],
       "cases": [],
@@ -2295,7 +2330,8 @@
           "name": "active_project",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The project that is selected."
         }
       ],
       "cases": [],
