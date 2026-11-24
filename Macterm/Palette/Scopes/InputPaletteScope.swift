@@ -114,7 +114,7 @@ final class InputPaletteScope: PaletteScope {
     let input: PaletteInput
     private(set) var text: String
     private(set) var failure: PaletteFailure?
-    /// The text that the shown refusal was for: the line goes when the text
+    /// The text that the shown refusal was for: the notice goes when the text
     /// changes.
     private var refusedText: String?
     private var completions: [PaletteCompletion] = []

@@ -40,9 +40,9 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The breadcrumb and each pill come and go through `PaletteMotion`. This is `blurReplace` of SwiftUI on an ease-out of 120 ms. Reduce Motion lands them in one frame.
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
       - An input screen's pill has no icon (`PaletteInput.title`).
-      - **The results have one notice** (`PaletteNotice`, drawn by `PaletteNoticeView`): a failure, a first listing in flight, or a search with no match. It is centered, and it fills the results when there are no rows. A failure is the same notice for a listing (with Retry) and for a refused value of an input screen (with no Retry). Do not draw a message of a screen in any other place.
       - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill and a chevron.
       - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
+    - **The results have one notice** (`PaletteNotice.resolve`, drawn by `PaletteNoticeView`): a failure, a first listing in flight, or a search with no match. It is centered, and it fills the results when there are no rows. A failure is the same notice for a listing (with Retry) and for a refused value of an input screen (no Retry). Do not draw a message of a screen in any other place. A row about one command (a muted command with its reason) is a row, not a notice.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.

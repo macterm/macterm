@@ -69,7 +69,7 @@ struct InputPaletteScopeTests {
     }
 
     @Test
-    func a_refused_commit_keeps_the_screen_with_one_line_until_the_text_changes() throws {
+    func a_refused_commit_keeps_the_screen_with_its_notice_until_the_text_changes() throws {
         let log = Log()
         let scope = InputPaletteScope(input: makeInput(log: log))
         let context = makeContext()
@@ -79,7 +79,7 @@ struct InputPaletteScopeTests {
         #expect(log.committed.isEmpty)
         let failure = try #require(scope.failure)
         #expect(failure.title == "A name cannot contain a slash.")
-        #expect(!failure.retryable, "a refusal is one line with no Retry")
+        #expect(!failure.retryable, "a refusal is a notice with no Retry")
 
         _ = scope.sections(for: PaletteQuery(raw: "a/b"), context: context)
         #expect(scope.failure == failure, "a redraw of the same text keeps the reason")

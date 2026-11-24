@@ -233,10 +233,9 @@ struct CommandPalettePanel: View {
                         // query lists every command, and an eager stack built
                         // all of them on each open and on the first keystroke.
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            // The one notice: centered in the results, and
-                            // filling them when there are no rows — above rows
-                            // that are still up (an earlier listing, or the
-                            // completions of a refused value).
+                            // The one notice. It is centered. It fills the
+                            // results when there are no rows, and else it is
+                            // above the rows.
                             if let notice {
                                 PaletteNoticeView(notice: notice) { scope?.retry() }
                                     .frame(maxWidth: .infinity, minHeight: sections.isEmpty ? noticeHeight : 0)
@@ -546,17 +545,14 @@ struct CommandPalettePanel: View {
     /// The list's padding above the first row and below the last.
     private static let listPadding: CGFloat = 6
 
-    /// What the results say instead of, or above, their rows: a failure
-    /// first, then a first listing in flight, then a search with no match.
-    /// An input screen's field is a value, not a search, so no completion is
-    /// not "no matches".
     private var notice: PaletteNotice? {
-        if let failure { return .failure(failure) }
-        if sections.isEmpty, let loading { return .loading(loading) }
-        if sections.isEmpty, inputScope == nil, !PaletteQuery(raw: query).isEmpty {
-            return .empty(String(localized: "No matches."))
-        }
-        return nil
+        PaletteNotice.resolve(
+            failure: failure,
+            loading: loading,
+            hasRows: !sections.isEmpty,
+            isInput: inputScope != nil,
+            queryIsEmpty: PaletteQuery(raw: query).isEmpty
+        )
     }
 
     /// The height of a notice that fills a list with no rows: the viewport
@@ -779,33 +775,27 @@ private struct PaletteScopePill: View {
     let isCurrent: Bool
 
     var body: some View {
-        Label {
-            Text(pill.title)
-        } icon: {
-            if let icon = pill.icon {
-                PaletteIconImage(icon: icon, side: 14)
-            }
-        }
-        .labelStyle(PillLabelStyle(hasIcon: pill.icon != nil))
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .padding(.horizontal, 9)
-        .frame(height: Self.height)
-        .modifier(PillBackground())
+        label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 9)
+            .frame(height: Self.height)
+            .modifier(PillBackground())
     }
 
     /// The title alone when the pill has no icon, so no gap is left for one.
-    private struct PillLabelStyle: LabelStyle {
-        let hasIcon: Bool
-
-        func makeBody(configuration: Configuration) -> some View {
-            if hasIcon {
-                Label(configuration)
-            } else {
-                configuration.title
+    @ViewBuilder
+    private var label: some View {
+        if let icon = pill.icon {
+            Label {
+                Text(pill.title)
+            } icon: {
+                PaletteIconImage(icon: icon, side: 14)
             }
+        } else {
+            Text(pill.title)
         }
     }
 
@@ -829,14 +819,31 @@ private struct PaletteScopePill: View {
 
 /// The one message of the results, never a row: it is never selected and
 /// Enter never lands on it.
-private enum PaletteNotice {
+enum PaletteNotice: Equatable {
     /// A first listing in flight: a spinner and what it waits on.
     case loading(PaletteLoading)
     /// A search with no match.
-    case empty(String)
+    case noMatches
     /// A listing that failed (with Retry), or a value that an input screen
     /// refused (no Retry: the user changes the text).
     case failure(PaletteFailure)
+
+    /// The notice of the results, nil for none. A failure wins. Then a
+    /// first listing in flight (with rows up, the field's spinner shows
+    /// it). Then a search with no match. An input screen's field is a
+    /// value, not a search, so no completion is not "no matches".
+    static func resolve(
+        failure: PaletteFailure?,
+        loading: PaletteLoading?,
+        hasRows: Bool,
+        isInput: Bool,
+        queryIsEmpty: Bool
+    ) -> PaletteNotice? {
+        if let failure { return .failure(failure) }
+        if !hasRows, let loading { return .loading(loading) }
+        if !hasRows, !isInput, !queryIsEmpty { return .noMatches }
+        return nil
+    }
 }
 
 /// Every notice of the palette draws here, centered, in one style: a
@@ -865,8 +872,8 @@ private struct PaletteNoticeView: View {
                     .foregroundStyle(MactermTheme.fgMuted)
                     .lineLimit(1)
             }
-        case let .empty(message):
-            Text(message)
+        case .noMatches:
+            Text("No matches.")
                 .font(.system(size: 13))
                 .foregroundStyle(MactermTheme.fgMuted)
         case let .failure(failure):

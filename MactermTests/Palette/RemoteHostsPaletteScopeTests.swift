@@ -111,7 +111,7 @@ struct RemoteHostsPaletteScopeTests {
         }
         #expect(input.id == "remote-folder:devbox")
         #expect(input.initialValue == "~")
-        #expect(input.pill.title == "devbox")
+        #expect(input.pill == PalettePill(title: "devbox", icon: nil), "an input screen's pill has no icon")
         #expect(input.prompt == "Folder on devbox")
     }
 

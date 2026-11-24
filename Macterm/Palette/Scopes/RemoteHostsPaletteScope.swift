@@ -111,7 +111,7 @@ final class RemoteHostsPaletteScope: PaletteScope {
     /// on `directory` (`~`, or the folder of a typed `host:folder`).
     ///
     /// Return checks the folder on the host (`RemoteHosts.refusal`). A
-    /// refusal is the screen's line. A folder that is there adds the
+    /// refusal is the palette's notice. A folder that is there adds the
     /// project and shows it, named by its folder
     /// (`ProjectPath.remoteDisplayName`).
     static func folderInput(
