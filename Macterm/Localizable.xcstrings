@@ -10644,6 +10644,23 @@
         }
       }
     },
+    "The host has no Macterm server, so this shell runs in one window only." : {
+      "comment" : "Under 'Showing in another window', in a pane whose ssh shell runs in another window",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트에 Macterm 서버가 없으므로 이 셸은 한 윈도우에서만 실행됩니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机上没有 Macterm 服务器，因此此 shell 只在一个窗口中运行。"
+          }
+        }
+      }
+    },
     "The key of this host is not known. Make sure that it is the key that you expect." : {
       "localizations" : {
         "ko" : {

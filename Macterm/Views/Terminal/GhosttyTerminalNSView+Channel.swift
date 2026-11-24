@@ -153,6 +153,11 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         self.view = view
     }
 
+    /// The id of the surface that owns this channel, nil in a test.
+    @MainActor var surfaceID: UUID? {
+        view?.owningSurface?.id
+    }
+
     func setSurface(_ new: ghostty_surface_t) {
         lock.lock()
         surface = new

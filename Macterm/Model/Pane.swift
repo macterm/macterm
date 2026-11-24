@@ -231,7 +231,22 @@ final class Pane: Identifiable {
         case let .status(status): receiveSessionStatus(status)
         case let .attention(flags): receiveAttention(flags)
         case .ended: sessionDidEnd()
+        case let .plainShellRunsIn(host): plainShellSurfaceID = host?.surfaceID
         }
+    }
+
+    /// The surface that runs the pane's plain ssh shell (a host with no
+    /// server), or nil. A pty is one terminal and no session holds it, so
+    /// no other window can take it: the pane's other surfaces show a notice
+    /// in place of the terminal until that surface goes. Live state only;
+    /// the link sets it (`receiveLinkEvent`).
+    var plainShellSurfaceID: UUID?
+
+    /// Whether the surface `surfaceID` shows the notice that the pane's
+    /// plain ssh shell runs in another window.
+    func plainShellRunsElsewhere(than surfaceID: UUID) -> Bool {
+        guard let owner = plainShellSurfaceID else { return false }
+        return owner != surfaceID
     }
 
     /// The channel's `state` message. A remote session's pid is on the

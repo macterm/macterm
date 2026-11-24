@@ -15,10 +15,10 @@ private let logger = Logger(subsystem: appBundleID, category: "RemotePaneDriver"
 ///   ready has a `PaneSession` (its own channel, size and claim);
 /// - plain: a `PlainShell`, a pty with ssh, for a host with no server. Its
 ///   output goes to every ready view, as a session's goes to each client.
-///   One view (`plainOwner`) leads: its keys, replies and size go to the
-///   pty. The others do not lead and type nowhere, so a window that is not
-///   key shows "Showing in another window" as for a session. A claim from
-///   another view makes that view the owner;
+///   One view runs it (`plainOwner`): its keys, replies and size go to the
+///   pty. There is no session that another window can lead, so a claim does
+///   not move the shell: it moves only when the owner's view goes. The app
+///   covers the other views with a notice (`onPlainOwner`);
 /// - waiting: the pane is lost, or it has nothing to run. It waits for the
 ///   host's next try (`RemoteHost.nextTry`): a trigger of the app after the
 ///   host's backoff, or a key.
@@ -82,7 +82,7 @@ final class RemotePaneDriver {
         }
 
         nonisolated func claim(grid: PaneGrid?) {
-            DispatchQueue.main.async { MainActor.assumeIsolated { self.driver?.claim(grid: grid, from: self) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.driver?.inputRoute(of: self)?.claim(grid: grid) } }
         }
 
         nonisolated func sendSize(_ grid: PaneGrid?) {
@@ -102,8 +102,11 @@ final class RemotePaneDriver {
     private var host: RemoteHost?
     /// The views, in the order they came. Only a ready view shows a session.
     private var views: [View] = []
-    /// The view that leads the plain shell: its input and size go to it.
+    /// The view that runs the plain shell: its input and size go to it.
     private weak var plainOwner: View?
+    /// The view that runs the plain shell changed: its host, or nil when no
+    /// view runs one. The pane covers its other views with a notice.
+    var onPlainOwner: ((any PaneSessionHost)?) -> Void = { _ in }
     /// The plain shell's output, for every ready view.
     private let plainOutput = PlainOutput()
     /// The end of the session or the plain shell that runs.
@@ -203,12 +206,16 @@ final class RemotePaneDriver {
         guard case let .plain(shell) = state else { return }
         if plainOwner === view {
             plainOwner = nil
-            if let next = views.first(where: \.ready) { hand(shell, to: next) }
+            if let next = views.first(where: \.ready) {
+                hand(shell, to: next)
+            } else {
+                onPlainOwner(nil)
+            }
         }
         syncPlainOutput()
     }
 
-    /// Whether the view of `host` leads the plain shell. nil when the pane
+    /// Whether the view of `host` runs the plain shell. nil when the pane
     /// runs no plain shell.
     func showsPlainShell(in host: any PaneSessionHost) -> Bool? {
         guard case .plain = state else { return nil }
@@ -356,28 +363,22 @@ final class RemotePaneDriver {
         return await withCheckedContinuation { ending = $0 }
     }
 
-    /// A ready view shows the plain shell from a clear screen. The first
-    /// one leads; any other does not, as a client of a session that another
-    /// window leads: the app shows the same notice.
+    /// A ready view gets the plain shell's output from a clear screen. The
+    /// first one runs the shell.
     private func showPlain(in view: View) {
         guard case let .plain(shell) = state else { return }
         view.host.paneFeed(PaneSession.resetScreen)
-        if plainOwner == nil {
-            hand(shell, to: view)
-        } else if plainOwner !== view {
-            view.host.paneLead(false)
-        }
+        if plainOwner == nil { hand(shell, to: view) }
         syncPlainOutput()
     }
 
-    /// `view` leads the plain shell from now on: its keys go to the pty, and
-    /// the pty takes its size. Its screen has the shell's output already.
+    /// `view` runs the plain shell from now on: its keys go to the pty, and
+    /// the pty takes its size. Its screen has the shell's output since the
+    /// view became ready: a pty keeps no screen to show again.
     private func hand(_ shell: PlainShell, to view: View) {
-        let previous = plainOwner
         plainOwner = view
         syncPlainOutput()
-        if let previous, previous !== view { previous.host.paneLead(false) }
-        view.host.paneLead(true)
+        onPlainOwner(view.host)
         shell.sendSize(view.host.paneGrid())
     }
 
@@ -443,8 +444,7 @@ final class RemotePaneDriver {
             shell.terminate()
             plainOwner = nil
             plainOutput.set(owner: nil, views: [])
-            // No view leads a shell that is gone.
-            each { $0.paneLead(nil) }
+            onPlainOwner(nil)
         default: break
         }
         if case .closed = state { return }
@@ -461,17 +461,6 @@ final class RemotePaneDriver {
         case let .plain(shell): plainOwner === view ? shell : nil
         default: nil
         }
-    }
-
-    /// A view claims, as the key window's surfaces do. A ready view that
-    /// claims a plain shell leads it from then on; a session takes the
-    /// claim itself.
-    private func claim(grid: PaneGrid?, from view: View) {
-        if case let .plain(shell) = state, view.ready, plainOwner !== view {
-            hand(shell, to: view)
-            return
-        }
-        inputRoute(of: view)?.claim(grid: grid)
     }
 
     private func route(_ data: Data, from view: View) {

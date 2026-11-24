@@ -627,49 +627,57 @@ struct RemoteHostsTests {
     }
 
     /// Two windows show one pane on a host with no server. The pane's one
-    /// plain shell shows in both views; one leads, and only its keys reach
-    /// the shell. A claim makes the other view lead, and so does the close
-    /// of the view that leads.
+    /// plain shell runs in the first view; both views get its output, and
+    /// only the first view's keys reach it. A claim does not move it: no
+    /// session holds it. It moves when the view that runs it goes.
     @Test(.enabled(if: LocalSSHD.isAvailable), .timeLimit(.minutes(3)))
-    func a_plain_shell_shows_in_every_view_and_the_view_that_claims_it_leads() async throws {
+    func a_plain_shell_runs_in_one_view_and_moves_only_when_that_view_goes() async throws {
         try await withSSHDHost(answer: false) { host in
             let fixture = Fixture(host)
             let pane = fixture.pane()
             fixture.hosts.pane = { _ in pane }
             let left = RecordingPaneHost()
             let right = RecordingPaneHost()
+            var owner: ObjectIdentifier?
             let driver = RemotePaneDriver(name: pane.sessionName, hosts: fixture.hosts)
+            driver.onPlainOwner = { host in owner = host.map(ObjectIdentifier.init) }
             defer { driver.stop() }
             let routes = driver.start(showing: [left, right])
-            // The first view leads the shell; the second does not, so the app
-            // shows its notice there.
-            try await left.waitFor { $0.leads.last == true }
-            try await right.waitFor { $0.leads.last == false }
+            try await waitUntil { owner == ObjectIdentifier(left) }
+            #expect(driver.showsPlainShell(in: left) == true)
+            #expect(driver.showsPlainShell(in: right) == false)
             routes[1].sendInput(Data("printf 'right-%s\\n' typed\n".utf8))
             routes[0].sendInput(Data("printf 'left-%s\\n' typed\n".utf8))
-            // Both views show the shell's output.
+            // Both views get the shell's output.
             try await left.waitFor { $0.screen.contains("left-typed") }
             try await right.waitFor { $0.screen.contains("left-typed") }
             #expect(!left.snapshot().screen.contains("right-typed"))
+            // No view leads a shell: no session decides it.
+            #expect(left.snapshot().leads.isEmpty && right.snapshot().leads.isEmpty)
 
-            // The second view claims, as the key window does: it leads, and
-            // its keys reach the shell.
+            // The second view claims, as the key window does: nothing moves.
             routes[1].claim(grid: nil)
-            try await right.waitFor { $0.leads.last == true }
-            try await left.waitFor { $0.leads.last == false }
-            routes[0].sendInput(Data("printf 'stale-%s\\n' typed\n".utf8))
-            routes[1].sendInput(Data("printf 'claimed-%s\\n' here\n".utf8))
-            try await right.waitFor { $0.screen.contains("claimed-here") }
-            try await left.waitFor { $0.screen.contains("claimed-here") }
-            #expect(!right.snapshot().screen.contains("stale-typed"))
+            routes[1].sendInput(Data("printf 'claimed-%s\\n' typed\n".utf8))
+            routes[0].sendInput(Data("printf 'still-%s\\n' here\n".utf8))
+            try await left.waitFor { $0.screen.contains("still-here") }
+            #expect(!left.snapshot().screen.contains("claimed-typed"))
+            #expect(driver.showsPlainShell(in: left) == true)
 
-            // That window closes: the first view leads again.
-            routes[1].stop()
-            try await left.waitFor { $0.leads.last == true }
-            routes[0].sendInput(Data("printf 'moved-%s\\n' back\n".utf8))
-            try await left.waitFor { $0.screen.contains("moved-back") }
-            #expect(left.snapshot().exit == nil)
+            // The first window closes: the shell runs in the second.
+            routes[0].stop()
+            try await waitUntil { owner == ObjectIdentifier(right) }
+            routes[1].sendInput(Data("printf 'moved-%s\\n' here\n".utf8))
+            try await right.waitFor { $0.screen.contains("moved-here") }
+            #expect(right.snapshot().exit == nil)
         }
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(30)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(condition())
     }
 
     // MARK: - The folder check of a new project (0358)

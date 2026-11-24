@@ -15,6 +15,9 @@ enum PaneLinkEvent {
     case attention(MactermProtocol.Attention)
     /// The session ended: its shell exited, it is gone, or the host has none.
     case ended
+    /// The surface that runs the pane's plain ssh shell, or nil when no
+    /// surface runs one. It is not a session's message: the driver says it.
+    case plainShellRunsIn(SurfaceChannelHost?)
 }
 
 /// One pane's link to its session (F2 of the 2026-11-15 architecture review,
@@ -111,12 +114,20 @@ final class PaneLink {
             )
             view = View(host: host, session: session)
         case let .remote(hosts):
-            let driver = driver ?? RemotePaneDriver(name: name, hosts: hosts)
+            let driver = driver ?? makeDriver(hosts)
             self.driver = driver
             view = View(host: host, remote: driver.addView(host))
         }
         views.append(view)
         return view.route
+    }
+
+    private func makeDriver(_ hosts: RemoteHosts) -> RemotePaneDriver {
+        let driver = RemotePaneDriver(name: name, hosts: hosts)
+        driver.onPlainOwner = { [weak self] host in
+            self?.onEvent?(.plainShellRunsIn(host as? SurfaceChannelHost))
+        }
+        return driver
     }
 
     /// The surface of `host` exists: its view can show the session.
