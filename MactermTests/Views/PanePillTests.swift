@@ -80,6 +80,27 @@ struct PanePillTests {
         #expect(abs(widths[0] - (icon + 4 + text)) < 1, "\(widths[0]) \(icon) \(text)")
     }
 
+    /// An open pill whose title gets shorter keeps the width of the earlier
+    /// title, so it stays under the pointer. A longer title still widens it.
+    @Test
+    func an_open_pill_keeps_the_width_of_an_earlier_title() {
+        func width(_ title: String, held: [String]) -> CGFloat {
+            Self.size(PanePillLabel(title: title, heldTitles: held, reveal: 1) {
+                Image(systemName: "character.cursor.ibeam")
+            }).width
+        }
+        #expect(width("Visual", held: ["Visual Block"]) == width("Visual Block", held: []))
+        #expect(width("Visual Block", held: ["Visual"]) == width("Visual Block", held: []))
+        #expect(width("Visual", held: []) < width("Visual Block", held: []))
+        /// At rest a held title adds no width.
+        func rest(held: [String]) -> CGFloat {
+            Self.size(PanePillLabel(title: "Visual", heldTitles: held, reveal: 0) {
+                Image(systemName: "character.cursor.ibeam")
+            }).width
+        }
+        #expect(rest(held: ["Visual Block"]) == rest(held: []))
+    }
+
     /// Every whole badge at rest (chrome, padding and icon, the spinner too)
     /// is near round: much narrower than a badge that shows its title.
     @Test
