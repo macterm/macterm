@@ -14,7 +14,6 @@ struct TerminalPane: View {
     var isNonLeaderMirror = false
     let onFocus: () -> Void
     let onProcessExit: () -> Void
-    let onCommandFinished: () -> Void
     let onAdaptiveBackgroundChange: (CGColor?) -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
     let onZoomRequest: () -> Void
@@ -68,7 +67,6 @@ struct TerminalPane: View {
                 reattachTick: surface.reattachTick,
                 onFocus: onFocus,
                 onProcessExit: onProcessExit,
-                onCommandFinished: onCommandFinished,
                 onAdaptiveBackgroundChange: onAdaptiveBackgroundChange,
                 onSplitRequest: onSplitRequest,
                 onZoomRequest: onZoomRequest
@@ -282,7 +280,6 @@ private struct TerminalSurface: NSViewRepresentable {
     let reattachTick: Int
     let onFocus: () -> Void
     let onProcessExit: () -> Void
-    let onCommandFinished: () -> Void
     let onAdaptiveBackgroundChange: (CGColor?) -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
     let onZoomRequest: () -> Void
@@ -434,8 +431,6 @@ private struct TerminalSurface: NSViewRepresentable {
         view.isZoomed = isZoomed
         view.isFocused = focused
         view.rendersForeignGeometry = isNonLeaderMirror
-        // A run ended: the window marks it seen if the user looks at the pane.
-        view.onRunEnded = onCommandFinished
         view.onOpenLink = { [weak appState, weak projectStore, weak pane] text in
             // The quick terminal's and desktop widgets' hosting views carry
             // no environment, and their clicks need the app's state too.

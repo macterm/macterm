@@ -30,7 +30,7 @@ extension AgentSkills {
         macterm pane list --project api --tab 4 --json
         ```
 
-        Choose a loaded project whose `path` holds the work. `--no-focus` starts the terminal also if that
+        Choose a project whose `path` holds the work. `--no-focus` starts the terminal also if that
         project is not on the screen. Without it, a tab in another project can wait until someone views it. If
         the app is too old for `--no-focus`, the command fails (exit 1) before it creates anything. It does not
         take the focus in silence. `tab new` uses the active project by default. It does not use the project

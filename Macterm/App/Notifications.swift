@@ -32,10 +32,6 @@ extension Notification.Name {
     /// Observed by `AppState`, which marks the pane seen on the spot when the
     /// user already looks at it and derives the Dock badge again (`BellBadge`).
     static let paneAttentionDidChange = Notification.Name("MactermPaneAttentionDidChange")
-    /// A final IO heartbeat's quiet deadline. Unlike ordinary poll events,
-    /// this must force one poll even when coalescing and window occlusion would
-    /// otherwise leave the timer paused.
-    static let terminalQuietSettleDeadline = Notification.Name("MactermTerminalQuietSettleDeadline")
     /// A zmx session was created, killed, or reattached: the session listing
     /// is stale. Observed by `AppState`, which invalidates its
     /// `ZmxRefreshGate` and wakes the poll.

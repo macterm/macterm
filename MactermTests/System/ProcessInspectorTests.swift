@@ -89,30 +89,10 @@ struct ProcessInspectorTests {
         #expect(!ProcessInspector.isIdleShellInvocation(["/bin/bash", "-lc", "sleep 10"]))
     }
 
-    /// A session report joins the arguments with spaces.
-    @Test
-    func reportedShellCommandLine_runsCommandOnlyForMinusCOrScript() {
-        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/sh -c sleep 1; printf started; echo"))
-        #expect(ProcessInspector.shellCommandLineRunsCommand("bash -lc make"))
-        #expect(ProcessInspector.shellCommandLineRunsCommand("/bin/bash /path/to/script.sh"))
-        #expect(!ProcessInspector.shellCommandLineRunsCommand("-zsh"))
-        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash --posix"))
-        // The value of `--execute` lost its quotes: the words after it are
-        // not a script.
-        #expect(!ProcessInspector.shellCommandLineRunsCommand("/opt/homebrew/bin/nu --execute use ghostty *"))
-        #expect(!ProcessInspector.shellCommandLineRunsCommand(""))
-        // A word after an unknown option can be its value: no run.
-        #expect(!ProcessInspector.shellCommandLineRunsCommand("bash -o vi"))
-        #expect(!ProcessInspector.shellCommandLineRunsCommand("nu --config /x/config.nu"))
-    }
-
     /// Every nushell pane runs the exact argv below — ghostty's command-wrapper
     /// injects `--execute 'use ghostty *'` to load shell integration. Unlike
     /// `-c`, nushell's `--execute` runs its code and THEN enters the
-    /// interactive REPL, so the invocation is an idle shell. Reading it as
-    /// foreground work costs the execution tracker its return-to-prompt
-    /// completion edge, which stranded the tab spinner for the whole
-    /// quiet-settle window after fast commands.
+    /// interactive REPL, so the invocation is an idle shell.
     @Test
     func shellIntegrationExecuteInvocation_isIdleShell() throws {
         // Resolved from the host's own login shell, not a hardcoded `nu` path:
