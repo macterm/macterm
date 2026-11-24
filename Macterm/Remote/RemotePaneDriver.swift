@@ -394,6 +394,21 @@ final class RemotePaneDriver {
         return await withCheckedContinuation { ending = $0 }
     }
 
+    /// The pane runs a plain shell now.
+    var runsPlainShell: Bool {
+        if case .plain = state { true } else { false }
+    }
+
+    /// Asks the host whether the pane's plain shell waits at its prompt
+    /// (0494). nil when the pane runs no plain shell. false while a program
+    /// runs, and when the host gives no clear answer: never kill an unknown
+    /// foreground in silence.
+    func plainShellIsIdle(timeout: Duration) async -> Bool? {
+        guard case let .plain(shell) = state else { return nil }
+        guard let host, let pid = shell.hostShellPID else { return false }
+        return await host.plainShellIsIdle(pid: pid, timeout: timeout) ?? false
+    }
+
     /// The first ready view runs the plain shell, from a clear screen.
     /// Another view shows the notice in place of the pane.
     private func showPlain(in view: View) {

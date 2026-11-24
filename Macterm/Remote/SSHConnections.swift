@@ -165,14 +165,16 @@ final class SSHConnections {
 
     /// Run `command` on the host over its connection. It never logs in by
     /// itself (see the type's comment). `input` is the command's stdin; nil
-    /// is `/dev/null`.
+    /// is `/dev/null`. With `login` false, only a connection that is up
+    /// (`connect(_:login:prompts:)`).
     func run(
         _ destination: String,
         _ command: String,
         input: FileHandle? = nil,
+        login: Bool = true,
         timeout: Duration = .seconds(30)
     ) async throws -> ProcessRunner.Outcome {
-        let route = try await connect(destination)
+        let route = try await connect(destination, login: login)
         guard let executable = configuration.ssh.first,
               let outcome = await ProcessRunner.run(
                   executable,

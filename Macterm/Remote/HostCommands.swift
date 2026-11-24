@@ -312,6 +312,46 @@ enum HostCommands {
         return "sh -c '\(script)' macterm " + arguments.joined(separator: " ")
     }
 
+    /// Asks the host about a plain shell before its pane closes (0494).
+    /// The pid is `$1` (`PlainShellAnnouncement`), so no shell parses it.
+    /// It prints three lines: the `ps` state of the pid, the number of its
+    /// children in the foreground process group, and `shell` when the
+    /// pid's command is in `/etc/shells` (else `other`).
+    static let shellStateScript = #"s=$(ps -o stat= -p "$1") || exit 1; "#
+        + #"n=$(ps -o comm= -p "$1" | sed -e "s|^-||" -e "s|.*/||"); "#
+        + #"c=$(ps -A -o ppid= -o stat= | grep -c "^ *$1 [^ ]*+"); "#
+        + #"k=other; if [ -n "$n" ] && grep -q "/$n\$" /etc/shells 2>/dev/null; then k=shell; fi; "#
+        + #"printf "%s\n%s\n%s\n" "$s" "$c" "$k""#
+
+    /// The command of `shellStateScript` for `pid`, for the host's login
+    /// shell over the ssh connection.
+    static func shellStateCommand(pid: Int32) -> String? {
+        command(shellStateScript, [String(pid)])
+    }
+
+    /// Whether the shell waits at its prompt, from the lines of
+    /// `shellStateScript`. All must be true:
+    /// - the pid is a shell of `/etc/shells` (a login shell that ran
+    ///   `exec vim` is not);
+    /// - it sleeps (`S` or `I`), so it runs no loop of its own;
+    /// - it is in the foreground process group (`+`): a job control shell
+    ///   gives the terminal to each command that it runs;
+    /// - no child of it is in the foreground group: a shell with no job
+    ///   control keeps the group while a command runs.
+    ///
+    /// A builtin that waits for input (`read`) still reads as idle. nil
+    /// when the host gives no clear answer (no such pid, a `ps` that does
+    /// not know the options, as BusyBox): the caller then warns.
+    static func shellIsIdle(status: Int32, output: String) -> Bool? {
+        guard status == 0 else { return nil }
+        let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard lines.count == 3, let state = lines.first, state.count <= 8,
+              let first = state.first, first.isUppercase,
+              let children = Int(lines[1]), ["shell", "other"].contains(lines[2])
+        else { return nil }
+        return lines[2] == "shell" && (first == "S" || first == "I") && state.contains("+") && children == 0
+    }
+
     static func hasHistoryMark(_ script: String) -> Bool {
         let characters = Array(script)
         return characters.indices.contains { index in
