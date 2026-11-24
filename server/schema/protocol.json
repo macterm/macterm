@@ -1295,7 +1295,7 @@
           "optional": false,
           "default": "80",
           "since": 1,
-          "doc": "The width of the terminal in cells.",
+          "doc": "The width of the terminal in cells. The server cuts it to 1000.",
           "minimum": 1
         },
         {
@@ -1304,7 +1304,7 @@
           "optional": false,
           "default": "24",
           "since": 1,
-          "doc": "The height of the terminal in cells.",
+          "doc": "The height of the terminal in cells. The server cuts it to 1000.",
           "minimum": 1
         },
         {
@@ -1320,7 +1320,7 @@
           "optional": false,
           "default": "false",
           "since": 3,
-          "doc": "True: a session of this id whose shell exited ends, and a new one starts after the old one is gone. False: the request fails with exited."
+          "doc": "True: a session of this id whose shell exited ends, and a new one starts after the old one is gone. False: the request then fails with exited."
         }
       ],
       "cases": [],
@@ -1349,100 +1349,116 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The name of the session: the file name of its socket. The client that asked for the session made it."
         },
         {
           "name": "state",
           "type": "SessionState",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The state of the session."
         },
         {
           "name": "build",
           "type": "str",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The build of the session, from its hello."
         },
         {
           "name": "level",
           "type": "u32",
           "optional": false,
-          "since": 1
+          "since": 1,
+          "doc": "The protocol level of the session, from its hello."
         },
         {
           "name": "build_key",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The build key of the session, from its hello. Null when the session did not say."
         },
         {
           "name": "pid",
           "type": "i64",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The session process. Null when state is refused."
         },
         {
           "name": "shell_pid",
           "type": "i64",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The shell, or the command, of the session."
         },
         {
           "name": "pty",
           "type": "bin",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The path of the slave side of the pty."
         },
         {
           "name": "cols",
           "type": "u16",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The width of the terminal in cells."
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The height of the terminal in cells."
         },
         {
           "name": "code",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The exit code, when state is exited and the shell exited."
         },
         {
           "name": "signal",
           "type": "u8",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The signal number, when state is exited and a signal ended the shell."
         },
         {
           "name": "clients",
           "type": "u16",
           "optional": true,
-          "since": 1
+          "since": 1,
+          "doc": "The count of clients that show the session. Null when the session did not say."
         },
         {
           "name": "unseen",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "The pane has output that no one saw."
         },
         {
           "name": "failed",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "The last command of the pane failed."
         },
         {
           "name": "bell",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 1
+          "since": 1,
+          "doc": "The pane rang the bell."
         }
       ],
       "cases": [],
@@ -1572,7 +1588,7 @@
           "type": "bin",
           "optional": false,
           "since": 3,
-          "doc": "The text to type, at most 65536 bytes.",
+          "doc": "The text to type. The limit is in bytes.",
           "max_length": 65536
         },
         {
@@ -1581,7 +1597,7 @@
           "optional": false,
           "default": "true",
           "since": 3,
-          "doc": "A newline follows the text."
+          "doc": "True: a newline follows the text."
         }
       ],
       "cases": [],
@@ -1707,62 +1723,72 @@
           "name": "cols",
           "type": "u16",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The width of the terminal in cells."
         },
         {
           "name": "rows",
           "type": "u16",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The height of the terminal in cells."
         },
         {
           "name": "scrollback_total",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The rows of the scrollback and the screen."
         },
         {
           "name": "scrollback_offset",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The row of the top of the viewport in them."
         },
         {
           "name": "scrollback_len",
           "type": "u64",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The rows of the viewport."
         },
         {
           "name": "alt_screen",
           "type": "bool",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The alternate screen is active."
         },
         {
           "name": "foreground_pid",
           "type": "i64",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The process group that holds the pty. Null when the session cannot read it."
         },
         {
           "name": "foreground_argv",
           "type": "[bin]",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The arguments of the leader of that group, cut at 1 KiB in all. Null when the session cannot read them."
         },
         {
           "name": "busy",
           "type": "bool",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "A program other than the shell holds the pty. Null when the session cannot read it."
         },
         {
           "name": "exited",
           "type": "bool",
           "optional": false,
           "default": "false",
-          "since": 3
+          "since": 3,
+          "doc": "The shell exited."
         }
       ],
       "cases": [],
@@ -1824,7 +1850,7 @@
           "type": "bin",
           "optional": false,
           "since": 1,
-          "doc": "The stdout of the command, at most 512 KiB."
+          "doc": "The stdout of the command, at most 524288 bytes."
         },
         {
           "name": "truncated",
@@ -1832,7 +1858,7 @@
           "optional": false,
           "default": "false",
           "since": 1,
-          "doc": "The command wrote more than 512 KiB. The rest is not in output."
+          "doc": "The command wrote more than output holds. The rest is not in output."
         },
         {
           "name": "code",
@@ -1861,7 +1887,7 @@
           "type": "secret",
           "optional": false,
           "since": 3,
-          "doc": "32 random bytes that seal each packet. The server keeps them in memory only.",
+          "doc": "Random bytes that seal each packet. The limit is in bytes. The server keeps them in memory only.",
           "min_length": 32,
           "max_length": 32
         },
@@ -1959,7 +1985,7 @@
           "optional": false,
           "default": "false",
           "since": 3,
-          "doc": "The server cannot write the model: every model request fails with model_readonly."
+          "doc": "The server cannot write the model: every model request except model.options fails with model_readonly."
         },
         {
           "name": "sessions",
@@ -2316,13 +2342,15 @@
           "name": "tab",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The tab."
         },
         {
           "name": "pane",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The zoomed pane of the tab."
         }
       ],
       "cases": [],
@@ -2505,19 +2533,22 @@
           "name": "id",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The pane."
         },
         {
           "name": "session",
           "type": "str",
           "optional": false,
-          "since": 3
+          "since": 3,
+          "doc": "The id of the session of the pane."
         },
         {
           "name": "host",
           "type": "str",
           "optional": true,
-          "since": 3
+          "since": 3,
+          "doc": "The host of the session. Null for a pane of this Mac."
         }
       ],
       "cases": [],
@@ -2628,7 +2659,7 @@
           "optional": false,
           "default": "true",
           "since": 3,
-          "doc": "The tab becomes the active tab of its workspace."
+          "doc": "True: the tab becomes the active tab of its workspace."
         }
       ],
       "cases": [],
@@ -2923,7 +2954,7 @@
           "type": "f64",
           "optional": true,
           "since": 3,
-          "doc": "The ratio of the first side. Null is 0.5."
+          "doc": "The ratio of the first side, from 0.15 to 0.85. Null is 0.5."
         },
         {
           "name": "focus",
@@ -2931,7 +2962,7 @@
           "optional": false,
           "default": "true",
           "since": 3,
-          "doc": "The new pane gets the focus, and a zoom ends."
+          "doc": "True: the new pane gets the focus, and a zoom ends."
         },
         {
           "name": "rebalance",
@@ -3164,7 +3195,7 @@
           "type": "f64",
           "optional": false,
           "since": 3,
-          "doc": "The ratio of the first side. The server keeps it inside 0.15 to 0.85."
+          "doc": "The ratio of the first side. The server moves a value out of 0.15 to 0.85 into that range, and refuses a value that is not finite."
         }
       ],
       "cases": [],
@@ -3267,7 +3298,7 @@
           "type": "bool",
           "optional": false,
           "since": 3,
-          "doc": "The rebalance of a request that gives null."
+          "doc": "True: a model request with a null rebalance makes every ratio of the tab even."
         }
       ],
       "cases": [],

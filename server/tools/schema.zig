@@ -10,8 +10,9 @@
 //!   decode and encode again (`server/schema/frames.json`).
 //!
 //! `check` compares the metadata of this build with an older one: the
-//! add-only rule of `messages.zig` as a test, no change to who may send a
-//! message, and no saved secret in a reply or an event (design/006 §1).
+//! add-only rule of `messages.zig` as a test, no stricter limit on a field,
+//! no change to who may send a message, and no saved secret in a reply or
+//! an event (design/006 §1).
 
 const std = @import("std");
 const server_src = @import("wire");
@@ -239,6 +240,10 @@ pub fn check(w: *std.Io.Writer, old: ?Metadata, new: Metadata, against: Base) st
                 try w.print("{s}.{s}: since changed from {d} to {d}\n", .{ ot.name, of.name, of.since, nf.since });
                 n += 1;
             }
+            if (stricter(of, nf)) |limit| {
+                try w.print("{s}.{s}: its {s} is stricter\n", .{ ot.name, of.name, limit });
+                n += 1;
+            }
         }
         for (nt.fields) |nf| {
             if (findName(Field, ot.fields, nf.name) != null) continue;
@@ -339,6 +344,25 @@ fn containsName(list: []const []const u8, name: []const u8) bool {
 fn findName(comptime T: type, items: []const T, name: []const u8) ?T {
     for (items) |item| if (std.mem.eql(u8, item.name, name)) return item;
     return null;
+}
+
+/// The first limit of `old` that `new` makes stricter. A client that sent a value that the old limit allowed
+/// must still be able to send it. A limit that `old` did not list can come:
+/// it names a check that the server already made.
+fn stricter(old: Field, new: Field) ?[]const u8 {
+    if (lower(old.max_length, new.max_length)) return "max_length";
+    if (lower(old.maximum, new.maximum)) return "maximum";
+    if (lower(new.min_length, old.min_length)) return "min_length";
+    if (lower(new.min_items, old.min_items)) return "min_items";
+    if (lower(new.minimum, old.minimum)) return "minimum";
+    return null;
+}
+
+/// `b` is below `a`, when `a` is listed. An unlisted `b` is no limit.
+fn lower(a: anytype, b: @TypeOf(a)) bool {
+    const x = a orelse return false;
+    const y = b orelse return false;
+    return y < x;
 }
 
 fn optionalEql(a: ?[]const u8, b: ?[]const u8) bool {
@@ -1214,6 +1238,32 @@ test "a listed removal passes against main, never against a release" {
     var out: std.Io.Writer.Allocating = .init(arena);
     try testing.expectEqual(2, try check(&out.writer, old, new, .release));
     try testing.expectEqualStrings("type ProjectKind was removed\nProject.kind was removed\n", out.written());
+}
+
+test "a listed limit never gets stricter, and a new limit can come" {
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const pane_field = "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1}";
+    const ratio = "{\"name\": \"ratio\", \"type\": \"u8\", \"default\": \"50\", \"since\": 1}";
+    const limited = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 10, "maximum": 90}
+    );
+    try testing.expectEqualStrings("", try problems(arena, base, limited));
+
+    const wider = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 5}
+    );
+    try testing.expectEqualStrings("", try problems(arena, limited, wider));
+
+    const higher_min = try edit(arena, ratio,
+        \\{"name": "ratio", "type": "u8", "default": "50", "since": 1, "minimum": 20, "maximum": 90}
+    );
+    try testing.expectEqualStrings("PaneSplit.Args.ratio: its minimum is stricter\n", try problems(arena, limited, higher_min));
+
+    const short = try edit(arena, pane_field, "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1, \"max_length\": 64}");
+    const shorter = try edit(arena, pane_field, "{\"name\": \"pane\", \"type\": \"str\", \"since\": 1, \"max_length\": 32}");
+    try testing.expectEqualStrings("PaneSplit.Args.pane: its max_length is stricter\n", try problems(arena, short, shorter));
 }
 
 test "a new enum case needs an unknown case in the enum" {

@@ -53,7 +53,7 @@ pub const max_clients = 64;
 
 /// The largest pane size that a client may ask for, in cells. A larger one
 /// is cut to it; a size of 0 is ignored.
-pub const max_cells = 1000;
+pub const max_cells = m.max_cells;
 
 /// A snapshot goes out in `bytes` frames of at most this size.
 const snapshot_chunk = 64 * 1024;

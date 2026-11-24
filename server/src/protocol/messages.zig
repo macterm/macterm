@@ -329,36 +329,42 @@ pub const Ping = struct {
 /// What the server knows of one session (design/001). The session process
 /// holds all of it, so a new server reads it again from each session.
 pub const Session = struct {
+    pub const field_doc = .{
+        .id = "The name of the session: the file name of its socket. The client that asked for the session made it.",
+        .state = "The state of the session.",
+        .build = "The build of the session, from its hello.",
+        .level = "The protocol level of the session, from its hello.",
+        .build_key = "The build key of the session, from its hello. Null when the session did not say.",
+        .pid = "The session process. Null when state is refused.",
+        .shell_pid = "The shell, or the command, of the session.",
+        .pty = "The path of the slave side of the pty.",
+        .cols = "The width of the terminal in cells.",
+        .rows = "The height of the terminal in cells.",
+        .code = "The exit code, when state is exited and the shell exited.",
+        .signal = "The signal number, when state is exited and a signal ended the shell.",
+        .clients = "The count of clients that show the session. Null when the session did not say.",
+        .unseen = "The pane has output that no one saw.",
+        .failed = "The last command of the pane failed.",
+        .bell = "The pane rang the bell.",
+    };
     pub const field_since = .{ .build_key = 3 };
 
-    /// The session's name: the file name of its socket. The client that
-    /// asked for the session made it.
     id: []const u8,
     state: SessionState,
-    /// The session's build and level, from its `hello`.
     build: []const u8,
     level: u32,
-    /// The session's build key, from its `hello`. Null when the session did
-    /// not say (a build with no key).
     build_key: ?[]const u8 = null,
-    /// The session process. Null when `state` is `refused`.
     pid: ?i64 = null,
-    /// The shell (or the command) of the session.
     shell_pid: ?i64 = null,
-    /// The path of the pty's slave side.
     pty: ?msgpack.Bin = null,
     cols: ?u16 = null,
     rows: ?u16 = null,
-    /// The exit code, when `state` is `exited` and the shell exited.
     code: ?u8 = null,
-    /// The signal number, when `state` is `exited` and a signal ended the
-    /// shell.
     signal: ?u8 = null,
-    /// The clients that show the session (they sent `attach`). Null when
-    /// the session did not say (a session of an older build).
+    /// The clients that sent `attach`.
     clients: ?u16 = null,
-    /// The pane's attention flags, from the session's `attention` message.
-    /// All false for a pane that has nothing to show.
+    /// The flags of the session's `attention` message. All false for a
+    /// pane that has nothing to show.
     unseen: bool = false,
     failed: bool = false,
     bell: bool = false,
@@ -377,6 +383,10 @@ pub const SessionState = enum {
     unknown,
 };
 
+/// The largest pane size, in cells. The server and a session cut a larger
+/// one to it.
+pub const max_cells = 1000;
+
 /// Starts a session process (design/001). The server answers when the
 /// session's socket accepts connections and the session sent its state.
 pub const SessionCreate = struct {
@@ -390,18 +400,16 @@ pub const SessionCreate = struct {
             .id = "Made by the client: letters, digits, '-', '_' and '.', not '.' or '-' first. A request sent again with this id starts no second session.",
             .cwd = "The folder of the session, an absolute path. Null is the home folder.",
             .command = "The command in place of a login shell.",
-            .cols = "The width of the terminal in cells.",
-            .rows = "The height of the terminal in cells.",
+            .cols = std.fmt.comptimePrint("The width of the terminal in cells. The server cuts it to {d}.", .{max_cells}),
+            .rows = std.fmt.comptimePrint("The height of the terminal in cells. The server cuts it to {d}.", .{max_cells}),
             .env = "The environment of the session, as NAME=value entries, in place of the environment of the server.",
-            .replace_exited = "True: a session of this id whose shell exited ends, and a new one starts after the old one is gone. False: the request fails with exited.",
+            .replace_exited = "True: a session of this id whose shell exited ends, and a new one starts after the old one is gone. False: the request then fails with exited.",
         };
 
         pub const field_since = .{ .replace_exited = 3 };
         pub const field_limits = .{ .cols = .{ .minimum = 1 }, .rows = .{ .minimum = 1 } };
 
-        /// Made by the client, so that a request sent again finds the session
-        /// that the first one started, and starts no second one. Only
-        /// letters, digits, `-`, `_` and `.`; not `.` first.
+        /// `session.validName` checks it.
         id: []const u8,
         cwd: ?msgpack.Bin = null,
         command: ?[]const msgpack.Bin = null,
@@ -508,12 +516,12 @@ pub const SessionSend = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
-        pub const field_limits = .{ .text = .{ .max_length = send_max } };
         pub const field_doc = .{
             .id = "The id of the session.",
-            .text = "The text to type, at most 65536 bytes.",
-            .submit = "A newline follows the text.",
+            .text = "The text to type. The limit is in bytes.",
+            .submit = "True: a newline follows the text.",
         };
+        pub const field_limits = .{ .text = .{ .max_length = send_max } };
 
         id: []const u8,
         text: msgpack.Bin,
@@ -595,26 +603,29 @@ pub const SessionInspect = struct {
 /// GUI's, and not here.
 pub const TerminalState = struct {
     pub const since = 3;
+    pub const field_doc = .{
+        .cols = "The width of the terminal in cells.",
+        .rows = "The height of the terminal in cells.",
+        .scrollback_total = "The rows of the scrollback and the screen.",
+        .scrollback_offset = "The row of the top of the viewport in them.",
+        .scrollback_len = "The rows of the viewport.",
+        .alt_screen = "The alternate screen is active.",
+        .foreground_pid = "The process group that holds the pty. Null when the session cannot read it.",
+        .foreground_argv = "The arguments of the leader of that group, cut at 1 KiB in all. Null when the session cannot read them.",
+        .busy = "A program other than the shell holds the pty. Null when the session cannot read it.",
+        .exited = "The shell exited.",
+    };
 
     cols: u16,
     rows: u16,
-    /// The rows of the screen and the scrollback, the row of the viewport's
-    /// top in them, and the rows of the viewport (ghostty's scrollbar).
+    /// Ghostty's scrollbar.
     scrollback_total: u64,
     scrollback_offset: u64,
     scrollback_len: u64,
-    /// The alternate screen is active.
     alt_screen: bool,
-    /// The process group that holds the pty. Null when the session cannot
-    /// read it.
     foreground_pid: ?i64 = null,
-    /// The arguments of the group's leader, cut at 1 KiB in all. Null when
-    /// they cannot be read.
     foreground_argv: ?[]const msgpack.Bin = null,
-    /// A program other than the shell holds the pty. Null when the
-    /// session cannot read it.
     busy: ?bool = null,
-    /// The shell exited.
     exited: bool = false,
 };
 
@@ -650,14 +661,14 @@ pub const CommandRun = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
-        pub const field_limits = .{
-            .argv = .{ .min_items = 1 },
-            .timeout_ms = .{ .minimum = 1, .maximum = run_timeout_max_ms },
-        };
         pub const field_doc = .{
             .argv = "The program, an absolute path, then its arguments.",
             .cwd = "The folder, an absolute path. Null is the home folder.",
             .timeout_ms = "After this time, the process group of the command gets SIGKILL and the request fails with timeout.",
+        };
+        pub const field_limits = .{
+            .argv = .{ .min_items = 1 },
+            .timeout_ms = .{ .minimum = 1, .maximum = run_timeout_max_ms },
         };
 
         argv: []const msgpack.Bin,
@@ -666,13 +677,12 @@ pub const CommandRun = struct {
     };
     pub const Result = struct {
         pub const field_doc = .{
-            .output = "The stdout of the command, at most 512 KiB.",
-            .truncated = "The command wrote more than 512 KiB. The rest is not in output.",
+            .output = std.fmt.comptimePrint("The stdout of the command, at most {d} bytes.", .{run_output_max}),
+            .truncated = "The command wrote more than output holds. The rest is not in output.",
             .code = "The exit code, when the command exited.",
             .signal = "The signal number, when a signal ended the command.",
         };
 
-        /// At most `run_output_max` bytes.
         output: msgpack.Bin,
         truncated: bool = false,
         code: ?u8 = null,
@@ -697,11 +707,11 @@ pub const LinkOpen = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
-        pub const field_limits = .{ .secret = .{ .min_length = link_secret_len, .max_length = link_secret_len } };
         pub const field_doc = .{
-            .secret = "32 random bytes that seal each packet. The server keeps them in memory only.",
+            .secret = "Random bytes that seal each packet. The limit is in bytes. The server keeps them in memory only.",
             .key_id = "Names the key in each packet. The client makes it, and no other link of this server has it.",
         };
+        pub const field_limits = .{ .secret = .{ .min_length = link_secret_len, .max_length = link_secret_len } };
 
         secret: msgpack.Secret,
         key_id: u32,
@@ -749,6 +759,11 @@ pub const SplitId = model.SplitId;
 
 /// The zoomed pane of a tab. The server keeps zoom in memory only.
 pub const Zoom = struct {
+    pub const field_doc = .{
+        .tab = "The tab.",
+        .pane = "The zoomed pane of the tab.",
+    };
+
     tab: TabId,
     pane: PaneId,
 };
@@ -757,9 +772,14 @@ pub const Zoom = struct {
 /// itself. A client that owns the link to `host` ends a remote one
 /// (design/010 §5).
 pub const RemovedPane = struct {
+    pub const field_doc = .{
+        .id = "The pane.",
+        .session = "The id of the session of the pane.",
+        .host = "The host of the session. Null for a pane of this Mac.",
+    };
+
     id: PaneId,
     session: []const u8,
-    /// Null for a pane of this Mac.
     host: ?[]const u8 = null,
 };
 
@@ -779,19 +799,19 @@ pub const StateSubscribe = struct {
             .seq = "The count of event batches in epoch that this state includes.",
             .model = "The model. Null on a server with no model.",
             .zoomed = "The zoomed pane of each tab that has one.",
-            .readonly = "The server cannot write the model: every model request fails with model_readonly.",
+            .readonly = "The server cannot write the model: every model request except model.options fails with model_readonly.",
             .sessions = "Every session of the server.",
             .client = "The key of this connection for the ring of request ids. A client that resumes on a new connection sends it in control.resume.",
         };
 
         epoch: u64,
         seq: u64,
-        /// Null on a server with no model: a host's server, or a server
-        /// that the app did not give `MACTERM_STATE_DIR`.
+        /// A host's server, or a server that the app did not give
+        /// `MACTERM_STATE_DIR`, has no model.
         model: ?model.ModelData = null,
         zoomed: []const Zoom = &.{},
         /// The server could not read `model.json`, or the file is of a newer
-        /// build. Every model request fails with `model_readonly`.
+        /// build.
         readonly: bool = false,
         sessions: []const Session,
         client: u64,
@@ -944,7 +964,7 @@ pub const TabCreate = struct {
             .index = "The position of the tab in its workspace. Null puts it at the end.",
             .root = "One pane, or a tree of panes, with the ids that the client made.",
             .title = "The title of the tab.",
-            .focus = "The tab becomes the active tab of its workspace.",
+            .focus = "True: the tab becomes the active tab of its workspace.",
         };
 
         workspace: WorkspaceId,
@@ -1108,8 +1128,8 @@ pub const PaneSplit = struct {
             .split_id = "The id of the new split. The client makes it.",
             .dir = "The direction of the split. Auto splits along the longer side of the target.",
             .position = "The side of the split that the new pane takes.",
-            .ratio = "The ratio of the first side. Null is 0.5.",
-            .focus = "The new pane gets the focus, and a zoom ends.",
+            .ratio = std.fmt.comptimePrint("The ratio of the first side, from {d} to {d}. Null is 0.5.", .{ model.tree.min_ratio, model.tree.max_ratio }),
+            .focus = "True: the new pane gets the focus, and a zoom ends.",
             .rebalance = "True: every ratio of the tab is even after the change. Null takes auto_tiling of model.options.",
         };
 
@@ -1240,7 +1260,7 @@ pub const SplitRatio = struct {
     pub const Args = struct {
         pub const field_doc = .{
             .id = "The split.",
-            .ratio = "The ratio of the first side. The server keeps it inside 0.15 to 0.85.",
+            .ratio = std.fmt.comptimePrint("The ratio of the first side. The server moves a value out of {d} to {d} into that range, and refuses a value that is not finite.", .{ model.tree.min_ratio, model.tree.max_ratio }),
         };
 
         id: SplitId,
@@ -1322,7 +1342,7 @@ pub const ModelOptions = struct {
     pub const senders: []const Trust = &.{.local};
 
     pub const Args = struct {
-        pub const field_doc = .{ .auto_tiling = "The rebalance of a request that gives null." };
+        pub const field_doc = .{ .auto_tiling = "True: a model request with a null rebalance makes every ratio of the tab even." };
 
         auto_tiling: bool,
     };

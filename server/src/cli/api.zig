@@ -191,7 +191,7 @@ fn definition(arena: std.mem.Allocator, t: metadata.TypeDef, defs: *ObjectMap) e
 /// The limits of a field, as the JSON Schema keywords. The schema's
 /// `minimum` and `maximum` of an integer type give way to the field's own.
 /// `minLength` and `maxLength` count characters in JSON Schema, and the
-/// server counts bytes: the field's doc says so.
+/// server counts bytes: the doc of each such field says so.
 fn putLimits(arena: std.mem.Allocator, o: *ObjectMap, f: metadata.Field) error{OutOfMemory}!void {
     if (f.min_length) |v| try o.put(arena, "minLength", .{ .integer = @intCast(v) });
     if (f.max_length) |v| try o.put(arena, "maxLength", .{ .integer = @intCast(v) });
@@ -474,7 +474,7 @@ test "describe gives the doc of each field as description, and its limits" {
     const a = arena_state.allocator();
     const send = (try describe(a, find("session.send").?)).object.get("args").?.object.get("properties").?.object;
     const text = send.get("text").?.object;
-    try testing.expectEqualStrings("The text to type, at most 65536 bytes.", text.get("description").?.string);
+    try testing.expectEqualStrings("The text to type. The limit is in bytes.", text.get("description").?.string);
     try testing.expectEqual(m.send_max, text.get("maxLength").?.integer);
     try testing.expect(send.get("submit").?.object.get("description") != null);
 
@@ -503,6 +503,15 @@ test "every field of the args and the result of a listed method has a doc" {
                 if (f.doc == null) std.debug.print("{s}: {s}.{s} has no doc\n", .{ method.name, name, f.name });
                 try testing.expect(f.doc != null);
             }
+        }
+    }
+}
+
+test "every field of a type of messages.zig in a result has a doc" {
+    inline for (.{ m.Session, m.TerminalState, m.Zoom, m.RemovedPane }) |T| {
+        inline for (comptime std.meta.fieldNames(T)) |name| {
+            if (!@hasField(@TypeOf(T.field_doc), name)) std.debug.print("{s}.{s} has no doc\n", .{ @typeName(T), name });
+            try testing.expect(@hasField(@TypeOf(T.field_doc), name));
         }
     }
 }
