@@ -210,7 +210,7 @@ pub const Connection = struct {
         m.encodeRequest(&out.writer, id, M, args) catch return error.OutOfMemory;
         c.sendFrame(out.written()) catch return error.NoReply;
         while (true) {
-            const body = (try c.nextMessage(request_timeout_ms)) orelse return error.NoReply;
+            const body = (try c.nextMessage(replyTimeoutMs(M, args))) orelse return error.NoReply;
             switch (m.decodeControl(c.arena, body) catch return error.Protocol) {
                 .response => |res| {
                     if (res.re != id) continue;
@@ -220,6 +220,13 @@ pub const Connection = struct {
                 else => {},
             }
         }
+    }
+
+    /// A method with a `timeout_ms` (`session.wait`, `command.run`) can
+    /// reply that late: the client waits that long, and then the usual time.
+    fn replyTimeoutMs(comptime M: type, args: M.Args) i32 {
+        if (!@hasField(M.Args, "timeout_ms")) return request_timeout_ms;
+        return @intCast(@min(@as(u64, args.timeout_ms) + request_timeout_ms, std.math.maxInt(i32)));
     }
 
     pub fn close(c: *Connection) void {

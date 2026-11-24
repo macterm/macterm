@@ -45,8 +45,19 @@ pub const Replace = struct {
 pub const Waiter = struct {
     peer: u64,
     re: u64,
-    kind: enum { create, info, kill, list, seen, history, inspect, subscribe },
+    kind: enum { create, info, kill, list, seen, history, inspect, subscribe, wait },
+    /// `history`: the `tail_lines` of the request.
+    tail_lines: ?u32 = null,
+    /// `wait`: the tag of the session's `wait`, and when the server stops
+    /// to wait for its `waited` (`wait_grace_ms` after the timeout).
+    tag: u64 = 0,
+    deadline: i64 = 0,
 };
+
+/// The time after a wait's timeout that the server gives the session to
+/// answer. A session of an older build does not know `wait`: its waiter gets
+/// an error when this time ends.
+pub const wait_grace_ms = 2000;
 
 /// The server's connection to one session process.
 pub const Entry = struct {
@@ -263,7 +274,19 @@ pub fn handleEntryFrame(s: *Server, e: *Entry, f: frame.Frame, arena: std.mem.Al
     } else if (std.mem.eql(u8, msg.t, m.History.name)) {
         const h = m.decodePane(m.History, arena, msg) catch return brokenEntry(s, e, "a bad history");
         const w = takeWaiter(e, .history) orelse return;
-        peers.reply(s, w.peer, w.re, m.SessionHistory, .{ .text = h.text, .truncated = h.truncated });
+        const tail = if (w.tail_lines) |n| tailLines(h.text.bytes, n) else Tail{ .text = h.text.bytes, .cut = 0 };
+        peers.reply(s, w.peer, w.re, m.SessionHistory, .{
+            .text = .{ .bytes = tail.text },
+            .truncated = h.truncated or tail.cut > 0,
+            .lines_cut = tail.cut,
+        });
+    } else if (std.mem.eql(u8, msg.t, m.Waited.name)) {
+        const d = m.decodePane(m.Waited, arena, msg) catch return brokenEntry(s, e, "a bad waited");
+        for (e.waiters.items, 0..) |w, i| if (w.kind == .wait and w.tag == d.tag) {
+            _ = e.waiters.orderedRemove(i);
+            peers.reply(s, w.peer, w.re, m.SessionWait, .{ .end = d.end, .line = d.line });
+            break;
+        };
     } else if (std.mem.eql(u8, msg.t, m.Inspect.name)) {
         const i = m.decodePane(m.Inspect, arena, msg) catch return brokenEntry(s, e, "a bad inspect");
         const w = takeWaiter(e, .inspect) orelse return;
@@ -289,7 +312,7 @@ pub fn settle(s: *Server, e: *Entry) void {
         .kill, .list, .seen, .subscribe => wait(s, &e.waiters, w),
         // A session asked for its text or state answers, unless it was
         // refused: then its connection is closed.
-        .history, .inspect => if (e.refused)
+        .history, .inspect, .wait => if (e.refused)
             peers.replyError(s, w.peer, w.re, .refused, "The session runs a build that this server cannot speak to.")
         else
             wait(s, &e.waiters, w),
@@ -342,7 +365,7 @@ pub fn entryGone(s: *Server, e: *Entry) void {
     for (e.waiters.items) |w| switch (w.kind) {
         .kill => peers.reply(s, w.peer, w.re, m.SessionKill, .{}),
         .create => peers.replyError(s, w.peer, w.re, .start_failed, "The session ended before it was ready."),
-        .info, .list, .seen, .history, .inspect, .subscribe => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
+        .info, .list, .seen, .history, .inspect, .subscribe, .wait => peers.replyError(s, w.peer, w.re, .not_found, "No session has this id."),
     };
     e.waiters.clearRetainingCapacity();
     answerLists(s);
@@ -665,9 +688,87 @@ pub fn sendKey(s: *Server, p: *Peer, re: u64, args: m.SessionKey.Args) void {
 
 /// `session.history`: the reply goes when the session's `history` comes.
 pub fn readHistory(s: *Server, p: *Peer, re: u64, args: m.SessionHistory.Args) void {
+    if (args.tail_lines == 0)
+        return peers.replyError(s, p.id, re, .invalid_args, "tail_lines must be 1 or more.");
     const e = terminalEntry(s, p, re, args.id, false) orelse return;
-    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history });
+    wait(s, &e.waiters, .{ .peer = p.id, .re = re, .kind = .history, .tail_lines = args.tail_lines });
     sendEntryPane(s, e, m.HistoryRead, .{ .scrollback = args.scrollback });
+}
+
+/// `session.wait`: the session waits, and the reply goes when its `waited`
+/// comes. The server keeps its own deadline, so that a session that does not
+/// answer does not hold the request for ever (`timers`).
+pub fn startWait(s: *Server, p: *Peer, re: u64, args: m.SessionWait.Args) void {
+    if (args.text) |t| if (t.len == 0 or t.len > m.wait_text_max)
+        return peers.replyError(s, p.id, re, .invalid_args, "The marker must be 1 to 1024 bytes.");
+    if (args.timeout_ms > m.wait_max_ms)
+        return peers.replyError(s, p.id, re, .invalid_args, "timeout_ms is over 600000.");
+    const e = terminalEntry(s, p, re, args.id, false) orelse return;
+    s.wait_tag += 1;
+    const tag = s.wait_tag;
+    wait(s, &e.waiters, .{
+        .peer = p.id,
+        .re = re,
+        .kind = .wait,
+        .tag = tag,
+        .deadline = s.now() + args.timeout_ms + wait_grace_ms,
+    });
+    sendEntryPane(s, e, m.Wait, .{ .tag = tag, .text = args.text, .timeout_ms = args.timeout_ms });
+}
+
+/// A client left: each session stops the waits of that client.
+pub fn cancelWaits(s: *Server, peer: u64) void {
+    for (s.entries.items) |e| {
+        var i: usize = 0;
+        while (i < e.waiters.items.len) {
+            const w = e.waiters.items[i];
+            if (w.kind != .wait or w.peer != peer) {
+                i += 1;
+                continue;
+            }
+            _ = e.waiters.orderedRemove(i);
+            if (!e.conn.dead) sendEntryPane(s, e, m.WaitCancel, .{ .tag = w.tag });
+        }
+    }
+}
+
+/// The waits of `e` that the session did not answer in time get an error.
+pub fn expireWaits(s: *Server, e: *Entry, now: i64) void {
+    var i: usize = 0;
+    while (i < e.waiters.items.len) {
+        const w = e.waiters.items[i];
+        if (w.kind != .wait or now < w.deadline) {
+            i += 1;
+            continue;
+        }
+        _ = e.waiters.orderedRemove(i);
+        peers.replyError(s, w.peer, w.re, .unavailable, "The session did not answer the wait. It can run an older build: restart the pane.");
+    }
+}
+
+/// The earliest deadline of the waits of `e`.
+pub fn waitDeadline(e: *const Entry) ?i64 {
+    var next: ?i64 = null;
+    for (e.waiters.items) |w| if (w.kind == .wait) {
+        next = @min(next orelse w.deadline, w.deadline);
+    };
+    return next;
+}
+
+pub const Tail = struct { text: []const u8, cut: u64 };
+
+/// The last `n` lines of `text`, and the count of lines before them. A
+/// newline at the end ends the last line and starts no new one.
+pub fn tailLines(text: []const u8, n: u32) Tail {
+    const body = if (std.mem.endsWith(u8, text, "\n")) text[0 .. text.len - 1] else text;
+    var start = body.len;
+    var kept: u32 = 0;
+    while (std.mem.lastIndexOfScalar(u8, body[0..start], '\n')) |nl| {
+        kept += 1;
+        if (kept == n) return .{ .text = text[nl + 1 ..], .cut = std.mem.count(u8, body[0..nl], "\n") + 1 };
+        start = nl;
+    }
+    return .{ .text = text, .cut = 0 };
 }
 
 /// `session.inspect`: the reply goes when the session's `inspect` comes.
@@ -935,4 +1036,21 @@ test "a session's build is kept only as short printable text" {
     try testing.expectEqualStrings("unknown", buildName("a\x1b[2Jb"));
     const long: [65]u8 = @splat('x');
     try testing.expectEqualStrings("unknown", buildName(&long));
+}
+
+test "a tail keeps the last lines and counts the lines before them" {
+    const t = tailLines("a\nb\nc\nd\n", 2);
+    try std.testing.expectEqualStrings("c\nd\n", t.text);
+    try std.testing.expectEqual(2, t.cut);
+    const no_newline = tailLines("a\nb\nc", 1);
+    try std.testing.expectEqualStrings("c", no_newline.text);
+    try std.testing.expectEqual(2, no_newline.cut);
+    // Fewer lines than asked: all of them, and nothing cut.
+    const short = tailLines("a\nb\n", 2);
+    try std.testing.expectEqualStrings("a\nb\n", short.text);
+    try std.testing.expectEqual(0, short.cut);
+    try std.testing.expectEqual(0, tailLines("", 3).cut);
+    const empty_lines = tailLines("\n\nx\n", 1);
+    try std.testing.expectEqualStrings("x\n", empty_lines.text);
+    try std.testing.expectEqual(2, empty_lines.cut);
 }

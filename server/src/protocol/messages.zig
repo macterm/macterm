@@ -591,20 +591,81 @@ pub const SessionHistory = struct {
         pub const field_doc = .{
             .id = "The id of the session.",
             .scrollback = "True: the scrollback and the screen. False: the screen only.",
+            .tail_lines = "The last lines of the text only. With no value, all the lines.",
         };
+        pub const field_limits = .{ .tail_lines = .{ .minimum = 1 } };
 
         id: []const u8,
         scrollback: bool = false,
+        tail_lines: ?u32 = null,
     };
     pub const Result = struct {
         pub const field_doc = .{
             .text = "The text of the terminal.",
-            .truncated = "The text was longer than a frame holds: text is its end.",
+            .truncated = "Only the end of the text is here, because the text was longer than a frame holds or than tail_lines.",
+            .lines_cut = "The lines that tail_lines removed. Lines that the frame limit removed are not counted.",
         };
 
         text: msgpack.Bin,
         truncated: bool = false,
+        lines_cut: u64 = 0,
     };
+};
+
+/// The longest marker of `session.wait`, in bytes.
+pub const wait_text_max = 1024;
+/// The longest time that `session.wait` waits.
+pub const wait_max_ms = 600_000;
+/// The longest line that `session.wait` gives back. A longer line keeps its
+/// start.
+pub const wait_line_max = 4096;
+/// With no marker, `session.wait` ends when no run is in progress and the
+/// pane printed nothing for this time.
+pub const wait_quiet_ms = 500;
+
+/// Waits in the session until a line of its terminal starts with a marker,
+/// or, with no marker, until no run is in progress and the pane is quiet
+/// (`wait_quiet_ms`). The session process waits, so a client does not poll
+/// `session.history`. The reply goes when the wait ends, at the latest after
+/// `timeout_ms`.
+pub const SessionWait = struct {
+    pub const name = "session.wait";
+    pub const doc = "Waits until a line of the terminal of a session starts with a marker, or until no command runs in it.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .id = "The id of the session.",
+            .text = "The marker. The wait ends when a line of the scrollback or the screen starts with it. The line of the typed command starts with the prompt, so it does not match. With no marker, the wait ends when no command runs and the pane printed nothing for 500 ms.",
+            .timeout_ms = "The longest time to wait, in milliseconds.",
+        };
+        pub const field_limits = .{
+            .text = .{ .min_length = 1, .max_length = wait_text_max },
+            .timeout_ms = .{ .maximum = wait_max_ms },
+        };
+
+        id: []const u8,
+        text: ?[]const u8 = null,
+        timeout_ms: u32 = 30_000,
+    };
+    pub const Result = struct {
+        pub const field_doc = .{
+            .end = "Why the wait ended: matched (a line starts with the marker), done (no command runs), exited (the shell exited) or timeout.",
+            .line = "With matched: the newest line that starts with the marker, cut at 4 KiB.",
+        };
+
+        end: WaitEnd,
+        line: ?msgpack.Bin = null,
+    };
+};
+
+pub const WaitEnd = enum {
+    matched,
+    done,
+    exited,
+    timeout,
+    unknown,
 };
 
 /// The state of a session's terminal (`macterm pane inspect`).
@@ -1356,6 +1417,7 @@ pub const methods = .{
     ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,    TabClose,      TabSet,         TabSelect,
     TabReorder,     TabMove,        TabMerge,      PaneSplit,    PaneClose,     PaneMove,       PaneSeparate,
     PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,    ModelImport,   ModelReplace,   ModelOptions,
+    SessionWait,
 };
 
 /// The methods that change the model. The server answers one of them sent
@@ -1934,6 +1996,39 @@ pub const History = struct {
     };
 };
 
+/// The server asks the session to wait (`session.wait`). The session
+/// answers with `Waited` and the same `tag` when the wait ends. Waits end in
+/// any order.
+pub const Wait = struct {
+    pub const name = "wait";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    tag: u64,
+    text: ?[]const u8 = null,
+    timeout_ms: u32,
+};
+
+/// The client of a `session.wait` left: the session stops the wait with
+/// this tag and sends no `waited`.
+pub const WaitCancel = struct {
+    pub const name = "wait_cancel";
+    pub const since = 3;
+    pub const senders = from_client;
+
+    tag: u64,
+};
+
+pub const Waited = struct {
+    pub const name = "waited";
+    pub const since = 3;
+    pub const senders = from_session;
+
+    tag: u64,
+    end: WaitEnd,
+    line: ?msgpack.Bin = null,
+};
+
 /// The server asks for the terminal's state (`session.inspect`). The session
 /// answers with `Inspect`, in the order of the requests.
 pub const InspectRead = struct {
@@ -2176,9 +2271,9 @@ pub const max_program_records = 64;
 
 /// Every message on a pane channel. A new one goes here.
 pub const pane_messages = .{
-    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,       Refresh,
-    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention, Seen,
-    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,
+    State,   Attach,  Resize,     Claim,       Lead,     SnapshotStart, SnapshotEnd, Exit,   Take,          End,        Refresh,
+    Title,   Cwd,     Foreground, Mark,        Progress, Bell,          Activity,    Status, ProgramStatus, Attention,  Seen,
+    Resumed, TtyMode, Key,        HistoryRead, History,  InspectRead,   Inspect,     Wait,   Waited,        WaitCancel,
 };
 
 pub fn encodePane(w: *std.Io.Writer, comptime M: type, value: M) std.Io.Writer.Error!void {
