@@ -182,13 +182,13 @@ pub fn parentPid(pid: lib_posix.pid_t) ?lib_posix.pid_t {
     return @intCast(info.ppid);
 }
 
-/// Whether `pid` runs login(1): its executable is a file named `login`. On
-/// macOS only, as `parentPid`.
-pub fn runsLogin(pid: lib_posix.pid_t) bool {
-    if (builtin.os.tag != .macos) return false;
+/// Whether `pid` runs login(1): its executable is a file named `login`.
+/// null when it cannot be read. On macOS only, as `parentPid`.
+pub fn runsLogin(pid: lib_posix.pid_t) ?bool {
+    if (builtin.os.tag != .macos) return null;
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const n = macos.proc_pidpath(@intCast(pid), &buf, buf.len);
-    if (n <= 0) return false;
+    if (n <= 0) return null;
     return std.mem.eql(u8, std.fs.path.basename(buf[0..@intCast(n)]), "login");
 }
 
@@ -361,6 +361,11 @@ test "foreground: parseProcArgs2 cuts at the output buffer" {
 test "foreground: parentPid reads the parent of this process" {
     if (builtin.os.tag != .macos) return error.SkipZigTest;
     try testing.expectEqual(std.c.getppid(), parentPid(std.c.getpid()).?);
+}
+
+test "foreground: runsLogin reads the program of a process" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+    try testing.expectEqual(false, runsLogin(std.c.getpid()).?);
 }
 
 test "foreground: joinCmdline turns NUL separators into spaces" {

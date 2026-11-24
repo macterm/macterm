@@ -42,10 +42,11 @@ PY
   check_idle
 }
 
-# A palette command with a wrapper starts `macterm palette exec … -- login …`,
-# which runs login(1) with exec. The session reads the program that runs, not
-# the command that it started.
+# A palette command with a wrapper starts `macterm palette exec … -- login …`.
+# The wrapper first runs a command in a process group of its own, then runs
+# login(1) with exec. The session reads the program that runs, not the
+# command that it started.
 @test "events: a wrapper that runs login(1) with exec gives a shell that is idle at its prompt" {
-  "$ZMX" __create-session s1 -- /bin/sh -c 'exec /usr/bin/login -flpq "$(id -un)" /bin/sh'
+  "$ZMX" __create-session s1 -- /bin/sh -c 'set -m; sleep 0.3; set +m; exec /usr/bin/login -flpq "$(id -un)" /bin/sh'
   check_idle
 }

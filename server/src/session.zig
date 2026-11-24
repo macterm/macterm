@@ -755,16 +755,18 @@ const Session = struct {
     }
 
     /// Whether `pgrp` is the shell's process group. login(1) starts the
-    /// shell in a process group of its own (ghostty starts every local shell
-    /// this way on macOS). login is in front before it starts the shell, and
-    /// counts as the shell. The first group in front whose leader is login's
-    /// child is the shell's: login has one child. The session reads the
-    /// program of `shell_pid` at that time, not the command it started: a
-    /// wrapper (`macterm palette exec`) can run login(1) with exec.
+    /// shell in a process group of its own, and is in front before that, so
+    /// login counts as the shell. The first group in front whose leader is a
+    /// child of login is the shell's: login has one child. The session reads
+    /// the program that runs now, because a wrapper (`macterm palette exec`)
+    /// can run login with exec. A read that fails is not kept, so that the
+    /// next read tries again.
     fn isShellGroup(s: *Session, pgrp: lib_posix.pid_t) bool {
         if (pgrp == s.shell_pid or pgrp == s.shell_pgid) return true;
         if (s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
-        if (foreground.parentPid(pgrp) != s.shell_pid or !foreground.runsLogin(s.shell_pid)) {
+        const parent = foreground.parentPid(pgrp) orelse return false;
+        const login = parent == s.shell_pid and (foreground.runsLogin(s.shell_pid) orelse return false);
+        if (!login) {
             s.other_pgid = pgrp;
             return false;
         }
