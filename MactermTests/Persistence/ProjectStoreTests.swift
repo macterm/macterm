@@ -126,7 +126,7 @@ struct ProjectStoreTests {
 
     @Test
     func a_stored_name_with_a_slash_still_loads() throws {
-        // Names from before the rule stay as they are (0226 converts them).
+        // Names from before the rule stay as they are.
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-slash-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
