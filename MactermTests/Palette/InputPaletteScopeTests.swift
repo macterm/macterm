@@ -186,39 +186,23 @@ struct InputPaletteScopeTests {
         }
         let completions = PaletteInput.pathCompletions(root.path + "/s")
         #expect(completions == [
-            PaletteCompletion(title: "scripts", value: root.path + "/scripts/"),
-            PaletteCompletion(title: "src", value: root.path + "/src/"),
+            PaletteCompletion(title: "scripts", value: root.path + "/scripts/", subtitle: root.path + "/scripts"),
+            PaletteCompletion(title: "src", value: root.path + "/src/", subtitle: root.path + "/src"),
         ])
-        #expect(PaletteInput.pathCompletions("devbox:~/dev").isEmpty, "a remote path gets no completion")
-    }
-
-    @Test
-    func results_replace_the_completions_and_run_on_a_press() throws {
-        var ran: [String] = []
         let scope = InputPaletteScope(input: PaletteInput(
-            id: "test.results",
-            title: "Pick",
+            id: "test.path",
+            title: "Path",
             prompt: "Path",
-            completions: { _ in [PaletteCompletion(title: "never", value: "never")] },
-            results: { text, _ in
-                ["notes", "novel"].filter { $0.hasPrefix(text) }.map { name in
-                    PaletteInputResult(
-                        item: PaletteItem(id: "row:\(name)", title: name) { ran.append(name) },
-                        completion: name + "/"
-                    )
-                }
-            },
-            check: { _, _ in .action(PaletteInputAction(title: "Browse") { .done }) }
-        ))
-
-        let rows = try #require(scope.sections(for: PaletteQuery(raw: "no"), context: makeContext()).first?.items)
-        #expect(rows.map(\.title) == ["Browse", "notes", "novel"], "the action row, then the results, not the completions")
-        #expect(scope.isAction(rows[0]))
-        #expect(!scope.isResult(rows[0]))
-        #expect(scope.isResult(rows[2]))
-        #expect(scope.completion(for: rows[2]) == "novel/")
-        #expect(scope.press(rows[2]) == .closed)
-        #expect(ran == ["novel"])
+            completions: PaletteInput.pathCompletions
+        ) { _, _ in .nothing })
+        let rows = scope.sections(for: PaletteQuery(raw: root.path + "/s"), context: makeContext()).flatMap(\.items)
+        #expect(rows.map(\.subtitle) == [root.path + "/scripts", root.path + "/src"], "a row shows the full path")
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #expect(
+            PaletteInput.pathCompletions("~/").allSatisfy { $0.subtitle?.hasPrefix("~/") == true && !$0.subtitle!.hasPrefix(home) },
+            "a typed ~ keeps the ~ in the full path"
+        )
+        #expect(PaletteInput.pathCompletions("devbox:~/dev").isEmpty, "a remote path gets no completion")
     }
 
     @Test

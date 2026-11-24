@@ -502,14 +502,11 @@ struct CommandPalettePanel: View {
         // rows) — Return would have nothing to run. An input screen's
         // selection stays on the row it was on, by its id, so a redraw never
         // moves it to another row that Return would then take. Else it
-        // rests on the first result row (`PaletteInput.results`), else on
-        // the action row, the first row, or on no row when the text has
-        // none.
+        // rests on the action row, the first row, or on no row when the
+        // text has none.
         if let inputScope {
             if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
                 selectedIndex = index
-            } else if let firstResult = flatItems.firstIndex(where: inputScope.isResult) {
-                selectedIndex = firstResult
             } else {
                 selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
             }
@@ -551,16 +548,13 @@ struct CommandPalettePanel: View {
     /// the keypress fall through (`.ignored`) to default focus traversal in
     /// that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's rows that complete the field: the first that
-        // changes the field, from the selected row down, or from the top
-        // when the selection is on the action row or on no row. A folder
-        // that a Tab filled in is its own top row, so the next Tab takes its
-        // first child, as in the root.
+        // An input screen's completion rows: the selected one, or the top
+        // one when the selection is on no completion (the action row).
         if let inputScope {
-            let start = flatItems.indices.contains(selectedIndex) && !inputScope.isAction(flatItems[selectedIndex])
-                ? selectedIndex : 0
-            guard flatItems.indices.contains(start),
-                  let completion = flatItems[start...].lazy.compactMap(inputScope.completion(for:)).first(where: { $0 != query })
+            let selected = flatItems.indices.contains(selectedIndex)
+                ? inputScope.completion(for: flatItems[selectedIndex]) : nil
+            guard let completion = selected ?? flatItems.lazy.compactMap(inputScope.completion(for:)).first,
+                  completion != query
             else { return .ignored }
             query = completion
             return .handled

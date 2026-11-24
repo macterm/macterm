@@ -2,8 +2,9 @@ import Foundation
 @testable import Macterm
 import Testing
 
-/// The New Project screen (`PaletteInput.newProject`): Select in Finder as
-/// its action row, and the rows of path mode of the root for a typed path.
+/// The New Project screen (`PaletteInput.newProject`): Select in Finder on
+/// an empty field, one action row for a typed folder, and the folders under
+/// the typed path as completions.
 @MainActor
 struct NewProjectInputTests {
     private func makeContext() -> (PaletteContext, WindowState) {
@@ -34,7 +35,7 @@ struct NewProjectInputTests {
     }
 
     @Test
-    func the_finder_row_is_first_with_no_glyph_and_the_pill_has_no_icon() throws {
+    func an_empty_field_shows_select_in_finder_alone_and_the_pill_has_no_icon() throws {
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
         #expect(PaletteInput.newProject.pill == PalettePill(title: "New Project"))
@@ -57,80 +58,82 @@ struct NewProjectInputTests {
     }
 
     @Test
-    func a_typed_path_lists_the_rows_of_path_mode() throws {
+    func a_typed_character_takes_select_in_finder_away() throws {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
-
-        let typed = folder.deletingLastPathComponent().path + "/"
-        let listed = rows(scope, typed, context)
-        let rootRows = DirectorySource().items(query: typed, context: context)
-        #expect(listed.first?.title == "Select in Finder")
-        let results = Array(listed.dropFirst())
-        #expect(results.map(\.id) == rootRows.map(\.id))
-        #expect(results.map(\.subtitle) == rootRows.map(\.subtitle))
-        #expect(results.allSatisfy { scope.isResult($0) && $0.icon == nil })
-        let child = try #require(results.last)
-        #expect(child.title == "api")
-        #expect(
-            try scope.completion(for: child) == #require(DirectorySource.path(of: child)) + "/",
-            "Tab fills the folder, ready to go into it"
-        )
+        for text in ["~", "/", folder.path, folder.deletingLastPathComponent().path + "/a", "devbox:~/api"] {
+            #expect(!rows(scope, text, context).contains { $0.title == "Select in Finder" }, "\(text)")
+        }
     }
 
     @Test
-    func a_result_adds_its_folder_or_switches_to_its_project() throws {
+    func a_typed_folder_has_one_action_row_that_adds_it() throws {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
 
-        let top = try #require(rows(scope, folder.path, context).first(where: scope.isResult))
-        #expect(scope.press(top) == .closed)
+        let listed = rows(scope, folder.path + "/", context)
+        let action = try #require(listed.first)
+        #expect(action.title == "New Project \"\(folder.path)/\"")
+        #expect(listed.dropFirst().allSatisfy { !scope.isAction($0) }, "one action row")
+        #expect(scope.press(action) == .closed)
         let project = try #require(context.projectStore.projects.first)
         #expect(project.name == "api")
+        #expect(project.path == ProjectPath.normalizedForStorage(folder.path), "the path loses its trailing slash")
         #expect(context.appState.activeProjectID == project.id)
-
-        // The folder has a project now: the top row switches to it, and the
-        // row below adds another.
-        let path = DirectorySource.path(of: top) ?? ""
-        let again = rows(scope, folder.path, context).filter(scope.isResult)
-        #expect(again.map(\.id) == ["dir-switch:\(path)", "dir-new:\(path)"])
-        #expect(scope.press(again[0]) == .closed)
-        #expect(context.projectStore.projects.count == 1)
     }
 
     @Test
-    func text_with_spaces_around_it_lists_the_same_rows() throws {
+    func a_folder_that_a_project_has_switches_to_that_project() throws {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
-        let plain = rows(scope, folder.path, context).map(\.id)
-        #expect(plain.count > 1)
-        #expect(rows(scope, " \(folder.path) ", context).map(\.id) == plain)
-    }
+        let existing = context.projectStore.create(name: "API", path: folder.path)
 
-    @Test
-    func a_remote_spec_lists_the_remote_rows_with_no_completion() {
-        let (context, window) = makeContext()
-        let scope = InputPaletteScope(input: .newProject)
-
-        let new = rows(scope, "devbox:~/dev/api", context).filter(scope.isResult)
-        #expect(new.count == 1)
-        #expect(scope.completion(for: new[0]) == nil)
-        #expect(scope.press(new[0]) == .closed)
-        #expect(window.isNewRemoteProjectSheetPresented, "the dialog adds the project")
-        #expect(context.projectStore.projects.isEmpty)
-
-        let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
-        let known = rows(scope, "devbox:~/dev/api", context).filter(scope.isResult)
-        #expect(known.count == 2, "switch, then add another")
-        #expect(known.allSatisfy { scope.completion(for: $0) == nil })
-        #expect(scope.press(known[0]) == .closed)
+        let action = try #require(rows(scope, folder.path, context).first)
+        #expect(action.title == "Switch to \"API\"")
+        #expect(scope.press(action) == .closed)
+        #expect(context.projectStore.projects.map(\.id) == [existing.id])
         #expect(context.appState.activeProjectID == existing.id)
     }
 
     @Test
-    func a_path_with_no_row_shows_its_notice_and_no_action_row() throws {
+    func the_folders_under_the_path_are_completions_with_their_full_path() throws {
+        let folder = try makeFolder("api")
+        let scope = InputPaletteScope(input: .newProject)
+        let (context, _) = makeContext()
+
+        let parent = folder.deletingLastPathComponent().path
+        let listed = rows(scope, parent + "/", context)
+        #expect(listed.map(\.title) == ["New Project \"\(parent)/\"", "api"])
+        let child = listed[1]
+        #expect(child.subtitle == folder.path)
+        #expect(scope.press(child) == .fill(folder.path + "/"), "a completion fills the field and runs nothing")
+        #expect(context.projectStore.projects.isEmpty)
+    }
+
+    @Test
+    func a_remote_spec_has_one_action_row() throws {
+        let (context, window) = makeContext()
+        let scope = InputPaletteScope(input: .newProject)
+
+        let new = try #require(rows(scope, "devbox:~/dev/api", context).first)
+        #expect(new.title == "New Project \"devbox:~/dev/api\"")
+        #expect(scope.press(new) == .closed)
+        #expect(window.isNewRemoteProjectSheetPresented, "the dialog adds the project")
+        #expect(window.newRemoteProjectDraft != nil)
+        #expect(context.projectStore.projects.isEmpty)
+
+        let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
+        let known = try #require(rows(scope, "devbox:~/dev/api", context).first)
+        #expect(known.title == "Switch to \"api\"")
+        #expect(scope.press(known) == .closed)
+        #expect(context.appState.activeProjectID == existing.id)
+    }
+
+    @Test
+    func a_path_that_is_not_a_folder_shows_its_notice_and_no_action_row() throws {
         let folder = try makeFolder("api")
         let file = folder.appendingPathComponent("notes.txt")
         try Data().write(to: file)
@@ -138,12 +141,12 @@ struct NewProjectInputTests {
         let (context, _) = makeContext()
 
         #expect(rows(scope, file.path, context).isEmpty)
-        #expect(scope.failure?.title == PathProblem.local(atPath: file.path)?.notice(for: file.path))
+        #expect(scope.failure?.title == "\(file.path) is not a directory")
         #expect(scope.press(nil) == .nothing, "with no row, Return does nothing")
 
-        let missing = folder.path + "/zzz-missing"
+        let missing = folder.path + "/zzz"
         #expect(rows(scope, missing, context).isEmpty)
-        #expect(scope.failure?.title == PathProblem.local(atPath: missing)?.notice(for: missing))
+        #expect(scope.failure?.title == "Path \(missing) doesn't exist")
         #expect(context.projectStore.projects.isEmpty)
     }
 
