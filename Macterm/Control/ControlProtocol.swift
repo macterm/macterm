@@ -490,6 +490,13 @@ struct ControlProjectInfo: Codable, Equatable {
     /// Whether a live workspace exists for the project this launch.
     var loaded: Bool
     var tabCount: Int?
+    /// The name of the project that holds this one (design 013), or empty
+    /// at the top level. Absent from an app before nested projects.
+    var parent: String?
+    /// The id of that project, or empty at the top level. A name can belong
+    /// to two projects, so the tree print of `project list` finds the depth
+    /// of a row by this id.
+    var parentID: String?
 }
 
 struct ControlTabInfo: Codable, Equatable {

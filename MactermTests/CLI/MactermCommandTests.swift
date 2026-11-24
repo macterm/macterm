@@ -114,6 +114,66 @@ struct MactermCommandTests {
     }
 
     @Test
+    func project_list_prints_a_tree_on_a_terminal_and_flat_rows_to_a_pipe() throws {
+        func project(_ index: Int, _ name: String, parent: String = "", parentID: String = "") -> ControlProjectInfo {
+            ControlProjectInfo(
+                index: index, id: "id-\(index)", name: name, path: "/tmp/\(name)",
+                active: false, loaded: false, tabCount: nil, parent: parent, parentID: parentID
+            )
+        }
+        let socket = RecordingSocket(data: ControlData(projects: [
+            project(1, "notes"),
+            project(2, "Work"),
+            project(3, "api", parent: "Work", parentID: "id-2"),
+            project(4, "handlers", parent: "api", parentID: "id-3"),
+            project(5, "web", parent: "Work", parentID: "id-2"),
+        ]))
+        defer { socket.stop() }
+
+        let tree = try socket.cli(["project", "list"], terminal: true)
+        #expect(tree.status == 0, "\(tree.stderr)")
+        #expect(tree.stdout == """
+        project:1     notes         not loaded  /tmp/notes
+        project:2     Work          not loaded  /tmp/Work
+        project:3       api         not loaded  /tmp/api
+        project:4         handlers  not loaded  /tmp/handlers
+        project:5       web         not loaded  /tmp/web
+
+        """)
+
+        let flat = try socket.cli(["project", "list"])
+        #expect(flat.status == 0, "\(flat.stderr)")
+        #expect(flat.stdout == """
+        project:1     notes     -     not loaded  /tmp/notes
+        project:2     Work      -     not loaded  /tmp/Work
+        project:3     api       Work  not loaded  /tmp/api
+        project:4     handlers  api   not loaded  /tmp/handlers
+        project:5     web       Work  not loaded  /tmp/web
+
+        """)
+    }
+
+    @Test
+    func project_list_with_no_parent_prints_the_columns_as_before() throws {
+        // No project has a parent, or the app is from before nested projects.
+        let socket = RecordingSocket(data: ControlData(projects: [
+            ControlProjectInfo(
+                index: 1, id: "a", name: "notes", path: "/tmp/notes",
+                active: true, loaded: true, tabCount: 2, parent: "", parentID: ""
+            ),
+            ControlProjectInfo(index: 2, id: "b", name: "api", path: "/tmp/api", active: false, loaded: false, tabCount: nil),
+        ]))
+        defer { socket.stop() }
+        let expected = """
+        project:1  *  notes  2 tabs      /tmp/notes
+        project:2     api    not loaded  /tmp/api
+
+        """
+        #expect(try socket.cli(["project", "list"]).stdout == expected)
+        #expect(try socket.cli(["project", "list"], terminal: true).stdout == expected)
+    }
+
+    @Test
     func pane_run_prints_help_for_a_help_flag_before_the_terminator() throws {
         let socket = RecordingSocket()
         defer { socket.stop() }
@@ -208,14 +268,15 @@ private final class RecordingSocket {
         responseVersion: Int = ControlProtocol.version,
         dropAfterFirstRequest: Bool = false,
         probeFails: Bool = false,
-        path: String? = nil
+        path: String? = nil,
+        data: ControlData? = nil
     ) {
         self.path = path ?? "/tmp/macterm-test-\(UInt32.random(in: 0 ..< UInt32.max)).sock"
         let version = responseVersion
         let dropLater = dropAfterFirstRequest
         server = ControlSocketServer(socketPath: self.path)
         server.start()
-        server.attach { [received, version, dropLater, probeFails] raw, _ in
+        server.attach { [received, version, dropLater, probeFails, data] raw, _ in
             let request = try? ControlProtocol.decodeRequest(raw)
             let drop = dropLater && received.value.count >= 1
             if let request { received.mutate { $0.append(request) } }
@@ -230,7 +291,7 @@ private final class RecordingSocket {
                 v: version,
                 id: request?.id ?? "",
                 ok: true,
-                data: nil,
+                data: data,
                 error: nil
             ))
         }
@@ -247,7 +308,11 @@ private final class RecordingSocket {
     /// doesn't exist, so whatever a regression types can't reach a Macterm the
     /// developer is running; pass `environment` with a real `CFFIXED_USER_HOME`
     /// to place another candidate there (see the no-fallback test).
-    func cli(_ arguments: [String], environment: [String: String]? = nil) throws -> BundledCLI.Result {
+    func cli(
+        _ arguments: [String],
+        environment: [String: String]? = nil,
+        terminal: Bool = false
+    ) throws -> BundledCLI.Result {
         var env = environment ?? [:]
         env[ControlProtocol.socketEnvVar] = path
         if env["CFFIXED_USER_HOME"] == nil {
@@ -255,6 +320,6 @@ private final class RecordingSocket {
             env["CFFIXED_USER_HOME"] = home
             env["HOME"] = home
         }
-        return try BundledCLI.run(arguments, environment: env)
+        return try BundledCLI.run(arguments, environment: env, terminal: terminal)
     }
 }

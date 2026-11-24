@@ -185,7 +185,16 @@ struct ProjectCommand: ParsableCommand {
     #endif
 
     struct List: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "List all projects.")
+        static let configuration = CommandConfiguration(
+            abstract: "List all projects.",
+            discussion: """
+            A project can hold other projects. The list is in sidebar order: a project, then the projects \
+            inside it. Each project has an index (project:N), also a project that holds others. On a \
+            terminal, the names show as a tree. To a pipe, each project is one line, with a parent column \
+            ("-" at the top level) when a project has a parent. With --json, each project has a "parent" \
+            field: the name of the project that holds it, or empty at the top level.
+            """
+        )
 
         @OptionGroup var options: ConnectionOptions
 

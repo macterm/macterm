@@ -95,9 +95,23 @@ enum Output {
         print(line)
     }
 
+    /// On a terminal, the projects print as a tree: each name is indented
+    /// under its parent. To a pipe, they print flat, one project for each
+    /// line, with a parent column ("-" at the top level) when a project has
+    /// a parent (design 013). A script reads the same columns as before
+    /// when no project has a parent.
     private static func renderProjects(_ projects: [ControlProjectInfo]) {
+        let tree = isatty(STDOUT_FILENO) == 1
+        let showsParent = !tree && projects.contains { !($0.parent ?? "").isEmpty }
+        // The rows come in tree order, so a parent's depth is known before
+        // its children. A parent that is not in the reply puts its child at
+        // the left edge.
+        var depths: [String: Int] = [:]
         let rows = projects.map { project -> [String] in
+            let depth = project.parentID.flatMap { depths[$0] }.map { $0 + 1 } ?? 0
+            depths[project.id] = depth
             let tabs = project.tabCount.map { "\($0) tab\($0 == 1 ? "" : "s")" } ?? "—"
+            let parent = project.parent.flatMap { $0.isEmpty ? nil : $0 } ?? "-"
             return [
                 // Never the row's offset in this reply, which is `project:1`
                 // for every single-project reply. A row without an index (the
@@ -105,7 +119,8 @@ enum Output {
                 // `--project` resolves just the same.
                 project.index.map { "project:\($0)" } ?? project.id,
                 project.active ? "*" : " ",
-                project.name,
+                tree ? String(repeating: "  ", count: depth) + project.name : project.name,
+            ] + (showsParent ? [parent] : []) + [
                 project.loaded ? tabs : "not loaded",
                 project.path,
             ]
