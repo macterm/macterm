@@ -19,7 +19,7 @@ struct InputPaletteScopeTests {
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
-        ) { text in
+        ) { text, _ in
             let name = text.trimmingCharacters(in: .whitespaces)
             if name.isEmpty { return .refused("Type a name.") }
             if name.contains("/") { return .refused("A name cannot contain a slash.") }
@@ -61,8 +61,9 @@ struct InputPaletteScopeTests {
     func a_commit_runs_the_action_with_the_text_and_closes() {
         let log = Log()
         let scope = InputPaletteScope(input: makeInput(log: log))
-        _ = scope.sections(for: PaletteQuery(raw: "notes"), context: makeContext())
-        #expect(scope.commit("notes"))
+        let context = makeContext()
+        _ = scope.sections(for: PaletteQuery(raw: "notes"), context: context)
+        #expect(scope.commit("notes", context: context))
         #expect(log.committed == ["notes"])
         #expect(scope.failure == nil)
     }
@@ -74,7 +75,7 @@ struct InputPaletteScopeTests {
         let context = makeContext()
 
         _ = scope.sections(for: PaletteQuery(raw: "a/b"), context: context)
-        #expect(!scope.commit("a/b"))
+        #expect(!scope.commit("a/b", context: context))
         #expect(log.committed.isEmpty)
         let failure = try #require(scope.failure)
         #expect(failure.title == "A name cannot contain a slash.")
@@ -85,7 +86,7 @@ struct InputPaletteScopeTests {
 
         _ = scope.sections(for: PaletteQuery(raw: "ab"), context: context)
         #expect(scope.failure == nil, "an edit clears it")
-        #expect(scope.commit("ab"))
+        #expect(scope.commit("ab", context: context))
         #expect(log.committed == ["ab"])
     }
 
@@ -99,6 +100,34 @@ struct InputPaletteScopeTests {
         #expect(try scope.completion(for: #require(rows.last)) == "novel-1")
         #expect(scope.completion(for: PaletteItem(title: "other", action: {})) == nil)
         #expect(scope.sections(for: PaletteQuery(raw: "x"), context: makeContext()).isEmpty)
+    }
+
+    @Test
+    func action_rows_come_first_and_run_after_the_palette_closes() throws {
+        var ran = 0
+        let input = PaletteInput(
+            id: "test.with-action",
+            pill: PalettePill(title: "Pick", icon: "folder"),
+            prompt: "Path",
+            actions: [PaletteInputAction(id: "browse", title: "Browse", icon: "folder") { _ in ran += 1 }],
+            completions: { _ in [PaletteCompletion(title: "notes", value: "notes/")] }
+        ) { _, _ in .done }
+        let scope = InputPaletteScope(input: input)
+        let context = makeContext()
+
+        let sections = scope.sections(for: PaletteQuery(raw: "n"), context: context)
+        #expect(sections.map { $0.items.map(\.title) } == [["Browse"], ["notes"]])
+        let action = try #require(sections.first?.items.first)
+        #expect(scope.isAction(action))
+        #expect(scope.completion(for: action) == nil, "an action row completes nothing")
+        #expect(try !scope.isAction(#require(sections.last?.items.first)))
+
+        // Picking it defers the run until the palette has closed.
+        action.action()
+        #expect(ran == 0)
+        let deferred = try #require(context.appState.postPaletteAction)
+        deferred()
+        #expect(ran == 1)
     }
 
     @Test

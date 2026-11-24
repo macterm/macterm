@@ -2184,10 +2184,12 @@ final class AppState {
     @ObservationIgnored
     var plainShellAnswerTimeout: Duration = .seconds(2)
 
-    /// Shows an open panel, adds or finds the selected directory as a project,
-    /// and selects it. Returns the selected project, nil if cancelled.
+    /// Shows the folder panel, adds the selected directory as a new project,
+    /// and selects it: the Select in Finder row of the New Project screen
+    /// and the `+` of Settings → Projects. Returns the project, nil if
+    /// cancelled.
     @discardableResult
-    func openProject(store: ProjectStore) -> Project? {
+    func newProjectFromFolderPanel(store: ProjectStore) -> Project? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -2202,6 +2204,12 @@ final class AppState {
         )
         selectProject(project)
         return project
+    }
+
+    /// Open a project's row in the sidebar of the window the user is in, so
+    /// that its tabs show: a project that the New Project screen added.
+    func expandProjectRow(_ projectID: UUID) {
+        keyOrFirstWindow?.expandedRows.insert(projectID)
     }
 
     /// A project per directory, in order, with the last one selected in

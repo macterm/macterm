@@ -49,8 +49,8 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
-        case .custom,
-             .input: ""
+        case .custom: ""
+        case let .input(input): input.summary
         }
     }
 

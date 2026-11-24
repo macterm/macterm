@@ -8,8 +8,10 @@ import Foundation
 /// The field starts on `initialValue`, selected, so a keystroke replaces
 /// it. Return commits the text in the field. The rows under the field are
 /// completions: Tab or a click puts the selected one in the field, and
-/// never commits. Escape, or Backspace at an empty field, pops the screen
-/// like any screen. A commit that `commit` refuses keeps the screen and
+/// never commits. Over the completions, `actions` are rows that do
+/// something in place of the typed value (Select in Finder): a click, or
+/// Return while one is selected, runs it. Escape, or Backspace at an empty
+/// field, pops the screen like any screen. A commit that `commit` refuses keeps the screen and
 /// shows the reason as one line above the rows, until the text changes.
 ///
 /// Its identity is `id`: two inputs with one id are one screen to the
@@ -21,25 +23,35 @@ struct PaletteInput: Hashable {
     /// The field's placeholder: what to type.
     let prompt: String
     let initialValue: String
+    /// What the screen is for, starting with a verb: the subtitle of the
+    /// palette row that opens it.
+    let summary: String
+    /// Rows above the completions that do something in place of the typed
+    /// value, in order.
+    let actions: [PaletteInputAction]
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
     /// Do the action with the text in the field, or refuse it. On `.done`
     /// the palette closes. An action that must run after the palette has
     /// closed and focus is back in the pane sets `AppState.postPaletteAction`.
-    let commit: @MainActor (String) -> PaletteCommit
+    let commit: @MainActor (String, PaletteContext) -> PaletteCommit
 
     init(
         id: String,
         pill: PalettePill,
         prompt: String,
         initialValue: String = "",
+        summary: String = "",
+        actions: [PaletteInputAction] = [],
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
-        commit: @escaping @MainActor (String) -> PaletteCommit
+        commit: @escaping @MainActor (String, PaletteContext) -> PaletteCommit
     ) {
         self.id = id
         self.pill = pill
         self.prompt = prompt
         self.initialValue = initialValue
+        self.summary = summary
+        self.actions = actions
         self.completions = completions
         self.commit = commit
     }
@@ -65,6 +77,16 @@ struct PaletteInput: Hashable {
             )
         }
     }
+}
+
+/// A row of an input screen that does something in place of the typed
+/// value. It runs after the palette has closed (`AppState.postPaletteAction`),
+/// so that it can show a modal panel or a sheet.
+struct PaletteInputAction {
+    let id: String
+    let title: String
+    let icon: PaletteIcon
+    let run: @MainActor (PaletteContext) -> Void
 }
 
 /// A row under an input field: what it shows, and the text the field takes
@@ -113,8 +135,19 @@ final class InputPaletteScope: PaletteScope {
             refusedText = nil
         }
         completions = input.completions(text)
+        let actions = input.actions.map { action in
+            PaletteItem(id: Self.actionID(action), title: action.title, icon: action.icon) {
+                context.appState.postPaletteAction = { action.run(context) }
+            }
+        }
         let items = completions.map { PaletteItem(id: Self.itemID($0), title: $0.title, action: {}) }
-        return items.isEmpty ? [] : [PaletteSection(header: nil, items: items)]
+        return [actions, items].filter { !$0.isEmpty }.map { PaletteSection(header: nil, items: $0) }
+    }
+
+    /// True when `item`, a row of this screen, is one of its `actions`:
+    /// picking it runs the row, not a completion.
+    func isAction(_ item: PaletteItem) -> Bool {
+        input.actions.contains { Self.actionID($0) == item.id }
     }
 
     /// The text that `item`, a row of this screen, puts in the field.
@@ -124,8 +157,8 @@ final class InputPaletteScope: PaletteScope {
 
     /// Commit `text`. True when the palette closes; false when the value
     /// was refused, and `failure` has the reason.
-    func commit(_ text: String) -> Bool {
-        switch input.commit(text) {
+    func commit(_ text: String, context: PaletteContext) -> Bool {
+        switch input.commit(text, context) {
         case .done:
             failure = nil
             refusedText = nil
@@ -139,5 +172,9 @@ final class InputPaletteScope: PaletteScope {
 
     private static func itemID(_ completion: PaletteCompletion) -> String {
         "completion:\(completion.value)"
+    }
+
+    private static func actionID(_ action: PaletteInputAction) -> String {
+        "action:\(action.id)"
     }
 }

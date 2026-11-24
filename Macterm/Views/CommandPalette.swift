@@ -270,7 +270,7 @@ struct CommandPalettePanel: View {
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
                                         selectedIndex = idx
-                                        if inputScope != nil {
+                                        if let inputScope, !inputScope.isAction(item) {
                                             _ = completeQuery()
                                         } else {
                                             execute(alt: NSEvent.modifierFlags.contains(.option))
@@ -421,7 +421,8 @@ struct CommandPalettePanel: View {
         // the press rather than `optionHeld`, which is display state. On an
         // input screen it commits the field.
         .onKeyPress(keys: [.return]) { press in
-            if let inputScope {
+            // A selected action row of an input screen runs, as a click does.
+            if let inputScope, !selectedIsAction(of: inputScope) {
                 commit(inputScope)
             } else {
                 execute(alt: press.modifiers.contains(.option))
@@ -523,10 +524,13 @@ struct CommandPalettePanel: View {
     /// traversal in that case.
     private func completeQuery() -> KeyPress.Result {
         // An input screen's rows are its completions: the selected one, or
-        // the top one when none is selected.
+        // the top one when none is selected. Its action rows complete
+        // nothing.
         if let inputScope {
-            let index = flatItems.indices.contains(selectedIndex) ? selectedIndex : 0
-            guard flatItems.indices.contains(index),
+            let index = flatItems.indices.contains(selectedIndex)
+                ? selectedIndex
+                : flatItems.firstIndex { !inputScope.isAction($0) }
+            guard let index, flatItems.indices.contains(index),
                   let completion = inputScope.completion(for: flatItems[index]),
                   completion != query
             else { return .ignored }
@@ -624,12 +628,18 @@ struct CommandPalettePanel: View {
     /// Commit an input screen's field: the palette closes when the action
     /// ran, and stays with the reason when the value was refused.
     private func commit(_ inputScope: InputPaletteScope) {
-        guard inputScope.commit(query) else {
+        let context = PaletteContext(appState: appState, projectStore: projectStore)
+        guard inputScope.commit(query, context: context) else {
             refresh()
             return
         }
         query = ""
         windowState.isCommandPaletteVisible = false
+    }
+
+    /// True when the selected row of `inputScope` is one of its action rows.
+    private func selectedIsAction(of inputScope: InputPaletteScope) -> Bool {
+        flatItems.indices.contains(selectedIndex) && inputScope.isAction(flatItems[selectedIndex])
     }
 
     /// Run the selected row: its alt action when `alt` and it has one, else

@@ -107,7 +107,7 @@ struct DirectorySource: PaletteSource {
     /// login, the install question and a refusal show there, and the user
     /// can correct a field. The name follows the folder
     /// (`ProjectPath.remoteDisplayName`) until the user types one.
-    private static func addRemote(_ spec: String, appState: AppState) {
+    static func addRemote(_ spec: String, appState: AppState) {
         guard let draft = NewRemoteProjectDraft(path: spec) else { return }
         appState.presentNewRemoteProject(draft)
     }

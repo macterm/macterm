@@ -209,11 +209,11 @@ struct ProjectsSettings: View {
         projectStore.children(of: nil).filter(\.hasFolder)
     }
 
-    /// Folder picker → new project → select it, the same as the sidebar's
-    /// "Local Folder…". Picking a directory that already backs a project makes
+    /// Folder picker → new project → select it, the same as Select in Finder
+    /// on the New Project screen. Picking a directory that already backs a project makes
     /// a second, independent one (a directory is not an identity).
     private func addLocalProject() {
-        appState.openProject(store: projectStore)
+        appState.newProjectFromFolderPanel(store: projectStore)
     }
 
     /// The remote sheet is attached to `MainWindow`, so it would open behind the

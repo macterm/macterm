@@ -44,7 +44,9 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
-      - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
+      - Return commits the field. The rows are completions. No row is selected until an arrow key selects one. Tab puts the selected row in the field (the top completion when none is selected), and so does a click. Neither commits.
+      - `PaletteInput.actions` are rows above the completions that do something in place of the typed value. A click, or Return while one is selected, runs it after the palette closes (`AppState.postPaletteAction`), so that it can show a modal panel.
+      - The New Project screen (`PaletteInput.newProject`, `NewProjectInput`) is the screen of `AppCommand.newProject`: the menu items, the Dock item and the sidebar's New Project button open it. Its field is a folder path with `PathCompleter`, and Return does what path mode of the root does with the same text. Its one action row, Select in Finder, shows the folder panel. The first-run seed, the Finder service and a folder that you drop on the sidebar still add a folder with no screen.
       - A commit that `PaletteInput.commit` refuses keeps the screen. The reason shows as one line above the rows (`PaletteFailure` with `retryable` false, no Retry) until the text changes.
       - Escape, or Backspace at an empty field, pops it like any screen.
     - `PasswordPaletteScope`.

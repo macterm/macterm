@@ -341,17 +341,15 @@ struct SidebarContent: View {
             paintsFallbackBackground: paintsFallbackFooterBackground
         ) {
             HStack(spacing: 0) {
-                Menu {
-                    Button("Local Folder…") { openProject() }
-                    Button("Remote Machine…") {
-                        windowState.isNewRemoteProjectSheetPresented = true
-                    }
+                // The New Project screen of the palette: a typed path, a
+                // remote spec, or Select in Finder.
+                Button {
+                    openNewProjectScreen()
                 } label: {
                     Label("New Project", systemImage: "plus")
                         .font(.body)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .buttonStyle(.borderless)
                 .fixedSize()
                 Spacer()
             }
@@ -824,7 +822,7 @@ struct SidebarContent: View {
         } else {
             // Right-click on empty space.
             Menu("New Project") {
-                Button("Local Folder…") { openProject() }
+                Button("Local Folder…") { openNewProjectScreen() }
                 Button("Remote Machine…") { windowState.isNewRemoteProjectSheetPresented = true }
             }
             Button("New Scratch Tab") { appState.createScratchTab() }
@@ -1145,10 +1143,11 @@ struct SidebarContent: View {
         }
     }
 
-    private func openProject() {
-        if let project = appState.openProject(store: projectStore) {
-            windowState.expandedRows.insert(project.id)
-        }
+    /// The New Project screen in this window's palette. The project it adds
+    /// becomes the window's active project, whose row expands
+    /// (`WindowState`).
+    private func openNewProjectScreen() {
+        appState.openCommandPalette(scope: .input(.newProject))
     }
 
     private func requestProjectRename(_ projectID: UUID) {
