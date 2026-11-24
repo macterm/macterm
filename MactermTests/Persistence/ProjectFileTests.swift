@@ -29,6 +29,23 @@ struct ProjectFileTests {
         #expect(try !file.yaml().contains("zmxPath"))
     }
 
+    /// `macterm mcp` serves the schema as `macterm://formats/layout`, and its
+    /// `examples` are what an agent copies: each one is a layout that applies.
+    @Test
+    func the_schemas_examples_decode_to_a_layout() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("assets/project.schema.json")
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let examples = try #require(schema["examples"] as? [Any])
+        #expect(!examples.isEmpty)
+        for example in examples {
+            // JSON is YAML.
+            let text = try String(decoding: JSONSerialization.data(withJSONObject: example), as: UTF8.self)
+            #expect(try ProjectFile.parse(yaml: text).layoutFile != nil)
+        }
+    }
+
     @Test
     func empty_tabs_bridges_to_no_layout() throws {
         let file = try ProjectFile.parse(yaml: """

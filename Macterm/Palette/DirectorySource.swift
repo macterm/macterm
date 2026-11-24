@@ -86,7 +86,7 @@ struct DirectorySource: PaletteSource {
                 category: Self.category,
                 score: 0
             ) { [appState = context.appState] in
-                appState.selectProject(existing)
+                appState.showLastTab(of: existing)
             }
             return [switchItem, newProjectItem(name: name, fullPath: spec, context: context, score: 1)]
         }
@@ -127,7 +127,7 @@ struct DirectorySource: PaletteSource {
                 category: Self.category,
                 score: score
             ) { [appState = context.appState] in
-                appState.selectProject(existing)
+                appState.showLastTab(of: existing)
             }
         }
         return PaletteItem(
