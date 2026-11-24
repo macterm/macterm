@@ -286,6 +286,29 @@ struct AppStateDesktopWidgetsTests {
         #expect(await ended.names.contains(widgetSession))
     }
 
+    // MARK: - Seen
+
+    /// A widget's tab is not in `workspaces`. Its pane is seen when the flags
+    /// arrive while the widget is key, and the app need not be active.
+    @Test
+    func the_pane_of_a_key_widget_is_seen_when_its_flags_arrive() throws {
+        let (state, _, dir) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        state.isAppActive = { false }
+        var keyPaneIDs: Set<UUID> = []
+        state.paneIsInKeyWindow = { keyPaneIDs.contains($0.id) }
+        let pane = try #require(state.createDesktopWidget().pane)
+        let flags = MactermProtocol.Attention(unseen: true, failed: true)
+
+        pane.receiveAttention(flags)
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == flags)
+
+        keyPaneIDs = [pane.id]
+        state.paneAttentionDidChange(paneID: pane.id)
+        #expect(pane.attention == MactermProtocol.Attention())
+    }
+
     // MARK: - Remove / exit
 
     @Test

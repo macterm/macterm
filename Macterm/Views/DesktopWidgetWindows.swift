@@ -128,6 +128,9 @@ final class DesktopWidgetPanel: NSPanel {
         widgetContent.onShellExit = { [weak appState, id = widget.id] in
             appState?.desktopWidgetShellExited(id: id)
         }
+        widgetContent.onRunEnded = { [weak appState] paneID in
+            appState?.markSeenIfInKeyPanel(paneID: paneID)
+        }
         widgetContent.onDragEnded = { [weak self] in self?.settle() }
         widgetContent.onDone = { [weak appState] in appState?.endEditingDesktopWidget() }
     }
@@ -339,6 +342,7 @@ enum DesktopWidgetRemoval {
 final class DesktopWidgetContentView: NSView {
     var menuProvider: () -> NSMenu = { NSMenu() }
     var onShellExit: () -> Void = {}
+    var onRunEnded: (UUID) -> Void = { _ in }
     var onDragEnded: () -> Void = {}
     var onDone: () -> Void = {}
     var isEditing = false {
@@ -372,7 +376,8 @@ final class DesktopWidgetContentView: NSView {
         let hosting = NSHostingView(rootView: DesktopWidgetTerminalView(
             widget: widget,
             state: viewState,
-            onShellExit: { [weak self] in self?.onShellExit() }
+            onShellExit: { [weak self] in self?.onShellExit() },
+            onRunEnded: { [weak self] in self?.onRunEnded($0) }
         ))
         let margin = DesktopWidgetMetrics.contentMargin
         hosting.frame = bounds.insetBy(dx: margin, dy: margin)
@@ -679,6 +684,7 @@ private struct DesktopWidgetTerminalView: View {
     let widget: DesktopWidget
     let state: DesktopWidgetViewState
     let onShellExit: () -> Void
+    let onRunEnded: (UUID) -> Void
 
     var body: some View {
         let tab = widget.tab
@@ -696,12 +702,7 @@ private struct DesktopWidgetTerminalView: View {
             onFocusPane: { ModelWriter.paneFocus(tab, paneID: $0) },
             onSplit: { _, _, _ in },
             onClosePane: { _ in onShellExit() },
-            onCommandFinished: { paneID in
-                guard let pane = tab.splitRoot.findPane(id: paneID),
-                      SurfaceRegistry.shared.existingSurface(for: pane, in: .widget(widget.id))?.nsView?.window?.isKeyWindow == true
-                else { return }
-                pane.markSeen()
-            },
+            onCommandFinished: onRunEnded,
             onAdaptiveBackgroundChange: { paneID, color in
                 guard let pane = tab.splitRoot.findPane(id: paneID) else { return }
                 let surface = SurfaceRegistry.shared.surface(for: pane, in: .widget(widget.id))

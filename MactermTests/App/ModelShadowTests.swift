@@ -43,14 +43,17 @@ struct ModelShadowTests {
             state.saveWorkspaces()
             let first = try await agreement(shadow, after: nil)
 
-            // Every project, the group and the one with no workspace too.
-            #expect(Set(first.projects.map(\.id)) == Set([group, a, b, remote].map(\.id.uuidString)))
+            // Every project, the group and the one with no workspace too,
+            // and the pinned and the scratch workspaces as hidden projects.
+            let hidden = [PinnedTabs.workspaceID, ScratchTabs.workspaceID]
+            #expect(Set(first.projects.map(\.id)) == Set(([group, a, b, remote].map(\.id) + hidden).map(\.uuidString)))
             #expect(first.projects.first { $0.id == b.id.uuidString }?.parent == group.id.uuidString)
-            let spaces = Dictionary(uniqueKeysWithValues: first.workspaces.map { ($0.id, $0) })
+            let spaces = Dictionary(uniqueKeysWithValues: first.projects.map { ($0.id, $0) })
             #expect(spaces[b.id.uuidString]?.tabs.isEmpty == true)
-            #expect(spaces[PinnedTabs.workspaceID.uuidString]?.kind == .pinned)
+            #expect(spaces[PinnedTabs.workspaceID.uuidString]?.alias == "pinned")
+            #expect(spaces[PinnedTabs.workspaceID.uuidString]?.sidebar == .top)
             #expect(spaces[PinnedTabs.workspaceID.uuidString]?.tabs.map(\.id) == [pinned.id.uuidString])
-            #expect(spaces[ScratchTabs.workspaceID.uuidString]?.kind == .scratch)
+            #expect(spaces[ScratchTabs.workspaceID.uuidString]?.alias == "scratch")
             let tabs = try #require(state.workspaces[a.id]?.tabs)
             #expect(spaces[a.id.uuidString]?.tabs.map(\.id) == tabs.map(\.id.uuidString))
             guard case let .split(split)? = spaces[a.id.uuidString]?.tabs.first?.root else {
@@ -74,14 +77,14 @@ struct ModelShadowTests {
             state.closeTab(tabs[0].id, projectID: a.id)
             state.saveWorkspaces()
             let second = try await agreement(shadow, after: first)
-            #expect(second.workspaces.first { $0.id == a.id.uuidString }?.tabs.map(\.id) == tabs.dropFirst().map(\.id.uuidString))
+            #expect(second.projects.first { $0.id == a.id.uuidString }?.tabs.map(\.id) == tabs.dropFirst().map(\.id.uuidString))
             #expect(shadow.mirror.seq > 0)
 
-            // The pinned row is no project of the model: no selection.
+            // The pinned row is a hidden project that a window can select.
             state.activeProjectID = PinnedTabs.workspaceID
             state.saveWorkspaces()
             let third = try await agreement(shadow, after: second)
-            #expect(third.selection.activeProject == nil)
+            #expect(third.selection.activeProject == PinnedTabs.workspaceID.uuidString)
         }
     }
 

@@ -1671,7 +1671,8 @@ final class ControlHandler {
     /// always selects the project it describes. nil for the pinned sentinel,
     /// which is not a store row.
     private func projectInfo(_ project: Project) -> ControlProjectInfo {
-        ControlProjectInfo(
+        let parent = project.parent.flatMap(projectStore.row)
+        return ControlProjectInfo(
             index: projectStore.projects.firstIndex { $0.id == project.id }.map { $0 + 1 },
             id: project.id.uuidString,
             name: project.name,
@@ -1680,7 +1681,9 @@ final class ControlHandler {
             // "Loaded" = a workspace exists (tabs/panes addressable over
             // this protocol), whether or not its panes have started shells.
             loaded: appState.workspaces[project.id] != nil,
-            tabCount: appState.workspaces[project.id]?.tabs.count
+            tabCount: appState.workspaces[project.id]?.tabs.count,
+            parent: parent?.name ?? "",
+            parentID: parent?.id.uuidString ?? ""
         )
     }
 

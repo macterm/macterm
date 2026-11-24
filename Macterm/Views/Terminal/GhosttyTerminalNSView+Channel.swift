@@ -72,13 +72,34 @@ extension GhosttyTerminalNSView {
         }
     }
 
-    /// Makes the pane's route (`PaneRoute`), before the surface: a key or
-    /// the `initial_input` that the surface writes while it starts is held
-    /// until the first attach. `launch` is nil for a remote pane.
+    /// Gives the surface its view channel on the pane's link, before the
+    /// surface: a key or the `initial_input` that the surface writes while it
+    /// starts is held until the first attach. `launch` is nil for a remote
+    /// pane. The link makes the session, once for the pane.
     func prepareChannel(launch: PaneSession.Launch?) {
+        guard let pane = owningPane else {
+            logger.error("surface channel: the view has no pane")
+            return
+        }
         let host = SurfaceChannelHost(view: self)
-        let route = PaneRoute.make(session: sessionName, remote: remoteSpec != nil, launch: launch, surface: host)
+        let link = pane.sessionLink
+        let input = link.attach(host, launch: launch)
+        let route = PaneRoute(
+            input: input,
+            start: { [weak link] in Self.onMain { link?.viewReady(host) } },
+            stop: { [weak link] in Self.onMain { link?.detach(host) } }
+        )
         channelRuntime = ChannelRuntime(route: route, host: host)
+    }
+
+    /// Runs `body` on the main actor: at once from the main thread, so a view
+    /// that goes stops counting before anything else runs.
+    nonisolated private static func onMain(_ body: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { body() }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
+        }
     }
 
     /// Gives the host its surface and starts the reading. The surface exists.
@@ -100,10 +121,12 @@ extension GhosttyTerminalNSView {
     }
 }
 
-/// What a pane's session drives: the surface. Its callbacks come in order on
-/// the session's queue (or a plain shell's read queue), so each one hops to
-/// the main actor where it touches the pane. A feed waits for the terminal,
-/// which slows the reader of a fast program. `invalidate` runs before the
+/// One surface's view of the pane's session. Its bytes, size and lead are the
+/// surface's own; the session's messages go to the pane's `PaneLink`, which
+/// gives the pane each one once. Its callbacks come in order on the session's
+/// queue (or a plain shell's read queue), so each one hops to the main actor
+/// where it touches the pane. A feed waits for the terminal, which slows the
+/// reader of a fast program. `invalidate` runs before the
 /// surface is freed: it waits for a feed in flight, and no later one reaches
 /// the surface.
 final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
@@ -114,9 +137,22 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     private weak var view: GhosttyTerminalNSView?
     private let gridLock = NSLock()
     private var grid = PaneGrid(cols: 80, rows: 24)
+    /// The pane's link. Set on the main actor before the first message.
+    @MainActor weak var link: PaneLink?
 
-    init(view: GhosttyTerminalNSView) {
+    /// `view` is nil only in a test, which reads the link's events.
+    init(view: GhosttyTerminalNSView?) {
         self.view = view
+    }
+
+    /// The id of the surface that owns this channel, nil in a test.
+    @MainActor var surfaceID: UUID? {
+        view?.owningSurface?.id
+    }
+
+    /// The terminal view of this channel, nil in a test.
+    @MainActor var terminalView: GhosttyTerminalNSView? {
+        view
     }
 
     func setSurface(_ new: ghostty_surface_t) {
@@ -153,33 +189,55 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
         }
     }
 
+    /// Sends a message of the session to the link, on the main actor.
+    private func toLink(_ event: PaneLinkEvent) {
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated { link?.receive(event, from: self) }
+        }
+    }
+
     func paneState(_ state: MactermProtocol.State) {
-        DispatchQueue.main.async { [weak view] in view?.onSessionState?(state) }
+        toLink(.state(state))
     }
 
     func paneForeground(_ foreground: MactermProtocol.Foreground) {
         guard let report = SessionForeground(foreground) else { return }
-        DispatchQueue.main.async { [weak view] in view?.onSessionForeground?(report) }
+        toLink(.foreground(report))
     }
 
     func paneTitle(_ title: Data) {
-        let text = String(decoding: title, as: UTF8.self)
-        DispatchQueue.main.async { [weak view] in view?.onTitleChange?(text) }
+        toLink(.title(String(decoding: title, as: UTF8.self)))
     }
 
     /// Each surface keeps the folder for itself (`currentPwd`), as
     /// libghostty's own `pwd` action does for a surface with no session.
     func paneCwd(_ url: Data) {
         guard let path = Self.path(ofCwdURL: url) else { return }
-        DispatchQueue.main.async { [weak view] in view?.currentPwd = path }
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated {
+                guard let link, link.counts(self) else { return }
+                link.receiveCwd(path)
+            }
+        }
+    }
+
+    @MainActor
+    func setCwd(_ path: String) {
+        view?.currentPwd = path
+    }
+
+    /// The session ended: the surface runs nothing now.
+    @MainActor
+    func markEnded() {
+        view?.sessionEnded = true
     }
 
     func paneMark(_ mark: MactermProtocol.Mark) {
-        DispatchQueue.main.async { [weak view] in view?.onSessionMark?(mark) }
+        toLink(.mark(mark, self))
     }
 
     func paneStatus(_ status: MactermProtocol.Status) {
-        DispatchQueue.main.async { [weak view] in view?.onSessionStatus?(status) }
+        toLink(.status(status))
     }
 
     /// The path of an OSC 7 URL: what follows the host. A `file://` URL has
@@ -197,30 +255,29 @@ final class SurfaceChannelHost: PaneSessionHost, @unchecked Sendable {
     }
 
     func paneTtyMode(_ mode: MactermProtocol.TtyMode) {
-        let lineMode = TerminalLineMode(canonical: mode.canonical, echo: mode.echo)
-        DispatchQueue.main.async { [weak view] in view?.onTtyMode?(lineMode) }
+        toLink(.ttyMode(TerminalLineMode(canonical: mode.canonical, echo: mode.echo)))
     }
 
     func paneAttention(_ flags: MactermProtocol.Attention) {
-        DispatchQueue.main.async { [weak view] in view?.onAttention?(flags) }
+        toLink(.attention(flags))
     }
 
+    /// The lead is this surface's own: the session says it for each client.
     func paneLead(_ leader: Bool?) {
         DispatchQueue.main.async { [weak view] in view?.onLead?(leader) }
     }
 
+    /// The session's exit, or a session that is gone after the create: a
+    /// fact of the session, so any view's channel tells it.
     func paneExited(code _: UInt8?, signal _: UInt8?) {
-        sessionEnded()
-    }
-
-    func paneGone() {
-        sessionEnded()
-    }
-
-    private func sessionEnded() {
-        DispatchQueue.main.async { [weak view] in
-            view?.sessionEnded = true
-            view?.onProcessExit?()
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated { link?.receiveExit() }
         }
+    }
+
+    /// The channel could not come back. It counts only from the counting
+    /// view: another window's channel that fails alone is a detach.
+    func paneGone() {
+        toLink(.ended)
     }
 }

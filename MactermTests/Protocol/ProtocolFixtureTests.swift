@@ -223,8 +223,19 @@ struct ProtocolFixtureTests {
     private static let model = MactermProtocol.ModelData(
         epochHint: 5,
         importedV1: true,
-        projects: [.init(id: "p-1", name: "api", path: "/src/api", color: "blue", sortOrder: 2, createdAt: 1_700_000_000_000)],
-        workspaces: [.init(id: "p-1", kind: .project, tabs: [tab], activeTab: "t-1")],
+        projects: [
+            .init(
+                id: "p-1",
+                name: "api",
+                path: "/src/api",
+                color: "blue",
+                sortOrder: 2,
+                createdAt: 1_700_000_000_000,
+                tabs: [tab],
+                activeTab: "t-1"
+            ),
+            .init(id: "pin-1", name: "Pinned", path: "", sidebar: .top, removable: false, alias: "pinned"),
+        ],
         selection: .init(activeProject: "p-1")
     )
 
@@ -254,7 +265,7 @@ struct ProtocolFixtureTests {
             Issue.record("not a request")
             return
         }
-        let args = MactermProtocol.TabCreate.Args(workspace: "p-1", id: "t-1", root: Self.tab.root, title: "build")
+        let args = MactermProtocol.TabCreate.Args(project: "p-1", id: "t-1", root: Self.tab.root, title: "build")
         #expect(try request.args(of: MactermProtocol.TabCreate.self) == args)
         #expect(request == .init(id: 11, method: MactermProtocol.TabCreate.self, args: args))
     }
@@ -265,13 +276,22 @@ struct ProtocolFixtureTests {
             Issue.record("not an event batch")
             return
         }
-        let changed = MactermProtocol.TabChanged(workspace: "p-1", tab: Self.tab, zoomed: "pane-2")
-        let order = MactermProtocol.TabOrder(workspace: "p-1", kind: .project, ids: ["t-1"], activeTab: "t-1")
+        let pinned = MactermProtocol.ProjectChanged(project: .init(
+            id: "pin-1",
+            name: "Pinned",
+            path: "",
+            sidebar: .top,
+            removable: false,
+            alias: "pinned"
+        ))
+        let changed = MactermProtocol.TabChanged(project: "p-1", tab: Self.tab, zoomed: "pane-2")
+        let order = MactermProtocol.TabOrder(project: "p-1", ids: ["t-1"], activeTab: "t-1")
         #expect(batch == .init(seq: 13, ev: [
+            .init(e: MactermProtocol.ProjectChanged.name, a: ProtocolRaw(encoding: pinned)),
             .init(e: MactermProtocol.TabChanged.name, a: ProtocolRaw(encoding: changed)),
             .init(e: MactermProtocol.TabOrder.name, a: ProtocolRaw(encoding: order)),
         ], cause: 11))
-        #expect(try batch.ev.map { try $0.decoded() } == [.tabChanged(changed), .tabOrder(order)])
+        #expect(try batch.ev.map { try $0.decoded() } == [.projectChanged(pinned), .tabChanged(changed), .tabOrder(order)])
     }
 
     @Test
