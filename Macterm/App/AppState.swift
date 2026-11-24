@@ -552,9 +552,10 @@ final class AppState {
     }
 
     /// Show the project screen of `project` in `window` (the key window when
-    /// nil), also when the project has tabs: what a click on a project row,
-    /// a palette project row and CLI `project select` do. The project's tabs
-    /// stay; a selection of one of them shows it.
+    /// nil), also when the project has tabs: what a click on a sidebar
+    /// project row and CLI `project select` do. The project's tabs stay; a
+    /// selection of one of them shows it. A palette project row shows the
+    /// last tab (`showLastTab(of:)`).
     func showProjectScreen(_ project: Project, in window: WindowState?) {
         selectProject(project, in: window)
         guard let target = window ?? keyWindow, target.activeProjectID == project.id,
@@ -563,6 +564,20 @@ final class AppState {
         target.showsProjectScreen = true
         settleWindowSelections()
         persistWindows()
+    }
+
+    /// Show `project` in the key window at the tab that the window last
+    /// showed there (`WindowState.activeTabIDs`), else the workspace's active
+    /// tab: what a palette project row does. A project with no tabs shows
+    /// `EmptyProjectView`. This is a function of its own and not a Bool
+    /// parameter of `showProjectScreen`, because the sidebar row and CLI
+    /// `project select` show the project screen.
+    func showLastTab(of project: Project) {
+        selectProject(project)
+        guard let key = keyWindow, key.activeProjectID == project.id else { return }
+        endProjectScreen(in: key)
+        settleWindowSelections()
+        claimLeadershipForKeyWindow()
     }
 
     /// Whether the key window shows the project screen. A command that acts on
@@ -1527,6 +1542,12 @@ final class AppState {
         for ws in WorkspaceSerializer.restore(from: loaded.workspaces, validIDs: valid) {
             workspaces[ws.id] = ws
         }
+        // A project holds its tabs from the start (design 010 section 11):
+        // one with no snapshot gets its first tab now, not when a window
+        // first shows it.
+        for project in projects {
+            giveFirstTab(to: project)
+        }
         // Pinned tabs: records first, then the launch reconcile against
         // `pinned.yaml` (the file is authoritative for membership — see
         // AppState+PinnedTabs). Live tabs materialize async, after zmx says
@@ -2074,13 +2095,14 @@ final class AppState {
     ///
     /// This is the ONE busy-close predicate. Every path that ends sessions —
     /// pane close, tab close, project remove, the sidebar's bulk
-    /// remove, the CLI's `busy` refusal and the Close Tab intent — asks one
-    /// of the overloads below. The raw `allPanes().contains(where:
-    /// \.needsConfirmClose)` ignores the retention, so it would warn about a
-    /// kill that the close does not do.
+    /// remove, the CLI's `busy` refusal and the Close Tab intent — asks
+    /// `judgeClose`, which gives this predicate the hosts' answers for plain
+    /// shells. The raw `allPanes().contains(where: \.needsConfirmClose)`
+    /// ignores the retention, so it would warn about a kill that the close
+    /// does not do.
     ///
     /// `plainAnswers` holds the verdicts that the hosts of plain shells gave
-    /// (`judgeClose`), by pane id. They replace the surface's reading.
+    /// (`askPlainShells`), by pane id. They replace the surface's reading.
     func closeNeedsConfirmation(_ closing: [Pane], plainAnswers: [UUID: Bool] = [:]) -> Bool {
         let retained = pendingPinnedSessionNames()
         return closing.contains { (plainAnswers[$0.id] ?? paneNeedsConfirmClose($0)) && !retained.contains($0.sessionName) }
@@ -2088,26 +2110,73 @@ final class AppState {
 
     /// Judges the close of `closing` and gives the verdict to `decide`.
     /// With no plain shell (a host with no server, 0494), `decide` runs at
-    /// once. Else the close first asks the host of each plain shell whether
-    /// the shell is idle. The asks run at the same time. `decide` runs at
-    /// the first busy answer, after the last answer, or after
-    /// `plainShellAnswerTimeout`. A pane with no answer then gets the
-    /// surface's reading, which warns. `target` names the request: a second
-    /// request for a target that is still judged does nothing.
+    /// once. Else the verdict waits for the hosts (`askPlainShells`).
+    /// `target` names the request: a second request for a target that is
+    /// still judged does nothing.
     func judgeClose(_ closing: [Pane], target: String, _ decide: @escaping @MainActor (Bool) -> Void) {
-        let plain = closing.filter(paneRunsPlainShell)
+        let plain = plainShellsToAsk(closing)
         guard !plain.isEmpty else {
             decide(closeNeedsConfirmation(closing))
             return
         }
         guard closesBeingJudged.insert(target).inserted else { return }
+        askPlainShells(plain, stopAtBusy: true) { [weak self] answers in
+            guard let self else { return }
+            closesBeingJudged.remove(target)
+            decide(closeNeedsConfirmation(closing, plainAnswers: answers))
+        }
+    }
+
+    /// The verdict of `judgeClose` for a caller that can wait: the CLI and
+    /// the Close Tab intent. It never stores a verdict: each call asks the
+    /// hosts again.
+    func judgeClose(_ closing: [Pane]) async -> Bool {
+        let plain = plainShellsToAsk(closing)
+        guard !plain.isEmpty else { return closeNeedsConfirmation(closing) }
+        let answers = await withCheckedContinuation { continuation in
+            askPlainShells(plain, stopAtBusy: true) { continuation.resume(returning: $0) }
+        }
+        return closeNeedsConfirmation(closing, plainAnswers: answers)
+    }
+
+    /// The panes of `panes` that would end a running program, each by the
+    /// same verdict as `judgeClose`, without the retention of pinned tabs:
+    /// the rows of the quit dialog.
+    func panesThatNeedConfirmClose(_ panes: [Pane]) async -> [Pane] {
+        let plain = panes.filter(paneRunsPlainShell)
+        var answers: [UUID: Bool] = [:]
+        if !plain.isEmpty {
+            answers = await withCheckedContinuation { continuation in
+                askPlainShells(plain, stopAtBusy: false) { continuation.resume(returning: $0) }
+            }
+        }
+        return panes.filter { answers[$0.id] ?? paneNeedsConfirmClose($0) }
+    }
+
+    /// The plain shells of `closing` whose verdict counts. A pane whose
+    /// session the close keeps (`pendingPinnedSessionNames`) is not asked,
+    /// so its busy answer cannot stop the wait for the others.
+    private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
+        let retained = pendingPinnedSessionNames()
+        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
+    }
+
+    /// Asks the host of each plain shell in `plain` whether the shell is
+    /// idle, all at the same time, and gives the answers to `done` once:
+    /// after the last answer, after `plainShellAnswerTimeout`, or, with
+    /// `stopAtBusy`, at the first busy answer. A pane with no answer is not
+    /// in the result, so it gets the surface's reading, which warns.
+    private func askPlainShells(
+        _ plain: [Pane],
+        stopAtBusy: Bool,
+        _ done: @escaping @MainActor ([UUID: Bool]) -> Void
+    ) {
         let judgement = CloseJudgement(waiting: Set(plain.map(\.id)))
-        let finish: @MainActor () -> Void = { [weak self] in
-            guard let self, !judgement.isDone else { return }
+        let finish: @MainActor () -> Void = {
+            guard !judgement.isDone else { return }
             judgement.isDone = true
             judgement.deadline?.cancel()
-            closesBeingJudged.remove(target)
-            decide(closeNeedsConfirmation(closing, plainAnswers: judgement.answers))
+            done(judgement.answers)
         }
         let ask = askPlainShellNeedsConfirmClose
         let timeout = plainShellAnswerTimeout
@@ -2115,7 +2184,7 @@ final class AppState {
             Task { @MainActor in
                 let answer = await ask(pane, timeout)
                 judgement.record(answer, for: pane.id)
-                if answer == true || judgement.waiting.isEmpty { finish() }
+                if (stopAtBusy && answer == true) || judgement.waiting.isEmpty { finish() }
             }
         }
         judgement.deadline = Task { @MainActor in
@@ -2128,23 +2197,6 @@ final class AppState {
     @ObservationIgnored
     private var closesBeingJudged: Set<String> = []
 
-    /// Whether closing (or, for a pinned tab, unloading) `tab` needs
-    /// confirmation. Closing a tab ends every session its panes hold alone.
-    func closeNeedsConfirmation(tab: TerminalTab) -> Bool {
-        closeNeedsConfirmation(tab.splitRoot.allPanes())
-    }
-
-    /// Whether removing the whole of project `projectID` needs
-    /// confirmation. Unknown or empty projects need none.
-    func closeNeedsConfirmation(projectID: UUID) -> Bool {
-        closeNeedsConfirmation(panes(inProject: projectID))
-    }
-
-    /// Every pane of the given projects (removed whole) and tabs.
-    func closeNeedsConfirmation(projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> Bool {
-        closeNeedsConfirmation(panes(inProjects: projectIDs, tabs: tabs))
-    }
-
     private func panes(inProjects projectIDs: [UUID], tabs: [(tabID: UUID, projectID: UUID)]) -> [Pane] {
         var closing = projectIDs.flatMap(panes(inProject:))
         for tab in tabs {
@@ -2154,7 +2206,8 @@ final class AppState {
         return closing
     }
 
-    private func panes(inProject projectID: UUID) -> [Pane] {
+    /// Every pane of project `projectID`. Empty for an unknown project.
+    func panes(inProject projectID: UUID) -> [Pane] {
         workspaces[projectID]?.tabs.flatMap { $0.splitRoot.allPanes() } ?? []
     }
 
@@ -2220,14 +2273,15 @@ final class AppState {
     }
 
     /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name the pinned workspace reserves is
-    /// refused with a notice and the old name stays — as `project rename`
-    /// refuses it with a `bad_request`. The field has closed by the time the
-    /// name arrives, so the notice is the one place left to say why.
+    /// Current Project opens too). A name that `Project.nameRefusal` refuses
+    /// (a slash, a reserved name) gets a notice and the old name stays — as
+    /// `project rename` refuses it with a `bad_request`. The field has closed
+    /// by the time the name arrives, so the notice is the one place left to
+    /// say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.reservedNameMessage(for: name) {
+        if let message = Project.nameRefusal(for: name) {
             present(.notice(
-                .reservedProjectName,
+                .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
@@ -3634,7 +3688,25 @@ final class AppState {
         tab.markSeen()
     }
 
+    /// A project that was just added gets its first tab at once, so that
+    /// no project is without tabs (design 010 section 11). `ProjectStore.onAdd`
+    /// calls it for every path that adds a project (`MactermApp` connects
+    /// the two). Before the restore it saves nothing: a save then would
+    /// write over the snapshot that the restore has not read yet.
+    func projectAdded(_ project: Project) {
+        guard workspaces[project.id] == nil, project.hasFolder else { return }
+        giveFirstTab(to: project)
+        if hasRestoredSelection { saveWorkspaces() }
+    }
+
     // MARK: - Private
+
+    /// The first tab of a project with a folder that has no tabs yet. A
+    /// project with no folder is a sidebar group, which holds no tabs.
+    private func giveFirstTab(to project: Project) {
+        guard project.hasFolder else { return }
+        ensureWorkspace(projectID: project.id, path: project.path)
+    }
 
     private func ensureWorkspace(projectID: UUID, path: String) {
         // The pinned workspace starts EMPTY — the path-taking init spawns an
@@ -3654,7 +3726,7 @@ final class AppState {
     }
 }
 
-/// The answers of one `AppState.judgeClose` that waits for hosts.
+/// The answers of one `AppState.askPlainShells`.
 @MainActor
 private final class CloseJudgement {
     /// The panes whose host has not answered yet.

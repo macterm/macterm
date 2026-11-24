@@ -82,6 +82,15 @@ pub fn describe(arena: std.mem.Allocator, method: metadata.Method) error{OutOfMe
     return .{ .object = o };
 }
 
+/// One type as a JSON Schema that stands alone: the types that it names are
+/// in its own `$defs` (an MCP tool's `inputSchema` and `outputSchema`).
+pub fn schema(arena: std.mem.Allocator, type_name: []const u8) error{OutOfMemory}!Value {
+    var defs: ObjectMap = .empty;
+    var root = try definition(arena, typeDef(type_name), &defs);
+    if (defs.count() > 0) try root.object.put(arena, "$defs", .{ .object = defs });
+    return root;
+}
+
 fn typeDef(name: []const u8) metadata.TypeDef {
     for (metadata.metadata.types) |t| if (std.mem.eql(u8, t.name, name)) return t;
     // `build` collects every type that a method holds.
@@ -496,24 +505,22 @@ test "describe gives the doc of each field as description, and its limits" {
     try testing.expectEqualStrings("The new session.", create.get("session").?.object.get("description").?.string);
 }
 
-test "every field of the args and the result of a listed method has a doc" {
-    for (methods) |method| {
-        for ([_][]const u8{ method.args, method.result }) |name| {
-            for (typeDef(name).fields) |f| {
-                if (f.doc == null) std.debug.print("{s}: {s}.{s} has no doc\n", .{ method.name, name, f.name });
-                try testing.expect(f.doc != null);
-            }
-        }
-    }
-}
+test "every field of every type of the schema has a doc" {
+    // The methods' args and results, the events, the envelopes, the pane
+    // messages and the model.
+    var missing: usize = 0;
+    for (metadata.metadata.types) |t| for (t.fields) |f| if (f.doc == null) {
+        std.debug.print("{s}.{s} has no doc\n", .{ t.name, f.name });
+        missing += 1;
+    };
+    try testing.expectEqual(0, missing);
 
-test "every field of a type of messages.zig in a result has a doc" {
-    inline for (.{ m.Session, m.TerminalState, m.Zoom, m.RemovedPane }) |T| {
-        inline for (comptime std.meta.fieldNames(T)) |name| {
-            if (!@hasField(@TypeOf(T.field_doc), name)) std.debug.print("{s}.{s} has no doc\n", .{ @typeName(T), name });
-            try testing.expect(@hasField(@TypeOf(T.field_doc), name));
-        }
-    }
+    // A model type in `$defs` has its descriptions too.
+    var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena_state.deinit();
+    const defs = (try describe(arena_state.allocator(), find("state.subscribe").?)).object.get("$defs").?.object;
+    const path = defs.get("Project").?.object.get("properties").?.object.get("path").?.object;
+    try testing.expect(path.get("description") != null);
 }
 
 test "describe gives a schema for every method" {

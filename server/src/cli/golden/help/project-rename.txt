@@ -4,7 +4,7 @@ USAGE: macterm project rename <project> <name> [--socket <socket>] [--json]
 
 ARGUMENTS:
   <project>               Project name, UUID, or index.
-  <name>                  New name for the project.
+  <name>                  New name for the project, with no slash.
 
 OPTIONS:
   --socket <socket>       Control socket path. It overrides discovery.

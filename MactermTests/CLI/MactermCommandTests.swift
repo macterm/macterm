@@ -118,7 +118,7 @@ struct MactermCommandTests {
         func project(_ index: Int, _ name: String, parent: String = "", parentID: String = "") -> ControlProjectInfo {
             ControlProjectInfo(
                 index: index, id: "id-\(index)", name: name, path: "/tmp/\(name)",
-                active: false, loaded: false, tabCount: nil, parent: parent, parentID: parentID
+                active: false, tabCount: 1, parent: parent, parentID: parentID
             )
         }
         let socket = RecordingSocket(data: ControlData(projects: [
@@ -133,22 +133,22 @@ struct MactermCommandTests {
         let tree = try socket.cli(["project", "list"], terminal: true)
         #expect(tree.status == 0, "\(tree.stderr)")
         #expect(tree.stdout == """
-        project:1     notes         not loaded  /tmp/notes
-        project:2     Work          not loaded  /tmp/Work
-        project:3       api         not loaded  /tmp/api
-        project:4         handlers  not loaded  /tmp/handlers
-        project:5       web         not loaded  /tmp/web
+        project:1     notes         1 tab  /tmp/notes
+        project:2     Work          1 tab  /tmp/Work
+        project:3       api         1 tab  /tmp/api
+        project:4         handlers  1 tab  /tmp/handlers
+        project:5       web         1 tab  /tmp/web
 
         """)
 
         let flat = try socket.cli(["project", "list"])
         #expect(flat.status == 0, "\(flat.stderr)")
         #expect(flat.stdout == """
-        project:1     notes     -     not loaded  /tmp/notes
-        project:2     Work      -     not loaded  /tmp/Work
-        project:3     api       Work  not loaded  /tmp/api
-        project:4     handlers  api   not loaded  /tmp/handlers
-        project:5     web       Work  not loaded  /tmp/web
+        project:1     notes     -     1 tab  /tmp/notes
+        project:2     Work      -     1 tab  /tmp/Work
+        project:3     api       Work  1 tab  /tmp/api
+        project:4     handlers  api   1 tab  /tmp/handlers
+        project:5     web       Work  1 tab  /tmp/web
 
         """)
     }
@@ -159,28 +159,28 @@ struct MactermCommandTests {
         // a parent that is not in the reply, so it prints at the left edge.
         let socket = RecordingSocket(data: ControlData(projects: [
             ControlProjectInfo(
-                index: 1, id: "w1", name: "Work", path: "/a", active: false, loaded: false, tabCount: nil,
+                index: 1, id: "w1", name: "Work", path: "/a", active: false, tabCount: nil,
                 parent: "", parentID: ""
             ),
             ControlProjectInfo(
-                index: 2, id: "w2", name: "Work", path: "/b", active: false, loaded: false, tabCount: nil,
+                index: 2, id: "w2", name: "Work", path: "/b", active: false, tabCount: nil,
                 parent: "Work", parentID: "w1"
             ),
             ControlProjectInfo(
-                index: 3, id: "api", name: "api", path: "/c", active: false, loaded: false, tabCount: nil,
+                index: 3, id: "api", name: "api", path: "/c", active: false, tabCount: nil,
                 parent: "Work", parentID: "w2"
             ),
             ControlProjectInfo(
-                index: 4, id: "o", name: "orphan", path: "/d", active: false, loaded: false, tabCount: nil,
+                index: 4, id: "o", name: "orphan", path: "/d", active: false, tabCount: nil,
                 parent: "gone", parentID: "missing"
             ),
         ]))
         defer { socket.stop() }
         #expect(try socket.cli(["project", "list"], terminal: true).stdout == """
-        project:1     Work     not loaded  /a
-        project:2       Work   not loaded  /b
-        project:3         api  not loaded  /c
-        project:4     orphan   not loaded  /d
+        project:1     Work     —  /a
+        project:2       Work   —  /b
+        project:3         api  —  /c
+        project:4     orphan   —  /d
 
         """)
     }
@@ -188,7 +188,7 @@ struct MactermCommandTests {
     @Test
     func project_list_from_an_app_without_parents_prints_a_dash_parent() throws {
         let socket = RecordingSocket(data: ControlData(projects: [
-            ControlProjectInfo(index: 1, id: "a", name: "notes", path: "/tmp/notes", active: true, loaded: true, tabCount: 2),
+            ControlProjectInfo(index: 1, id: "a", name: "notes", path: "/tmp/notes", active: true, tabCount: 2),
         ]))
         defer { socket.stop() }
         #expect(try socket.cli(["project", "list"]).stdout == "project:1  *  notes  -  2 tabs  /tmp/notes\n")
@@ -199,7 +199,7 @@ struct MactermCommandTests {
     func project_list_json_has_the_parent_fields() throws {
         let socket = RecordingSocket(data: ControlData(projects: [
             ControlProjectInfo(
-                index: 1, id: "api", name: "api", path: "/c", active: false, loaded: false, tabCount: nil,
+                index: 1, id: "api", name: "api", path: "/c", active: false, tabCount: nil,
                 parent: "Work", parentID: "w1"
             ),
         ]))

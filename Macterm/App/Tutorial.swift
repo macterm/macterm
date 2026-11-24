@@ -3,7 +3,7 @@ import Foundation
 /// The short tutorials `macterm tutor <topic>` prints — plain terminal output,
 /// so a first-run pane can teach with scrollback the user can read, re-run or
 /// clear instead of chrome that has to be dismissed. Seeded into a fresh
-/// install's panes as their `run:` (see `FirstRunSeed`).
+/// install's pinned tab as its `run:` (see `FirstRunSeed`).
 ///
 /// **Rendered in the app, not in the CLI**, which is the whole reason `tutor`
 /// is a control-socket verb rather than an offline one like `ssh`: the

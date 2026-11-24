@@ -6,6 +6,34 @@ import Testing
 /// own (see `LocalServerTests`).
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct PaneChannelTests {
+    /// With a read-ahead limit, the reader waits while that many events wait
+    /// for the consumer, and a close wakes it.
+    @Test
+    func a_reader_waits_at_the_read_ahead_limit_and_a_close_wakes_it() async throws {
+        let link = FakeServerLink()
+        let channel = PaneChannel(transport: link, number: 1, readAhead: 2)
+        let delivered = LockedBox(0)
+        let done = LockedBox(false)
+        let reader = Thread {
+            for index in 0 ..< 5 {
+                channel.sink.deliver(ProtocolFrame(channel: 1, kind: .bytes, body: Data([UInt8(index)])))
+                delivered.mutate { $0 += 1 }
+            }
+            done.mutate { $0 = true }
+        }
+        reader.start()
+        try await Self.waitFor { delivered.value == 2 }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(delivered.value == 2, "the reader waits for room")
+
+        var events = channel.events.makeAsyncIterator()
+        #expect(await events.next() == .output(Data([0])))
+        try await Self.waitFor { delivered.value == 3 }
+
+        channel.sink.finish()
+        try await Self.waitFor { done.value }
+    }
+
     @Test
     func a_channel_attaches_gets_output_sends_input_and_sees_the_exit() async throws {
         try await withServer { server in
@@ -119,6 +147,14 @@ struct PaneChannelTests {
             cols: 80,
             rows: 24
         )
+    }
+
+    private static func waitFor(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(condition(), "timed out")
     }
 
     private func withServer(_ body: (LocalServer) async throws -> Void) async throws {

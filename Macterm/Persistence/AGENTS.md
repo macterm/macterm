@@ -10,7 +10,7 @@ This file loads when you work in `Macterm/Persistence/`. The root `AGENTS.md` ha
   - Only an explicit Apply Layout applies a declared layout (palette, menu, Settings row, `layout apply`). When you select a project or start Macterm again, Macterm never reads it. The snapshot restores, and a project without a snapshot gets the default workspace.
 - **A directory is not an identity**. `ProjectStore.create` always appends a new project. `findOrCreate` exists only for callers that must be idempotent (the `open-project` hook of `BenchmarkControl`, and the folder rows of the palette).
 - Project declarations are YAML in `~/.config/macterm/projects/`. All build flavors share them. They look at the `$HOME` env first, through `ProjectPath.currentHome`.
-  - `name:` is for display only. `path:` is the identity (scp-style, with `~` when Macterm writes it). `tabs:` is optional.
+  - `name:` is for display only. When Settings → Projects makes a project from the file, each slash in it becomes a hyphen (`ProjectStore.allowedName`). `path:` is the identity (scp-style, with `~` when Macterm writes it). `tabs:` is optional.
   - The schema is `assets/project.schema.json`. Keep them in sync.
   - Only an explicit Save Layout and the editor of the user write a file. Only Settings → Projects → Layouts → Remove deletes it.
   - Matching is by the canonical `path:`. The slug of the name of the project breaks a tie when one directory backs several projects (`ProjectSlug.owns`). Macterm surfaces duplicates. It never deletes them.

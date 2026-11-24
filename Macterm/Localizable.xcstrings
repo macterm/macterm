@@ -843,6 +843,22 @@
         }
       }
     },
+    "A project name cannot contain a slash." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 이름에는 슬래시를 사용할 수 없습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目名称不能包含斜杠。"
+          }
+        }
+      }
+    },
     "A remote project cannot open a directory on this Mac" : {
       "localizations" : {
         "ko" : {

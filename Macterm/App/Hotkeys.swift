@@ -160,11 +160,11 @@ enum HotkeyAction: String, CaseIterable, Identifiable {
         case .resizePaneDown: "cmd+shift+j"
         case .resizePaneUp: "cmd+shift+k"
         case .resizePaneRight: "cmd+shift+l"
-        // The arrow row of the same families: ⌃←/⌃→ step the tab through the
-        // sidebar's list (it runs top to bottom), and ⌘⌃ + an arrow moves the
-        // pane the way ⌘⌃ + h/j/k/l moves focus.
-        case .moveTabUp: "ctrl+left"
-        case .moveTabDown: "ctrl+right"
+        // ⌃⇧[/⌃⇧] move the tab through the sidebar's list, next to ⌃[/⌃]
+        // that step through it. No ghostty default binds them.
+        case .moveTabUp: "ctrl+shift+["
+        case .moveTabDown: "ctrl+shift+]"
+        // ⌘⌃ + an arrow moves the pane as ⌘⌃ + h/j/k/l moves focus.
         case .movePaneLeft: "cmd+ctrl+left"
         case .movePaneDown: "cmd+ctrl+down"
         case .movePaneUp: "cmd+ctrl+up"

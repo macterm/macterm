@@ -62,6 +62,29 @@ struct DirectorySourceTests {
     }
 
     @Test
+    func local_directory_switch_ends_the_project_screen_of_the_same_project() throws {
+        let (ctx, state, store) = makeContext()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-dir-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let existing = Project(name: "existing", path: dir.path, sortOrder: 0)
+        store.add(existing)
+        state.incubatePane = { _ in }
+        let window = WindowState(activeProjectID: existing.id)
+        state.registerWindow(window)
+        state.noteKeyWindow(window)
+        state.showProjectScreen(existing, in: window)
+        #expect(window.showsProjectScreen)
+
+        let item = try #require(DirectorySource().items(query: dir.path, context: ctx).first)
+        #expect(item.subtitle?.contains("Switch to project") == true)
+        item.action()
+
+        #expect(!window.showsProjectScreen)
+        #expect(state.selectedTab(for: existing.id, in: window) != nil)
+    }
+
+    @Test
     func local_directory_backing_a_project_also_offers_adding_another() throws {
         // A directory is not an identity — below "Switch to project" the
         // exact match offers creating a second, independent project there.
@@ -273,5 +296,41 @@ struct DirectorySourceTests {
         let titles = childTitles(dir.path + "/", in: ctx)
         // Sorted ascending → the first ten are d00…d09, in order.
         #expect(titles == (0 ..< 10).map { String(format: "d%02d", $0) })
+    }
+
+    // MARK: - Tab completion
+
+    private func row(_ id: String) -> PaletteItem {
+        PaletteItem(id: id, title: id, subtitle: nil, category: "", score: 0) {}
+    }
+
+    /// The first Tab on `~/d` keeps the `~` and ends in a slash.
+    @Test
+    func tab_completion_keeps_tilde_and_trailing_slash() {
+        let home = NSHomeDirectory()
+        let items = [row("dir-open:\(home)/dev"), row("dir-open:\(home)/docs")]
+        #expect(DirectorySource.tabCompletion(query: "~/d", items: items) == "~/dev/")
+    }
+
+    /// After a Tab, the typed directory is the exact-match row at the top.
+    /// The next Tab skips it (and its add-another row) and takes the first
+    /// child.
+    @Test
+    func second_tab_descends_past_the_exact_match() throws {
+        let (ctx, _, store) = makeContext()
+        let dir = try makeListingDir(children: ["alpha", "beta"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+        store.add(Project(name: "top", path: dir.path, sortOrder: 0))
+        let query = dir.path + "/"
+        let items = DirectorySource().items(query: query, context: ctx)
+        let top = try #require(items.first.flatMap { DirectorySource.path(of: $0) })
+        #expect(PathCompleter.fieldText(for: top, typed: query) == query)
+        #expect(DirectorySource.tabCompletion(query: query, items: items) == dir.path + "/alpha/")
+    }
+
+    @Test
+    func tab_completion_ignores_rows_that_are_not_local_directories() {
+        #expect(DirectorySource.tabCompletion(query: "devbox:~/a", items: [row("remote-open:devbox:~/a")]) == nil)
+        #expect(DirectorySource.tabCompletion(query: "/tmp/", items: [row("dir-open:/tmp")]) == nil)
     }
 }

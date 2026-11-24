@@ -28,6 +28,11 @@ final class ProjectStore {
     /// to save, because that list is not the user's.
     @ObservationIgnored
     var onSave: (([Project]) -> Void)?
+    /// Called with each project that `add` stored. `AppState.projectAdded`
+    /// gives it its first tab, so a project has tabs from the moment it is
+    /// added, whichever path added it.
+    @ObservationIgnored
+    var onAdd: ((Project) -> Void)?
 
     init(fileURL: URL = FileStorage.fileURL(filename: "projects.json")) {
         self.fileURL = fileURL
@@ -57,15 +62,16 @@ final class ProjectStore {
     /// sessions (named with per-pane entropy). This is the entry point for
     /// user-initiated creation (folder picker, remote sheet, `project create`).
     ///
-    /// A name the pinned workspace reserves is stored suffixed (see
-    /// `unreservedName`). Most callers pass the folder's own name — the
+    /// A name that `Project.nameRefusal` refuses is stored changed (see
+    /// `allowedName`). Most callers pass the folder's own name — the
     /// picker, Finder, Open With, the palette, a bare `project create` — which
     /// nobody chose, so refusing it would make a folder called Pinned
-    /// impossible to add. A caller holding a name someone typed refuses it
-    /// before calling this, where it can say why.
+    /// impossible to add. The `name:` of a layout file is changed the same
+    /// way. A caller holding a name someone typed refuses it before calling
+    /// this, where it can say why.
     @discardableResult
     func create(name: String, path: String) -> Project {
-        var project = Project(name: Self.unreservedName(name), path: path)
+        var project = Project(name: Self.allowedName(name), path: path)
         if autoAssignsColors() {
             project.colorName = ProjectColor.leastUsed(among: projects.map(\.color)).rawValue
         }
@@ -82,6 +88,7 @@ final class ProjectStore {
         project.sortOrder = children(of: project.parent).count
         rows.append(project)
         changed()
+        onAdd?(project)
         return project
     }
 
@@ -257,13 +264,13 @@ final class ProjectStore {
         return result
     }
 
-    /// Rename a project, unless `Project.reservesName` matches the new
+    /// Rename a project, unless `Project.nameRefusal` refuses the new
     /// name: then the project keeps its old one. Every caller holds a name
     /// someone typed and says why first (the CLI's `bad_request`, the
     /// sidebar's notice); this only stops one that forgot to.
     func rename(id: UUID, to newName: String) {
-        guard !Project.reservesName(newName) else {
-            logger.error("Refusing to rename project \(id, privacy: .public) to reserved name \(newName, privacy: .public)")
+        guard Project.nameRefusal(for: newName) == nil else {
+            logger.error("Refusing to rename project \(id, privacy: .public) to refused name \(newName, privacy: .public)")
             return
         }
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
@@ -271,13 +278,21 @@ final class ProjectStore {
         changed()
     }
 
-    /// `name`, or — when a sentinel workspace reserves it — the name a second
-    /// one would get: `Pinned 2`, the suffix its layout file already takes
-    /// (`pinned_2.yaml`, see `ProjectFileStore.write`). The case is kept; it
-    /// is still the folder's name. Only the bare name is reserved, so the
-    /// suffixed one is always reachable, and a second project from the same
-    /// folder is a second `Pinned 2`, as a second `api` is a second `api`.
-    private static func unreservedName(_ name: String) -> String {
+    /// `name` changed so that `Project.nameRefusal` allows it. Each slash
+    /// becomes a hyphen. A name that a sentinel workspace reserves becomes the
+    /// name a second one would get: `Pinned 2`, the suffix its layout file
+    /// already takes (`pinned_2.yaml`, see `ProjectFileStore.write`). The
+    /// case is kept; it is still the folder's name. Only the bare name is
+    /// reserved, so the suffixed one is always reachable, and a second project
+    /// from the same folder is a second `Pinned 2`, as a second `api` is a
+    /// second `api`.
+    static func allowedName(_ name: String) -> String {
+        var name = name
+        if Project.hasSlash(name) {
+            let hyphenated = name.replacingOccurrences(of: "/", with: "-")
+            logger.info("Project name \(name, privacy: .public) has a slash; creating \(hyphenated, privacy: .public)")
+            name = hyphenated
+        }
         guard Project.reservesName(name) else { return name }
         let suffixed = "\(name.trimmingCharacters(in: .whitespacesAndNewlines)) 2"
         logger.info("Project name \(name, privacy: .public) is reserved; creating \(suffixed, privacy: .public)")

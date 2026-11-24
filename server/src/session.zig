@@ -59,6 +59,19 @@ pub const max_cells = m.max_cells;
 const snapshot_chunk = 64 * 1024;
 /// The most text that `history` holds: it must fit the server's frame.
 const history_max = 960 * 1024;
+/// While output comes, a wait for a marker reads the terminal text at most
+/// this often.
+const wait_scan_ms = 100;
+
+/// A `wait` of the server (`session.wait`).
+const Wait = struct {
+    client: *Client,
+    tag: u64,
+    /// The marker, owned. Null: wait until no run is in progress and the
+    /// pane is quiet.
+    text: ?[]u8,
+    deadline: i64,
+};
 
 pub const Options = struct {
     name: []const u8,
@@ -277,9 +290,6 @@ const Session = struct {
     /// The shell's process group. It is `shell_pid` until a shell under
     /// login(1) takes the foreground (`isShellGroup`).
     shell_pgid: lib_posix.pid_t,
-    /// The command is login(1), which starts the shell in a process group
-    /// of its own. ghostty starts every local shell this way on macOS.
-    under_login: bool,
     /// The last group in front that `isShellGroup` found is not the shell's,
     /// so that a program in front costs no read of its parent at each output.
     other_pgid: lib_posix.pid_t = 0,
@@ -321,6 +331,15 @@ const Session = struct {
     etc_shells_buf: [4096]u8 = undefined,
     /// A client sent `end`.
     ending: bool = false,
+    /// The waits that did not end, in the order they came.
+    waits: std.ArrayList(Wait) = .empty,
+    /// Output came since the last read of the text for a marker.
+    wait_dirty: bool = false,
+    wait_scanned_at: i64 = 0,
+    /// The last submission (`queueUserInput`). A wait with no marker counts
+    /// its quiet time from it too: the run that it starts can show only
+    /// after the shell read it.
+    submitted_at: i64 = 0,
 
     const pty_in_max = 256 * 1024;
 
@@ -335,7 +354,6 @@ const Session = struct {
             .pty_fd = pty.master_fd,
             .shell_pid = pty.pid,
             .shell_pgid = pty.pid,
-            .under_login = isLogin(opts.command),
             .pty_name = "",
             .pty_name_buf = pty.name_buf,
             .epoch = epoch,
@@ -393,6 +411,7 @@ const Session = struct {
             s.checkForeground(null);
             s.checkTty(null);
             s.sendEvents();
+            s.checkWaits(false);
 
             for (reactor.fds.items, reactor.sources.items) |pfd, source| switch (source) {
                 .signal => if (pfd.revents & lib_posix.POLL.IN != 0) {
@@ -503,7 +522,7 @@ const Session = struct {
             .build_key = build_options.key,
             .role = .session,
             .epoch = s.epoch,
-            .caps = &.{},
+            .caps = &.{m.tty_read_cap},
         };
     }
 
@@ -527,6 +546,7 @@ const Session = struct {
         }
         const data = buf[0..n];
         s.has_output = true;
+        s.wait_dirty = true;
         // With no leader, no terminal of a client answers the queries: the
         // session's terminal answers them (`Watch.answers_all`).
         s.watch.answers_all = s.leader == null;
@@ -724,8 +744,29 @@ const Session = struct {
             const text = terminal.plainText(arena, &s.watch.term, r.scrollback, history_max) catch
                 terminal.PlainText{ .text = "", .truncated = false };
             s.sendPane(c, m.History, .{ .text = .{ .bytes = text.text }, .truncated = text.truncated });
+        } else if (std.mem.eql(u8, msg.t, m.Wait.name)) {
+            const w = try m.decodePane(m.Wait, arena, msg);
+            const text = if (w.text) |t| try s.gpa.dupe(u8, t) else null;
+            errdefer if (text) |t| s.gpa.free(t);
+            try s.waits.append(s.gpa, .{
+                .client = c,
+                .tag = w.tag,
+                .text = text,
+                .deadline = s.nowMs() + w.timeout_ms,
+            });
+            // A marker that is already in the text ends the wait now.
+            s.checkWaits(true);
+        } else if (std.mem.eql(u8, msg.t, m.WaitCancel.name)) {
+            const w = try m.decodePane(m.WaitCancel, arena, msg);
+            for (s.waits.items, 0..) |pending, i| if (pending.client == c and pending.tag == w.tag) {
+                _ = s.waits.orderedRemove(i);
+                if (pending.text) |t| s.gpa.free(t);
+                break;
+            };
         } else if (std.mem.eql(u8, msg.t, m.InspectRead.name)) {
             s.sendPane(c, m.Inspect, .{ .terminal = s.terminalState(arena) });
+        } else if (std.mem.eql(u8, msg.t, m.TtyRead.name)) {
+            s.sendPane(c, m.TtyMode, s.readTtyMode());
         } else if (std.mem.eql(u8, msg.t, m.Take.name)) {
             if (s.exited() != null) {
                 std.log.info("session {s}: exit status taken", .{s.name});
@@ -751,21 +792,27 @@ const Session = struct {
     /// submission in it can start a run (`Watch.submitted`).
     fn queueUserInput(s: *Session, data: []const u8) void {
         if (!s.pty_closed and events.isSubmission(data)) {
+            s.submitted_at = s.nowMs();
             s.observeForeground();
-            s.watch.submitted(s.nowMs());
+            s.watch.submitted(s.submitted_at);
             s.sendEvents();
         }
         s.queueInput(data);
     }
 
-    /// Whether `pgrp` is the shell's process group. login(1) is in front
-    /// before it starts the shell, and counts as the shell. The first group
-    /// in front whose leader is login's child is the shell's: login has one
-    /// child.
+    /// Whether `pgrp` is the shell's process group. login(1) starts the
+    /// shell in a process group of its own, and is in front before that, so
+    /// login counts as the shell. The first group in front whose leader is a
+    /// child of login is the shell's: login has one child. The session reads
+    /// the program that runs now, because a wrapper (`macterm palette exec`)
+    /// can run login with exec. A read that fails is not kept, so that the
+    /// next read tries again.
     fn isShellGroup(s: *Session, pgrp: lib_posix.pid_t) bool {
         if (pgrp == s.shell_pid or pgrp == s.shell_pgid) return true;
-        if (!s.under_login or s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
-        if (foreground.parentPid(pgrp) != s.shell_pid) {
+        if (s.shell_pgid != s.shell_pid or pgrp == s.other_pgid) return false;
+        const parent = foreground.parentPid(pgrp) orelse return false;
+        const login = parent == s.shell_pid and (foreground.runsLogin(s.shell_pid) orelse return false);
+        if (!login) {
             s.other_pgid = pgrp;
             return false;
         }
@@ -957,6 +1004,10 @@ const Session = struct {
     }
 
     fn sweep(s: *Session) void {
+        var w: usize = 0;
+        while (w < s.waits.items.len) {
+            if (s.waits.items[w].client.conn.dead) s.endWait(w, .timeout, null) else w += 1;
+        }
         var i: usize = 0;
         while (i < s.clients.items.len) {
             const c = s.clients.items[i];
@@ -984,7 +1035,78 @@ const Session = struct {
 
     fn pollTimeout(s: *const Session) i32 {
         const now = s.nowMs();
-        return pollTimeoutFor((foreground.supported and s.hasForegroundClient()) or s.hasTtyClient() or s.watch.watchesForeground(now), s.watch.deadline(), now);
+        var deadline = s.watch.deadline();
+        if (s.waitDeadline()) |d| deadline = @min(deadline orelse d, d);
+        return pollTimeoutFor((foreground.supported and s.hasForegroundClient()) or s.hasTtyClient() or s.watch.watchesForeground(now), deadline, now);
+    }
+
+    /// When a wait must be checked again: its timeout, the end of the quiet
+    /// time, or the next read of the text.
+    fn waitDeadline(s: *const Session) ?i64 {
+        var next: ?i64 = null;
+        for (s.waits.items) |w| {
+            next = @min(next orelse w.deadline, w.deadline);
+            const again = if (w.text != null)
+                (if (s.wait_dirty) s.wait_scanned_at + wait_scan_ms else null)
+            else if (s.watch.status.state != .running)
+                s.quietFrom() + m.wait_quiet_ms
+            else
+                null;
+            if (again) |d| next = @min(next orelse d, d);
+        }
+        return next;
+    }
+
+    /// Ends each wait whose condition holds. A marker is looked for in the
+    /// text when output came, at most each `wait_scan_ms`, or at once with
+    /// `now_scan` (a new wait).
+    fn checkWaits(s: *Session, now_scan: bool) void {
+        if (s.waits.items.len == 0) return;
+        const now = s.nowMs();
+        var arena_state: std.heap.ArenaAllocator = .init(s.gpa);
+        defer arena_state.deinit();
+        var text: ?terminal.PlainText = null;
+        const has_marker = for (s.waits.items) |w| {
+            if (w.text != null) break true;
+        } else false;
+        const gone = s.exited() != null;
+        // The last output before the exit is read before the exit ends a wait.
+        const due = now_scan or (s.wait_dirty and (gone or now >= s.wait_scanned_at + wait_scan_ms));
+        if (has_marker and due) {
+            s.wait_dirty = false;
+            s.wait_scanned_at = now;
+            text = terminal.plainText(arena_state.allocator(), &s.watch.term, true, std.math.maxInt(usize)) catch null;
+        }
+        const quiet = s.watch.status.state != .running and now - s.quietFrom() >= m.wait_quiet_ms;
+        var i: usize = 0;
+        while (i < s.waits.items.len) {
+            const w = s.waits.items[i];
+            if (w.text) |marker| if (text) |t| if (markedLine(t.text, marker)) |line| {
+                s.endWait(i, .matched, line);
+                continue;
+            };
+            if (gone) {
+                s.endWait(i, .exited, null);
+            } else if (w.text == null and quiet) {
+                s.endWait(i, .done, null);
+            } else if (now >= w.deadline) {
+                s.endWait(i, .timeout, null);
+            } else i += 1;
+        }
+    }
+
+    /// The last output or submission.
+    fn quietFrom(s: *const Session) i64 {
+        return @max(s.watch.quiet_from, s.submitted_at);
+    }
+
+    /// Answers the wait at `i` and removes it. A client that is gone gets
+    /// nothing.
+    fn endWait(s: *Session, i: usize, end_: m.WaitEnd, line: ?[]const u8) void {
+        const w = s.waits.orderedRemove(i);
+        defer if (w.text) |t| s.gpa.free(t);
+        if (w.client.conn.dead) return;
+        s.sendPane(w.client, m.Waited, .{ .tag = w.tag, .end = end_, .line = if (line) |l| .{ .bytes = l } else null });
     }
 
     /// A live client asked for `foreground` messages. With none, the
@@ -992,6 +1114,16 @@ const Session = struct {
     fn hasForegroundClient(s: *const Session) bool {
         for (s.clients.items) |c| if (c.wants_foreground and !c.conn.dead) return true;
         return false;
+    }
+
+    /// The pty's line modes now, for `tty_read`. A pty that cannot be read
+    /// reads as a password read: the server then refuses the input.
+    fn readTtyMode(s: *const Session) m.TtyMode {
+        const password: m.TtyMode = .{ .canonical = true, .echo = false };
+        if (s.pty_closed) return password;
+        var t: cross.termios = undefined;
+        if (cross.tcgetattr(s.pty_fd, &t) != 0) return password;
+        return ttyModeOf(t.c_lflag);
     }
 
     /// A live client asked for `tty_mode` messages.
@@ -1230,13 +1362,6 @@ fn sequenceEnd(data: []const u8, from: usize) usize {
 /// interval while a client wants foreground reports: a program that takes
 /// the pty and prints nothing is still reported (zmx 0010). With neither,
 /// -1: the session sleeps until a fd is ready.
-/// Whether `command` runs login(1): its program is a file named `login`.
-fn isLogin(command: ?[]const []const u8) bool {
-    const argv = command orelse return false;
-    if (argv.len == 0) return false;
-    return std.mem.eql(u8, std.fs.path.basename(argv[0]), "login");
-}
-
 fn pollTimeoutFor(foreground_client: bool, deadline: ?i64, now: i64) i32 {
     var timeout: i32 = if (foreground_client) foreground.poll_interval_ms else -1;
     if (deadline) |due| {
@@ -1244,6 +1369,24 @@ fn pollTimeoutFor(foreground_client: bool, deadline: ?i64, now: i64) i32 {
         timeout = if (timeout < 0) wait else @min(timeout, wait);
     }
     return timeout;
+}
+
+/// The newest line of `text` that starts with `marker`, cut at
+/// `m.wait_line_max` bytes (at the start of a UTF-8 character).
+fn markedLine(text: []const u8, marker: []const u8) ?[]const u8 {
+    var end = text.len;
+    while (true) {
+        const start = if (std.mem.lastIndexOfScalar(u8, text[0..end], '\n')) |nl| nl + 1 else 0;
+        const line = text[start..end];
+        if (std.mem.startsWith(u8, line, marker)) {
+            if (line.len <= m.wait_line_max) return line;
+            var cut: usize = m.wait_line_max;
+            while (cut > 0 and line[cut] & 0xC0 == 0x80) cut -= 1;
+            return line[0..cut];
+        }
+        if (start == 0) return null;
+        end = start - 1;
+    }
 }
 
 /// What an `Attach` asks to resume from.
@@ -1297,6 +1440,21 @@ test "the output is cut after each BEL and ST" {
     try testing.expectEqual(data.len, sequenceEnd(data, 17));
 }
 
+test "a wait finds the newest line that starts with the marker" {
+    const text = "$ make; echo done-7f3a-$?\nbuild\ndone-7f3a-1\n$ make; echo done-7f3a-$?\ndone-7f3a-0\n$ ";
+    try testing.expectEqualStrings("done-7f3a-0", markedLine(text, "done-7f3a").?);
+    try testing.expectEqual(null, markedLine("$ echo done-7f3a\n$ ", "done-7f3a"));
+    try testing.expectEqualStrings("first", markedLine("first\nsecond", "fir").?);
+    try testing.expectEqual(null, markedLine("", "x"));
+    // A long line keeps its start, cut before a UTF-8 character.
+    var long: [m.wait_line_max + 10]u8 = undefined;
+    @memset(&long, 'a');
+    long[m.wait_line_max - 1] = 0xC3;
+    long[m.wait_line_max] = 0xA9;
+    const cut = markedLine(&long, "aaa").?;
+    try testing.expectEqual(m.wait_line_max - 1, cut.len);
+}
+
 test "a pane size is cut to the limit, and 0 is ignored" {
     try testing.expectEqual(null, paneSize(0, 24, 0, 0));
     try testing.expectEqual(null, paneSize(80, 0, 0, 0));
@@ -1304,13 +1462,6 @@ test "a pane size is cut to the limit, and 0 is ignored" {
     try testing.expectEqual(max_cells, big.cols);
     try testing.expectEqual(max_cells, big.rows);
     try testing.expectEqual(80, paneSize(80, 24, 0, 0).?.cols);
-}
-
-test "session: isLogin names a command whose program is login(1)" {
-    try std.testing.expect(isLogin(&.{ "/usr/bin/login", "-flp", "me", "/bin/zsh" }));
-    try std.testing.expect(!isLogin(&.{ "/bin/zsh", "-l" }));
-    try std.testing.expect(!isLogin(&.{}));
-    try std.testing.expect(!isLogin(null));
 }
 
 test "a session polls the foreground only for a client that wants it" {

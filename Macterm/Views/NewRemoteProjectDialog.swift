@@ -165,10 +165,9 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         nameField.stringValue.trimmingCharacters(in: .whitespaces)
     }
 
-    /// A typed name that a sentinel workspace reserves
-    /// (`Project.reservedNameMessage`).
-    private var reservedNameMessage: String? {
-        Project.reservedNameMessage(for: nameField.stringValue)
+    /// Why the typed name is refused (`Project.nameRefusal`), or nil.
+    private var nameRefusal: String? {
+        Project.nameRefusal(for: nameField.stringValue)
     }
 
     /// The name of a project that the user did not name, as the palette
@@ -203,7 +202,7 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
     }
 
     private func add() {
-        guard let path = composedPath, reservedNameMessage == nil, failure == nil, case .fields = step else { return }
+        guard let path = composedPath, nameRefusal == nil, failure == nil, case .fields = step else { return }
         guard case let .remote(user, host, _) = ProjectPath.parse(path) else { return }
         let name = trimmedName.isEmpty ? automaticName : trimmedName
         failure = nil
@@ -334,13 +333,13 @@ final class NewRemoteProjectDialog: NSObject, NSTextFieldDelegate {
         spinner.isHidden = true
         afterSpinner?.isActive = false
         atEdge?.isActive = true
-        let message = reservedNameMessage ?? failure
+        let message = nameRefusal ?? failure
         setStatus(message ?? "")
         // The line has a maximum of two lines. The tooltip has all the text.
         statusLine.toolTip = message
         statusLine.textColor = NSColor(MactermTheme.warning)
         // A refused path stays refused until an edit: Add and Return do nothing.
-        alert.buttons[0].isEnabled = composedPath != nil && reservedNameMessage == nil && failure == nil
+        alert.buttons[0].isEnabled = composedPath != nil && nameRefusal == nil && failure == nil
         fitForm()
     }
 

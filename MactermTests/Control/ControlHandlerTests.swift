@@ -25,6 +25,8 @@ struct ControlHandlerTests {
         let appState = state ?? makeAppState()
         let projectStore = store ?? ProjectStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        // As `MactermApp` connects them: an added project gets its first tab.
+        projectStore.onAdd = { [weak appState] in appState?.projectAdded($0) }
         let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in remoteFolder }
         return (handler, appState, projectStore)
     }
@@ -123,7 +125,7 @@ struct ControlHandlerTests {
     // MARK: - project.list
 
     @Test
-    func project_list_marks_active_and_loaded() async {
+    func project_list_marks_active_and_counts_tabs_of_a_project_never_selected() async {
         let (handler, appState, projectStore) = makeHandler()
         let selected = seedProject(appState, projectStore, name: "one")
         _ = seedProject(appState, projectStore, name: "two", select: false)
@@ -134,12 +136,10 @@ struct ControlHandlerTests {
         let one = projects?.first { $0.name == "one" }
         let two = projects?.first { $0.name == "two" }
         #expect(one?.active == true)
-        #expect(one?.loaded == true)
         #expect(one?.id == selected.id.uuidString)
         #expect(one?.tabCount == 1)
         #expect(two?.active == false)
-        #expect(two?.loaded == false)
-        #expect(two?.tabCount == nil)
+        #expect(two?.tabCount == 1)
     }
 
     @Test
@@ -221,13 +221,22 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func tab_list_unloaded_project_is_not_found_with_hint() async {
+    func tab_list_lists_the_first_tab_of_a_project_never_selected() async {
         let (handler, appState, projectStore) = makeHandler()
-        _ = seedProject(appState, projectStore, name: "loaded")
+        _ = seedProject(appState, projectStore, name: "open")
         _ = seedProject(appState, projectStore, name: "cold", select: false)
         let response = await handler.handle(request("tab.list", args: ControlArgs(project: "cold")))
+        #expect(response.ok)
+        #expect(response.data?.tabs?.count == 1)
+    }
+
+    @Test
+    func tab_list_of_a_group_is_not_found() async {
+        let (handler, _, projectStore) = makeHandler()
+        projectStore.add(Project(name: "Work", path: ""))
+        let response = await handler.handle(request("tab.list", args: ControlArgs(project: "Work")))
         #expect(response.error?.code == .notFound)
-        #expect(response.error?.action?.contains("project select") == true)
+        #expect(response.error?.message.contains("has no tabs") == true)
     }
 
     @Test
@@ -383,7 +392,7 @@ struct ControlHandlerTests {
         let info = created.data?.projects?.first
         #expect(info?.name == "fresh")
         #expect(info?.active == true)
-        #expect(info?.loaded == true)
+        #expect(info?.tabCount == 1)
         #expect(projectStore.projects.count == 1)
         #expect(appState.activeProjectID?.uuidString == info?.id)
 
@@ -479,6 +488,24 @@ struct ControlHandlerTests {
             ))
             #expect(response.error?.code == .badRequest)
             #expect(response.error?.message == "\"Pinned\" is a reserved name for the pinned tabs")
+        }
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
+    func project_create_refuses_a_name_with_a_slash() async throws {
+        let (handler, _, projectStore) = makeHandler()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-create-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for name in ["Work/api", "/", "api/"] {
+            let response = await handler.handle(request(
+                "project.create", args: ControlArgs(path: dir.path, name: name)
+            ))
+            #expect(response.error?.code == .badRequest)
+            #expect(response.error?.message == "a project name cannot contain a slash")
         }
         #expect(projectStore.projects.isEmpty)
     }
@@ -676,6 +703,9 @@ struct ControlHandlerTests {
         #expect(reserved.error?.message == "\"Pinned\" is a reserved name for the pinned tabs")
         let reservedCase = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: " pInNeD ")))
         #expect(reservedCase.error?.code == .badRequest)
+        let slash = await handler.handle(request("project.rename", args: ControlArgs(project: "alpha", name: "Work/api")))
+        #expect(slash.error?.code == .badRequest)
+        #expect(slash.error?.message == "a project name cannot contain a slash")
         #expect(projectStore.projects.first?.name == "alpha")
 
         // Unknown project
@@ -697,7 +727,7 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func project_remove_unloaded_project_succeeds() async {
+    func project_remove_of_a_project_never_selected_succeeds() async {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "alpha", select: false)
         #expect(projectStore.projects.count == 1)
@@ -1338,6 +1368,95 @@ struct ControlHandlerTests {
         ))
         #expect(response.ok)
         #expect(tab.splitRoot.allPanes().count == 1)
+    }
+
+    // MARK: - A plain shell's host decides the CLI's busy refusal (0538)
+
+    /// A project with two panes whose surfaces read busy, as libghostty
+    /// reads a plain ssh shell with no OSC 133 marks. The second pane runs a
+    /// plain shell, and its host answers `answer`.
+    private func plainShellProject(answer: Bool?) throws
+        -> (handler: ControlHandler, state: AppState, project: Project, tab: TerminalTab, plain: Pane)
+    {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore)
+        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
+        let plain = try #require(tab.splitRoot.allPanes().last)
+        appState.paneNeedsConfirmClose = { $0.id == plain.id }
+        appState.paneRunsPlainShell = { $0.id == plain.id }
+        appState.askPlainShellNeedsConfirmClose = { pane, _ in pane.id == plain.id ? answer : nil }
+        return (handler, appState, project, tab, plain)
+    }
+
+    @Test
+    func pane_close_closes_a_plain_shell_that_its_host_calls_idle() async throws {
+        let fx = try plainShellProject(answer: false)
+        let response = await fx.handler.handle(request(
+            "pane.close", args: ControlArgs(pane: fx.plain.id.uuidString)
+        ))
+        #expect(response.ok)
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
+    }
+
+    @Test
+    func pane_close_refuses_a_plain_shell_that_its_host_calls_busy() async throws {
+        let fx = try plainShellProject(answer: true)
+        let response = await fx.handler.handle(request(
+            "pane.close", args: ControlArgs(pane: fx.plain.id.uuidString)
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(fx.tab.splitRoot.allPanes().count == 2)
+    }
+
+    @Test
+    func pane_close_refuses_a_plain_shell_whose_host_does_not_answer() async throws {
+        let fx = try plainShellProject(answer: nil)
+        let response = await fx.handler.handle(request(
+            "pane.close", args: ControlArgs(pane: fx.plain.id.uuidString)
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(fx.tab.splitRoot.allPanes().count == 2)
+    }
+
+    @Test
+    func tab_close_closes_a_tab_whose_plain_shell_its_host_calls_idle() async throws {
+        let fx = try plainShellProject(answer: false)
+        let response = await fx.handler.handle(request(
+            "tab.close", args: ControlArgs(project: fx.project.name, tab: "tab:1")
+        ))
+        #expect(response.ok)
+        #expect(fx.state.workspaces[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } != true)
+    }
+
+    @Test
+    func tab_close_refuses_a_tab_whose_plain_shell_its_host_calls_busy() async throws {
+        let fx = try plainShellProject(answer: true)
+        let response = await fx.handler.handle(request(
+            "tab.close", args: ControlArgs(project: fx.project.name, tab: "tab:1")
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(fx.state.workspaces[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } == true)
+    }
+
+    @Test
+    func project_remove_refuses_a_plain_shell_that_its_host_calls_busy() async throws {
+        let fx = try plainShellProject(answer: true)
+        let response = await fx.handler.handle(request(
+            "project.remove", args: ControlArgs(project: fx.project.name)
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(fx.state.workspaces[fx.project.id] != nil)
+    }
+
+    @Test
+    func project_remove_removes_a_project_whose_plain_shell_its_host_calls_idle() async throws {
+        let fx = try plainShellProject(answer: false)
+        let response = await fx.handler.handle(request(
+            "project.remove", args: ControlArgs(project: fx.project.name)
+        ))
+        #expect(response.ok)
+        #expect(fx.state.workspaces[fx.project.id] == nil)
     }
 
     @Test
