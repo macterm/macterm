@@ -3663,12 +3663,13 @@ final class AppState {
 
     /// A project that was just added gets its first tab at once, so that
     /// no project is without tabs (design 010 section 11). `ProjectStore.onAdd`
-    /// calls it for every path that adds a project. Before the restore, the
-    /// restore gives the first tab.
+    /// calls it for every path that adds a project (`MactermApp` connects
+    /// the two). Before the restore it saves nothing: a save then would
+    /// write over the snapshot that the restore has not read yet.
     func projectAdded(_ project: Project) {
-        guard hasRestoredSelection, workspaces[project.id] == nil, project.hasFolder else { return }
+        guard workspaces[project.id] == nil, project.hasFolder else { return }
         giveFirstTab(to: project)
-        saveWorkspaces()
+        if hasRestoredSelection { saveWorkspaces() }
     }
 
     // MARK: - Private

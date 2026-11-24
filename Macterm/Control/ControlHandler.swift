@@ -1453,7 +1453,7 @@ final class ControlHandler {
     // MARK: - Selector resolution
 
     /// Resolve the project selector (name, UUID, or 1-based list index) to a
-    /// project with a live workspace; defaults to the active project — except
+    /// project and its workspace (a group has none); defaults to the active project — except
     /// for a session selector with no project. A session names one pane
     /// wherever it lives, so it resolves in the project holding it: otherwise
     /// `--session`, and the `MACTERM_SESSION` self-target the CLI sends the

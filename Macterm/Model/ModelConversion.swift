@@ -20,8 +20,7 @@ enum ModelConversion {
     }
 
     /// The model. Each project holds the tabs of its workspace. A project
-    /// with no workspace (the app makes it when a window selects the
-    /// project) has no tabs. A workspace of kind `project` with no project
+    /// with no workspace (a group, which has no folder) has no tabs. A workspace of kind `project` with no project
     /// is not in the model: the model has no place for its tabs. A
     /// selection that names no project of the model is not sent.
     static func model(projects: [Project], workspaces: [WorkspaceInput], activeProjectID: UUID?) -> MactermProtocol.ModelData {

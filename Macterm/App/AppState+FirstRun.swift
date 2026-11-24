@@ -43,8 +43,9 @@ extension AppState {
 
         let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath)
         // A pure-spawn reconcile is how the declared `run:` reaches the pane
-        // as a typed `PaneStartCommand`. Its tab replaces the first tab that
-        // `projectAdded` gave the project, which has started nothing yet.
+        // as a typed `PaneStartCommand`. Its tab takes the place of the first
+        // tab that `projectAdded` gave the project: no window drew that tab,
+        // so it has no surface and no session.
         let plan = LayoutReconciler.plan(
             layout: FirstRunSeed.projectLayout,
             workspace: nil,
@@ -58,7 +59,11 @@ extension AppState {
                 focusedPaneID: planned.focusedPaneID,
                 customTitle: planned.title
             )
-            workspaces[project.id] = Workspace(id: project.id, tabs: [tab], activeTabID: tab.id)
+            if let workspace = workspaces[project.id] {
+                ModelWriter.tabReplaceAll(in: workspace, with: [tab], activeTabID: tab.id)
+            } else {
+                workspaces[project.id] = Workspace(id: project.id, tabs: [tab], activeTabID: tab.id)
+            }
         }
 
         // The pinned half is added as a record with no live tab — exactly the
