@@ -61,35 +61,32 @@ final class ModelMirror {
             switch event {
             case let .projectChanged(e):
                 if let i = model.projects.firstIndex(where: { $0.id == e.project.id }) {
-                    model.projects[i] = e.project
+                    model.projects[i] = Self.project(e.project, tabs: model.projects[i].tabs, activeTab: model.projects[i].activeTab)
                 } else {
-                    model.projects.append(e.project)
+                    model.projects.append(Self.project(e.project, tabs: [], activeTab: nil))
                 }
             case let .projectRemoved(e):
                 model.projects.removeAll { $0.id == e.id }
-                model.workspaces.removeAll { $0.id == e.id }
             case let .tabOrder(e):
-                let i = Self.workspaceIndex(e.workspace, kind: e.kind, in: &model)
-                model.workspaces[i].activeTab = e.activeTab
-                orders[e.workspace] = e.ids
+                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else { continue }
+                model.projects[i].activeTab = e.activeTab
+                orders[e.project] = e.ids
             case let .tabChanged(e):
-                for w in model.workspaces.indices where model.workspaces[w].id != e.workspace {
-                    model.workspaces[w].tabs.removeAll { $0.id == e.tab.id }
+                for p in model.projects.indices where model.projects[p].id != e.project {
+                    model.projects[p].tabs.removeAll { $0.id == e.tab.id }
                 }
-                let i = Self.workspaceIndex(e.workspace, kind: .project, in: &model)
-                if let t = model.workspaces[i].tabs.firstIndex(where: { $0.id == e.tab.id }) {
-                    model.workspaces[i].tabs[t] = e.tab
+                guard let i = model.projects.firstIndex(where: { $0.id == e.project }) else { continue }
+                if let t = model.projects[i].tabs.firstIndex(where: { $0.id == e.tab.id }) {
+                    model.projects[i].tabs[t] = e.tab
                 } else {
-                    model.workspaces[i].tabs.append(e.tab)
+                    model.projects[i].tabs.append(e.tab)
                 }
                 zoomed[e.tab.id] = e.zoomed
             case let .tabRemoved(e):
-                if let i = model.workspaces.firstIndex(where: { $0.id == e.workspace }) {
-                    model.workspaces[i].tabs.removeAll { $0.id == e.id }
+                if let i = model.projects.firstIndex(where: { $0.id == e.project }) {
+                    model.projects[i].tabs.removeAll { $0.id == e.id }
                 }
                 zoomed[e.id] = nil
-            case let .workspaceRemoved(e):
-                model.workspaces.removeAll { $0.id == e.id }
             case let .selectionChanged(e):
                 model.selection = .init(activeProject: e.activeProject)
             default:
@@ -99,16 +96,30 @@ final class ModelMirror {
             }
         }
         for (id, ids) in orders {
-            guard let i = model.workspaces.firstIndex(where: { $0.id == id }) else { continue }
-            let tabs = Dictionary(model.workspaces[i].tabs.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-            model.workspaces[i].tabs = ids.compactMap { tabs[$0] }
+            guard let i = model.projects.firstIndex(where: { $0.id == id }) else { continue }
+            let tabs = Dictionary(model.projects[i].tabs.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+            model.projects[i].tabs = ids.compactMap { tabs[$0] }
         }
         data = model
     }
 
-    private static func workspaceIndex(_ id: String, kind: MactermProtocol.Kind, in model: inout MactermProtocol.ModelData) -> Int {
-        if let i = model.workspaces.firstIndex(where: { $0.id == id }) { return i }
-        model.workspaces.append(.init(id: id, kind: kind))
-        return model.workspaces.count - 1
+    /// A project with the fields of `project.set` and the tabs that the
+    /// mirror has: `tab.order` and `tab.set` carry those.
+    private static func project(_ info: MactermProtocol.ProjectInfo, tabs: [MactermProtocol.Tab], activeTab: String?) -> MactermProtocol.Project {
+        .init(
+            id: info.id,
+            name: info.name,
+            path: info.path,
+            color: info.color,
+            sortOrder: info.sortOrder,
+            createdAt: info.createdAt,
+            parent: info.parent,
+            sidebar: info.sidebar,
+            singleTab: info.singleTab,
+            removable: info.removable,
+            alias: info.alias,
+            tabs: tabs,
+            activeTab: activeTab
+        )
     }
 }
