@@ -491,7 +491,7 @@ struct ControlProjectInfo: Codable, Equatable {
     var loaded: Bool
     var tabCount: Int?
     /// The name of the project that holds this one (design 013), or empty
-    /// at the top level. Absent from an app before nested projects.
+    /// at the top level.
     var parent: String?
     /// The id of that project, or empty at the top level. A name can belong
     /// to two projects, so the tree print of `project list` finds the depth

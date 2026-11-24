@@ -15,7 +15,7 @@ enum BundledCLI {
 
     /// Runs `macterm` with `arguments` until it exits. `environment`, when
     /// given, replaces the inherited one. With `terminal`, stdout is a
-    /// pseudo-terminal, as in a shell, and its line ends read as "\n".
+    /// pseudo-terminal, as in a shell.
     static func run(
         _ arguments: [String],
         environment: [String: String]? = nil,
@@ -29,36 +29,42 @@ enum BundledCLI {
         process.executableURL = binary
         process.arguments = arguments
         if let environment { process.environment = environment }
-        let stdout = Pipe()
         let stderr = Pipe()
-        var primary: Int32 = -1
-        var replica: Int32 = -1
-        if terminal {
-            try #require(openpty(&primary, &replica, nil, nil, nil) == 0, "openpty failed")
-            process.standardOutput = FileHandle(fileDescriptor: replica, closeOnDealloc: false)
-        } else {
-            process.standardOutput = stdout
-        }
         process.standardError = stderr
-        try process.run()
         let out: Data
         if terminal {
+            var primary: Int32 = -1
+            var replica: Int32 = -1
+            try #require(openpty(&primary, &replica, nil, nil, nil) == 0, "openpty failed")
+            defer { close(primary) }
+            // No output processing, so a line ends in "\n" as it does in a pipe.
+            var attributes = termios()
+            tcgetattr(replica, &attributes)
+            attributes.c_oflag &= ~tcflag_t(OPOST)
+            tcsetattr(replica, TCSANOW, &attributes)
+            process.standardOutput = FileHandle(fileDescriptor: replica, closeOnDealloc: false)
+            do {
+                try process.run()
+            } catch {
+                close(replica)
+                throw error
+            }
             // The child holds its own copy. Once it exits, a read of the
             // primary side fails (EIO), which is the end of its output.
             close(replica)
             out = readToEnd(primary)
-            close(primary)
         } else {
+            let stdout = Pipe()
+            process.standardOutput = stdout
+            try process.run()
             // Drain both pipes before waiting, or a full pipe deadlocks the child.
             out = stdout.fileHandleForReading.readDataToEndOfFile()
         }
         let err = stderr.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        var text = String(decoding: out, as: UTF8.self)
-        if terminal { text = text.replacingOccurrences(of: "\r\n", with: "\n") }
         return Result(
             status: process.terminationStatus,
-            stdout: text,
+            stdout: String(decoding: out, as: UTF8.self),
             stderr: String(decoding: err, as: UTF8.self)
         )
     }

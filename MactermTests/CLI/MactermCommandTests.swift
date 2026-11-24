@@ -154,23 +154,59 @@ struct MactermCommandTests {
     }
 
     @Test
-    func project_list_with_no_parent_prints_the_columns_as_before() throws {
-        // No project has a parent, or the app is from before nested projects.
+    func project_list_finds_the_depth_by_parent_id_not_by_name() throws {
+        // Two parents named Work. "api" is in the second one. "orphan" names
+        // a parent that is not in the reply, so it prints at the left edge.
         let socket = RecordingSocket(data: ControlData(projects: [
             ControlProjectInfo(
-                index: 1, id: "a", name: "notes", path: "/tmp/notes",
-                active: true, loaded: true, tabCount: 2, parent: "", parentID: ""
+                index: 1, id: "w1", name: "Work", path: "/a", active: false, loaded: false, tabCount: nil,
+                parent: "", parentID: ""
             ),
-            ControlProjectInfo(index: 2, id: "b", name: "api", path: "/tmp/api", active: false, loaded: false, tabCount: nil),
+            ControlProjectInfo(
+                index: 2, id: "w2", name: "Work", path: "/b", active: false, loaded: false, tabCount: nil,
+                parent: "Work", parentID: "w1"
+            ),
+            ControlProjectInfo(
+                index: 3, id: "api", name: "api", path: "/c", active: false, loaded: false, tabCount: nil,
+                parent: "Work", parentID: "w2"
+            ),
+            ControlProjectInfo(
+                index: 4, id: "o", name: "orphan", path: "/d", active: false, loaded: false, tabCount: nil,
+                parent: "gone", parentID: "missing"
+            ),
         ]))
         defer { socket.stop() }
-        let expected = """
-        project:1  *  notes  2 tabs      /tmp/notes
-        project:2     api    not loaded  /tmp/api
+        #expect(try socket.cli(["project", "list"], terminal: true).stdout == """
+        project:1     Work     not loaded  /a
+        project:2       Work   not loaded  /b
+        project:3         api  not loaded  /c
+        project:4     orphan   not loaded  /d
 
-        """
-        #expect(try socket.cli(["project", "list"]).stdout == expected)
-        #expect(try socket.cli(["project", "list"], terminal: true).stdout == expected)
+        """)
+    }
+
+    @Test
+    func project_list_from_an_app_without_parents_prints_a_dash_parent() throws {
+        let socket = RecordingSocket(data: ControlData(projects: [
+            ControlProjectInfo(index: 1, id: "a", name: "notes", path: "/tmp/notes", active: true, loaded: true, tabCount: 2),
+        ]))
+        defer { socket.stop() }
+        #expect(try socket.cli(["project", "list"]).stdout == "project:1  *  notes  -  2 tabs  /tmp/notes\n")
+        #expect(try socket.cli(["project", "list"], terminal: true).stdout == "project:1  *  notes  2 tabs  /tmp/notes\n")
+    }
+
+    @Test
+    func project_list_json_has_the_parent_fields() throws {
+        let socket = RecordingSocket(data: ControlData(projects: [
+            ControlProjectInfo(
+                index: 1, id: "api", name: "api", path: "/c", active: false, loaded: false, tabCount: nil,
+                parent: "Work", parentID: "w1"
+            ),
+        ]))
+        defer { socket.stop() }
+        let json = try socket.cli(["project", "list", "--json"]).stdout
+        #expect(json.contains(#""parent" : "Work""#), "\(json)")
+        #expect(json.contains(#""parentID" : "w1""#), "\(json)")
     }
 
     @Test

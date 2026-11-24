@@ -97,12 +97,10 @@ enum Output {
 
     /// On a terminal, the projects print as a tree: each name is indented
     /// under its parent. To a pipe, they print flat, one project for each
-    /// line, with a parent column ("-" at the top level) when a project has
-    /// a parent (design 013). A script reads the same columns as before
-    /// when no project has a parent.
+    /// line, with a parent column ("-" at the top level) on every line, so
+    /// a script always reads the same columns (design 013).
     private static func renderProjects(_ projects: [ControlProjectInfo]) {
         let tree = isatty(STDOUT_FILENO) == 1
-        let showsParent = !tree && projects.contains { !($0.parent ?? "").isEmpty }
         // The rows come in tree order, so a parent's depth is known before
         // its children. A parent that is not in the reply puts its child at
         // the left edge.
@@ -120,7 +118,7 @@ enum Output {
                 project.index.map { "project:\($0)" } ?? project.id,
                 project.active ? "*" : " ",
                 tree ? String(repeating: "  ", count: depth) + project.name : project.name,
-            ] + (showsParent ? [parent] : []) + [
+            ] + (tree ? [] : [parent]) + [
                 project.loaded ? tabs : "not loaded",
                 project.path,
             ]
