@@ -201,7 +201,7 @@ final class ServerConnection: @unchecked Sendable {
     func openChannel(session: String) async throws -> PaneChannel {
         let result = try await call(MactermProtocol.ChannelOpen.self, .init(session: session), timeout: nil)
         let channel = PaneChannel(
-            transport: self, number: result.channel, epoch: result.epoch,
+            transport: self, number: result.channel, epoch: result.epoch, caps: result.caps ?? [],
             buffering: .skipAhead(bytes: PaneChannel.relayLimit)
         )
         guard register(channel.sink, as: result.channel) else {

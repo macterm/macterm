@@ -87,17 +87,6 @@ final class PaneSurface: Identifiable {
         self.host = host
     }
 
-    /// Whether this surface's libghostty callbacks count what it parses for
-    /// the pane (runs, notifications, project memory). Every surface parses
-    /// the same output, so one counts: the pane's link decides
-    /// (`PaneLink.counts`), and a plain ssh shell counts in the view that
-    /// shows it. A surface with no session counts its own output. Each
-    /// callback asks when it fires (`Pane.connectViewCallbacks`).
-    var countsOutput: Bool {
-        guard let host = nsView?.channelRuntime?.host, let link = host.link else { return true }
-        return link.showsPlainShell(in: host) ?? link.counts(host)
-    }
-
     /// The live terminal NSView. Created lazily the first time it's requested,
     /// destroyed explicitly with the pane or when its window goes. Owning the
     /// view here (not in a cache or inside SwiftUI) keeps the underlying
