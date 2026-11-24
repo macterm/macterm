@@ -12,9 +12,10 @@ private let logger = Logger(subsystem: appBundleID, category: "SidebarDragFeedba
 ///
 /// SwiftUI has no modifier for the style. This view is a `.background` of
 /// the List, so it has the frame of the List. It finds the outline view whose
-/// scroll view is at that frame and sets the style. A frame match, not the
-/// nearest outline view: the overlay sidebar and the collapsed native sidebar
-/// are in one window, and each has its own outline view.
+/// scroll view is at that frame and sets the style. It matches by frame and
+/// does not take the nearest outline view, because the overlay sidebar and
+/// the collapsed native sidebar are in one window. Each of them has its own
+/// outline view.
 ///
 /// The style is set only after `OutlineGapExitGuard` is in place. Without
 /// the guard, a drag that leaves the outline view crashes SwiftUI.
@@ -35,6 +36,9 @@ struct SidebarDragFeedback: NSViewRepresentable {
         /// The outline view that has the style. When SwiftUI replaces it,
         /// the next pass finds the new one.
         private weak var outline: NSOutlineView?
+        /// False when the guard cannot go on the outline view's data source.
+        /// Then the outline view keeps its default style.
+        private var gapIsAllowed = false
         private var isScheduled = false
         /// Passes left before the probe stops a search that finds nothing.
         private var triesLeft = 0
@@ -54,10 +58,19 @@ struct SidebarDragFeedback: NSViewRepresentable {
             scheduleApply()
         }
 
-        /// One pass on the next turn of the run loop, after SwiftUI puts the
-        /// outline view in the window. Calls before the pass join it.
+        /// Schedules one pass on the next turn of the run loop, after SwiftUI
+        /// puts the outline view in the window. More calls before the pass
+        /// do not add passes. A probe with no size (the collapsed sidebar)
+        /// does no search.
         func scheduleApply() {
-            if outline?.window != nil, outline?.window == window { return }
+            if let outline, outline.window != nil, outline.window == window {
+                // Cheap: SwiftUI can set the style back.
+                if gapIsAllowed, outline.draggingDestinationFeedbackStyle != .gap {
+                    outline.draggingDestinationFeedbackStyle = .gap
+                }
+                return
+            }
+            guard bounds.width > 0, bounds.height > 0 else { return }
             triesLeft = Self.maxTries
             guard !isScheduled else { return }
             isScheduled = true
@@ -69,19 +82,27 @@ struct SidebarDragFeedback: NSViewRepresentable {
             guard let window, let root = window.contentView else { return }
             let frame = convert(bounds, to: nil)
             if let found = Self.outline(at: frame, in: root) {
-                outline = found
-                guard OutlineGapExitGuard.install(on: found) else {
-                    // Fail closed: the insertion line stays.
-                    logger.error("no drop gap: the outline view's data source has no validateDrop method")
+                switch OutlineGapExitGuard.install(on: found) {
+                case .installed:
+                    outline = found
+                    gapIsAllowed = true
+                    if found.draggingDestinationFeedbackStyle != .gap {
+                        found.draggingDestinationFeedbackStyle = .gap
+                    }
                     return
+                case .unsupported:
+                    // Fail closed: the insertion line stays, and no later
+                    // pass tries again.
+                    outline = found
+                    gapIsAllowed = false
+                    logger.error("no drop gap: the data source of the outline view has no validateDrop method")
+                    return
+                case .noDataSource:
+                    break
                 }
-                if found.draggingDestinationFeedbackStyle != .gap {
-                    found.draggingDestinationFeedbackStyle = .gap
-                }
-                return
             }
-            // SwiftUI has not made the outline view yet: try again a little
-            // later, a limited number of times.
+            // SwiftUI has not made the outline view or its data source yet.
+            // Try again a little later, a limited number of times.
             triesLeft -= 1
             guard triesLeft > 0 else { return }
             isScheduled = true
@@ -118,40 +139,52 @@ struct SidebarDragFeedback: NSViewRepresentable {
     }
 }
 
-/// Keeps SwiftUI's outline list alive when a drag leaves an outline view
-/// whose drop feedback is `.gap`.
+/// Prevents a SwiftUI crash when a drag leaves an outline view whose drop
+/// feedback is `.gap`. Never set `.gap` on a SwiftUI outline view without it.
 ///
-/// In the gap style, `NSOutlineView.draggingExited` validates one more drop,
-/// with no item and the child index -2, to close the gap. SwiftUI's data
-/// source reads its rows at that index and stops the app ("index -2 out of
-/// bounds", ui-review 0573). A drag leaves the outline view each time it
-/// goes onto a row that has its own `.dropDestination`, such as a project
-/// header. The regular style never makes this call.
+/// In the gap style, `NSOutlineView.draggingExited` validates one more drop
+/// to close the gap. That call has no item and the child index -2. SwiftUI's
+/// data source reads its rows at that index, and the app crashes with
+/// "index -2 out of bounds". A drag leaves the outline view each time that
+/// it goes onto a row with its own `.dropDestination`, for example a project
+/// header. The regular style does not make this call.
 ///
-/// The guard replaces the data source's `validateDrop` method. For a child
-/// index below `NSOutlineViewDropOnItemIndex` on an outline view in the gap
-/// style, it answers "no drop" and does not call SwiftUI. Every other call
-/// goes to SwiftUI unchanged. Measured in a standalone program with a fake
-/// drag: the exit no longer stops, the gap closes, a new drag opens the gap
-/// again, and the drop lands at its slot.
+/// The guard replaces the `validateDrop` method of the data source class.
+/// For a child index below `NSOutlineViewDropOnItemIndex` on an outline view
+/// in the gap style, it returns "no drop" and does not call SwiftUI. All
+/// other calls go to SwiftUI with no change. Other Lists keep the default
+/// style, so the guard does not touch their drags.
+///
+/// Measured with a fake drag on a hosted List (`SidebarDragFeedbackTests`):
+/// without the guard, the exit crashes. With it, the gap closes, a new drag
+/// opens the gap again, and the drop lands at its slot.
 @MainActor
 enum OutlineGapExitGuard {
     private typealias Validate = @convention(c) (
         AnyObject, Selector, NSOutlineView, NSDraggingInfo, AnyObject?, Int
     ) -> NSDragOperation
 
+    enum Result {
+        case installed
+        /// The data source has no `validateDrop` method. The outline view
+        /// must keep its default style.
+        case unsupported
+        /// The outline view has no data source yet.
+        case noDataSource
+    }
+
     /// The classes that have the guard.
     private static var guardedClasses: Set<ObjectIdentifier> = []
 
     /// Installs the guard on the class of the outline view's data source,
-    /// one time for each class. False when the class has no `validateDrop`
-    /// method: then the outline view must keep its default style.
-    static func install(on outline: NSOutlineView) -> Bool {
-        guard let source = outline.dataSource, let dataSourceClass = object_getClass(source) else { return false }
+    /// one time for each class.
+    static func install(on outline: NSOutlineView) -> Result {
+        guard let source = outline.dataSource else { return .noDataSource }
+        guard let dataSourceClass = declaredClass(of: source) else { return .unsupported }
         let key = ObjectIdentifier(dataSourceClass)
-        if guardedClasses.contains(key) { return true }
+        if guardedClasses.contains(key) { return .installed }
         let selector = #selector(NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:))
-        guard let method = class_getInstanceMethod(dataSourceClass, selector) else { return false }
+        guard let method = class_getInstanceMethod(dataSourceClass, selector) else { return .unsupported }
         let original = unsafeBitCast(method_getImplementation(method), to: Validate.self)
         let replacement: @convention(block) (AnyObject, NSOutlineView, NSDraggingInfo, AnyObject?, Int)
             -> NSDragOperation = { source, view, info, item, index in
@@ -169,6 +202,16 @@ enum OutlineGapExitGuard {
             method_setImplementation(method, block)
         }
         guardedClasses.insert(key)
-        return true
+        return .installed
+    }
+
+    /// The class of `object`. When KVO observes the object, the runtime
+    /// class is a KVO subclass, and the guard goes on its superclass.
+    private static func declaredClass(of object: AnyObject) -> AnyClass? {
+        guard let runtimeClass = object_getClass(object) else { return nil }
+        if NSStringFromClass(runtimeClass).hasPrefix("NSKVONotifying_") {
+            return class_getSuperclass(runtimeClass)
+        }
+        return runtimeClass
     }
 }

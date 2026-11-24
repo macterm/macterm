@@ -166,7 +166,7 @@ enum SidebarDropItem: Transferable {
 /// ForEach reports. Deliberately NOT `SidebarDropItem` — including the project
 /// payload here would make a project drag target the tab rows, which is the
 /// state the header comment calls out as broken at this outline level: the
-/// insertion line would appear inside a section a project can't land in. The
+/// drop slot would appear inside a section a project can't land in. The
 /// two unions are separate views' payloads, not stacked destinations.
 enum TabSlotDropItem: Transferable {
     case tab(MovableTab)
@@ -220,10 +220,10 @@ struct SidebarContent: View {
             // Pinned tabs live above every project as flat rows (no header,
             // no disclosure), wrapped in a headerless Section so their ForEach
             // sits inside a container — mirroring the tab ForEach below, whose
-            // `.dropDestination` insertion line works there while the same
+            // `.dropDestination` drop slot works there while the same
             // API on a BARE top-level ForEach crashes the outline accept (see
             // the project ForEach's notes below). The drop mechanism is the
-            // native insertion line, exactly like a project's tab list: the
+            // native drop slot, exactly like a project's tab list: the
             // ForEach reports the insertion offset, a drop pins (or reorders /
             // separates a pane) at that slot, and rows carry NO destinations
             // of their own (a row-level target would kill the line — see
@@ -261,7 +261,7 @@ struct SidebarContent: View {
             // gap, about 13 pt, above the first row. Drawn only while there
             // are scratch tabs, or while this window shows the workspace (the
             // user closed the last scratch tab and is still there). The
-            // `.dropDestination` insertion line works on this bare ForEach:
+            // `.dropDestination` drop slot works on this bare ForEach:
             // its rows are flat, not the DisclosureGroups that crash the
             // project ForEach's accept (see the notes below).
             if showsScratchRows {
@@ -327,7 +327,7 @@ struct SidebarContent: View {
         // once a pinned row exists, the native drop gap above it says
         // the same thing, and the band on top of it is noise.
         .safeAreaInset(edge: .top, spacing: 0) {
-            // Same handlers as the insertion line, fixed at the first slot
+            // Same handlers as the drop slot, fixed at the first slot
             // — the strip and the line are one operation, so a routing fix
             // in one can't strand the other.
             PinTabDropZone(
@@ -441,7 +441,7 @@ struct SidebarContent: View {
     /// One pinned row: loaded (a live tab, standard row treatment with a pin
     /// icon) or unloaded (dimmed; selecting it rebuilds the tab from its
     /// declaration). Draggable only — drops are the enclosing ForEach's
-    /// native insertion line (see `body`), and a row-level destination would
+    /// native drop slot (see `body`), and a row-level destination would
     /// kill it, same as `tabRow` documents.
     private func pinnedRow(record: PinnedTabRecord, index: Int) -> some View {
         Group {
@@ -487,12 +487,12 @@ struct SidebarContent: View {
         // routes the record bookkeeping). Deliberately NO drop destination on
         // the row — same rule as `tabRow`: any row-level target claims the
         // drag before the ForEach's insertion mechanism sees it and kills the
-        // native insertion line.
+        // native drop slot.
         .draggable(MovableTab(tabID: record.id, sourceProjectID: PinnedTabs.workspaceID))
     }
 
     /// A tab dropped at a pinned insertion offset (the ForEach's native
-    /// insertion line): from a project → pin there; from within the pinned
+    /// drop slot): from a project → pin there; from within the pinned
     /// rows → reorder (`reorderPinnedTab` speaks the same pre-removal offset).
     private func receivePinnedTabDrop(_ item: MovableTab, at offset: Int) {
         if item.sourceProjectID == PinnedTabs.workspaceID {
@@ -648,10 +648,10 @@ struct SidebarContent: View {
         // — even one registered for the project payload alone — claims every
         // drag over the row before the tab ForEach's insertion mechanism sees
         // it (SwiftUI routes a drag to the topmost target by geometry with no
-        // type fall-through), which kills the native insertion line and broke
+        // type fall-through), which kills the native drop feedback and broke
         // tab reordering outright when tried. The cost is that a PROJECT drag
         // over an expanded section's tab rows has nothing to land on — drop
-        // it on a project header instead. The insertion line won.
+        // it on a project header instead. The drop slot won.
     }
 
     private func projectHeader(project: Project) -> some View {
@@ -670,7 +670,7 @@ struct SidebarContent: View {
         // here appends its new tab the same way. A PROJECT dropped
         // squarely on the header reorders it to this project's slot; the
         // seams BETWEEN rows deliberately stay uncovered (label-height
-        // target, no taller band) so the ForEach-level insertion line can
+        // target, no taller band) so the ForEach-level drop slot can
         // appear there for both drag kinds.
         .dropDestination(for: SidebarDropItem.self) { items, _ in
             for item in items {

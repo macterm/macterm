@@ -6,8 +6,8 @@ import Testing
 @MainActor
 struct SidebarDragFeedbackTests {
     /// Two sidebar Lists in one window, as the native sidebar and the overlay
-    /// sidebar are. Only the List with the probe gets the gap; the other keeps
-    /// the default insertion line.
+    /// sidebar are. Only the List with the probe gets the gap. The other List
+    /// keeps the default insertion line.
     @Test
     func only_the_list_with_the_probe_gets_the_gap_feedback() async throws {
         let content = HStack(spacing: 0) {
@@ -46,8 +46,7 @@ struct SidebarDragFeedbackTests {
 
     /// A drag across a section, out of the outline view (as onto a project
     /// header with its own drop destination), back in, and a drop. Without
-    /// `OutlineGapExitGuard`, the exit stops the test process in SwiftUI
-    /// (ui-review 0573).
+    /// `OutlineGapExitGuard`, the exit crashes the test process in SwiftUI.
     @Test
     func a_drag_that_leaves_the_gap_outline_and_comes_back_drops_at_its_slot() async throws {
         let drops = DropLog()
@@ -96,6 +95,7 @@ struct SidebarDragFeedbackTests {
         drag.location = point(row: 4, fraction: 0.8)
         #expect(!outline.draggingUpdated(drag).isEmpty)
         outline.draggingExited(drag)
+        #expect(drops.entries.isEmpty)
         // Back in, above A1, and drop.
         drag.location = point(row: 2, fraction: 0.2)
         #expect(!outline.draggingEntered(drag).isEmpty)
