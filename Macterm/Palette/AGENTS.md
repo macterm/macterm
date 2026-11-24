@@ -43,7 +43,7 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
-      - The pill of an input screen has no glyph (`PalettePill.icon` is nil), so its palette row has none either.
+      - The pill of an input screen has no glyph (the icon of its `PalettePill` is nil), so its palette row has none either.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
       - Return commits the field, or the selected row when an arrow key selected it. The rows are completions. While the field has text, no row is selected until an arrow key selects one, and a row that the pointer selects is not taken by Return. At an empty field the top row is selected, and Return takes the selected row: an empty field has no value. Tab puts the selected row in the field (the top row when none is selected), and so does a click. Neither commits.
       - A row can have a subtitle (`PaletteCompletion.subtitle`). It is a path, and the row cuts a long one in the middle (`PaletteItem.subtitleIsPath`).
