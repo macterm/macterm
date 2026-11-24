@@ -321,7 +321,7 @@ pub fn linkPorts() ?[2]u16 {
 pub fn linkOpen(s: *Server, p: *Peer, re: u64, args: m.LinkOpen.Args) void {
     const ports = linkPorts() orelse
         return replyError(s, p.id, re, .unavailable, "The link is off on this host.");
-    if (args.secret.bytes.len != 32)
+    if (args.secret.bytes.len != m.link_secret_len)
         return replyError(s, p.id, re, .invalid_args, "The key is not 32 bytes.");
     var seed: u32 = undefined;
     s.io.random(std.mem.asBytes(&seed));

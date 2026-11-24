@@ -25,6 +25,18 @@ pub const Field = struct {
     /// `true` or `false`, an enum tag, `[]`, or a JSON string.
     default: ?[]const u8 = null,
     since: u32,
+    /// One sentence for people: `T.field_doc.<name>` (`macterm api describe`
+    /// shows it as `description`).
+    doc: ?[]const u8 = null,
+    /// The limits that the server checks: `T.field_limits.<name>`. Each one
+    /// is a JSON Schema keyword. `min_length` and `max_length` are in bytes,
+    /// for a `str`, a `bin` or a `secret`; `min_items` is for an array;
+    /// `minimum` and `maximum` are for an integer.
+    min_length: ?u64 = null,
+    max_length: ?u64 = null,
+    min_items: ?u64 = null,
+    minimum: ?i64 = null,
+    maximum: ?i64 = null,
 };
 
 /// One case of a tagged union.
@@ -285,6 +297,8 @@ fn typeDef(comptime T: type) TypeDef {
                 return .{ .name = shortName(T), .kind = .@"enum", .cases = &final };
             },
             .@"struct" => |s| {
+                checkFieldDecl(T, "field_doc");
+                checkFieldDecl(T, "field_limits");
                 var fields: [s.field_names.len]Field = undefined;
                 for (s.field_names, s.field_types, s.field_attrs, 0..) |name, F, attrs, i| {
                     checkName(name);
@@ -302,7 +316,13 @@ fn typeDef(comptime T: type) TypeDef {
                         .optional = optional,
                         .default = if (optional) null else if (attrs.defaultValue(F)) |d| defaultText(F, d) else null,
                         .since = fieldSince(T, name),
+                        .doc = if (@hasDecl(T, "field_doc") and @hasField(@TypeOf(T.field_doc), name))
+                            @as([]const u8, @field(T.field_doc, name))
+                        else
+                            null,
                     };
+                    if (@hasDecl(T, "field_limits") and @hasField(@TypeOf(T.field_limits), name))
+                        fields[i] = withLimits(fields[i], Inner, @field(T.field_limits, name));
                 }
                 const final = fields;
                 return .{ .name = shortName(T), .kind = .@"struct", .fields = &final };
@@ -321,6 +341,43 @@ fn typeDef(comptime T: type) TypeDef {
             },
             else => unreachable,
         }
+    }
+}
+
+/// `T.field_doc` and `T.field_limits` name only fields of `T`, so that a
+/// renamed field cannot lose its doc or its limits without a word.
+fn checkFieldDecl(comptime T: type, comptime decl: []const u8) void {
+    comptime {
+        if (!@hasDecl(T, decl)) return;
+        for (std.meta.fieldNames(@TypeOf(@field(T, decl)))) |name| {
+            if (!@hasField(T, name)) @compileError(@typeName(T) ++ "." ++ decl ++ ": " ++ name ++ " is not a field");
+        }
+    }
+}
+
+/// `field` with the limits of `T.field_limits.<name>`. A limit that does not
+/// apply to the field's type is an error.
+fn withLimits(comptime field_in: Field, comptime Inner: type, comptime limits: anytype) Field {
+    comptime {
+        var field = field_in;
+        for (std.meta.fieldNames(@TypeOf(limits))) |key| {
+            const value = @field(limits, key);
+            const wire = field.type;
+            if (std.mem.eql(u8, key, "min_length") or std.mem.eql(u8, key, "max_length")) {
+                if (!(std.mem.eql(u8, wire, "str") or std.mem.eql(u8, wire, "bin") or std.mem.eql(u8, wire, "secret")))
+                    @compileError(field.name ++ ": " ++ key ++ " is for a str, a bin or a secret");
+                @field(field, key) = value;
+            } else if (std.mem.eql(u8, key, "min_items")) {
+                if (wire[0] != '[') @compileError(field.name ++ ": min_items is for an array");
+                field.min_items = value;
+            } else if (std.mem.eql(u8, key, "minimum") or std.mem.eql(u8, key, "maximum")) {
+                if (@typeInfo(Inner) != .int) @compileError(field.name ++ ": " ++ key ++ " is for an integer");
+                if (value < std.math.minInt(Inner) or value > std.math.maxInt(Inner))
+                    @compileError(field.name ++ ": " ++ key ++ " is out of the range of its type");
+                @field(field, key) = value;
+            } else @compileError(field.name ++ ": " ++ key ++ " is not a limit");
+        }
+        return field;
     }
 }
 

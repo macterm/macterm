@@ -13,13 +13,6 @@ const peers = @import("peers.zig");
 const Server = server.Server;
 const Peer = peers.Peer;
 
-/// The most stdout that `command.run` returns. The rest is read and dropped,
-/// so that the command does not stop on a full pipe.
-const run_output_max = 512 * 1024;
-
-/// The longest `command.run` that a client can ask for.
-const run_timeout_max_ms = 60_000;
-
 /// The most commands that run at one time.
 const max_runs = 16;
 
@@ -49,7 +42,7 @@ pub fn runCommand(s: *Server, p: *Peer, re: u64, args: m.CommandRun.Args) void {
         return peers.replyError(s, p.id, re, .invalid_args, "A command argument cannot hold a NUL byte.");
     if (args.cwd) |cwd| if (cwd.bytes.len == 0 or cwd.bytes[0] != '/' or std.mem.findScalar(u8, cwd.bytes, 0) != null)
         return peers.replyError(s, p.id, re, .invalid_args, "The folder must be an absolute path.");
-    if (args.timeout_ms == 0 or args.timeout_ms > run_timeout_max_ms)
+    if (args.timeout_ms == 0 or args.timeout_ms > m.run_timeout_max_ms)
         return peers.replyError(s, p.id, re, .invalid_args, "The time limit must be from 1 ms to 60 s.");
     if (s.runs.items.len >= max_runs)
         return peers.replyError(s, p.id, re, .busy, "Too many commands run now.");
@@ -106,7 +99,7 @@ pub fn startRun(s: *Server, peer: u64, re: u64, args: m.CommandRun.Args) !void {
     _ = std.c.setpgid(pid, pid);
 }
 
-/// Reads what the command wrote. Past `run_output_max` it reads and
+/// Reads what the command wrote. Past `m.run_output_max` it reads and
 /// drops, so that the command never blocks on a full pipe.
 pub fn readRun(s: *Server, r: *Run) void {
     var buf: [16 * 1024]u8 = undefined;
@@ -121,7 +114,7 @@ pub fn readRun(s: *Server, r: *Run) void {
             // `timers` answers it: the poll loop still walks `runs`.
             return;
         }
-        const room = run_output_max - r.output.items.len;
+        const room = m.run_output_max - r.output.items.len;
         if (n > room) r.truncated = true;
         r.output.appendSlice(s.gpa, buf[0..@min(n, room)]) catch {
             r.truncated = true;
