@@ -299,20 +299,10 @@ struct PendingDialogAlert: ViewModifier {
                     appState.dismissPendingDialog(dialog.id)
                 }
                 .keyboardShortcut(.cancelAction)
-                if let alternative = dialog.alternative {
-                    Button(confirmTitle, role: .destructive) {
-                        appState.confirmPendingDialog()
-                    }
-                    Button(alternative.title) {
-                        appState.confirmPendingDialogAlternative()
-                    }
-                    .keyboardShortcut(.defaultAction)
-                } else {
-                    Button(confirmTitle, role: .destructive) {
-                        appState.confirmPendingDialog()
-                    }
-                    .keyboardShortcut(.defaultAction)
+                Button(confirmTitle, role: .destructive) {
+                    appState.confirmPendingDialog()
                 }
+                .keyboardShortcut(.defaultAction)
             } else {
                 Button("OK", role: .cancel) {
                     appState.dismissPendingDialog(dialog.id)

@@ -338,7 +338,7 @@ struct AppStateTests {
         state.requestRemoveProject(p.id, store: store)
         #expect(store.row(p.id) != nil)
         #expect(state.pendingDialog?.kind == .removeProject(p.id))
-        #expect(state.pendingDialog?.alternative == nil, "a project with no projects inside has one choice")
+        #expect(state.pendingDialog?.confirmTitle == "Remove")
         state.dismissPendingDialog()
 
         var removed = false
@@ -1018,46 +1018,41 @@ struct AppStateTests {
     }
 
     @Test
-    func remove_a_project_with_projects_inside_always_asks() {
+    func remove_a_project_with_projects_inside_asks_with_the_counts() {
         let state = makeAppState()
         let store = makeProjectStore()
         let parent = store.create(name: "parent", path: "/tmp/parent")
         let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
         _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        state.selectProject(parent)
+        state.selectProject(child)
+        let tabs = [parent.id, child.id].reduce(0) { $0 + (state.workspaces[$1]?.tabs.count ?? 0) }
 
         state.requestRemoveProject(parent.id, store: store)
         let dialog = state.pendingDialog
         #expect(dialog?.kind == .removeProject(parent.id))
-        #expect(dialog?.message.contains("2") == true, "the question says how many projects are inside")
-        #expect(dialog?.confirmTitle == "Remove All")
-        #expect(dialog?.alternative?.title == "Keep Inside Projects")
+        #expect(dialog?.message == "This project contains \(tabs) tabs and 2 nested projects.")
+        #expect(dialog?.confirmTitle == "Remove")
         #expect(store.projects.count == 3, "nothing goes before the answer")
 
         state.confirmPendingDialog()
-        #expect(store.projects.isEmpty, "Remove All removes every project inside")
+        #expect(store.projects.isEmpty, "Remove removes every project inside")
+        #expect(state.workspaces[parent.id] == nil)
+        #expect(state.workspaces[child.id] == nil)
     }
 
     @Test
-    func keep_inside_projects_moves_them_to_the_place_of_the_removed_project() {
+    func remove_a_project_with_nothing_inside_goes_at_once() {
         let state = makeAppState()
         let store = makeProjectStore()
-        let a = store.create(name: "a", path: "/tmp/a")
-        let parent = store.create(name: "parent", path: "/tmp/parent")
-        let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
-        let grandchild = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
-        let b = store.create(name: "b", path: "/tmp/b")
-        state.selectProject(parent)
-
-        state.requestRemoveProject(parent.id, store: store)
-        state.confirmPendingDialogAlternative()
+        let p = store.create(name: "proj", path: "/tmp")
+        state.requestRemoveProject(p.id, store: store)
         #expect(state.pendingDialog == nil)
-        #expect(store.children(of: nil).map(\.id) == [a.id, child.id, b.id])
-        #expect(store.row(grandchild.id)?.parent == child.id, "the tree below the child stays")
-        #expect(state.workspaces[parent.id] == nil)
+        #expect(store.row(p.id) == nil)
     }
 
     @Test
-    func remove_a_busy_project_with_projects_inside_asks_once() {
+    func remove_a_busy_project_says_that_a_process_runs() {
         let state = makeAppState()
         state.paneNeedsConfirmClose = { _ in true }
         let store = makeProjectStore()
@@ -1066,8 +1061,7 @@ struct AppStateTests {
         state.selectProject(parent)
 
         state.requestRemoveProject(parent.id, store: store)
-        #expect(state.pendingDialog?.alternative != nil, "one dialog, with the choices for the projects inside")
-        #expect(state.pendingDialog?.message.contains("running") == true)
+        #expect(state.pendingDialog?.message.hasSuffix("A process is still running.") == true)
     }
 
     @Test
@@ -2335,15 +2329,17 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveProject_idle_runs_removal_immediately() {
+    func requestRemoveProject_idle_with_tabs_asks_before_it_removes() {
         let state = makeAppState()
         let store = makeProjectStore()
         let p = store.create(name: "proj", path: "/tmp")
         state.selectProject(p)
         state.requestRemoveProject(p.id, store: store)
+        #expect(store.row(p.id) != nil)
+        #expect(state.pendingDialog?.kind == .removeProject(p.id))
+        state.confirmPendingDialog()
         #expect(store.row(p.id) == nil)
         #expect(state.workspaces[p.id] == nil)
-        #expect(state.pendingDialog == nil)
     }
 
     @Test

@@ -50,15 +50,6 @@ extension AppState {
         let confirmTitle: String?
         let host: DialogHost
         let onConfirm: @MainActor () -> Void
-        /// A second choice that is not destructive, between Cancel and the
-        /// destructive button. It takes Return, because it keeps more than
-        /// the destructive one does.
-        var alternative: Alternative?
-
-        struct Alternative {
-            let title: String
-            let action: @MainActor () -> Void
-        }
 
         /// A notice with an OK button. A question is the memberwise init with
         /// a `confirmTitle` and an `onConfirm`.
@@ -85,13 +76,6 @@ extension AppState {
         guard let dialog = pendingDialog else { return }
         pendingDialog = nil
         dialog.onConfirm()
-    }
-
-    /// The user chose the alternative of the dialog: run it.
-    func confirmPendingDialogAlternative() {
-        guard let dialog = pendingDialog, let alternative = dialog.alternative else { return }
-        pendingDialog = nil
-        alternative.action()
     }
 
     /// The user cancelled or acknowledged. `id` lets an alert dismiss only

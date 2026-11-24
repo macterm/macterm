@@ -2250,66 +2250,42 @@ final class AppState {
         saveWorkspaces()
     }
 
-    /// Remove the project `projectID` (design 013 §3). With no projects
-    /// inside, it goes at once, or after one question when a process runs
-    /// in it. With projects inside, one dialog always asks: Remove All, or
-    /// Keep Inside Projects. Each choice reads the tree again at the answer.
+    /// Remove the project `projectID`, its tabs and every project inside
+    /// it, at any depth (design 013 §3, Ethan on ui-review 0522). A project
+    /// with no tabs and no projects inside goes at once. Any other project
+    /// asks one question with the count of tabs and of nested projects:
+    /// Cancel or Remove.
     func requestRemoveProject(_ projectID: UUID, store: ProjectStore, host: DialogHost = .mainWindow) {
         guard let project = store.row(projectID) else { return }
-        let inside = store.descendants(of: projectID).map(\.id)
-        guard !inside.isEmpty else {
-            let removal: @MainActor () -> Void = { [weak self] in
-                self?.removeProject(projectID, keepingInside: true, store: store)
-            }
-            guard closeNeedsConfirmation(projectID: projectID) else {
-                removal()
-                return
-            }
-            present(PendingDialog(
-                kind: .removeProject(projectID),
-                title: String(localized: "Remove project with running processes?"),
-                message: String(localized: "A process is still running in this project. Removing it ends every process in its tabs."),
-                confirmTitle: String(localized: "Remove"),
-                host: host,
-                onConfirm: removal
-            ))
+        let removed = [projectID] + store.descendants(of: projectID).map(\.id)
+        let tabs = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let nested = removed.count - 1
+        let removal: @MainActor () -> Void = { [weak self] in
+            self?.removeProject(projectID, store: store)
+        }
+        guard tabs > 0 || nested > 0 else {
+            removal()
             return
         }
-        let count = inside.count
-        let message = closeNeedsConfirmation(projectIDs: [projectID] + inside, tabs: [])
-            ? String(localized: """
-            This project contains \(count) projects, and a process is still running. Remove All also removes \
-            them. Keep Inside Projects moves them to the place of this project.
-            """)
-            : String(localized: """
-            This project contains \(count) projects. Remove All also removes them. Keep Inside Projects moves \
-            them to the place of this project.
-            """)
+        let message = closeNeedsConfirmation(projectIDs: removed, tabs: [])
+            ? String(localized: "This project contains \(tabs) tabs and \(nested) nested projects. A process is still running.")
+            : String(localized: "This project contains \(tabs) tabs and \(nested) nested projects.")
         present(PendingDialog(
             kind: .removeProject(projectID),
             title: String(localized: "Remove the project “\(project.name)”?"),
             message: message,
-            confirmTitle: String(localized: "Remove All"),
+            confirmTitle: String(localized: "Remove"),
             host: host,
-            onConfirm: { [weak self] in self?.removeProject(projectID, keepingInside: false, store: store) },
-            alternative: PendingDialog.Alternative(
-                title: String(localized: "Keep Inside Projects"),
-                action: { [weak self] in self?.removeProject(projectID, keepingInside: true, store: store) }
-            )
+            onConfirm: removal
         ))
     }
 
-    /// Remove the project `projectID`: its workspace, its sessions and its
-    /// row. With `keepingInside`, the projects inside it move to its place
-    /// in its parent; without it, they are removed too.
-    func removeProject(_ projectID: UUID, keepingInside: Bool, store: ProjectStore) {
-        let removed = keepingInside ? [projectID] : [projectID] + store.descendants(of: projectID).map(\.id)
-        removeProjects(removed)
-        if keepingInside {
-            store.removeKeepingChildren(projectID)
-        } else {
-            store.removeWithDescendants(projectID)
-        }
+    /// Remove the project `projectID` and every project inside it: their
+    /// workspaces, their sessions and their rows.
+    func removeProject(_ projectID: UUID, store: ProjectStore) {
+        guard store.row(projectID) != nil else { return }
+        removeProjects([projectID] + store.descendants(of: projectID).map(\.id))
+        store.removeWithDescendants(projectID)
     }
 
     /// A bulk sidebar delete (multi-selection): run `removal` now, or stage

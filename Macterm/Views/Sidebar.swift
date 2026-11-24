@@ -505,10 +505,8 @@ struct SidebarContent: View {
     }
 
     /// One project's disclosure (design 013): its tab rows, then the
-    /// projects inside it, each again a disclosure. Only the tab `ForEach`
-    /// takes an insertion drop: on a `ForEach` of disclosure rows, a drop
-    /// crashes (see the notes in `body`). `AnyView`, because the function
-    /// calls itself for the projects inside.
+    /// projects inside it, each again a disclosure. `AnyView`, because the
+    /// function calls itself for the projects inside.
     private func projectSection(_ node: SidebarNode) -> AnyView {
         let project = node.project
         let tabs = appState.workspaces[project.id]?.tabs ?? []
@@ -534,8 +532,25 @@ struct SidebarContent: View {
                         }
                     }
                 }
+                // The outline gives the line between the last tab and the
+                // first project inside to this `ForEach` (its offset 0), not
+                // to the tab `ForEach`. With no destination here, a tab drop
+                // at that line did nothing (ui-review 0522). A tab or a pane
+                // dropped at any line among these rows goes after the last
+                // tab of this project.
                 ForEach(node.children) { child in
                     projectSection(child)
+                }
+                .dropDestination(for: TabSlotDropItem.self) { items, offset in
+                    let slot = SidebarTree.tabSlot(atRow: tabs.count + offset, tabCount: tabs.count)
+                    for item in items {
+                        switch item {
+                        case let .tab(tab):
+                            receiveTabDrop([tab], into: project, at: slot)
+                        case let .pane(pane):
+                            receivePaneDrop([pane], into: project, at: slot)
+                        }
+                    }
                 }
             } label: {
                 projectHeader(project: project)
@@ -990,9 +1005,7 @@ struct SidebarContent: View {
     /// Delete every item in a multi-selection, confirming once if any affected
     /// pane is busy. Tabs whose project is also being removed are skipped —
     /// `removeProject` already tears their surfaces down. A selected project
-    /// keeps the projects inside it that are not selected: they move to its
-    /// place (Keep Inside Projects), so a bulk remove never removes a
-    /// project that the user did not select.
+    /// goes with every project inside it, as a single Remove does.
     private func removeSelection(_ items: Set<SidebarItem>) {
         var projectIDs: [UUID] = []
         var tabRefs: [(tabID: UUID, projectID: UUID)] = []
@@ -1011,13 +1024,13 @@ struct SidebarContent: View {
             }
         }
 
-        let removedProjects = Set(projectIDs)
+        let removedProjects = Set(projectIDs + projectIDs.flatMap { projectStore.descendants(of: $0).map(\.id) })
         let tabsToClose = tabRefs.filter { !removedProjects.contains($0.projectID) }
 
-        appState.requestRemoveSelection(projectIDs: projectIDs, tabs: tabsToClose) {
+        appState.requestRemoveSelection(projectIDs: Array(removedProjects), tabs: tabsToClose) {
             appState.closeTabs(tabsToClose)
             for id in projectIDs {
-                appState.removeProject(id, keepingInside: true, store: projectStore)
+                appState.removeProject(id, store: projectStore)
             }
             presentation.selection = []
         }

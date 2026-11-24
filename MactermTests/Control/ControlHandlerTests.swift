@@ -658,6 +658,18 @@ struct ControlHandlerTests {
     }
 
     @Test
+    func project_remove_also_removes_the_projects_inside() async {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "alpha")
+        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        _ = projectStore.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+
+        let response = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
+        #expect(response.ok)
+        #expect(projectStore.projects.isEmpty)
+    }
+
+    @Test
     func project_remove_unloaded_project_succeeds() async {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "alpha", select: false)

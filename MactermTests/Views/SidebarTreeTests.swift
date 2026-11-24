@@ -125,4 +125,12 @@ struct SidebarTreeTests {
         #expect(SidebarTree.pathName(of: f.c, in: f.store) == "g / inner / c")
         #expect(SidebarTree.pathName(of: f.g, in: f.store) == "g")
     }
+
+    @Test
+    func a_tab_drop_where_the_tabs_end_and_the_projects_inside_begin_goes_after_the_last_tab() {
+        #expect(SidebarTree.tabSlot(atRow: 3, tabCount: 3) == 3, "the line above the first project inside")
+        #expect(SidebarTree.tabSlot(atRow: 5, tabCount: 3) == 3, "a line lower among the projects inside")
+        #expect(SidebarTree.tabSlot(atRow: 1, tabCount: 3) == 1, "a line between two tabs")
+        #expect(SidebarTree.tabSlot(atRow: 0, tabCount: 0) == 0, "a project with no tabs")
+    }
 }

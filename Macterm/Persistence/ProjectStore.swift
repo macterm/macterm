@@ -177,23 +177,6 @@ final class ProjectStore {
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
     }
 
-    /// Remove the project `id` and keep its children: they go to the parent
-    /// of the project, at its place, in their order. The caller ends the
-    /// sessions of the project first.
-    func removeKeepingChildren(_ id: UUID) {
-        guard let project = row(id) else { return }
-        let inside = children(of: id).map(\.id)
-        var siblings = children(of: project.parent).map(\.id)
-        let index = siblings.firstIndex(of: id) ?? siblings.endIndex
-        siblings.replaceSubrange(index ..< min(index + 1, siblings.endIndex), with: inside)
-        for child in inside {
-            if let at = rows.firstIndex(where: { $0.id == child }) { rows[at].parent = project.parent }
-        }
-        rows.removeAll { $0.id == id }
-        setOrder(parent: project.parent, ids: siblings)
-        changed()
-    }
-
     /// Remove the project `id` and every project inside it, at any depth.
     /// The caller ends the sessions of all of them first.
     func removeWithDescendants(_ id: UUID) {

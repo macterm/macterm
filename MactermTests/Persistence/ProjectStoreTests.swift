@@ -530,21 +530,6 @@ struct ProjectStoreTests {
     }
 
     @Test
-    func remove_keeping_children_puts_them_at_the_place_of_the_parent() {
-        let store = makeStore()
-        let a = store.add(Project(name: "a", path: "/tmp/a"))
-        let parent = store.add(Project(name: "p", path: "/tmp/p"))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: parent.id))
-        let inner = store.add(Project(name: "inner", path: "", parent: parent.id))
-        let deep = store.add(Project(name: "deep", path: "/tmp/d", parent: inner.id))
-        let c = store.add(Project(name: "c", path: "/tmp/c"))
-        store.removeKeepingChildren(parent.id)
-        #expect(store.children(of: nil).map(\.id) == [a.id, b.id, inner.id, c.id])
-        #expect(store.row(parent.id) == nil)
-        #expect(store.projects.map(\.id) == [a.id, b.id, inner.id, deep.id, c.id])
-    }
-
-    @Test
     func remove_with_descendants_removes_every_project_inside() {
         let store = makeStore()
         let parent = store.add(Project(name: "p", path: "/tmp/p"))

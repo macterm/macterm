@@ -693,7 +693,8 @@ final class ControlHandler {
         throw ControlError(code: .badRequest, message: message, action: "select another name")
     }
 
-    /// Drop a project's workspace and its `ProjectStore` entry — the same pair
+    /// Drop a project's workspace and its `ProjectStore` entry, and those of
+    /// every project inside it — the same removal
     /// every in-app removal runs (sidebar row menu, bulk delete, palette,
     /// Settings → Projects), which is what makes the CLI removal reach exactly
     /// as far as theirs: panes' zmx sessions die, `projects.json` loses the
@@ -719,7 +720,9 @@ final class ControlHandler {
         // The same predicate `AppState.requestRemoveProject` evaluates before
         // it decides to stage its dialog, so the CLI refuses exactly when the
         // app would have asked.
-        if appState.closeNeedsConfirmation(projectID: project.id), args.force != true {
+        // A project goes with every project inside it, as in the app.
+        let removed = [project.id] + projectStore.descendants(of: project.id).map(\.id)
+        if appState.closeNeedsConfirmation(projectIDs: removed, tabs: []), args.force != true {
             throw ControlError(
                 code: .busy,
                 message: "a pane in that project has a running program (removing kills its sessions)",
@@ -727,8 +730,7 @@ final class ControlHandler {
             )
         }
 
-        appState.removeProject(project.id)
-        projectStore.remove(id: project.id)
+        appState.removeProject(project.id, store: projectStore)
         return ControlData()
     }
 
