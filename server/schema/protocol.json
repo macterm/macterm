@@ -498,6 +498,17 @@
       "args": "ModelOptions.Args",
       "result": "ModelOptions.Result",
       "doc": "Sets the defaults of this client for requests that do not give them."
+    },
+    {
+      "name": "session.wait",
+      "type": "SessionWait",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "SessionWait.Args",
+      "result": "SessionWait.Result",
+      "doc": "Waits until a line of the terminal of a session starts with a marker, or until no command runs in it."
     }
   ],
   "events": [
@@ -833,6 +844,30 @@
       "since": 3,
       "senders": [
         "session"
+      ]
+    },
+    {
+      "name": "wait",
+      "type": "Wait",
+      "since": 3,
+      "senders": [
+        "local"
+      ]
+    },
+    {
+      "name": "waited",
+      "type": "Waited",
+      "since": 3,
+      "senders": [
+        "session"
+      ]
+    },
+    {
+      "name": "wait_cancel",
+      "type": "WaitCancel",
+      "since": 3,
+      "senders": [
+        "local"
       ]
     }
   ],
@@ -1625,6 +1660,14 @@
           "default": "false",
           "since": 3,
           "doc": "True: the scrollback and the screen. False: the screen only."
+        },
+        {
+          "name": "tail_lines",
+          "type": "u32",
+          "optional": true,
+          "since": 3,
+          "doc": "The last lines of the text only. With no value, all the lines.",
+          "minimum": 1
         }
       ],
       "cases": [],
@@ -1647,7 +1690,15 @@
           "optional": false,
           "default": "false",
           "since": 3,
-          "doc": "The text was longer than a frame holds: text is its end."
+          "doc": "Only the end of the text is here, because the text was longer than a frame holds or than tail_lines."
+        },
+        {
+          "name": "lines_cut",
+          "type": "u64",
+          "optional": false,
+          "default": "0",
+          "since": 3,
+          "doc": "The lines that tail_lines removed. Lines that the frame limit removed are not counted."
         }
       ],
       "cases": [],
@@ -3286,6 +3337,74 @@
       "variants": []
     },
     {
+      "name": "SessionWait.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The id of the session."
+        },
+        {
+          "name": "text",
+          "type": "str",
+          "optional": true,
+          "since": 3,
+          "doc": "The marker. The wait ends when a line of the scrollback or the screen starts with it. The line of the typed command starts with the prompt, so it does not match. With no marker, the wait ends when no command runs and the pane printed nothing for 500 ms.",
+          "min_length": 1,
+          "max_length": 1024
+        },
+        {
+          "name": "timeout_ms",
+          "type": "u32",
+          "optional": false,
+          "default": "30000",
+          "since": 3,
+          "doc": "The longest time to wait, in milliseconds.",
+          "maximum": 600000
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "SessionWait.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "end",
+          "type": "WaitEnd",
+          "optional": false,
+          "since": 3,
+          "doc": "Why the wait ended: matched (a line starts with the marker), done (no command runs), exited (the shell exited) or timeout."
+        },
+        {
+          "name": "line",
+          "type": "bin",
+          "optional": true,
+          "since": 3,
+          "doc": "With matched: the newest line that starts with the marker, cut at 4 KiB."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WaitEnd",
+      "kind": "enum",
+      "fields": [],
+      "cases": [
+        "matched",
+        "done",
+        "exited",
+        "timeout",
+        "unknown"
+      ],
+      "variants": []
+    },
+    {
       "name": "SessionExit",
       "kind": "struct",
       "fields": [
@@ -4220,6 +4339,72 @@
         {
           "name": "terminal",
           "type": "TerminalState",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Wait",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tag",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "text",
+          "type": "str",
+          "optional": true,
+          "since": 3
+        },
+        {
+          "name": "timeout_ms",
+          "type": "u32",
+          "optional": false,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "Waited",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tag",
+          "type": "u64",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "end",
+          "type": "WaitEnd",
+          "optional": false,
+          "since": 3
+        },
+        {
+          "name": "line",
+          "type": "bin",
+          "optional": true,
+          "since": 3
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "WaitCancel",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tag",
+          "type": "u64",
           "optional": false,
           "since": 3
         }
