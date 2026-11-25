@@ -38,9 +38,31 @@ struct RemoteHostsPaletteScopeTests {
         scope.sections(for: PaletteQuery(raw: text), context: context).flatMap(\.items)
     }
 
-    /// Return on the first row of the folder step for `text`: its action row.
-    private func press(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) -> PaletteInputPress {
-        scope.press(folderRows(scope, text, context).first)
+    /// The rows of the folder step for `text`, after the host's listing
+    /// that they need has come.
+    private func settledRows(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> [PaletteItem] {
+        _ = folderRows(scope, text, context)
+        try await waitUntil { scope.input.hostFolders?.isListing != true }
+        return folderRows(scope, text, context)
+    }
+
+    /// Return on the first row of the folder step for `text`.
+    private func press(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> PaletteInputPress {
+        try await scope.press(settledRows(scope, text, context).first)
+    }
+
+    /// A host that gives no folder list: the folder step falls back to its
+    /// action row and the host's check.
+    private let noList: @MainActor (String, String) async -> FolderListing? = { _, _ in nil }
+
+    /// A host whose home is `/home/me`, with `api`, `docs` and `.cache` in
+    /// it, and `src` in `api`.
+    private let homeList: @MainActor (String, String) async -> FolderListing? = { folder, _ in
+        switch folder {
+        case "~/": FolderListing(path: "/home/me", names: ["api", "docs", ".cache"])
+        case "~/api/": FolderListing(path: "/home/me/api", names: ["src"])
+        default: nil
+        }
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {
@@ -149,16 +171,18 @@ struct RemoteHostsPaletteScopeTests {
         state.registerWindow(window)
         state.noteKeyWindow(window)
         var checked: [String] = []
-        let input = RemoteHostsPaletteScope.folderInput(destination: "me@devbox", context: context) { path in
+        let input = RemoteHostsPaletteScope.folderInput(destination: "me@devbox", context: context, listFolders: noList) { path in
             checked.append(path)
             return nil
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(folderRows(scope, "~/dev/api", context).map(\.title) == ["New Project \"me@devbox:~/dev/api\""])
-        #expect(press(scope, "~/dev/api", context) == .checking)
+        #expect(try await settledRows(scope, "~/dev/api", context).map(\.title) == ["New Project \"me@devbox:~/dev/api\""])
+        #expect(try await press(scope, "~/dev/api", context) == .checking)
         #expect(scope.loading?.message == "Connecting to me@devbox…")
-        try await waitUntil { scope.isFinished }
+        #expect(folderRows(scope, "~/dev/api", context).isEmpty, "the connect notice is alone")
+        try await waitUntil { scope.loading == nil }
+        #expect(scope.takeCloseRequest())
 
         #expect(checked == ["me@devbox:~/dev/api"])
         #expect(store.projects.map(\.name) == ["api"])
@@ -169,13 +193,14 @@ struct RemoteHostsPaletteScopeTests {
     @Test
     func the_home_folder_names_the_project_after_the_host_and_an_empty_field_has_no_action() async throws {
         let (context, _, store) = makeContext()
-        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in nil }
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: noList) { _ in nil }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
         #expect(folderRows(scope, "  ", context).isEmpty)
         #expect(scope.failure == nil)
-        #expect(press(scope, "~", context) == .checking)
-        try await waitUntil { scope.isFinished }
+        #expect(try await press(scope, "~", context) == .checking)
+        try await waitUntil { scope.loading == nil }
+        #expect(scope.takeCloseRequest())
         #expect(store.projects.map(\.name) == ["devbox"])
         #expect(store.projects.map(\.path) == ["devbox:~"])
     }
@@ -185,20 +210,20 @@ struct RemoteHostsPaletteScopeTests {
         let (context, _, store) = makeContext()
         // The host's answers, with the folder of the path that the step
         // sends, through the same text as a local path.
-        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { path in
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: noList) { path in
             guard case let .remote(_, _, directory) = ProjectPath.parse(path) else { return "not a remote path" }
             return RemoteHosts.refusal(directory.hasSuffix(".txt") ? .notDirectory : .missing, directory: directory, destination: "devbox")
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
 
-        #expect(press(scope, "~/none", context) == .checking)
+        #expect(try await press(scope, "~/none", context) == .checking)
         try await waitUntil { scope.loading == nil }
-        #expect(!scope.isFinished)
+        #expect(!scope.takeCloseRequest())
         #expect(scope.failure?.title == "Path ~/none doesn't exist")
         #expect(folderRows(scope, "~/none", context).isEmpty, "the notice is alone, as for a local path")
 
-        #expect(press(scope, "~/notes.txt", context) == .checking)
+        #expect(try await press(scope, "~/notes.txt", context) == .checking)
         try await waitUntil { scope.loading == nil }
         #expect(scope.failure?.title == "~/notes.txt is not a directory")
         #expect(store.projects.isEmpty)
@@ -207,11 +232,12 @@ struct RemoteHostsPaletteScopeTests {
     @Test
     func a_reserved_folder_name_is_changed_as_for_a_local_folder() async throws {
         let (context, _, store) = makeContext()
-        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in nil }
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: noList) { _ in nil }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(press(scope, "~/Pinned", context) == .checking)
-        try await waitUntil { scope.isFinished }
+        #expect(try await press(scope, "~/Pinned", context) == .checking)
+        try await waitUntil { scope.loading == nil }
+        #expect(scope.takeCloseRequest())
         #expect(store.projects.map(\.name) == ["Pinned 2"])
     }
 
@@ -219,17 +245,17 @@ struct RemoteHostsPaletteScopeTests {
     func a_folder_step_left_during_its_check_adds_nothing() async throws {
         let (context, _, store) = makeContext()
         var answer: CheckedContinuation<String?, Never>?
-        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context) { _ in
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: noList) { _ in
             await withCheckedContinuation { answer = $0 }
         }
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        #expect(press(scope, "~/api", context) == .checking)
+        #expect(try await press(scope, "~/api", context) == .checking)
         try await waitUntil { answer != nil }
         scope.deactivate()
         answer?.resume(returning: nil)
         try await Task.sleep(for: .milliseconds(50))
-        #expect(!scope.isFinished)
+        #expect(!scope.takeCloseRequest())
         #expect(store.projects.isEmpty)
     }
 
@@ -237,7 +263,7 @@ struct RemoteHostsPaletteScopeTests {
     func a_destination_that_is_not_a_host_has_a_notice_and_no_action() {
         let (context, _, _) = makeContext()
         var checks = 0
-        let input = RemoteHostsPaletteScope.folderInput(destination: "not a host", context: context) { _ in
+        let input = RemoteHostsPaletteScope.folderInput(destination: "not a host", context: context, listFolders: noList) { _ in
             checks += 1
             return nil
         }
@@ -245,5 +271,50 @@ struct RemoteHostsPaletteScopeTests {
         #expect(folderRows(scope, "~", context).isEmpty)
         #expect(scope.failure?.title == "not a host is not a host name.")
         #expect(checks == 0)
+    }
+
+    @Test
+    func a_host_that_lists_its_folders_gives_folder_rows_that_add_the_project() async throws {
+        let (context, state, store) = makeContext()
+        let window = WindowState()
+        state.registerWindow(window)
+        state.noteKeyWindow(window)
+        var checks = 0
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: homeList) { _ in
+            checks += 1
+            return nil
+        }
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+
+        let home = try await settledRows(scope, "~", context)
+        #expect(home.map(\.title) == ["me", "api", "docs"], "the typed folder, then the folders in it; no hidden one")
+        #expect(home.first?.subtitle == "Open as new project: devbox:~")
+        #expect(home.allSatisfy { $0.id != InputPaletteScope.actionItemID }, "a listed folder needs no action row")
+
+        let api = try #require(try await settledRows(scope, "~/a", context).first)
+        #expect(api.title == "api")
+        #expect(api.subtitle == "Open as new project: devbox:~/api")
+        #expect(scope.completion(for: api) == "~/api/", "Tab goes into the folder")
+        #expect(scope.failure == nil)
+        #expect(scope.press(api) == .closed, "a listed folder adds with no check")
+        #expect(checks == 0)
+        #expect(store.projects.map(\.path) == ["devbox:~/api"])
+        #expect(store.projects.map(\.name) == ["api"])
+        #expect(state.activeProjectID == store.projects.first?.id)
+    }
+
+    @Test
+    func a_listed_host_with_no_matching_folder_shows_the_path_notice() async throws {
+        let (context, _, store) = makeContext()
+        let input = RemoteHostsPaletteScope.folderInput(destination: "devbox", context: context, listFolders: homeList) { _ in nil }
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+
+        #expect(try await settledRows(scope, "~/zzz", context).isEmpty)
+        #expect(scope.failure?.title == "Path ~/zzz doesn't exist")
+        #expect(folderRows(scope, "api", context).isEmpty, "a session starts only in a folder from / or ~")
+        #expect(scope.failure?.title == "Path api doesn't exist")
+        #expect(store.projects.isEmpty)
     }
 }

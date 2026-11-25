@@ -119,7 +119,7 @@ struct MactermApp: App {
                 }
                 Divider()
                 AppCommandMenuItem(command: .newTab, appState: appState, projectStore: projectStore, titleOverride: "New Tab")
-                AppCommandMenuItem(command: .openProject, appState: appState, projectStore: projectStore, titleOverride: "Open Project…")
+                AppCommandMenuItem(command: .newProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
             }
             CommandGroup(replacing: .toolbar) {
                 ToolbarVisibilityMenuItem(appState: appState, projectStore: projectStore)
@@ -214,7 +214,7 @@ struct MactermApp: App {
                 AppCommandMenuItem(command: .recentTab, appState: appState, projectStore: projectStore, titleOverride: "Recent Tab")
             }
             CommandMenu("Project") {
-                AppCommandMenuItem(command: .openProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
+                AppCommandMenuItem(command: .newProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
                 AppCommandMenuItem(
                     command: .renameProject,
                     appState: appState,
@@ -227,6 +227,25 @@ struct MactermApp: App {
                     appState: appState,
                     projectStore: projectStore,
                     titleOverride: "Set Project Path to Current Directory"
+                )
+                Divider()
+                AppCommandMenuItem(
+                    command: .newProjectInside,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "New Project Inside…"
+                )
+                AppCommandMenuItem(
+                    command: .moveToProject,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "Move to Project…"
+                )
+                AppCommandMenuItem(
+                    command: .moveOutOfProject,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "Move Out of Project"
                 )
                 Divider()
                 AppCommandMenuItem(command: .nextProject, appState: appState, projectStore: projectStore, titleOverride: "Next Project")

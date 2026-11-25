@@ -55,6 +55,27 @@ extension AppCommand {
         }
     }
 
+    /// The input screen this command asks its value on (`PaletteInput`), or
+    /// nil when it asks none or has no target. Unlike `paletteScope`, the
+    /// screen is about one thing (the active tab, the current project), so
+    /// it depends on the context. Its palette row enters it in place; a
+    /// keybind or the menu opens the palette on it.
+    @MainActor
+    func inputScope(in ctx: AppCommandContext) -> PaletteScopeID? {
+        guard let projectID = ctx.appState.activeProjectID else { return nil }
+        let input: PaletteInput? = switch self {
+        case .renameTab:
+            ctx.appState.workspaces[projectID]?.activeTab.flatMap { tab in
+                PaletteInput.renameTab(tab.id, in: projectID, appState: ctx.appState)
+            }
+        case .renameProject:
+            PaletteInput.renameProject(projectID, appState: ctx.appState, store: ctx.projectStore)
+        default:
+            nil
+        }
+        return input.map { .input($0) }
+    }
+
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
     /// project is active, "Replace path" when the pane's pwd matches the
@@ -114,19 +135,10 @@ extension AppCommand {
         case .moveTabDown:
             guard let projectID, ctx.appState.activeTabMoveOffset(step: 1, projectID: projectID) != nil else { return nil }
             return { ctx.appState.moveActiveTab(step: 1, projectID: projectID) }
-        case .renameTab:
-            guard let projectID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab
-            else { return nil }
-            let tabID = tab.id
-            return {
-                ctx.appState.sidebarVisible = true
-                // Defer a tick so the sidebar (and its row's TextField) is in
-                // the hierarchy before we ask it to begin editing — otherwise,
-                // when the sidebar was collapsed, the field can't take first
-                // responder. Applies to every caller (palette, menu, hotkey).
-                DispatchQueue.main.async { ctx.appState.renamingTabID = tabID }
-            }
+        case .renameTab,
+             .renameProject:
+            guard let scope = inputScope(in: ctx) else { return nil }
+            return { ctx.appState.openCommandPalette(scope: scope) }
         case .pinTab:
             // Pin the active tab. Only from a real project — the
             // pinned workspace's own tabs are already pinned.
@@ -282,18 +294,22 @@ extension AppCommand {
                   let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.explainOutput() }
-        case .openProject:
-            return { _ = ctx.appState.openProject(store: ctx.projectStore) }
+        case .newProject:
+            return { ctx.appState.toggleCommandPalette(scope: .input(.newProject)) }
+        // The tree of projects and tabs (design 013). Move to Project acts
+        // on the node that the key window shows; the others act on the
+        // active project, as the items of its sidebar menu do.
+        case .newProjectInside:
+            guard let current else { return nil }
+            return { ctx.appState.newProject(inside: current, store: ctx.projectStore, in: ctx.appState.keyWindow) }
+        case .moveToProject:
+            guard let scope = paletteScope(in: ctx) else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: scope) }
+        case .moveOutOfProject:
+            guard let current, current.parent != nil else { return nil }
+            return { ctx.projectStore.moveOut(current.id) }
         case .newRemoteProject:
             return { ctx.appState.openCommandPalette(scope: .remoteHosts) }
-        case .renameProject:
-            guard let current else { return nil }
-            let projectID = current.id
-            return {
-                ctx.appState.sidebarVisible = true
-                // See .renameTab: defer so the sidebar row exists first.
-                DispatchQueue.main.async { ctx.appState.renamingProjectID = projectID }
-            }
         case .removeProject:
             guard let projectID, !Project.isSynthetic(projectID) else { return nil }
             return {

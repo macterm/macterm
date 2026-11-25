@@ -307,6 +307,20 @@ final class RemoteHosts {
         return nil
     }
 
+    /// The folders in `directory` on the host, for the path completion of
+    /// a remote folder field (0614, `HostCommands.folderListScript`). Over
+    /// the host's ssh connection, only one that is up: a keystroke never
+    /// asks for a login. nil when no connection is up, the folder is not
+    /// there, or no answer came in `timeout`; the field then shows no rows.
+    func listFolders(_ directory: String, destination: String, timeout: Duration = .seconds(2)) async -> FolderListing? {
+        guard SSHConnections.isValidDestination(destination),
+              let command = HostCommands.folderListCommand(directory: directory),
+              let outcome = try? await connections.run(destination, command, login: false, timeout: timeout),
+              let list = HostCommands.folderList(status: outcome.status, output: outcome.stdout)
+        else { return nil }
+        return FolderListing(path: list.path, names: list.names)
+    }
+
     /// `checkFolder` for the scp-style path of a new remote project in the
     /// GUI (New Remote Project in the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the

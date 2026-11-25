@@ -58,7 +58,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case explainOutput
     case autofillPassword
     // Projects
-    case openProject
+    case newProject
     case newRemoteProject
     case renameProject
     case removeProject
@@ -67,6 +67,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case saveLayout
     case nextProject
     case previousProject
+    case newProjectInside
+    case moveToProject
+    case moveOutOfProject
     // Window
     case toggleSidebar
     case toggleProjectMemory
@@ -93,9 +96,19 @@ enum AppCommand: String, CaseIterable, Identifiable {
     var englishTitle: String { Self.englishTitles[self] ?? rawValue }
 
     /// What a search matches besides `title`: the English title, when the
-    /// shown title is a translation.
+    /// shown title is a translation, and the earlier English names of a
+    /// renamed command.
     var searchAliases: [String] {
-        englishTitle == title ? [] : [englishTitle]
+        (englishTitle == title ? [] : [englishTitle]) + formerTitles
+    }
+
+    /// The English names that a command had before, so that a search for
+    /// them still finds it.
+    private var formerTitles: [String] {
+        switch self {
+        case .newProject: ["Open Project", "Add Project"]
+        default: []
+        }
     }
 
     /// Resolved one time: the English text never changes while the app runs,
@@ -149,7 +162,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .explainOutput: "Explain Output"
         case .autofillPassword: "Autofill Password"
         case .passwordManager: "Password Manager"
-        case .openProject: "Open Project"
+        case .newProject: "New Project"
         case .newRemoteProject: "New Remote Project"
         case .renameProject: "Rename Current Project"
         case .removeProject: "Remove Current Project"
@@ -159,6 +172,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .saveLayout: "Save Layout"
         case .nextProject: "Next Project"
         case .previousProject: "Previous Project"
+        case .newProjectInside: "New Project Inside"
+        case .moveToProject: "Move to Project"
+        case .moveOutOfProject: "Move Out of Project"
         case .toggleSidebar: "Toggle Sidebar"
         case .toggleProjectMemory: "Toggle Project Insights"
         case .toggleToolbar: "Toggle Toolbar"
@@ -222,7 +238,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .restartSession,
              .explainOutput,
              .autofillPassword: .panes
-        case .openProject,
+        case .newProject,
              .newRemoteProject,
              .renameProject,
              .removeProject,
@@ -230,7 +246,10 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .applyLayout,
              .saveLayout,
              .nextProject,
-             .previousProject: .projects
+             .previousProject,
+             .newProjectInside,
+             .moveToProject,
+             .moveOutOfProject: .projects
         case .toggleSidebar,
              .toggleProjectMemory,
              .toggleToolbar,
@@ -283,7 +302,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .movePaneRight: .movePaneRight
         case .movePaneUp: .movePaneUp
         case .movePaneDown: .movePaneDown
-        case .openProject: .openProject
+        case .newProject: .openProject
         case .nextProject: .nextProject
         case .previousProject: .previousProject
         case .toggleSidebar: .toggleSidebar
@@ -311,6 +330,9 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .capturePaletteScreenshot: .capturePaletteScreenshot
         case .applyLayout: .applyLayout
         case .saveLayout: .saveLayout
+        case .newProjectInside: .newProjectInside
+        case .moveToProject: .moveToProject
+        case .moveOutOfProject: .moveOutOfProject
         case .newRemoteProject,
              .newDesktopWidget,
              .removeProject,
@@ -327,8 +349,22 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .passwordManager: .passwords
         case .files: .files
         case .newRemoteProject: .remoteHosts
+        case .newProject: .input(.newProject)
         default: nil
         }
+    }
+
+    /// The palette screen this command opens now: `paletteScope`, or a
+    /// screen about the node that the key window shows (Move to Project),
+    /// which needs the context to name it. nil when the command opens no
+    /// screen, or when it does not apply.
+    @MainActor
+    func paletteScope(in ctx: AppCommandContext) -> PaletteScopeID? {
+        guard self == .moveToProject else { return paletteScope }
+        guard let node = ctx.appState.moveToProjectNode(store: ctx.projectStore),
+              !SidebarTree.moveDestinations(for: node, in: ctx.projectStore).isEmpty
+        else { return nil }
+        return .moveToProject(node)
     }
 
     /// The raw value is an identifier, never shown: `title` is the label.

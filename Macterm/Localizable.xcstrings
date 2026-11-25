@@ -1180,6 +1180,22 @@
         }
       }
     },
+    "Add a project from a folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더에서 프로젝트 추가"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从文件夹添加项目"
+          }
+        }
+      }
+    },
     "Add a widget at the center of the desktop" : {
       "localizations" : {
         "ko" : {
@@ -2163,6 +2179,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在行的菜单中更改顺序。"
+          }
+        }
+      }
+    },
+    "Change to: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음으로 변경: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改为：%@"
           }
         }
       }
@@ -4782,6 +4814,22 @@
         }
       }
     },
+    "Listing folders…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 목록을 읽는 중…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在列出文件夹…"
+          }
+        }
+      }
+    },
     "Load Ghostty's default config files" : {
       "localizations" : {
         "ko" : {
@@ -5446,22 +5494,6 @@
         }
       }
     },
-    "Move Into Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 안으로 이동"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移入项目"
-          }
-        }
-      }
-    },
     "Move Out of Project" : {
       "localizations" : {
         "ko" : {
@@ -5606,6 +5638,22 @@
         }
       }
     },
+    "Move to Project…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트로 이동…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移到项目…"
+          }
+        }
+      }
+    },
     "Move to Scratch Tabs" : {
       "localizations" : {
         "ko" : {
@@ -5698,6 +5746,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在其中新建项目"
+          }
+        }
+      }
+    },
+    "New Project Inside…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내부에 새로운 프로젝트…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在其中新建项目…"
           }
         }
       }
@@ -5810,6 +5874,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新建窗口"
+          }
+        }
+      }
+    },
+    "New project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로운 프로젝트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建项目"
           }
         }
       }
@@ -6779,38 +6859,6 @@
         }
       }
     },
-    "Open Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目"
-          }
-        }
-      }
-    },
-    "Open Project…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目…"
-          }
-        }
-      }
-    },
     "Open System Settings…" : {
       "localizations" : {
         "ko" : {
@@ -6823,22 +6871,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开系统设置…"
-          }
-        }
-      }
-    },
-    "Open a project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目"
           }
         }
       }
@@ -6871,22 +6903,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先在项目中打开一个终端。"
-          }
-        }
-      }
-    },
-    "Open another project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "다른 프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开另一个项目"
           }
         }
       }
@@ -7718,6 +7734,23 @@
         }
       }
     },
+    "Project name" : {
+      "comment" : "Placeholder of the Rename Project field in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 이름"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目名称"
+          }
+        }
+      }
+    },
     "Projects" : {
       "comment" : "Command category\nSettings pane",
       "localizations" : {
@@ -8458,6 +8491,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新命名标签页"
+          }
+        }
+      }
+    },
+    "Rename to \"%@\"" : {
+      "comment" : "The action row of the Rename Tab and Rename Project fields in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”(으)로 이름 변경"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新命名为“%@”"
           }
         }
       }
@@ -9206,6 +9256,22 @@
         }
       }
     },
+    "Search projects by name or path..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름 또는 경로로 프로젝트 검색..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按名称或路径搜索项目..."
+          }
+        }
+      }
+    },
     "Search projects or commands..." : {
       "localizations" : {
         "ko" : {
@@ -9348,6 +9414,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择项目文件夹"
+          }
+        }
+      }
+    },
+    "Select in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder에서 선택"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“访达”中选择"
           }
         }
       }
@@ -9685,6 +9767,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示 AI 智能体图标"
+          }
+        }
+      }
+    },
+    "Show Project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 표시"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示项目"
           }
         }
       }
@@ -10440,6 +10538,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "标签页图标"
+          }
+        }
+      }
+    },
+    "Tab name" : {
+      "comment" : "Placeholder of the Rename Tab field in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签页名称"
           }
         }
       }
@@ -11856,6 +11971,22 @@
         }
       }
     },
+    "Type a folder path, or select one in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 경로를 입력하거나 Finder에서 선택하십시오"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入文件夹路径，或在“访达”中选择一个"
+          }
+        }
+      }
+    },
     "Type the passphrase for the key %@." : {
       "localizations" : {
         "ko" : {
@@ -12159,6 +12290,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用已存储的密码"
+          }
+        }
+      }
+    },
+    "Use the automatic name \"%@\"" : {
+      "comment" : "The action row of the Rename Tab field in the palette when the field is empty",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동 이름 “%@” 사용"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用自动名称“%@”"
           }
         }
       }

@@ -120,6 +120,11 @@ struct CommandPalettePanel: View {
 
     @State
     private var selectedIndex = 0
+    /// True when `refresh` put the selection on an input screen's resting
+    /// row: that is not navigation, so the list does not scroll to it (a
+    /// Cancel row under many completions stays out of view).
+    @State
+    private var selectionIsResting = false
     @State
     private var sections: [PaletteSection] = []
     /// The top screen's listing in flight, read off its scope on every
@@ -268,7 +273,10 @@ struct CommandPalettePanel: View {
                                 ForEach(section.items) { item in
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
-                                        selectedIndex = idx
+                                        // Read the index at the click. SwiftUI can keep the
+                                        // action of a row whose item did not change.
+                                        guard let index = flatIndexByID[item.id] else { return }
+                                        selectedIndex = index
                                         if let inputScope {
                                             runInputRow(inputScope)
                                         } else {
@@ -301,7 +309,7 @@ struct CommandPalettePanel: View {
                         .padding(.vertical, Self.listPadding)
                     }
                 }
-                .frame(maxHeight: 340)
+                .frame(maxHeight: Self.listHeight)
                 .coordinateSpace(name: rowSpace)
                 .background(
                     GeometryReader { geo in
@@ -323,7 +331,7 @@ struct CommandPalettePanel: View {
                 }
                 .onChange(of: selectedIndex) { old, idx in
                     // Only follow keyboard navigation; hovering shouldn't scroll.
-                    guard !hoverTracker.isHoverSelection(idx) else { return }
+                    guard !hoverTracker.isHoverSelection(idx), !selectionIsResting else { return }
                     scrollSelectionIntoView(idx, from: old, proxy: proxy)
                 }
                 // A new screen or a new query is a new list, and it starts at
@@ -369,7 +377,7 @@ struct CommandPalettePanel: View {
                 isFieldFocused = true
                 // Select the preserved text so a fresh keystroke replaces it
                 // while arrows/edits still work — Spotlight/Raycast behavior.
-                selectFieldText()
+                selectFieldText(once: query)
             }
         }
         .onChange(of: query) {
@@ -387,7 +395,7 @@ struct CommandPalettePanel: View {
             // wipe.
             if let inputScope, inputScope.isFirstShow {
                 inputScope.isFirstShow = false
-                DispatchQueue.main.async { selectFieldText() }
+                selectFieldText(once: query)
             }
         }
         .onChange(of: availability.unavailable) {
@@ -464,18 +472,16 @@ struct CommandPalettePanel: View {
     private func activateScope() {
         guard let scope else { return }
         let context = PaletteContext(appState: appState, projectStore: projectStore)
-        scope.activate(context: context) {
-            // A checked action of an input screen ran.
-            if let inputScope = scope as? InputPaletteScope, inputScope.isFinished {
-                query = ""
-                windowState.isCommandPaletteVisible = false
-                return
-            }
-            refresh()
-        }
+        scope.activate(context: context) { refresh() }
     }
 
     private func refresh() {
+        // An input action ran after its check (a host said yes): close.
+        if inputScope?.takeCloseRequest() == true {
+            query = ""
+            windowState.isCommandPaletteVisible = false
+            return
+        }
         let selectedID = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex].id : nil
         if let scope {
             let context = PaletteContext(appState: appState, projectStore: projectStore)
@@ -499,7 +505,8 @@ struct CommandPalettePanel: View {
             if let selectedID, let index = flatItems.firstIndex(where: { $0.id == selectedID }) {
                 selectedIndex = index
             } else {
-                selectedIndex = flatItems.first.map(inputScope.isAction) == true ? 0 : -1
+                selectionIsResting = true
+                selectedIndex = inputScope.restingItemID.flatMap { id in flatItems.firstIndex { $0.id == id } } ?? -1
             }
         } else if !flatItems.indices.contains(selectedIndex) || !flatItems[selectedIndex].isEnabled,
                   let firstEnabled = flatItems.indices.first(where: { flatItems[$0].isEnabled })
@@ -512,6 +519,7 @@ struct CommandPalettePanel: View {
     /// Enter can never land on one. When only disabled rows remain in that
     /// direction, the selection stays put.
     private func moveSelection(_ delta: Int) {
+        selectionIsResting = false
         var idx = min(selectedIndex, flatItems.count) + delta
         while idx >= 0, idx < flatItems.count, !flatItems[idx].isEnabled {
             idx += delta
@@ -521,14 +529,31 @@ struct CommandPalettePanel: View {
         }
     }
 
-    /// Select all text in the focused search field via the window's field
-    /// editor, so reopening the palette with a preserved query highlights it.
-    private func selectFieldText() {
-        guard !query.isEmpty,
-              let window = NSApp.keyWindow,
-              let editor = window.fieldEditor(false, for: nil)
-        else { return }
-        editor.selectAll(nil)
+    /// Select `text` in the palette field, so that a keystroke replaces it.
+    /// The palette uses it for a kept query when it opens, and for the value
+    /// of an input screen when the screen opens.
+    ///
+    /// The select uses the first responder of the palette's window. SwiftUI's
+    /// `TextField` has a field editor of its own. The window's shared field
+    /// editor (`fieldEditor(_:for:)`) is not that editor, so a select there
+    /// does nothing (measured in `CommandPaletteTests`). A field that takes
+    /// focus selects its text itself. A screen that opens from a palette row
+    /// changes the text of a field that already has focus, so that field
+    /// needs this select.
+    ///
+    /// The field holds the new text 10 ms later in the tests. The select
+    /// tries again every 10 ms, 5 times at most. It does nothing when the
+    /// user changed the query.
+    private func selectFieldText(once text: String, attempts: Int = 5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
+            guard !text.isEmpty, query == text else { return }
+            let editor = appState.nsWindow(for: windowState)?.firstResponder as? NSTextView
+            if let editor, editor.isFieldEditor, editor.string == text {
+                editor.selectAll(nil)
+            } else if attempts > 1 {
+                selectFieldText(once: text, attempts: attempts - 1)
+            }
+        }
     }
 
     /// Tab autocompletes the input with the top result. Commands and projects
@@ -539,14 +564,11 @@ struct CommandPalettePanel: View {
     /// the keypress fall through (`.ignored`) to default focus traversal in
     /// that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's completion rows: the selected one, or the top
-        // one when the selection is on no completion (the action row).
+        // An input screen's completion and choice rows
+        // (`InputPaletteScope.tabText`).
         if let inputScope {
-            let selected = flatItems.indices.contains(selectedIndex)
-                ? inputScope.completion(for: flatItems[selectedIndex]) : nil
-            guard let completion = selected ?? flatItems.lazy.compactMap(inputScope.completion(for:)).first,
-                  completion != query
-            else { return .ignored }
+            let selected = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
+            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .ignored }
             query = completion
             return .handled
         }
@@ -564,6 +586,14 @@ struct CommandPalettePanel: View {
         query = completion
         return .handled
     }
+
+    /// The most height of the results under the field. The scroll view
+    /// takes all the height that it gets, so the list has this height on
+    /// every screen and in every state. The panel therefore does not grow or
+    /// shrink while the user types. Do not size the list to its rows: an
+    /// input screen with one row has the height of the root palette. Only a
+    /// window that is too short makes the list shorter.
+    static let listHeight: CGFloat = 340
 
     /// The id of the zero-height view at the top of the results.
     private static let listTop = "list-top"
@@ -634,9 +664,9 @@ struct CommandPalettePanel: View {
         let itemID: String
     }
 
-    /// Return or a click on an input screen: the action row runs its
-    /// action, a completion row goes into the field, and no row does
-    /// nothing. The palette closes when the action ran, and stays with the
+    /// Return or a click on an input screen: the action row and a choice
+    /// run their action, a completion row goes into the field, and no row
+    /// does nothing. The palette closes when the action ran, and stays with the
     /// reason when it refused.
     private func runInputRow(_ inputScope: InputPaletteScope) {
         let item = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
@@ -648,6 +678,10 @@ struct CommandPalettePanel: View {
         case .refused,
              .checking:
             refresh()
+        case .cancelled:
+            leaveScope()
+        case let .opens(next):
+            enterScope(next)
         case .closed:
             query = ""
             windowState.isCommandPaletteVisible = false
@@ -810,28 +844,24 @@ private struct PaletteScopePill: View {
     let isCurrent: Bool
 
     var body: some View {
-        label
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, 9)
-            .frame(height: Self.height)
-            .modifier(PillBackground())
-    }
-
-    /// The title alone when the pill has no icon, so no gap is left for one.
-    @ViewBuilder
-    private var label: some View {
-        if let icon = pill.icon {
-            Label {
+        Group {
+            if let icon = pill.icon {
+                Label {
+                    Text(pill.title)
+                } icon: {
+                    PaletteIconImage(icon: icon, side: 14)
+                }
+            } else {
                 Text(pill.title)
-            } icon: {
-                PaletteIconImage(icon: icon, side: 14)
             }
-        } else {
-            Text(pill.title)
         }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(isCurrent ? MactermTheme.fg : MactermTheme.fgMuted)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .padding(.horizontal, 9)
+        .frame(height: Self.height)
+        .modifier(PillBackground())
     }
 
     private struct PillBackground: ViewModifier {
@@ -977,6 +1007,7 @@ private struct CommandPaletteRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(item.isEnabled ? MactermTheme.fgMuted : MactermTheme.fgDim)
                         .lineLimit(1)
+                        .truncationMode(item.subtitleIsPath && !showsAlt ? .middle : .tail)
                 }
             }
             // At least a key-cap tall, so a row with a keybind and one

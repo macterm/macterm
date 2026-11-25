@@ -50,14 +50,14 @@ struct DirectorySource: PaletteSource {
 
         // Exact match at the top (when the typed path is itself a directory).
         if let exact = completion.exactMatch {
-            appendRows(name: (exact as NSString).lastPathComponent, fullPath: exact)
+            appendRows(name: PathRow.title(for: exact), fullPath: exact)
         }
 
         // Children rank below every exact-match row. The completer's cap
         // counts directories, not rows — a backed child's add-another row
         // rides along.
         for child in completion.children {
-            appendRows(name: (child as NSString).lastPathComponent, fullPath: child)
+            appendRows(name: PathRow.title(for: child), fullPath: child)
         }
 
         return items
@@ -146,7 +146,8 @@ struct DirectorySource: PaletteSource {
             return PaletteItem(
                 id: "dir-switch:\(fullPath)",
                 title: existing.name,
-                subtitle: String(localized: "Switch to project: \(fullPath)"),
+                subtitle: PathRow.Action.switchToProject.subtitle(for: fullPath),
+                subtitleIsPath: true,
                 category: Self.category,
                 score: score
             ) { [appState = context.appState] in
@@ -156,7 +157,8 @@ struct DirectorySource: PaletteSource {
         return PaletteItem(
             id: "dir-open:\(fullPath)",
             title: name,
-            subtitle: String(localized: "Open as new project: \(fullPath)"),
+            subtitle: PathRow.Action.openAsNewProject.subtitle(for: fullPath),
+            subtitleIsPath: true,
             category: Self.category,
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
@@ -181,7 +183,8 @@ struct DirectorySource: PaletteSource {
         PaletteItem(
             id: "dir-new:\(fullPath)",
             title: name,
-            subtitle: String(localized: "Add another project: \(fullPath)"),
+            subtitle: PathRow.Action.addAnotherProject.subtitle(for: fullPath),
+            subtitleIsPath: true,
             category: Self.category,
             score: score,
             opensScope: Self.remoteFolderScope(fullPath, context: context)

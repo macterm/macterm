@@ -108,54 +108,137 @@ final class RemoteHostsPaletteScope: PaletteScope {
     /// New Remote Project, step 2: the folder on `destination`. It starts
     /// on `directory` (`~`, or the folder of a typed `host:folder`).
     ///
-    /// A typed folder gives the action row `New Project "devbox:~/api"`.
-    /// It checks the folder on the host (`RemoteHosts.refusal`) while the
-    /// palette shows that it connects. A missing folder or a file is the
-    /// one notice of a path (`PathProblem`), as on a local screen. A folder
-    /// that is there adds the project and shows it, named by its folder
-    /// (`ProjectPath.remoteDisplayName`).
+    /// A typed path lists the host's folders as the rows of a local path
+    /// (`FolderCompletion`, `HostFolderLister`): the typed folder, then the
+    /// folders in it or the folders that complete it. Each row is the
+    /// action: Return or a click adds the folder as a project, with no
+    /// check, because the host listed it. Tab goes into it. A path with no
+    /// row is the one notice of a path (`PathProblem`), as on a local
+    /// screen.
+    ///
+    /// Only when the host gives no list (no connection up, no answer in
+    /// time) does a typed folder give the action row
+    /// `New Project "devbox:~/api"`. It checks the folder on the host
+    /// (`RemoteHosts.refusal`) while the palette shows that it connects,
+    /// and a missing folder or a file is the notice of `PathProblem`.
+    ///
+    /// A new project is named by its folder
+    /// (`ProjectPath.remoteDisplayName`) and is always new: a folder can
+    /// back several projects.
     static func folderInput(
         destination: String,
         directory: String = "~",
         context: PaletteContext,
+        listFolders: @escaping @MainActor (String, String) async -> FolderListing? = {
+            await RemoteHosts.shared.listFolders($0, destination: $1)
+        },
         refusal: @escaping @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) }
     ) -> PaletteInput {
-        PaletteInput(
+        let lister = HostFolderLister { folder in await listFolders(folder, destination) }
+        let appState = context.appState
+        let projectStore = context.projectStore
+        return PaletteInput(
             id: "remote-folder:\(destination)",
             title: destination,
             prompt: String(localized: "Folder on \(destination)"),
-            initialValue: directory
-        ) { [appState = context.appState, projectStore = context.projectStore] text in
-            let folder = text.trimmingCharacters(in: .whitespaces)
-            if folder.isEmpty { return .nothing }
-            guard isDestination(destination),
-                  let path = ProjectPath.composeRemote(host: destination, directory: folder),
-                  case let .remote(_, host, parsedFolder) = ProjectPath.parse(path)
-            else { return .notice(String(localized: "\(destination) is not a host name.")) }
-            // A name that nobody typed: `ProjectStore.create` changes a
-            // reserved one (`Pinned 2`), as for a local folder.
-            let name = ProjectPath.remoteDisplayName(host: host, directory: parsedFolder)
-            let title = String(
-                localized: "palette.remoteFolder.action",
-                defaultValue: "New Project \"\(path)\"",
-                comment: "Command palette, New Remote Project: the action row that adds the typed folder of the host"
+            initialValue: directory,
+            choices: { text, _ in
+                folderChoices(for: text, destination: destination, lister: lister, appState: appState, projectStore: projectStore) ?? []
+            },
+            hostFolders: lister,
+            check: { text, _ in
+                let folder = hostFolder(text)
+                if folder.isEmpty { return .nothing }
+                guard isDestination(destination),
+                      let path = ProjectPath.composeRemote(host: destination, directory: folder)
+                else { return .notice(String(localized: "\(destination) is not a host name.")) }
+                // A session starts only in a folder from `/` or `~`.
+                guard HostCommands.isSafeHostFolder(folder) else {
+                    return .notice(PathProblem.missing.notice(for: folder))
+                }
+                switch folderChoices(for: text, destination: destination, lister: lister, appState: appState, projectStore: projectStore) {
+                case let rows? where rows.isEmpty:
+                    // The host listed the folders and none matches.
+                    return .notice(PathProblem.missing.notice(for: folder))
+                case .some:
+                    // The folder rows are the action.
+                    return .nothing
+                case nil where lister.isListing:
+                    return .nothing
+                case nil:
+                    break
+                }
+                // No list from the host: the typed folder is the action, and
+                // the host checks it when it runs.
+                let title = String(
+                    localized: "palette.remoteFolder.action",
+                    defaultValue: "New Project \"\(path)\"",
+                    comment: "Command palette, New Remote Project: the action row that adds the typed folder of the host"
+                )
+                return .action(PaletteInputAction(
+                    title: title,
+                    check: (
+                        message: String(localized: "Connecting to \(destination)…"),
+                        answer: {
+                            let answer = await refusal(path)
+                            if answer != nil { logger.info("new remote project \(path, privacy: .public): not added") }
+                            return answer
+                        }
+                    ),
+                    run: { addProject(path, appState: appState, projectStore: projectStore) }
+                ))
+            }
+        )
+    }
+
+    /// The folder rows of a path typed in step 2: the rows of a local path
+    /// (`FolderCompletion`), from the host's folder list. Each row adds the
+    /// folder as the user typed it, with no slash at the end
+    /// (`hostFolder`). nil while the host lists, or when it gave no list.
+    static func folderChoices(
+        for text: String,
+        destination: String,
+        lister: HostFolderLister,
+        appState: AppState,
+        projectStore: ProjectStore
+    ) -> [PaletteInputChoice]? {
+        let typed = text.trimmingCharacters(in: .whitespaces)
+        guard isDestination(destination),
+              HostCommands.isSafeHostFolder(hostFolder(typed)),
+              let rows = FolderCompletion.rows(for: typed, listing: lister.listing)
+        else { return nil }
+        return rows.compactMap { row in
+            guard let path = ProjectPath.composeRemote(host: destination, directory: hostFolder(row.fieldText)) else { return nil }
+            return PaletteInputChoice(
+                item: PaletteItem(
+                    id: "remote-folder:\(row.path)",
+                    title: PathRow.title(for: row.path),
+                    subtitle: PathRow.Action.openAsNewProject.subtitle(for: path),
+                    subtitleIsPath: true,
+                    action: { _ = addProject(path, appState: appState, projectStore: projectStore) }
+                ),
+                value: row.fieldText
             )
-            return .action(PaletteInputAction(title: title) {
-                .check(PaletteCheck(message: String(localized: "Connecting to \(destination)…")) {
-                    // The answer of a missing folder or a file is the one
-                    // notice of a path (`PathProblem`), as for a local
-                    // folder.
-                    let answer = await refusal(path)
-                    guard !Task.isCancelled else { return .refused("") }
-                    if let answer {
-                        logger.info("new remote project \(path, privacy: .public): not added")
-                        return .refused(answer)
-                    }
-                    // Always create: a folder can back several projects.
-                    appState.selectProject(projectStore.create(name: name, path: path))
-                    return .done
-                })
-            })
         }
+    }
+
+    /// The folder of a field, with no slash at the end (`~/api/` is
+    /// `~/api`), as a project keeps it. `/` and `~/` stay a folder.
+    static func hostFolder(_ text: String) -> String {
+        var folder = text.trimmingCharacters(in: .whitespaces)
+        while folder.count > 1, folder.hasSuffix("/") {
+            folder.removeLast()
+        }
+        return folder
+    }
+
+    /// Add the remote project at `path` (`host:folder`) and show it.
+    private static func addProject(_ path: String, appState: AppState, projectStore: ProjectStore) -> PaletteCommit {
+        guard case let .remote(_, host, folder) = ProjectPath.parse(path) else { return .refused("") }
+        // A name that nobody typed: `ProjectStore.create` changes a reserved
+        // one (`Pinned 2`), as for a local folder.
+        let name = ProjectPath.remoteDisplayName(host: host, directory: folder)
+        appState.selectProject(projectStore.create(name: name, path: path))
+        return .done
     }
 }

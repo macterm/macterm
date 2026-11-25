@@ -31,7 +31,7 @@ Define a term only when it is Macterm-specific or when it is ambiguous. Do not d
 
 | Term | Meaning |
 |---|---|
-| **project** | A folder, or a folder on a remote host. It has an entry in the sidebar. It holds tabs, and it can hold other projects ("inside" a project: New Project Inside, Move Into Project). |
+| **project** | A folder, or a folder on a remote host. It has an entry in the sidebar. It holds tabs, and it can hold other projects ("inside" a project: New Project Inside, Move to Project). |
 | **tab** | One row under a project. It holds one or more panes. |
 | **pane** | One terminal. A tab can have several panes. |
 | **split** | The division of a tab into panes. As a verb, "split a pane" makes a new pane. |

@@ -30,6 +30,9 @@ enum PaletteScopeID: Hashable {
     case custom(CustomPaletteTarget)
     /// A screen that asks for one value (`PaletteInput`).
     case input(PaletteInput)
+    /// The projects that this node, a project or a tab, can move to
+    /// (`MoveToProjectPaletteScope`).
+    case moveToProject(SidebarItem)
 
     /// The screens Macterm ships.
     static let builtIn: [PaletteScopeID] = [.passwords, .files]
@@ -43,6 +46,7 @@ enum PaletteScopeID: Hashable {
         case .remoteHosts: PalettePill(title: AppCommand.newRemoteProject.title, icon: RemoteHostsPaletteScope.icon)
         case let .custom(target): target.pill
         case let .input(input): input.pill
+        case .moveToProject: PalettePill(title: AppCommand.moveToProject.title, icon: "folder")
         }
     }
 
@@ -56,7 +60,8 @@ enum PaletteScopeID: Hashable {
         case .files: String(localized: "Browse files and folders in this project")
         case .remoteHosts: String(localized: "Add a folder on an ssh host as a project")
         case .custom,
-             .input: ""
+             .moveToProject: ""
+        case let .input(input): input.summary
         }
     }
 
@@ -69,6 +74,7 @@ enum PaletteScopeID: Hashable {
         case .remoteHosts: .newRemoteProject
         case .custom,
              .input: nil
+        case .moveToProject: .moveToProject
         }
     }
 
@@ -80,16 +86,21 @@ enum PaletteScopeID: Hashable {
         case .remoteHosts: RemoteHostsPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
         case let .input(input): InputPaletteScope(input: input)
+        case let .moveToProject(node): MoveToProjectPaletteScope(node: node)
         }
     }
 }
 
-/// A pill in the breadcrumb above the input: a frame's name and glyph.
+/// A pill in the breadcrumb above the input: a frame's name and glyph. An
+/// input screen's pill has no glyph (`PaletteInput.pill`).
 struct PalettePill: Hashable {
     let title: String
-    /// Nil for an input screen: its pill is its text only (Ethan, ui-review
-    /// 0561).
     let icon: PaletteIcon?
+
+    init(title: String, icon: PaletteIcon? = nil) {
+        self.title = title
+        self.icon = icon
+    }
 }
 
 /// A listing in flight: what the scope is waiting on, shown with a spinner
