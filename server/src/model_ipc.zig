@@ -258,6 +258,7 @@ fn modelError(err: model.Error) Outcome {
         error.DuplicateId => fail(.duplicate_id, "An object has this id."),
         error.BadRequest => fail(.invalid_args, "The model refuses this change."),
         error.Refused => fail(.refused, "The project does not allow this change."),
+        error.SlashInName => fail(.invalid_args, "A project name cannot contain a slash."),
         error.OutOfMemory => fail(.unavailable, "The server is out of memory."),
     };
 }
@@ -285,9 +286,11 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
         }) catch |err| return modelError(err),
         m.ProjectSet => {
             const p = mo.findProject(args.id) orelse return modelError(error.NotFound);
+            // Check the name before a change: a request changes all or nothing.
+            if (args.name) |n| if (!Model.nameAllowed(p.sidebar, n)) return modelError(error.SlashInName);
             if (args.parent) |parent| mo.setParent(args.id, parent) catch |err| return modelError(err);
+            if (args.name) |n| mo.renameProject(args.id, n) catch |err| return modelError(err);
             const al = mo.arena.allocator();
-            if (args.name) |n| p.name = try al.dupe(u8, n);
             if (args.path) |path| p.path = try al.dupe(u8, path);
             if (args.color) |c| p.color = if (c.len == 0) null else try al.dupe(u8, c);
         },

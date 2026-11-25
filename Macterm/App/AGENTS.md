@@ -193,7 +193,7 @@ Pinned tabs belong to no project of the tree. The sidebar shows them above the p
   - `Project.nameRefusal` is the one test that every naming path applies (`PinnedTabs.reservesName` for this name). A typed name is refused where the user typed it. These paths are CLI `project create --name` and `project rename`, the notice of the sidebar rename, and the New Project intent.
   - A name that nobody chose (the own name of a folder, also the folder of New Remote Project) becomes `Pinned 2` in `ProjectStore.create`. `ProjectStore.rename` refuses it outright.
   - Projects that got their names before the rule keep their names.
-- **No project name may contain a slash.** A nested project is named by the path of names from the top level (`Work/api`). `Project.nameRefusal` refuses a slash on the same paths as a reserved name. `ProjectStore.create` changes each slash to a hyphen in a name that nobody typed (the `name:` of a layout file), and `ProjectStore.rename` refuses it. Names from before the rule load as they are.
+- **No project name may contain a slash.** A nested project is named by the path of names from the top level (`Work/api`). `Project.nameRefusal` refuses a slash on the same paths as a reserved name. `ProjectStore.create` changes each slash to a hyphen in a name that nobody typed (the `name:` of a layout file), and `ProjectStore.rename` refuses it. Names from before the rule load as they are. The server refuses a slash too (`server/AGENTS.md`); the app's test comes first, so the user gets the localized text.
 
 ## Desktop widgets
 

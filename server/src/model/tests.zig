@@ -661,6 +661,22 @@ test "a project id and an alias are not reused" {
     try testing.expectEqual(@as(?*model.Project, null), m.findAlias("scratch"));
 }
 
+test "the name of a tree project has no slash" {
+    var m = try newModel();
+    defer m.deinit();
+    try testing.expectError(error.SlashInName, m.addProject(.{ .id = .of("s"), .name = "Work/api", .path = "/s" }));
+    try testing.expectEqual(@as(?*model.Project, null), m.findProject(.of("s")));
+    try testing.expectError(error.SlashInName, m.renameProject(.of("p"), "a/b"));
+    try testing.expectEqualStrings("P", m.findProject(.of("p")).?.name);
+    try m.renameProject(.of("p"), "Work-api");
+    try testing.expectEqualStrings("Work-api", m.findProject(.of("p")).?.name);
+    try testing.expectError(error.NotFound, m.renameProject(.of("zz"), "Z"));
+    // A hidden project is on no path of names: a widget keeps its name.
+    try m.addProject(.{ .id = .of("w"), .name = "CPU/RAM", .path = "", .sidebar = .none, .single_tab = true });
+    try m.renameProject(.of("w"), "Disk/Net");
+    try expectValid(&m);
+}
+
 test "a hidden project is at the top level and holds no project" {
     var m = try newModel();
     defer m.deinit();
