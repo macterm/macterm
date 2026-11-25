@@ -394,6 +394,46 @@ struct AppStateProjectDirectoryTests {
         #expect(checked == 0, "the host listed the folder, so it needs no check")
     }
 
+    @Test
+    func a_remote_pane_row_falls_back_to_the_folder_of_the_shell_process() async throws {
+        let fixture = makeFixture(path: "devbox:~/proj")
+        var reported: String?
+        var asked = 0
+        let input = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { reported },
+            listFolders: { _, _ in .unavailable },
+            hostPaneFolder: {
+                asked += 1
+                return "/srv/app"
+            }
+        )
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        let rows = try await settledItems(scope, "", context)
+        #expect(rows.first?.title == "Current Pane's Directory", "a shell that reports no folder: the host reads its process")
+        #expect(rows.first?.subtitle == "/srv/app")
+        #expect(asked == 1)
+        #expect(scope.press(rows[0]) == .closed)
+        #expect(path(of: fixture) == "devbox:/srv/app")
+
+        reported = "/home/me/web"
+        let second = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { reported },
+            listFolders: { _, _ in .unavailable },
+            hostPaneFolder: {
+                asked += 1
+                return "/srv/app"
+            }
+        )
+        #expect(action(second, "", fixture)?.subtitle == "/home/me/web", "the shell's report first, as for a local pane")
+        #expect(asked == 1, "with a report, the host is not asked")
+    }
+
     /// The rows of `text` once the host's listing in flight has ended.
     private func settledItems(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> [PaletteItem] {
         _ = scope.sections(for: PaletteQuery(raw: text), context: context)

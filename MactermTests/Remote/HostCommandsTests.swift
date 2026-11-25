@@ -358,6 +358,28 @@ struct HostCommandsTests {
     }
 
     @Test
+    func the_process_folder_is_the_folder_of_the_process() throws {
+        let home = try Home()
+        let folder = home.url.appendingPathComponent("a b")
+        let sleeper = Process()
+        sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        sleeper.arguments = ["5"]
+        sleeper.currentDirectoryURL = folder
+        try sleeper.run()
+        defer { sleeper.terminate() }
+        let argv = HostCommands.processFolderArgv(pid: sleeper.processIdentifier)
+        let result = try Self.run(argv, environment: home.environment, in: home.url)
+        let code = UInt8(truncatingIfNeeded: result.status)
+        #expect(HostCommands.processFolder(code: code, output: result.output) == folder.path)
+        // A pid with no process gives no folder.
+        let none = try Self.run(HostCommands.processFolderArgv(pid: Int32.max), environment: home.environment, in: home.url)
+        #expect(none.status != 0)
+        #expect(HostCommands.processFolder(code: 0, output: "lsof: no such\n") == nil)
+        #expect(HostCommands.processFolder(code: 1, output: "/srv\n") == nil)
+        #expect(HostCommands.processFolder(code: nil, output: "/srv\n") == nil)
+    }
+
+    @Test
     func the_folder_list_keeps_only_names_under_the_cap() {
         let names = (0 ..< HostCommands.folderListCap + 5).map { "f\($0)" }
         let output = "/srv\n" + names.joined(separator: "\n") + "\n"

@@ -184,12 +184,38 @@ final class HostFolderLister {
         failed[folder] != nil
     }
 
+    /// The folder of the pane's process on the host (`paneFolder`): not
+    /// asked yet, asked, or the answer.
+    private var paneFolderAnswer: String??
+    private var paneFolderRequest: Task<Void, Never>?
+
+    /// The folder of the focused pane's process on the host, for the
+    /// Current Pane's Directory row (UI review 0617). The first call asks
+    /// with `read`, and `onChange` draws the screen again when the answer
+    /// comes. The screen asks once. nil while it asks, and when the host
+    /// gave no folder.
+    func paneFolder(read: @escaping @MainActor () async -> String?) -> String? {
+        if let paneFolderAnswer { return paneFolderAnswer }
+        if paneFolderRequest == nil {
+            paneFolderRequest = Task { [weak self] in
+                let answer = await read()
+                guard let self, !Task.isCancelled else { return }
+                paneFolderRequest = nil
+                paneFolderAnswer = .some(answer)
+                onChange?()
+            }
+        }
+        return nil
+    }
+
     /// Whether a request is in flight.
-    var isListing: Bool { !requests.isEmpty }
+    var isListing: Bool { !requests.isEmpty || paneFolderRequest != nil }
 
     /// Stop every request: the screen left.
     func cancel() {
         requests.values.forEach { $0.cancel() }
         requests.removeAll()
+        paneFolderRequest?.cancel()
+        paneFolderRequest = nil
     }
 }

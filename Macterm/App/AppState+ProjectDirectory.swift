@@ -30,6 +30,7 @@ extension AppState {
         projectStore: ProjectStore,
         paneDirectory: (@MainActor () -> String?)? = nil,
         listFolders: (@MainActor (String, String) async -> HostFolderAnswer)? = nil,
+        hostPaneFolder: (@MainActor () async -> String?)? = nil,
         folderCheck: (@MainActor (String, String) async -> RemoteHosts.FolderCheck)? = nil
     ) -> PaletteInput {
         let projectID = project.id
@@ -39,6 +40,9 @@ extension AppState {
             let checkFolder = folderCheck ?? { await RemoteHosts.shared.checkFolder($0, destination: $1) }
             let list = listFolders ?? { await RemoteHosts.shared.listFolders($0, destination: $1) }
             let lister = HostFolderLister { folder in await list(folder, destination) }
+            let readHostPaneFolder = hostPaneFolder ?? { [self] in
+                await hostProcessFolder(of: project, destination: destination)
+            }
             return PaletteInput(
                 id: "changeProjectDirectory:\(projectID.uuidString)",
                 title: AppCommand.changeProjectDirectory.title,
@@ -50,7 +54,10 @@ extension AppState {
                 check: { [self] text, _ in
                     let folder = Self.hostFolder(text)
                     if folder.isEmpty {
-                        return paneDirectoryAction(readPaneDirectory(), for: project, projectStore: projectStore)
+                        // The shell's report first, as for a local pane,
+                        // else the folder of its process on the host.
+                        let paneFolder = readPaneDirectory() ?? lister.paneFolder(read: readHostPaneFolder)
+                        return paneDirectoryAction(paneFolder, for: project, projectStore: projectStore)
                     }
                     // A session starts only in a folder from `/` or `~`.
                     guard HostCommands.isSafeHostFolder(folder) else {
@@ -184,15 +191,23 @@ extension AppState {
 
     /// The folder of the focused pane, when the key window shows a tab of
     /// `project`. A local pane's folder comes from its shell's report, else
-    /// from its process. A remote pane's folder is only the one that its
-    /// shell reports (OSC 7): through the session (`Pane.sessionDirectory`)
-    /// on a host with the server, else through the surface. The protocol
-    /// carries no folder of the host's process, so a shell that reports no
-    /// folder gives no row.
+    /// from its process. A remote pane's report (OSC 7) comes through the
+    /// session (`Pane.sessionDirectory`) on a host with the server, else
+    /// through the surface. With no report, the screen asks the host for
+    /// the folder of the shell's process (`hostProcessFolder`).
     func currentPaneDirectory(of project: Project) -> String? {
         guard !keyWindowShowsProjectScreen, let pane = focusedPane(for: project.id) else { return nil }
         if project.isRemote { return pane.sessionDirectory ?? SurfaceRegistry.shared.view(of: pane)?.currentPwd }
         return pane.liveLocalWorkingDirectory()
+    }
+
+    /// The folder of the focused pane's shell process on the host, from
+    /// the host's server (`RemoteHosts.processFolder`). nil for a pane with
+    /// no session on a server (a plain ssh shell), and when the host gives
+    /// no answer.
+    func hostProcessFolder(of project: Project, destination: String) async -> String? {
+        guard !keyWindowShowsProjectScreen, let pid = focusedPane(for: project.id)?.hostShellPID else { return nil }
+        return await RemoteHosts.shared.processFolder(pid: pid, destination: destination)
     }
 
     /// The folder that the pane row offers: the pane's folder, unless it is

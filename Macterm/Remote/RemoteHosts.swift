@@ -322,6 +322,17 @@ final class RemoteHosts {
         return .listed(FolderListing(path: list.path, names: list.names))
     }
 
+    /// The folder of the process `pid` on the host (a session's shell), from
+    /// the host's server (`HostCommands.processFolderScript`, `run`). It
+    /// uses only a connection that is up, as every background read. nil
+    /// when no server is up, or no clear answer came in `timeout`.
+    func processFolder(pid: Int32, destination: String, timeout: Duration = .seconds(2)) async -> String? {
+        guard let result = await run(HostCommands.processFolderArgv(pid: pid), destination: destination, timeout: timeout) else {
+            return nil
+        }
+        return HostCommands.processFolder(code: result.code, output: String(decoding: result.output.bytes, as: UTF8.self))
+    }
+
     /// `checkFolder` for the scp-style path of a new remote project in the
     /// GUI (the sheet, the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the

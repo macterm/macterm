@@ -209,6 +209,27 @@ enum HostCommands {
         command(hexFolder + " " + folderCheckScript, [Scripts.hex(directory)])
     }
 
+    /// The folder of a process on the host, for the Current Pane's
+    /// Directory row of a remote pane (`RemoteHosts.processFolder`). The
+    /// pid is `$1`, so no shell parses it. Linux reads `/proc/<pid>/cwd`,
+    /// macOS asks `lsof`, which is in `/usr/sbin` there, so the script adds
+    /// it to `PATH`. One line with the folder from `/`, else exit 1.
+    static let processFolderScript = #"PATH=$PATH:/usr/sbin:/sbin; d=$(readlink "/proc/$1/cwd" 2>/dev/null) || "#
+        + #"d=$(lsof -a -d cwd -Fn -p "$1" 2>/dev/null | sed -n "s/^n//p"); "#
+        + #"case $d in /*) printf "%s\n" "$d" ;; *) exit 1 ;; esac"#
+
+    /// The `command.run` argv of `processFolderScript` for `pid`.
+    static func processFolderArgv(pid: Int32) -> [String] {
+        ["/bin/sh", "-c", processFolderScript, "sh", String(pid)]
+    }
+
+    /// The folder in the output of `processFolderScript`, nil for any
+    /// other end.
+    static func processFolder(code: UInt8?, output: String) -> String? {
+        guard code == 0, let line = output.split(separator: "\n").first, line.hasPrefix("/") else { return nil }
+        return String(line)
+    }
+
     /// The most folder names that one listing gives (`folderListScript`).
     /// Large, because the field filters the names by the typed prefix
     /// after they come: a small cap would hide a folder in a big folder.

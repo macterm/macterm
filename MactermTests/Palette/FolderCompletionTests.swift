@@ -141,6 +141,23 @@ struct FolderCompletionTests {
     }
 
     @Test
+    func the_pane_folder_is_asked_once() async throws {
+        let lister = HostFolderLister { _ in .unavailable }
+        var asked = 0
+        var changes = 0
+        lister.onChange = { changes += 1 }
+        #expect(lister.paneFolder {
+            asked += 1
+            return "/srv/app"
+        } == nil, "asked, not there yet")
+        #expect(lister.isListing, "the field shows the spinner meanwhile")
+        try await waitUntil { changes == 1 }
+        #expect(lister.paneFolder { nil } == "/srv/app", "the answer stays")
+        #expect(asked == 1)
+        #expect(!lister.isListing)
+    }
+
+    @Test
     func a_cancelled_request_tells_nothing() async throws {
         let lister = HostFolderLister { _ in
             try? await Task.sleep(for: .milliseconds(100))
