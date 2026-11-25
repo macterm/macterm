@@ -576,6 +576,7 @@ final class ControlHandler {
             guard !name.isEmpty else { throw Self.emptyNameError }
             try Self.checkName(name)
         }
+        let parent = try args.parent.map { try resolveTreeProject($0, role: "parent") }
         #if DEBUG
         // `--skip-folder-check`: the e2e suite's project on a host that never answers.
         let checksFolder = args.force != true
@@ -600,9 +601,14 @@ final class ControlHandler {
         // distinct project for the same directory. `--select` only activates
         // the just-created project; scripts that want create-or-select must
         // check `project list` first.
+        // The parent can go while the host check waits.
+        if let parent, projectStore.row(parent.id) == nil {
+            throw ControlError(code: .notFound, message: "project \"\(parent.name)\" was removed")
+        }
         guard let project = projectStore.create(
             name: name ?? (canonical as NSString).lastPathComponent,
-            path: canonical
+            path: canonical,
+            parent: parent?.id
         )
         else {
             throw ControlError(code: .internalError, message: "the server refused the project")
@@ -779,33 +785,64 @@ final class ControlHandler {
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
     }
 
-    /// Reorder a tab within its project to an absolute slot (#224). `slot` is
-    /// the tab's FINAL 1-based position — `tab move tab:4 2` makes it second —
-    /// which `Workspace.moveTab` doesn't speak: it takes a drag-and-drop
-    /// insertion offset in the pre-removal coordinate space, where a drop past
-    /// the origin lands one slot earlier. So a downward move passes `slot`
-    /// (final position + the removed tab's own vacated slot) and any other
-    /// passes `slot - 1` (0-based conversion only).
+    /// Move a tab to another project (`toProject`), to a slot (#224), or
+    /// both. The move to a project is Move to Project of the sidebar
+    /// (`AppState.moveNode`): the tab goes to the end of the tabs of that
+    /// project, and that project becomes active, as in the app. A
+    /// destination that is the tab's own project is a plain reorder.
+    ///
+    /// `slot` is the tab's FINAL 1-based position in the project that holds
+    /// it at the end: `tab move tab:4 2` makes it second. `Workspace.moveTab`
+    /// takes a drop offset in the pre-removal coordinate space instead, where
+    /// a drop past the origin lands one slot earlier. So a downward move
+    /// passes `slot`, and any other passes `slot - 1`.
     private func tabMove(_ args: ControlArgs) throws -> ControlData {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.move requires a tab selector")
         }
-        guard let slot = args.slot else {
-            throw ControlError(code: .badRequest, message: "tab.move requires a destination slot")
+        guard args.slot != nil || args.toProject != nil else {
+            throw ControlError(code: .badRequest, message: "tab.move requires a destination slot or project")
         }
         let (project, workspace) = try resolveProjectTabs(args)
-        let (fromIndex, tab) = try resolveTab(args, in: workspace)
-        // Reject out-of-range slots up front so the caller isn't silently
-        // clamped — same contract as pane.resize-split's ratio bounds.
-        guard slot >= 1, slot <= workspace.tabs.count else {
+        let (_, tab) = try resolveTab(args, in: workspace)
+        let destination = try args.toProject.map { try resolveTreeProject($0, role: "destination") }
+        var holder = (project, workspace)
+        if let destination, destination.id != project.id {
+            // Check the slot before the move, so that a bad slot moves nothing.
+            let target = tabs(of: destination)
+            if let slot = args.slot { try Self.checkSlot(slot, count: target.tabs.count + 1) }
+            appState.moveNode(
+                .tab(projectID: project.id, tabID: tab.id),
+                to: destination,
+                store: projectStore,
+                in: appState.keyWindow
+            )
+            holder = (destination, target)
+        } else if args.slot == nil {
+            throw ControlError(code: .badRequest, message: "the tab is already in \"\(project.name)\"")
+        }
+        let (owner, ownerTabs) = holder
+        guard let fromIndex = ownerTabs.tabs.firstIndex(where: { $0.id == tab.id }).map({ $0 + 1 }) else {
+            throw ControlError(code: .internalError, message: "the server refused the move")
+        }
+        guard let slot = args.slot else {
+            return ControlData(tabs: [tabInfo(tab, index: fromIndex, in: ownerTabs)])
+        }
+        try Self.checkSlot(slot, count: ownerTabs.tabs.count)
+        appState.reorderTab(tab.id, inProject: owner.id, toIndex: slot > fromIndex ? slot : slot - 1)
+        return ControlData(tabs: [tabInfo(tab, index: slot, in: ownerTabs)])
+    }
+
+    /// Reject out-of-range slots up front so the caller isn't silently
+    /// clamped — same contract as pane.resize-split's ratio bounds.
+    private static func checkSlot(_ slot: Int, count: Int) throws {
+        guard slot >= 1, slot <= count else {
             throw ControlError(
                 code: .badRequest,
-                message: "slot must be between 1 and \(workspace.tabs.count)",
+                message: "slot must be between 1 and \(count)",
                 action: "run `macterm tab list` for the current order"
             )
         }
-        appState.reorderTab(tab.id, inProject: project.id, toIndex: slot > fromIndex ? slot : slot - 1)
-        return ControlData(tabs: [tabInfo(tab, index: slot, in: workspace)])
     }
 
     private func tabRename(_ args: ControlArgs) throws -> ControlData {
@@ -1497,6 +1534,22 @@ final class ControlHandler {
         )
     }
 
+    /// A project of the tree that a node can go in: `project create
+    /// --parent` and `tab move --to-project`. The pinned, the scratch and
+    /// the quick terminal's projects are hidden, so they are refused, as the
+    /// list of Move to Project leaves them out (design 013 §2.3).
+    private func resolveTreeProject(_ selector: String, role: String) throws -> Project {
+        let project = try resolveProject(selector)
+        guard project.isTreeProject else {
+            throw ControlError(
+                code: .badRequest,
+                message: "\(project.name) is not a project of the tree, so it cannot be the \(role)",
+                action: "pin a tab or move it to Scratch Tabs in the app"
+            )
+        }
+        return project
+    }
+
     /// A project by its selector: a UUID, an alias (`pinned`, `scratch`,
     /// `quick`), or a project of the tree by name or 1-based index
     /// (design/010 §11, §3). No selector is the active project.
@@ -1677,12 +1730,15 @@ final class ControlHandler {
     }
 
     private func tabInfo(_ tab: TerminalTab, index: Int, in workspace: ProjectTabs) -> ControlTabInfo {
-        ControlTabInfo(
+        let project = appState.model.project(workspace.id)
+        return ControlTabInfo(
             index: index,
             id: tab.id.uuidString,
             title: tab.sidebarTitle,
             active: tab.id == workspace.activeTabID,
-            paneCount: tab.splitRoot.allPanes().count
+            paneCount: tab.splitRoot.allPanes().count,
+            parent: project?.name ?? "",
+            parentID: workspace.id.uuidString
         )
     }
 

@@ -93,7 +93,7 @@
       "usage" : "macterm status [--socket <socket>] [--json]"
     },
     {
-      "abstract" : "List, create, select, rename, and remove projects.",
+      "abstract" : "List, create, select, rename, move, and remove projects.",
       "arguments" : [
 
       ],
@@ -204,6 +204,17 @@
           "value" : "name"
         },
         {
+          "abstract" : "Project to put the new project in (name, UUID, or index). The default is the top level.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--parent"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "parent"
+        },
+        {
           "abstract" : "Select the project too.",
           "debug" : false,
           "hidden" : false,
@@ -263,7 +274,7 @@
       "subcommands" : [
 
       ],
-      "usage" : "macterm project create <path> [--name <name>] [--select] [--skip-folder-check] [--socket <socket>] [--json]"
+      "usage" : "macterm project create <path> [--name <name>] [--parent <parent>] [--select] [--skip-folder-check] [--socket <socket>] [--json]"
     },
     {
       "abstract" : "Make a project active.",
@@ -551,7 +562,7 @@
       "usage" : "macterm project memory <project> [--set <set>] [--panel <panel>] [--summary <summary>] [--socket <socket>] [--json]"
     },
     {
-      "abstract" : "List, create, select, reorder, and close tabs.",
+      "abstract" : "List, create, select, move, and close tabs.",
       "arguments" : [
 
       ],
@@ -581,6 +592,7 @@
         "move",
         "rename",
         "close",
+        "remove",
         "merge"
       ],
       "usage" : "macterm tab <subcommand>"
@@ -807,7 +819,7 @@
       "usage" : "macterm tab select <tab> [--project <project>] [--window <window>] [--socket <socket>] [--json]"
     },
     {
-      "abstract" : "Move a tab to a slot. The slot is the final position of the tab in the `tab list` order, counted from 1.",
+      "abstract" : "Move a tab to a slot, to another project, or both.",
       "arguments" : [
         {
           "abstract" : "Tab title, UUID, or index (tab:3).",
@@ -820,13 +832,25 @@
           "abstract" : "Destination slot: the position of the tab at the end, counted from 1.",
           "hidden" : false,
           "name" : "slot",
-          "optional" : false,
+          "optional" : true,
           "repeating" : false
         }
       ],
       "debug" : false,
+      "discussion" : "The slot is the final position of the tab in the `tab list` order, counted from 1. With --to-project, the tab goes to the end of the tabs of that project, and the slot is in that project.",
       "hidden" : false,
       "options" : [
+        {
+          "abstract" : "Destination project (name, UUID, or index).",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--to-project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "to-project"
+        },
         {
           "abstract" : "Project scope. The default is the active project.",
           "debug" : false,
@@ -878,7 +902,7 @@
       "subcommands" : [
 
       ],
-      "usage" : "macterm tab move <tab> <slot> [--project <project>] [--socket <socket>] [--json]"
+      "usage" : "macterm tab move <tab> [<slot>] [--to-project <to-project>] [--project <project>] [--socket <socket>] [--json]"
     },
     {
       "abstract" : "Rename a tab, or use --reset to restore its automatic title.",
@@ -1040,6 +1064,83 @@
 
       ],
       "usage" : "macterm tab close <tab> [--project <project>] [--force] [--socket <socket>] [--json]"
+    },
+    {
+      "abstract" : "Remove a tab. This is the same as `tab close`.",
+      "arguments" : [
+        {
+          "abstract" : "Tab title, UUID, or index (tab:3).",
+          "hidden" : false,
+          "name" : "tab",
+          "optional" : false,
+          "repeating" : false
+        }
+      ],
+      "debug" : false,
+      "hidden" : false,
+      "options" : [
+        {
+          "abstract" : "Project scope. The default is the active project.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--project"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "project"
+        },
+        {
+          "abstract" : "Close even if a pane has a running program.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--force"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Control socket path. It overrides discovery.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--socket"
+          ],
+          "optional" : true,
+          "repeating" : false,
+          "value" : "socket"
+        },
+        {
+          "abstract" : "Print the raw JSON payload instead of a table.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "--json"
+          ],
+          "optional" : true,
+          "repeating" : false
+        },
+        {
+          "abstract" : "Show help information.",
+          "debug" : false,
+          "hidden" : false,
+          "names" : [
+            "-h",
+            "--help"
+          ],
+          "optional" : true,
+          "repeating" : false
+        }
+      ],
+      "path" : [
+        "tab",
+        "remove"
+      ],
+      "subcommands" : [
+
+      ],
+      "usage" : "macterm tab remove <tab> [--project <project>] [--force] [--socket <socket>] [--json]"
     },
     {
       "abstract" : "[debug] Merge a tab into the active tab, next to a pane (--dest) or at the edge of the workspace.",

@@ -11,8 +11,8 @@ A bundled CLI controls the app over `<App Support>/control.sock` (target `Macter
 The verbs:
 
 - `status`
-- `project list/create/select/rename/remove`
-- `tab list/new/select/move/rename/close/merge`
+- `project list/create/select/rename/remove`. `project create --parent` is New Project Inside.
+- `tab list/new/select/move/rename/close/remove/merge`. `tab move --to-project` is Move to Project (`AppState.moveNode`). `tab remove` is `tab close`. A tab and a project have the same fields that name a node: `id`, `parent` and `parentID`.
 - `pane list/inspect/dump/split/focus/close/run/key/zoom/resize-split`
 - `grid RxC`
 - `session list/info/kill`
@@ -28,6 +28,7 @@ Rules:
 
 - **Wire protocol** (`ControlProtocol.swift`, compiled into both targets). One request is one JSON line that ends with a newline, for each connection: `{v, id, command, args}`, with `noun.verb` commands. The responses are `{ok, data}` or `{ok:false, error:{code, message, action?}}`. The codes are in snake_case (`not_found`, `busy`, `no_surface`, `starting`, `ambiguous`).
   - The `v` of a request is the minimum version of the server that it needs. Ordinary requests stay at v1. `focus` needs v2. The handler rejects newer versions before dispatch.
+  - `parent` and `toProject` need v3 (`ControlProtocol.treeFieldVersion`): an older app ignores them and makes a top-level project or reorders the tab in its own project.
   - Apps of v1 that shipped earlier ignore `v`. The CLI must therefore check newer requests against the version in the response of the server before it sends any mutation. A new version number alone cannot stop an older app from ignoring `--no-focus` in silence.
 - **Server** (`ControlSocketServer`). A dedicated thread polls a non-blocking listen fd. The dispatch of each connection hops to `@MainActor`. The server starts in `applicationDidFinishLaunching`. The handler attaches in `installResponders` (early requests get `starting`). The socket has mode 0600 in a directory with mode 0700, for the same user only.
 - **Handler** (`ControlHandler`). It translates and delegates only. It resolves selectors (name, UUID, index from 1). It calls the same `AppState`, `ProjectStore` and `SessionClient` methods that the UI uses. Close verbs return a typed `busy` error, and they do not stage dialogs. A session selector with no `--project` resolves in the project that holds the session (`MACTERM_SESSION` arrives in the same way). A pane in the background can therefore still reach itself while the user looks at another project.

@@ -1,4 +1,4 @@
-OVERVIEW: List, create, select, reorder, and close tabs.
+OVERVIEW: List, create, select, move, and close tabs.
 
 USAGE: macterm tab <subcommand>
 
@@ -10,11 +10,11 @@ SUBCOMMANDS:
   new                     Open a new tab. It becomes active, unless you use
                           --no-focus.
   select                  Make a tab active.
-  move                    Move a tab to a slot. The slot is the final position
-                          of the tab in the `tab list` order, counted from 1.
+  move                    Move a tab to a slot, to another project, or both.
   rename                  Rename a tab, or use --reset to restore its automatic
                           title.
   close                   Close a tab. This kills the zmx sessions of its panes.
+  remove                  Remove a tab. This is the same as `tab close`.
   merge                   [debug] Merge a tab into the active tab, next to a
                           pane (--dest) or at the edge of the workspace.
 

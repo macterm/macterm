@@ -8,8 +8,9 @@ OPTIONS:
 SUBCOMMANDS:
   status                  Show whether Macterm is running and which project is
                           active.
-  project                 List, create, select, rename, and remove projects.
-  tab                     List, create, select, reorder, and close tabs.
+  project                 List, create, select, rename, move, and remove
+                          projects.
+  tab                     List, create, select, move, and close tabs.
   window                  List, open and close terminal windows.
   widget                  List, add, edit and remove desktop widgets.
   palette                 List the palettes of the installed extensions and

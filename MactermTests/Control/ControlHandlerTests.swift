@@ -469,6 +469,38 @@ struct ControlHandlerTests {
         #expect(projectStore.projects.count == 2)
     }
 
+    /// `--parent` is New Project Inside: the new project is the last child
+    /// of the parent. The pinned and the scratch tabs cannot be a parent.
+    @Test
+    func project_create_puts_the_project_in_a_parent() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let parent = seedProject(appState, projectStore, name: "Work")
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-create-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func create(parent: String) async -> ControlResponse {
+            var args = ControlArgs(path: dir.path, name: "api")
+            args.parent = parent
+            return await handler.handle(request("project.create", args: args))
+        }
+
+        for selector in ["project:1", parent.id.uuidString] {
+            let created = await create(parent: selector)
+            #expect(created.data?.projects?.first?.parentID == parent.id.uuidString, "\(selector)")
+        }
+        let created = await create(parent: "Work")
+        #expect(created.ok, "\(String(describing: created.error))")
+        let info = try #require(created.data?.projects?.first)
+        #expect(info.parentID == parent.id.uuidString)
+        #expect(info.parent == "Work")
+        #expect(try projectStore.row(#require(UUID(uuidString: info.id)))?.parent == parent.id)
+
+        for selector in ["ghost", "pinned", "scratch"] {
+            #expect(await !create(parent: selector).ok, "\(selector)")
+        }
+        #expect(projectStore.projects.count == 4)
+    }
+
     @Test
     func project_create_rejects_bad_paths() async {
         let (handler, _, projectStore) = makeHandler()
@@ -1176,6 +1208,118 @@ struct ControlHandlerTests {
         #expect(unknown.error?.code == .notFound)
 
         #expect(workspace.tabs.map(\.id) == before)
+    }
+
+    /// `--to-project` is Move to Project: the tab goes to the end of the
+    /// tabs of the destination, with its panes; the old slot argument then
+    /// orders it there.
+    @Test
+    func tab_move_to_project_moves_the_tab_and_orders_it_with_a_slot() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let source = seedProject(appState, projectStore, name: "api")
+        appState.createTab(projectID: source.id, projectPath: source.path)
+        let destination = seedProject(appState, projectStore, name: "web", select: false)
+        appState.createTab(projectID: destination.id, projectPath: destination.path)
+        let from = try #require(appState.liveTabs[source.id])
+        let to = try #require(appState.liveTabs[destination.id])
+        let moving = from.tabs[1].id
+        let pane = try #require(from.tabs[1].splitRoot.allPanes().first)
+        let before = to.tabs.map(\.id)
+        #expect(before.count == 2)
+
+        let moved = await handler.handle(request(
+            "tab.move", args: { var a = ControlArgs(project: "api", tab: "tab:2")
+                a.toProject = "web"
+                return a
+            }()
+        ))
+        #expect(moved.ok, "\(String(describing: moved.error))")
+        #expect(moved.data?.tabs?.first?.index == 3)
+        #expect(moved.data?.tabs?.first?.parentID == destination.id.uuidString)
+        #expect(to.tabs.map(\.id) == before + [moving])
+        #expect(!from.tabs.contains { $0.id == moving })
+        #expect(pane.projectID == destination.id)
+
+        // Back, to the first slot of the source.
+        let back = await handler.handle(request(
+            "tab.move",
+            args: { var a = ControlArgs(project: "web", tab: "tab:3", slot: 1)
+                a.toProject = "api"
+                return a
+            }()
+        ))
+        #expect(back.ok, "\(String(describing: back.error))")
+        #expect(back.data?.tabs?.first?.index == 1)
+        #expect(from.tabs.first?.id == moving)
+        #expect(to.tabs.map(\.id) == before)
+    }
+
+    /// The destination takes every project selector. Its own project with a
+    /// slot is a plain reorder.
+    @Test
+    func tab_move_to_project_takes_a_uuid_or_an_index_and_its_own_project_reorders() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let source = seedProject(appState, projectStore, name: "api")
+        appState.createTab(projectID: source.id, projectPath: source.path)
+        let destination = seedProject(appState, projectStore, name: "web", select: false)
+        let from = try #require(appState.liveTabs[source.id])
+        let to = try #require(appState.liveTabs[destination.id])
+        let ids = from.tabs.map(\.id)
+
+        func move(_ tab: String, in project: String, to target: String, slot: Int? = nil) async -> ControlResponse {
+            var args = ControlArgs(project: project, tab: tab, slot: slot)
+            args.toProject = target
+            return await handler.handle(request("tab.move", args: args))
+        }
+        let byIndex = await move("tab:2", in: "api", to: "project:2")
+        #expect(byIndex.ok, "\(String(describing: byIndex.error))")
+        #expect(to.tabs.last?.id == ids[1])
+        let byID = await move("tab:2", in: "web", to: source.id.uuidString)
+        #expect(byID.ok, "\(String(describing: byID.error))")
+        #expect(from.tabs.map(\.id) == ids)
+
+        let reorder = await move("tab:2", in: "api", to: "api", slot: 1)
+        #expect(reorder.ok, "\(String(describing: reorder.error))")
+        #expect(from.tabs.map(\.id) == [ids[1], ids[0]])
+    }
+
+    /// The whole request is checked before the first change: a bad slot or
+    /// destination leaves the tab where it was.
+    @Test
+    func tab_move_to_project_refuses_a_bad_destination_or_slot_with_no_change() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let source = seedProject(appState, projectStore, name: "api")
+        appState.createTab(projectID: source.id, projectPath: source.path)
+        _ = seedProject(appState, projectStore, name: "web", select: false)
+        let from = try #require(appState.liveTabs[source.id])
+        let before = from.tabs.map(\.id)
+
+        func move(to destination: String, slot: Int? = nil) async -> ControlResponse {
+            var args = ControlArgs(project: "api", tab: "tab:2", slot: slot)
+            args.toProject = destination
+            return await handler.handle(request("tab.move", args: args))
+        }
+        // "web" has one tab, so with the moved tab the slots are 1 and 2.
+        #expect(await move(to: "web", slot: 3).error?.code == .badRequest)
+        #expect(await move(to: "web", slot: 0).error?.code == .badRequest)
+        #expect(await move(to: "api").error?.code == .badRequest)
+        #expect(await move(to: "ghost").error?.code == .notFound)
+        // The pinned and the scratch tabs are not projects of the tree.
+        #expect(await move(to: "pinned").error?.code == .badRequest)
+        #expect(await move(to: "scratch").error?.code == .badRequest)
+        #expect(from.tabs.map(\.id) == before)
+    }
+
+    /// `tab list` names a tab's project with the fields that `project list`
+    /// names a parent with.
+    @Test
+    func tab_list_names_the_project_of_each_tab() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let project = seedProject(appState, projectStore, name: "api")
+        let response = await handler.handle(request("tab.list"))
+        let tab = try #require(response.data?.tabs?.first)
+        #expect(tab.parent == "api")
+        #expect(tab.parentID == project.id.uuidString)
     }
 
     // MARK: - tab.rename

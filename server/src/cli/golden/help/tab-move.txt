@@ -1,7 +1,10 @@
-OVERVIEW: Move a tab to a slot. The slot is the final position of the tab in
-the `tab list` order, counted from 1.
+OVERVIEW: Move a tab to a slot, to another project, or both.
 
-USAGE: macterm tab move <tab> <slot> [--project <project>] [--socket <socket>] [--json]
+The slot is the final position of the tab in the `tab list` order, counted from
+1. With --to-project, the tab goes to the end of the tabs of that project, and
+the slot is in that project.
+
+USAGE: macterm tab move <tab> [<slot>] [--to-project <to-project>] [--project <project>] [--socket <socket>] [--json]
 
 ARGUMENTS:
   <tab>                   Tab title, UUID, or index (tab:3).
@@ -9,6 +12,8 @@ ARGUMENTS:
                           counted from 1.
 
 OPTIONS:
+  --to-project <to-project>
+                          Destination project (name, UUID, or index).
   --project <project>     Project scope. The default is the active project.
   --socket <socket>       Control socket path. It overrides discovery.
   --json                  Print the raw JSON payload instead of a table.

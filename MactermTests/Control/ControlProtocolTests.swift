@@ -87,6 +87,22 @@ struct ControlProtocolTests {
         #expect(explicit.v == ControlProtocol.focusFieldVersion)
     }
 
+    /// `parent` and `toProject` need v3: an older app would ignore them and
+    /// make a top-level project, or reorder the tab in its own project.
+    @Test
+    func tree_fields_need_the_tree_version() {
+        var create = ControlArgs(path: "/tmp")
+        create.parent = "Work"
+        #expect(ControlRequest(command: "project.create", args: create).v == ControlProtocol.treeFieldVersion)
+
+        var move = ControlArgs(tab: "tab:1", slot: 1)
+        move.toProject = "web"
+        #expect(ControlRequest(command: "tab.move", args: move).v == ControlProtocol.treeFieldVersion)
+
+        #expect(ControlRequest(command: "tab.move", args: ControlArgs(tab: "tab:1", slot: 1)).v
+            == ControlProtocol.minimumSupportedVersion)
+    }
+
     /// A server must refuse a request whose minimum version exceeds its own,
     /// and the wire shape of that refusal round-trips.
     @Test

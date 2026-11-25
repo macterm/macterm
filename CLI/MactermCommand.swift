@@ -136,7 +136,7 @@ struct Status: ParsableCommand {
 struct ProjectCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "project",
-        abstract: "List, create, select, rename, and remove projects.",
+        abstract: "List, create, select, rename, move, and remove projects.",
         subcommands: projectSubcommands,
         defaultSubcommand: List.self
     )
@@ -216,6 +216,9 @@ struct ProjectCommand: ParsableCommand {
         @Option(help: "Display name, with no slash. The default is the name of the directory.")
         var name: String?
 
+        @Option(help: "Project to put the new project in (name, UUID, or index). The default is the top level.")
+        var parent: String?
+
         @Flag(help: "Select the project too.")
         var select = false
 
@@ -231,9 +234,11 @@ struct ProjectCommand: ParsableCommand {
         @OptionGroup var options: ConnectionOptions
 
         func run() throws {
+            var args = ControlArgs(path: path, name: name, select: select, force: skipFolderCheck ? true : nil)
+            args.parent = parent
             try runControlCommand(
                 command: "project.create",
-                args: ControlArgs(path: path, name: name, select: select, force: skipFolderCheck ? true : nil),
+                args: args,
                 options: options,
                 // A remote spec waits for the login and the check on the host.
                 readTimeout: isRemote ? AskpassCommand.answerTimeout : 10
@@ -382,7 +387,7 @@ struct WindowCommand: ParsableCommand {
 struct TabCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "tab",
-        abstract: "List, create, select, reorder, and close tabs.",
+        abstract: "List, create, select, move, and close tabs.",
         subcommands: tabSubcommands,
         defaultSubcommand: List.self
     )
@@ -390,7 +395,7 @@ struct TabCommand: ParsableCommand {
     /// Mirrors PaneCommand.paneSubcommands: the debug-only `merge` verb is
     /// present in debug builds of the CLI and absent in release.
     private static var tabSubcommands: [ParsableCommand.Type] {
-        var subs: [ParsableCommand.Type] = [List.self, New.self, Select.self, Move.self, Rename.self, Close.self]
+        var subs: [ParsableCommand.Type] = [List.self, New.self, Select.self, Move.self, Rename.self, Close.self, Remove.self]
         #if DEBUG
         subs.append(Merge.self)
         #endif
@@ -487,26 +492,38 @@ struct TabCommand: ParsableCommand {
 
     struct Move: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Move a tab to a slot. The slot is the final position of the tab in the `tab list` order, counted from 1."
+            abstract: "Move a tab to a slot, to another project, or both.",
+            discussion: """
+            The slot is the final position of the tab in the `tab list` order, counted from 1. With \
+            --to-project, the tab goes to the end of the tabs of that project, and the slot is in that \
+            project.
+            """
         )
 
         @Argument(help: "Tab title, UUID, or index (tab:3).")
         var tab: String
 
         @Argument(help: "Destination slot: the position of the tab at the end, counted from 1.")
-        var slot: Int
+        var slot: Int?
+
+        @Option(help: "Destination project (name, UUID, or index).")
+        var toProject: String?
 
         @Option(help: "Project scope. The default is the active project.")
         var project: String?
 
         @OptionGroup var options: ConnectionOptions
 
+        func validate() throws {
+            if slot == nil, toProject == nil {
+                throw ValidationError("Give a destination slot, --to-project, or both.")
+            }
+        }
+
         func run() throws {
-            try runControlCommand(
-                command: "tab.move",
-                args: ControlArgs(project: project, tab: tab, slot: slot),
-                options: options
-            )
+            var args = ControlArgs(project: project, tab: tab, slot: slot)
+            args.toProject = toProject
+            try runControlCommand(command: "tab.move", args: args, options: options)
         }
     }
 
@@ -554,6 +571,28 @@ struct TabCommand: ParsableCommand {
             abstract: "Close a tab. This kills the zmx sessions of its panes."
         )
 
+        @OptionGroup var target: CloseTarget
+
+        func run() throws {
+            try target.close()
+        }
+    }
+
+    /// `tab remove` is `tab close` with the verb of `project remove`, so
+    /// that the two groups have the same verbs (design 013 §2.8).
+    struct Remove: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Remove a tab. This is the same as `tab close`."
+        )
+
+        @OptionGroup var target: CloseTarget
+
+        func run() throws {
+            try target.close()
+        }
+    }
+
+    struct CloseTarget: ParsableArguments {
         @Argument(help: "Tab title, UUID, or index (tab:3).")
         var tab: String
 
@@ -565,7 +604,7 @@ struct TabCommand: ParsableCommand {
 
         @OptionGroup var options: ConnectionOptions
 
-        func run() throws {
+        func close() throws {
             try runControlCommand(
                 command: "tab.close",
                 args: ControlArgs(project: project, tab: tab, force: force),

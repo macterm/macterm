@@ -63,7 +63,8 @@ macterm project create ~/dev/api --name api --select
 ```
 
 `--select` makes the new project the active project. The active project is the project that the user
-looks at. In later commands, name projects by `name` or `id` (`--project api`). If two projects have
+looks at. `--parent Work` puts the new project in the project `Work`, as its last project. In later
+commands, name projects by `name` or `id` (`--project api`). If two projects have
 the same name, the answer is `ambiguous`, so pass the `id`. `macterm project remove <id>` removes a
 duplicate. It does not touch any file, but it kills the sessions of that project and of every project
 inside it.
@@ -98,6 +99,10 @@ macterm tab rename --project api 2 server
 - `macterm tab rename --project api 2 --reset` restores the automatic title, which is the name of the
   running program.
 - `macterm tab move --project api 3 1` makes tab 3 the first tab.
+- `macterm tab move --project api 3 --to-project web` moves tab 3 to the end of the tabs of `web`. Its
+  panes and their sessions go with it. Add a slot (`3 1 --to-project web`) to make it the first tab of
+  `web`. In `macterm tab list --json`, the `parent` and the `parentID` of a tab name its project.
+- `macterm tab remove --project api 3` is the same as `macterm tab close --project api 3`.
 
 Add `--no-focus` to `tab new` or `pane split` to start the new terminal with no change to the
 selection, the focus history or the zoom. If the app is too old for `--no-focus`, the command fails
