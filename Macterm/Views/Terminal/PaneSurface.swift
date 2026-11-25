@@ -515,13 +515,13 @@ extension Pane {
     /// in exactly one tested place. This wrapper just feeds it the live
     /// surface signal.
     var needsConfirmClose: Bool {
-        let view = SurfaceRegistry.shared.view(of: self)
+        guard let view = SurfaceRegistry.shared.view(of: self) else { return false }
         return ForegroundPolicy.needsConfirmClose(
             sample: foregroundSample,
             executionState: executionState,
             isRemote: isRemote,
-            hasSurface: view != nil,
-            surfaceBusy: view?.needsConfirmQuit() == true
+            confirmClose: GhosttyApp.shared.confirmCloseSurface,
+            surfaceBusy: { view.needsConfirmQuit() }
         )
     }
 
