@@ -54,6 +54,21 @@ struct MoveIntoProjectPaletteScopeTests {
     }
 
     @Test
+    func an_empty_query_keeps_the_order_of_the_projects() {
+        let f = makeFixture()
+        _ = f.store.create(name: "lib", path: "/tmp/lib", parent: f.api.id)
+        _ = f.store.create(name: "Z", path: "/tmp/z")
+        #expect(f.rows("").map(\.title) == ["Work", "Work/api", "Work/api/lib", "Z"])
+    }
+
+    @Test
+    func a_query_matches_the_folder_and_any_letter_case() {
+        let f = makeFixture()
+        #expect(f.rows("/tmp/api").map(\.title) == ["Work/api"])
+        #expect(f.rows("work/API").map(\.title) == ["Work/api"])
+    }
+
+    @Test
     func a_query_filters_by_name_or_path() {
         let f = makeFixture()
         #expect(f.rows("ap").map(\.title) == ["Work/api"])
