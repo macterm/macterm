@@ -58,17 +58,12 @@ struct PaletteScopeTests {
     }
 
     private func makeContext() -> PaletteContext {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
-        return PaletteContext(appState: state, projectStore: ProjectStore(fileURL: storeTmp))
+        return PaletteContext(appState: state, projectStore: TestModel.projectStore(state))
     }
 
     @Test
@@ -78,7 +73,9 @@ struct PaletteScopeTests {
             #expect(frame.scope.loading == nil)
             #expect(frame.scope.failure == nil)
             #expect(frame.pill == id.pill)
+            #expect(id.pill.icon != nil, "only an input screen's pill has no icon")
         }
+        #expect(PaletteScopeID.remoteHosts.pill.icon != nil)
         // Passwords reads live state, so activating it loads nothing; Files
         // indexes, and with no local project says so.
         let passwords = PaletteFrame(.passwords)

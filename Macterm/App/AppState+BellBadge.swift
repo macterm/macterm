@@ -39,7 +39,7 @@ extension AppState {
     func markSeenIfInKeyPanel(paneID: UUID) {
         if let quick = adoptedQuickTerminal,
            quick.focusedPaneID == paneID,
-           let pane = quick.splitRoot.findPane(id: paneID)
+           let pane = quick.splitRoot?.findPane(id: paneID)
         {
             if paneIsInKeyWindow(pane) { pane.markSeen() }
             return
@@ -55,18 +55,17 @@ extension AppState {
     /// bell on `windowDidBecomeKey`; Macterm's unit is the tab.
     func markActiveTabSeenOnActivation() {
         guard let projectID = activeProjectID,
-              let pane = workspaces[projectID]?.activeTab?.splitRoot.allPanes().first
+              let pane = model.activeTab(of: projectID)?.splitRoot.allPanes().first
         else { return }
         markSeenIfActive(paneID: pane.id, projectID: projectID)
     }
 
-    /// Re-derive the badge from every tab in every workspace (the pinned
-    /// sentinel included — its tabs ring like any other) and write it only
-    /// when it changed. Mirror (shadow) tabs are not in `workspaces`, so a
-    /// tab shown in two windows counts once.
+    /// Re-derive the badge from every tab of every project of the model (the
+    /// pinned tabs included — they ring like any other) and write it only
+    /// when it changed. A tab shown in two windows counts once.
     func syncDockBadge() {
         let features = bellFeatures()
-        let count = BellBadge.tabCount(workspaces.values.flatMap(\.tabs))
+        let count = BellBadge.tabCount(model.allTabs.map(\.tab))
         let label = BellBadge.label(bellTabCount: count, features: features)
         guard label != dockBadgeLabel else { return }
         let text = label ?? "none"

@@ -202,16 +202,16 @@ struct ProjectsSettings: View {
         appState.newProjectFromFolderPanel(store: projectStore)
     }
 
-    /// The remote sheet is attached to `MainWindow`, so it would open behind the
-    /// settings window. Front the terminal window first — the sheet is where the
-    /// host/dir get entered, and it has to be visible to be filled in.
+    /// New Remote Project is a palette flow in a terminal window, so it
+    /// would open behind the settings window. Front the terminal window
+    /// first.
     private func addRemoteProject() {
         for window in NSApp.windows where window.isVisible && !(window is NSPanel) {
             guard window.contentViewController != nil, window.canBecomeMain else { continue }
             window.makeKeyAndOrderFront(nil)
             break
         }
-        appState.isNewRemoteProjectSheetPresented = true
+        appState.openCommandPalette(scope: .remoteHosts)
     }
 
     // MARK: - Layouts
@@ -239,7 +239,7 @@ struct ProjectsSettings: View {
     private func createProject(from layout: ProjectFileStore.Listing) {
         guard folderCheck == nil, let path = layout.declaredPath else { return }
         guard ProjectPath.isRemote(path) else {
-            appState.selectProject(Self.addProject(from: layout, path: path, in: projectStore))
+            if let project = Self.addProject(from: layout, path: path, in: projectStore) { appState.selectProject(project) }
             return
         }
         checkingLayout = layout.id
@@ -279,10 +279,12 @@ struct ProjectsSettings: View {
         guard let path = layout.declaredPath else { return .noPath }
         if let line = await refusal(path) { return .refused(line) }
         guard !Task.isCancelled else { return .cancelled }
-        return .created(addProject(from: layout, path: path, in: store))
+        guard let project = addProject(from: layout, path: path, in: store)
+        else { return .refused(String(localized: "Macterm could not add the project.")) }
+        return .created(project)
     }
 
-    private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project {
+    private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project? {
         // `name:` is optional in a project file; fall back to the filename,
         // which is the slug of a name Macterm itself wrote.
         let declared = layout.declaredName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -379,7 +381,7 @@ private struct ProjectRow: View {
                     appState.noteLayoutFilesChanged()
                 }
                 // A layout file matches a project by its folder.
-                .disabled(appState.workspaces[project.id] == nil || !project.hasFolder)
+                .disabled(!project.hasFolder)
 
                 // A project from a dev build's group row has no folder
                 // (design 013 §1): its shells start in the home folder

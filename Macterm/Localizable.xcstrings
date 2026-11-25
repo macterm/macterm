@@ -204,6 +204,22 @@
         }
       }
     },
+    "%@ is not a host name." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 호스트 이름이 아닙니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是主机名。"
+          }
+        }
+      }
+    },
     "%@ is not a project, so it has no insights." : {
       "localizations" : {
         "ko" : {
@@ -1112,6 +1128,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将文件夹添加为项目并选择它。"
+          }
+        }
+      }
+    },
+    "Add a folder on an ssh host as a project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 호스트의 폴더를 프로젝트로 추가"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 SSH 主机上的文件夹添加为项目"
           }
         }
       }
@@ -2263,6 +2295,22 @@
         }
       }
     },
+    "Checking the folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 폴더를 확인하는 중"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 %@ 上的文件夹"
+          }
+        }
+      }
+    },
     "Choose Files…" : {
       "localizations" : {
         "ko" : {
@@ -3091,22 +3139,6 @@
         }
       }
     },
-    "Directory" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "디렉토리"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目录"
-          }
-        }
-      }
-    },
     "Don't Allow" : {
       "comment" : "Button of the Shortcuts permission alert",
       "localizations" : {
@@ -3760,6 +3792,22 @@
         }
       }
     },
+    "Folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 폴더"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上的文件夹"
+          }
+        }
+      }
+    },
     "Foreground Process" : {
       "localizations" : {
         "ko" : {
@@ -4112,22 +4160,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐藏工具栏"
-          }
-        }
-      }
-    },
-    "Host" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "호스트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主机"
           }
         }
       }
@@ -5022,6 +5054,22 @@
         }
       }
     },
+    "Macterm could not add the project." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 프로젝트를 추가하지 못했습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法添加项目。"
+          }
+        }
+      }
+    },
     "Macterm could not encode the image." : {
       "localizations" : {
         "ko" : {
@@ -5050,6 +5098,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 无法解释此文本。请重试。"
+          }
+        }
+      }
+    },
+    "Macterm could not read the projects of an earlier version" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 이전 버전의 프로젝트를 읽지 못했습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法读取早期版本的项目"
           }
         }
       }
@@ -5313,6 +5377,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 从提示符中存储密钥密码短语。请在提示符处输入一次并存储。"
+          }
+        }
+      }
+    },
+    "Macterm tries again at the next start." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 다음 시작 때 다시 시도합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 会在下次启动时重试。"
           }
         }
       }
@@ -6538,6 +6618,22 @@
         }
       }
     },
+    "Not in ~/.ssh/config" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.ssh/config에 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不在 ~/.ssh/config 中"
+          }
+        }
+      }
+    },
     "Not running. Select it to restore it from its saved layout." : {
       "localizations" : {
         "ko" : {
@@ -7439,22 +7535,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "固定的标签页布局文件有问题"
-          }
-        }
-      }
-    },
-    "Port, identity, and ControlMaster come from ~/.ssh/config." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "端口、身份和 ControlMaster 来自 ~/.ssh/config。"
           }
         }
       }
@@ -9224,6 +9304,22 @@
         }
       }
     },
+    "Search hosts or type user@host..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트 검색 또는 user@host 입력..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索主机或输入 user@host..."
+          }
+        }
+      }
+    },
     "Search projects by name or path..." : {
       "localizations" : {
         "ko" : {
@@ -10689,6 +10785,22 @@
         }
       }
     },
+    "The change did not apply" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경 사항이 적용되지 않았습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改未应用"
+          }
+        }
+      }
+    },
     "The command did not finish within %lld seconds." : {
       "localizations" : {
         "ko" : {
@@ -11184,6 +11296,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
+          }
+        }
+      }
+    },
+    "The session server is not available. Macterm tries again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 서버를 사용할 수 없습니다. Macterm이 다시 시도합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话服务器不可用。Macterm 会重试。"
           }
         }
       }
@@ -12699,22 +12827,6 @@
         }
       }
     },
-    "[user@]host or ssh alias" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[user@]host 또는 ssh 별칭"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[user@]host 或 ssh 别名"
-          }
-        }
-      }
-    },
     "autofill the password for “%@”" : {
       "comment" : "Touch ID reason. macOS shows it after “Macterm is trying to”.",
       "localizations" : {
@@ -12865,6 +12977,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加"
+          }
+        }
+      }
+    },
+    "palette.remoteFolder.action" : {
+      "comment" : "Command palette, New Remote Project: the action row that adds the typed folder of the host",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "New Project \"%@\""
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로운 프로젝트 \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建项目“%@”"
+          }
+        }
+      }
+    },
+    "palette.remoteHosts.header" : {
+      "comment" : "Command palette, New Remote Project: the heading of the hosts of ~/.ssh/config",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "SSH Config"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 설정"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 配置"
           }
         }
       }

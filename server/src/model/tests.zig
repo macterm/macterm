@@ -422,6 +422,49 @@ test "swap two panes of one tab" {
     try testing.expectError(error.BadRequest, m.swapPanes(.of("a"), .of("x")));
 }
 
+test "replace a pane: the new pane takes its place, focus and zoom" {
+    var m = try newModel();
+    defer m.deinit();
+    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.zoom(.of("t1"), .of("b"));
+    const old = try m.replacePane(.of("b"), mkPane("n"));
+    try testing.expectEqualStrings("b", old.id.text);
+    try expectOrder(&m, "t1", &.{ "a", "n", "c" });
+    try expectFocus(&m, "t1", "n");
+    try testing.expectEqualStrings("n", m.zoomedPane(.of("t1")).?.text);
+    try testing.expectError(error.DuplicateId, m.replacePane(.of("a"), mkPane("c")));
+    try testing.expectError(error.NotFound, m.replacePane(.of("zz"), mkPane("q")));
+}
+
+test "set the folders of a pane" {
+    var m = try newModel();
+    defer m.deinit();
+    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.setPaneFolders(.of("a"), "/x", null);
+    try m.setPaneFolders(.of("a"), null, "/host/dir");
+    const p = m.findPane(.of("a")).?;
+    try testing.expectEqualStrings("/x", p.cwd.?);
+    try testing.expectEqualStrings("/host/dir", p.host_session_dir.?);
+    try testing.expectError(error.NotFound, m.setPaneFolders(.of("zz"), "/x", null));
+}
+
+test "a new tree for a tab keeps the panes that it names" {
+    var m = try newModel();
+    defer m.deinit();
+    try threePaneTab(&m, "t1", "a", "b", "c", "s1", "s2");
+    try m.zoom(.of("t1"), .of("a"));
+    const arena = m.arena.allocator();
+    const root = try split(arena, "s9", .vertical, 0.5, pane("c"), pane("d"));
+    const gone = try m.setTabRoot(.of("t1"), root, .of("d"));
+    try expectOrder(&m, "t1", &.{ "c", "d" });
+    try expectFocus(&m, "t1", "d");
+    try testing.expectEqual(@as(?model.PaneId, null), m.zoomedPane(.of("t1")));
+    try testing.expectEqual(@as(usize, 2), gone.len);
+    // A pane id of another tab is not fresh.
+    try m.createTab(.of("p"), .of("t2"), null, pane("x"), null, false);
+    try testing.expectError(error.DuplicateId, m.setTabRoot(.of("t1"), pane("x"), null));
+}
+
 test "move a pane inside a tab" {
     var m = try newModel();
     defer m.deinit();

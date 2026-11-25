@@ -24,16 +24,21 @@ struct CustomPaletteScopeTests {
             try text.write(to: palettes.appendingPathComponent(name), atomically: true, encoding: .utf8)
         }
         let state = AppState(
+            modelConnection: TestModel.connection(),
             workspaceStore: WorkspaceStore(fileURL: base.appendingPathComponent("workspaces.json")),
+            guiStateStore: GUIStateStore(fileURL: base.appendingPathComponent("gui-state.json")),
             projectFiles: ProjectFileStore(
                 directoryURL: base.appendingPathComponent("projects", isDirectory: true),
                 configDirectoryURL: config
             ),
-            paletteHotkeys: hotkeys
+            paletteHotkeys: hotkeys,
+            quickTerminal: QuickTerminalSplitState(),
+            legacyPanelVisible: { false }
         )
-        let store = ProjectStore(fileURL: base.appendingPathComponent("projects.json"))
-        let project = Project(name: "api", path: "/tmp", sortOrder: 0)
-        store.add(project)
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        let project = try #require(store.add(Project(name: "api", path: "/tmp", sortOrder: 0)))
+        state.projectAdded(project)
         state.selectProject(project)
         return (PaletteContext(appState: state, projectStore: store), state.customPalettes, palettes)
     }
@@ -418,8 +423,9 @@ struct CustomPaletteScopeTests {
         let (context, _, _) = try makeContext(files: [:])
         let state = context.appState
         state.selectPinnedProject()
-        _ = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: PinnedTabs.fallbackRoot))
-        let before = state.workspaces[PinnedTabs.workspaceID]?.tabs.count
+        let pinnedID = try #require(state.pinnedProjectID)
+        _ = try #require(state.createTab(projectID: pinnedID, projectPath: PinnedTabs.fallbackRoot))
+        let before = state.liveTabs[pinnedID]?.tabs.count
         CustomPaletteActions.perform(
             .run(command: "htop", in: .tab),
             operand: nil,
@@ -427,10 +433,10 @@ struct CustomPaletteScopeTests {
             appState: state,
             projects: context.projectStore.projects
         )
-        #expect(state.workspaces[PinnedTabs.workspaceID]?.tabs.count == before, "no new pinned tab")
-        let panes = try #require(state.workspaces[PinnedTabs.workspaceID]?.activeTab?.splitRoot.allPanes())
+        #expect(state.liveTabs[pinnedID]?.tabs.count == before, "no new pinned tab")
+        let panes = try #require(state.liveTabs[pinnedID]?.activeTab?.splitRoot.allPanes())
         #expect(panes.count == 2)
-        let pane = try #require(state.focusedPane(for: PinnedTabs.workspaceID))
+        let pane = try #require(state.focusedPane(for: pinnedID))
         #expect(pane.start == .wrapped("htop"))
         #expect(pane.env?["HOST"] == "a")
     }
@@ -457,23 +463,23 @@ struct CustomPaletteScopeTests {
         #expect(shell.start == nil, "no run: is a plain shell")
 
         perform(.run(command: "make", in: .split, cwd: "/tmp/\(name)/"), "/tmp/\(name)/")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         #expect(tab.splitRoot.allPanes().count == 2, "in: split splits")
         let split = try #require(state.focusedPane(for: project.id))
         #expect(split.id != shell.id)
         #expect(split.start == .wrapped("make"))
 
-        let tabs = state.workspaces[project.id]?.tabs.count
+        let tabs = state.liveTabs[project.id]?.tabs.count
         perform(.run(command: nil, in: .tab, cwd: ".path"), "\(name)/missing")
-        #expect(state.workspaces[project.id]?.tabs.count == tabs)
+        #expect(state.liveTabs[project.id]?.tabs.count == tabs)
         #expect(state.activeToast?.title == "No directory at /tmp/\(name)/missing")
 
         let remote = Project(name: "box", path: "me@box:/srv", sortOrder: 1)
         context.projectStore.add(remote)
         state.selectProject(remote)
-        let remoteTabs = state.workspaces[remote.id]?.tabs.count
+        let remoteTabs = state.liveTabs[remote.id]?.tabs.count
         perform(.run(command: nil, in: .tab, cwd: "/tmp"), "/tmp")
-        #expect(state.workspaces[remote.id]?.tabs.count == remoteTabs)
+        #expect(state.liveTabs[remote.id]?.tabs.count == remoteTabs)
         #expect(state.activeToast?.title == "A remote project cannot open a directory on this Mac")
     }
 

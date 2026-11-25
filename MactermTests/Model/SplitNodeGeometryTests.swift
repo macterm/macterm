@@ -89,25 +89,14 @@ struct SplitNodeGeometryTests {
         }
     }
 
-    // MARK: - swappingPanes
+    // MARK: - tileUnits
 
     @Test
-    func swappingPanes_trades_two_leaves_and_keeps_shape_and_ratios() throws {
-        let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"), ratio: 0.3), ratio: 0.6))
-        let swapped = try tree.swappingPanes(#require(ids["a"]), #require(ids["c"]))
-        #expect(swapped.allPanes().map(\.id) == [ids["c"], ids["b"], ids["a"]])
-        guard case let .split(root) = swapped, case let .split(inner) = root.second else {
-            Issue.record("shape changed")
-            return
-        }
-        #expect(root.direction == .horizontal && root.ratio == 0.6)
-        #expect(inner.direction == .vertical && inner.ratio == 0.3)
-    }
-
-    @Test
-    func swappingPanes_with_an_unknown_pane_is_a_noop() throws {
-        let (tree, ids) = build(H(pane("a"), pane("b")))
-        let swapped = try tree.swappingPanes(#require(ids["a"]), UUID())
-        #expect(swapped.allPanes().map(\.id) == [ids["a"], ids["b"]])
+    func tileUnits_counts_same_axis_leaves_and_one_for_a_cross_axis_split() {
+        let (tree, _) = build(H(pane("a"), H(pane("b"), V(pane("c"), pane("d")))))
+        #expect(tree.tileUnits(along: .horizontal) == 3)
+        #expect(tree.tileUnits(along: .vertical) == 1)
+        let (leaf, _) = build(pane("a"))
+        #expect(leaf.tileUnits(along: .horizontal) == 1)
     }
 }

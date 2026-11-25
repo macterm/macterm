@@ -4,6 +4,9 @@ import SwiftUI
 extension EnvironmentValues {
     /// What draws the panes below: a window, the quick terminal or a widget.
     @Entry var paneHost: SurfaceHost = .incubator
+    /// The writer of the model whose panes are below: a divider drag sends
+    /// its ratio through it (`split.ratio`).
+    @Entry var modelWriter: ModelWriter?
 }
 
 struct TerminalPane: View {

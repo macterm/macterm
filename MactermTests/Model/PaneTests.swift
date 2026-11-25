@@ -259,15 +259,11 @@ struct PaneTests {
     }
 
     @Test
-    func split_inherits_the_source_panes_session_slug() throws {
+    func split_inherits_the_source_panes_session_slug() {
         let source = Pane(projectPath: "/tmp", projectID: UUID(), sessionSlug: "myproj")
-        let root = SplitNode.pane(source)
-        let (newRoot, newID) = root.splitting(
-            paneID: source.id, direction: .horizontal, position: .second,
-            projectPath: "/somewhere/else", projectID: source.projectID
-        )
-        let createdID = try #require(newID)
-        let newPane = try #require(newRoot.findPane(id: createdID))
+        let newPane = TestModel.appState().newSplitPane(of: source, workingDirectory: "/somewhere/else")
+        #expect(newPane.projectPath == "/somewhere/else")
+        #expect(newPane.projectID == source.projectID)
         #expect(newPane.sessionSlug == "myproj")
         #expect(newPane.sessionName.hasPrefix("macterm-myproj-"))
         #expect(newPane.sessionName != source.sessionName)

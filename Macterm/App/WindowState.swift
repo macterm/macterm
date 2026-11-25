@@ -155,10 +155,6 @@ final class WindowState: Identifiable {
         popped.forEach { $0.scope.deactivate() }
     }
 
-    var isNewRemoteProjectSheetPresented = false
-    /// The fields that the palette filled in for the sheet: it checks them
-    /// at once. nil: the sheet opens empty.
-    var newRemoteProjectDraft: NewRemoteProjectDraft?
     /// The password editor sheet up in this window — the palette's Password
     /// Manager adding an entry.
     var passwordEditor: PasswordEditorRequest?
@@ -169,9 +165,10 @@ final class WindowState: Identifiable {
         expandActiveProject()
     }
 
-    /// The pinned workspace has no section to open.
+    /// A project of a sidebar section (Pinned, Scratch Tabs) has no row to
+    /// open: its id in the set opens nothing.
     private func expandActiveProject() {
-        guard let activeProjectID, activeProjectID != PinnedTabs.workspaceID else { return }
+        guard let activeProjectID else { return }
         expandedRows.insert(activeProjectID)
     }
 }

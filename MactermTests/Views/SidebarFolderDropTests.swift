@@ -5,19 +5,6 @@ import Testing
 /// Folders dragged onto the sidebar open as projects (`SidebarFolderDropTarget`).
 @MainActor
 struct SidebarFolderDropTests {
-    private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
-    }
-
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-folder-drop-\(UUID().uuidString).json"))
-    }
-
     @Test
     func a_drag_names_its_folders_and_ignores_its_files() throws {
         let root = FileManager.default.temporaryDirectory
@@ -50,8 +37,8 @@ struct SidebarFolderDropTests {
 
     @Test
     func a_drop_on_a_background_window_selects_the_project_there_and_leaves_the_key_window_alone() {
-        let state = makeAppState()
-        let store = makeProjectStore()
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
         let key = WindowState()
         state.restoreWindows(adopting: key)
         state.noteKeyWindow(key)

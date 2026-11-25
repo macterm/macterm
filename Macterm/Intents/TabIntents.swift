@@ -55,7 +55,7 @@ struct NewMactermTabIntent: AppIntent {
             projects: ctx.projectStore.projects,
             command: trimmed.flatMap { $0.isEmpty ? nil : .typed($0) }
         ),
-            let tab = ctx.appState.workspaces[target.id]?.tabs.first(where: { $0.id == tabID })
+            let tab = ctx.appState.model.tab(tabID)
         else {
             throw MactermIntentError.notFound
         }
@@ -89,12 +89,11 @@ struct FocusMactermTabIntent: AppIntent {
         // Selecting the tab's project first: a tab in a project no window is
         // showing would otherwise be selected into a workspace nobody is
         // looking at.
-        if projectID == PinnedTabs.workspaceID {
-            ctx.appState.selectPinnedProject()
-        } else if projectID == ScratchTabs.workspaceID {
-            ctx.appState.selectScratchTabs()
-        } else {
+        let project = try IntentTargets.project(projectID, in: ctx)
+        if project.isTreeProject {
             ctx.appState.revealProject(projectID)
+        } else {
+            ctx.appState.select(project: project)
         }
         ctx.appState.selectTab(target.id, projectID: projectID)
         return .result()

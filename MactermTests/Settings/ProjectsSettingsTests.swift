@@ -7,8 +7,9 @@ import Testing
 @MainActor
 struct ProjectsSettingsTests {
     private func store() -> ProjectStore {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        return ProjectStore(fileURL: dir.appendingPathComponent("projects.json"))
+        let store = ProjectStore(writer: ModelWriter(connection: TestModel.connection()))
+        store.autoAssignsColors = { false }
+        return store
     }
 
     private func listing(path: String?, name: String? = "api") -> ProjectFileStore.Listing {

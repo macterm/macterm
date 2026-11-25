@@ -179,6 +179,8 @@ struct AnimatedSplitView: View {
     private var reduceMotion
     @Environment(\.paneHost)
     private var host
+    @Environment(\.modelWriter)
+    private var writer
 
     @State
     private var ghosts: [ClosingGhost] = []
@@ -396,7 +398,7 @@ struct AnimatedSplitView: View {
             resizedValue: { start, delta in
                 SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: divider.total)
             },
-            onResize: { ModelWriter.splitRatio(divider.branch, ratio: $0) }
+            onResize: { writer?.splitRatio(divider.branch.id, ratio: $0) }
         )
         .frame(width: bandRect.width, height: bandRect.height)
         .position(x: bandRect.midX, y: bandRect.midY)

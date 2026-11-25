@@ -271,15 +271,13 @@ final class CustomPaletteScope: PaletteScope {
         self.context = context
         guard fileReads(context), !gated, let palette = palette(context) else { return [] }
         guard let node = palette.nodes[target.node] else {
-            return [PaletteSection(header: nil, items: [
-                PaletteItem(
-                    id: "custom-missing-node",
-                    title: String(localized: "No node named \(target.node)"),
-                    subtitle: String(localized: "Check the palette's file"),
-                    isEnabled: false,
-                    action: {}
-                ),
-            ])]
+            // The palette's notice, as every message of a screen. ⌘R reads
+            // the file again.
+            failure = failure ?? PaletteFailure(
+                title: String(localized: "No node named \(target.node)"),
+                detail: String(localized: "Check the palette's file")
+            )
+            return []
         }
         let search = SearchQuery(query.trimmed)
         let written: [PaletteItem] = node.items.enumerated().compactMap { index, entry in
@@ -468,9 +466,9 @@ enum CustomPaletteActions {
                 return
             }
             // A pinned tab belongs to no project. A tab born in the pinned
-            // workspace would be pinned itself, so the command always splits
+            // project would be pinned itself, so the command always splits
             // beside the focused pane there, as a clicked text file does.
-            if projectID == PinnedTabs.workspaceID {
+            if appState.showsPinnedRecords(projectID) {
                 guard let pane = appState.focusedPane(for: projectID) else {
                     appState.presentToast(String(localized: "No pane to run beside"))
                     return

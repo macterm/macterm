@@ -54,41 +54,54 @@ extension AppState {
     @discardableResult
     func createDesktopWidget(span: DesktopWidgetSpan? = nil, name: String? = nil, command: String? = nil) -> DesktopWidget {
         let widget = makeDesktopWidget(span: span, name: name, command: command, cwd: nil)
+        ensureWidgetTab(widget)
         desktopWidgets.append(widget)
         logger.info("created desktop widget \(widget.id.uuidString, privacy: .public) (\(widget.span.description, privacy: .public))")
         desktopWidgetsDidChange()
         return widget
     }
 
-    private func makeDesktopWidget(span: DesktopWidgetSpan?, name: String?, command: String?, cwd: String?) -> DesktopWidget {
+    private func makeDesktopWidget(
+        span: DesktopWidgetSpan?,
+        name: String?,
+        command: String?,
+        cwd: String?,
+        id: UUID = UUID()
+    ) -> DesktopWidget {
         let span = span ?? .initial
         let occupied = desktopWidgets.map(\.frame) + nativeDesktopWidgetFrames()
         let topLeft = desktopVisibleFrames().first.map {
             DesktopWidgetGrid.centered(span, in: $0, avoiding: occupied)
         } ?? .zero
-        let widget = DesktopWidget(name: name, span: span, topLeft: topLeft, command: command, cwd: cwd)
+        let widget = DesktopWidget(id: id, model: model, name: name, span: span, topLeft: topLeft, command: command, cwd: cwd)
         recordPlacement(of: widget)
         return widget
+    }
+
+    /// The widget's project and its one tab (design/010 §11): made when the
+    /// model does not have them. A widget is one project for each widget,
+    /// with the widget's id.
+    @discardableResult
+    func ensureWidgetTab(_ widget: DesktopWidget) -> TerminalTab? {
+        widget.model = model
+        if let tab = widget.tab { return tab }
+        if model.project(widget.id) == nil, !writer.projectCreate(widget.newProject) { return nil }
+        return writer.tabCreate(in: widget.id, root: .pane(widget.freshPane()))
     }
 
     /// Remove a widget for good: its shell ends and its session is killed.
     /// Unconditional — the confirmation for a busy pane belongs to the
     /// caller (`desktopWidgetNeedsConfirmRemove`), as with every close verb.
     func removeDesktopWidget(id: UUID) {
-        guard let index = desktopWidgets.firstIndex(where: { $0.id == id }) else { return }
-        let widget = desktopWidgets.remove(at: index)
+        guard desktopWidgets.contains(where: { $0.id == id }) else { return }
+        // The widget's project goes, and the server ends its session. A
+        // widget whose project the server keeps stays on the desktop.
+        if model.project(id) != nil, !writer.projectRemove(id) { return }
+        desktopWidgets.removeAll { $0.id == id }
         if editingDesktopWidgetID == id { editingDesktopWidgetID = nil }
         unlistedDesktopWidgetIDs.remove(id)
-        endSessions(of: widget)
         logger.info("removed desktop widget \(id.uuidString, privacy: .public)")
         desktopWidgetsDidChange()
-    }
-
-    private func endSessions(of widget: DesktopWidget) {
-        for pane in widget.tab.splitRoot.allPanes() {
-            SurfaceRegistry.shared.destroySurfaces(of: pane)
-            pane.killPersistentSession(using: sessionClient)
-        }
     }
 
     /// Whether removing the widget would end a running program.
@@ -240,30 +253,41 @@ extension AppState {
     /// than closing.
     func desktopWidgetShellExited(id: UUID) {
         guard let widget = desktopWidget(id: id) else { return }
-        endSessions(of: widget)
-        widget.startOver()
+        startOver(widget)
         logger.info("desktop widget \(id.uuidString, privacy: .public) shell exited; started over")
         desktopWidgetsDidChange()
     }
 
+    /// A new pane in a new session in place of the widget's pane: the shell
+    /// exited, or its session is gone at a launch. The old pane leaves the
+    /// model, and the server ends what is left of its session.
+    private func startOver(_ widget: DesktopWidget) {
+        if let old = widget.pane {
+            writer.paneReplace(old.id, with: widget.freshPane())
+        } else {
+            ensureWidgetTab(widget)
+        }
+    }
+
     // MARK: - Snapshot
 
-    /// Hand the persisted widgets back, all locked, and return the ids
+    /// Hand the saved widgets back, all locked, and return the ids
     /// restored — `materializeRestoredDesktopWidgets` checks their sessions
     /// before they are drawn. Each goes where the user put it on the displays
     /// connected now, or a projection of that (`placeForCurrentScreens`) —
-    /// the displays may have changed while Macterm was quit. A snapshot from
+    /// the displays may have changed while Macterm was quit. A record from
     /// before placements existed has its placement taken from where it was,
     /// if that is still on a screen. A widget already live under the same id
-    /// is left alone.
+    /// is left alone. A widget project of the model with no record is placed
+    /// by the default rule and kept (design/010 §11, §3).
     @discardableResult
-    func restoreDesktopWidgets(_ snapshots: [DesktopWidgetSnapshot]) -> Set<UUID> {
+    func restoreDesktopWidgets(_ records: [DesktopWidgetState]) -> Set<UUID> {
         let frames = desktopVisibleFrames()
         var widgets: [DesktopWidget] = []
-        for snapshot in snapshots where desktopWidget(id: snapshot.id) == nil {
+        for snapshot in records where desktopWidget(id: snapshot.id) == nil {
             let widget = DesktopWidget(
                 id: snapshot.id,
-                tab: WorkspaceSerializer.restoreTab(snapshot.tab, projectID: DesktopWidget.projectID),
+                model: model,
                 name: snapshot.name,
                 span: DesktopWidgetSpan(columns: snapshot.columns, rows: snapshot.rows),
                 topLeft: CGPoint(x: snapshot.topLeftX, y: snapshot.topLeftY),
@@ -274,6 +298,12 @@ extension AppState {
             if widget.placements.isEmpty, DesktopWidgetGrid.isReachable(widget.frame, on: frames) {
                 recordPlacement(of: widget)
             }
+            ensureWidgetTab(widget)
+            widgets.append(widget)
+        }
+        let known = Set(records.map(\.id))
+        for project in model.projects where project.sidebar == .none && project.alias == nil && !known.contains(project.id) {
+            let widget = makeDesktopWidget(span: nil, name: nil, command: nil, cwd: nil, id: project.id)
             widgets.append(widget)
         }
         placeForCurrentScreens(widgets, avoiding: nativeDesktopWidgetFrames())
@@ -304,7 +334,7 @@ extension AppState {
                       SurfaceRegistry.shared.view(of: pane) == nil
                 else { continue }
                 logger.info("desktop widget \(widget.id.uuidString, privacy: .public): session gone; respawning")
-                widget.startOver()
+                startOver(widget)
                 respawned = true
             }
         }
@@ -313,12 +343,13 @@ extension AppState {
         syncDesktopWidgetPresenter()
     }
 
-    func desktopWidgetSnapshots() -> [DesktopWidgetSnapshot] {
+    /// The widgets' records for `gui-state.json`: geometry and recipe, by
+    /// widget id. The tab is in the model.
+    func desktopWidgetStates() -> [DesktopWidgetState] {
         desktopWidgets.map { widget in
-            DesktopWidgetSnapshot(
+            DesktopWidgetState(
                 id: widget.id,
                 name: widget.name,
-                tab: WorkspaceSerializer.snapshotTab(widget.tab),
                 columns: widget.span.columns,
                 rows: widget.span.rows,
                 topLeftX: widget.topLeft.x,
@@ -328,12 +359,6 @@ extension AppState {
                 placements: widget.placements
             )
         }
-    }
-
-    /// The sessions widget panes hold — claims for the orphan reaper, since a
-    /// restored widget attaches only once its window has a surface.
-    func desktopWidgetSessionNames() -> Set<String> {
-        Set(desktopWidgets.flatMap { $0.tab.splitRoot.allPanes().map(\.sessionName) })
     }
 
     // MARK: - widgets.yaml
@@ -351,8 +376,9 @@ extension AppState {
         liveCommand: (Pane) -> String? = { ProcessInspector.runningCommand(forPane: $0) }
     ) {
         for widget in desktopWidgets where widget.pane.flatMap({ SurfaceRegistry.shared.view(of: $0) }) != nil {
+            guard let tab = widget.tab else { continue }
             let declaration = LayoutSerializer.pinnedDeclaration(
-                for: widget.tab,
+                for: tab,
                 liveCommand: { pane in pane.isShellAtPrompt ? nil : liveCommand(pane) }
             )
             guard case let .pane(leaf) = declaration.layout else { continue }
@@ -441,6 +467,7 @@ extension AppState {
             cwd: entry.cwd
         )
         adopt(entry, into: widget)
+        ensureWidgetTab(widget)
         return widget
     }
 
@@ -483,7 +510,7 @@ extension AppState {
             }
             for index in matching.removed {
                 logger.info("widgets.yaml removed desktop widget \(current[index].id.uuidString, privacy: .public)")
-                endSessions(of: current[index])
+                writer.projectRemove(current[index].id)
                 pendingDesktopWidgetMaterialize.remove(current[index].id)
             }
             desktopWidgets = result
@@ -564,7 +591,7 @@ extension AppState {
         result += unlisted
         desktopWidgets = result
         tidyDesktopWidgets(moved)
-        saveWorkspaces()
+        persistState()
         syncDesktopWidgetPresenter()
     }
 
@@ -596,13 +623,13 @@ extension AppState {
         syncDesktopWidgetPresenter()
     }
 
-    /// Both layers, gated on the launch restore like the quick terminal's
-    /// saves: until it has run, `workspaces` is empty and a save would write
-    /// that emptiness over the file about to be restored.
+    /// Both layers, gated on the launch restore: until it has run, the
+    /// widgets are not known yet, and a save would write that emptiness over
+    /// the file about to be restored.
     private func saveDesktopWidgetsIfRestored() {
         guard hasRestoredSelection else { return }
         refreshDesktopWidgetRecipes()
-        saveWorkspaces()
+        persistState()
         writeWidgetLayout()
     }
 }

@@ -8,26 +8,17 @@ import Testing
 struct BackgroundCreationTests {
     // MARK: - Setup
 
-    /// Temp-file stores, so no test touches the developer's real App Support or
-    /// `~/.config/macterm`. A no-op zmx so a test can never fork the real
-    /// daemon or reap live sessions.
+    /// An AppState over a test server of its own, so no test touches the
+    /// developer's data. A no-op session client, so a test never reaps live
+    /// sessions.
     private func makeAppState() -> AppState {
-        let storeURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-bg-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-bg-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+        let state = TestModel.appState()
         state.sessionClient = .noop
         return state
     }
 
     private func seedProject(_ state: AppState, name: String, path: String) -> Project {
-        let project = Project(name: name, path: path, sortOrder: 0)
-        state.selectProject(project)
-        return project
+        TestModel.project(state, name: name, path: path)
     }
 
     // MARK: - No-focus splits and `warmIfUnrendered`
@@ -48,7 +39,7 @@ struct BackgroundCreationTests {
         state.registerWindow(onQ)
         state.noteKeyWindow(otherWindowIsKey ? onQ : onP)
 
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
 
         let newID = try #require(state.splitPane(
@@ -69,7 +60,7 @@ struct BackgroundCreationTests {
         let p = seedProject(state, name: "p", path: "/p")
         // No window at all: SwiftUI never renders the new pane, so it must be
         // started off-screen.
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
 
         let newID = try #require(state.splitPane(
@@ -94,9 +85,9 @@ struct BackgroundCreationTests {
         state.registerWindow(window)
         state.noteKeyWindow(window)
 
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
-        ModelWriter.paneZoom(tab, toggling: source.id)
+        state.writer.paneZoom(tab: tab.id, pane: source.id)
 
         let newID = try #require(state.splitPane(
             source.id, direction: .horizontal, projectID: p.id,
@@ -117,8 +108,8 @@ struct BackgroundCreationTests {
 
         let p = seedProject(state, name: "p", path: "/p")
         let q = seedProject(state, name: "q", path: "/q")
-        let wsP = try #require(state.workspaces[p.id])
-        let wsQ = try #require(state.workspaces[q.id])
+        let wsP = try #require(state.liveTabs[p.id])
+        let wsQ = try #require(state.liveTabs[q.id])
         let originalTab = try #require(wsP.activeTab)
         let qTab = try #require(wsQ.activeTab)
 
@@ -162,7 +153,7 @@ struct BackgroundCreationTests {
         state.paneNeedsConfirmClose = { _ in false }
 
         let p = seedProject(state, name: "p", path: "/p")
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let firstTab = try #require(ws.activeTab)
 
         // A second tab becomes active; the first is now the "unseen" tab.
@@ -191,12 +182,12 @@ struct BackgroundCreationTests {
         state.paneNeedsConfirmClose = { _ in false }
 
         let origin = seedProject(state, name: "origin", path: "/origin")
-        let tab = try #require(state.workspaces[origin.id]?.activeTab)
+        let tab = try #require(state.liveTabs[origin.id]?.activeTab)
 
         // Pin the tab, then warm it while it lives in the pinned workspace —
         // the exit closure is wired there.
         state.pinTab(tab.id, fromProject: origin.id)
-        let pinnedTab = try #require(state.pinnedWorkspace?.tabs.first { $0.id == tab.id })
+        let pinnedTab = try #require(state.pinnedTabs.first { $0.id == tab.id })
         let pane = try #require(pinnedTab.splitRoot.allPanes().first)
 
         state.warmStaggered([pane])
@@ -206,10 +197,11 @@ struct BackgroundCreationTests {
         // Move it into a normal project: the pane's routing identity is
         // rebound, but its session and warmed surface stay put.
         let dest = seedProject(state, name: "dest", path: "/dest")
-        state.moveTab(tab.id, from: PinnedTabs.workspaceID, to: dest.id, destPath: dest.path)
+        let pinnedID = try #require(state.pinnedProjectID)
+        state.moveTab(tab.id, from: pinnedID, to: dest.id, destPath: dest.path)
         #expect(pane.projectID == dest.id)
 
-        let wsDest = try #require(state.workspaces[dest.id])
+        let wsDest = try #require(state.liveTabs[dest.id])
 
         // Simulate the exit. The closure must read the pane's project NOW
         // (the destination), so the pane — and its single-pane tab — close in
@@ -218,6 +210,6 @@ struct BackgroundCreationTests {
         view.onProcessExit?()
 
         #expect(wsDest.tabs.contains { $0.id == tab.id } == false)
-        #expect(state.pinnedWorkspace?.tabs.contains { $0.id == tab.id } != true)
+        #expect(!state.pinnedTabs.contains { $0.id == tab.id })
     }
 }

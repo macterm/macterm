@@ -11,11 +11,16 @@ struct MactermApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self)
     var appDelegate
     @State
-    private var appState = AppState()
+    private var appState: AppState
     @State
-    private var projectStore = ProjectStore()
+    private var projectStore: ProjectStore
 
     init() {
+        // The model is on the local server (design/010): the app's state is
+        // a view of it, and the project list is that model's tree.
+        let state = AppState(modelConnection: .bundled())
+        _appState = State(initialValue: state)
+        _projectStore = State(initialValue: ProjectStore(writer: state.writer))
         // Must precede any scene construction: SwiftUI can touch
         // `GhosttyApp.shared` while building views, and every environment
         // mutation has to land before `ghostty_init` captures environ.
@@ -68,11 +73,6 @@ struct MactermApp: App {
                     }
                     appDelegate.projectStore = projectStore
                     projectStore.onAdd = { [weak appState] project in appState?.projectAdded(project) }
-                    if ModelShadow.isEnabled, appState.modelShadow == nil {
-                        let shadow = ModelShadow(projectStore: projectStore)
-                        appState.modelShadow = shadow
-                        Task { await shadow.start() }
-                    }
                     NotificationHandler.shared.appState = appState
                     Updater.shared.presentToast = { [appState] in appState.presentToast($0) }
                     // Termination persists the snapshot AND refreshes the
@@ -1000,34 +1000,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    /// One row for each pane of the workspaces, the quick terminal and the
-    /// desktop widgets that would end a running program, by the verdict of
-    /// `AppState.panesThatNeedConfirmClose`. The quick terminal's tab lives
-    /// outside `workspaces`, so it is walked on its own.
+    /// One row for each pane of the model — the projects, the pinned and
+    /// the scratch tabs, the quick terminal and the desktop widgets — that
+    /// would end a running program, by the verdict of
+    /// `AppState.panesThatNeedConfirmClose`.
     private func collectRunningProcessRows() async -> [RunningProcessRow] {
         var candidates: [(projectName: String, pane: Pane)] = []
-        let projectsByID = Dictionary(
-            uniqueKeysWithValues: (projectStore?.projects ?? []).map { ($0.id, $0) }
-        )
-
-        for ws in appState?.workspaces.values ?? [:].values {
-            let project = projectsByID[ws.id]
-            let projectName = Project.synthetic(for: ws.id)?.name
-                ?? project?.name
-                ?? String(localized: "Project")
-            for tab in ws.tabs {
+        guard let appState else { return [] }
+        for project in appState.model.projects {
+            let projectName = if project.alias == QuickTerminalService.alias {
+                String(localized: "Quick Terminal")
+            } else if appState.desktopWidget(id: project.id) != nil {
+                String(localized: "Desktop Widget")
+            } else {
+                project.name
+            }
+            for tab in appState.model.tabs(of: project.id) {
                 candidates += tab.splitRoot.allPanes().map { (projectName, $0) }
             }
         }
-        let quickTerminal = String(localized: "Quick Terminal")
-        candidates += QuickTerminalService.shared.splitState.tab.splitRoot.allPanes().map { (quickTerminal, $0) }
-        let widget = String(localized: "Desktop Widget")
-        for desktopWidget in appState?.desktopWidgets ?? [] {
-            candidates += desktopWidget.tab.splitRoot.allPanes().map { (widget, $0) }
-        }
 
         let panes = candidates.map(\.pane)
-        let busy = await Set((appState?.panesThatNeedConfirmClose(panes) ?? panes.filter(\.needsConfirmClose)).map(\.id))
+        let busy = await Set(appState.panesThatNeedConfirmClose(panes).map(\.id))
         return candidates.filter { busy.contains($0.pane.id) }.map {
             RunningProcessRow(projectName: $0.projectName, processName: $0.pane.processTitle)
         }

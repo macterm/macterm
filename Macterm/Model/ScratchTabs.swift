@@ -1,33 +1,25 @@
 import Foundation
 
-/// The scratch-tabs sentinel (#665): a workspace for tabs that belong to no
-/// project, and that are not pinned. It is the second workspace that lives
-/// outside the project list, after `PinnedTabs`. Like that one, its key is a
-/// fixed UUID that is deliberately NOT a `ProjectStore` row, so every path
-/// that iterates real projects never sees it.
+/// The scratch tabs (#665): a hidden project of the model (design/010 §11)
+/// for tabs that belong to no project and that are not pinned, with
+/// `sidebar: bottom` (its tabs are rows below the tree), `removable: false`
+/// and the alias `scratch`. The app makes it when the first scratch tab
+/// opens. Code finds it by its alias, never by an id.
 ///
-/// A scratch tab is an ordinary `TerminalTab` in an ordinary `Workspace`. The
-/// difference from a project tab is only what is around it: no project
-/// directory (a new tab starts in home), no layout file, no rename, no color,
-/// no worktrees, and no unload. The difference from a pinned tab is the
-/// lifecycle: closing a scratch tab closes it for good, and nothing declares it
-/// in a YAML file. The snapshot in `workspaces_v3.json` is its only record,
-/// as for a project tab.
+/// A scratch tab is an ordinary tab. The difference from a project tab is
+/// only what is around it: no project directory (a new tab starts in home),
+/// no layout file, no rename, no color, no worktrees, and no unload. The
+/// difference from a pinned tab is the lifecycle: closing a scratch tab
+/// closes it for good, and nothing declares it in a YAML file.
 enum ScratchTabs {
-    /// Fixed across launches and machines. Spelled as raw bytes for the
-    /// linter, like `PinnedTabs.workspaceID`; this is
-    /// `F1E0D0D0-0000-4000-8000-4D6163536372`.
-    static let workspaceID = UUID(uuid: (
-        0xF1, 0xE0, 0xD0, 0xD0, 0x00, 0x00, 0x40, 0x00,
-        0x80, 0x00, 0x4D, 0x61, 0x63, 0x53, 0x63, 0x72
-    ))
-
     /// The sidebar header and the window title. Not localized, like
     /// `PinnedTabs.displayName`: it is also the name the CLI resolves.
     static let displayName = "Scratch Tabs"
 
-    /// The short selector the CLI also accepts: `--project scratch`.
+    /// The alias of the scratch project, and the short selector the CLI
+    /// also accepts: `--project scratch`.
     static let shortName = "scratch"
+    static var alias: String { shortName }
 
     /// The icon of every scratch row, in place of the user's tab icon, as
     /// the pin is for a pinned row. The rows have no header and no separator
@@ -54,9 +46,17 @@ enum ScratchTabs {
     /// scratch pane can follow that pane's directory.
     static var fallbackRoot: String { ProjectPath.currentHome }
 
-    /// Synthetic `Project` value for the call sites that render or route by a
-    /// `Project`. Never inserted into `ProjectStore`.
-    static var project: Project {
-        Project(id: workspaceID, name: displayName, path: fallbackRoot)
+    /// The request of the scratch project (design/010 §11, §2).
+    static func newProject(id: String) -> MactermProtocol.Project {
+        .init(id: id, name: displayName, path: "", sidebar: .bottom, removable: false, alias: alias)
+    }
+
+    /// The scratch project as the app makes it: a new id.
+    static func newProject() -> Project {
+        var project = Project(id: UUID(), name: displayName, path: "")
+        project.sidebar = .bottom
+        project.removable = false
+        project.alias = alias
+        return project
     }
 }

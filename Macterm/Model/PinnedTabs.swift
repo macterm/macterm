@@ -1,21 +1,12 @@
 import Foundation
 
-/// The pinned-tabs sentinel: a special workspace that lives outside the
-/// project list. Pinned tabs belong to no project — their workspace is keyed
-/// by this fixed UUID, which is deliberately NOT a `ProjectStore` row, so
-/// everything that iterates real projects (Settings → Projects, the palette's
-/// project source, CLI `project list`, sidebar reordering, layout save/apply)
-/// never sees it by construction. Only the narrower set of
-/// `activeProjectID → Project` lookups needs the synthetic `project` below.
+/// The pinned tabs: a hidden project of the model (design/010 §11) with
+/// `sidebar: top` (its tabs are rows above the tree), `removable: false` and
+/// the alias `pinned`. The app makes it at the first pin, or at a launch that
+/// has `pinned.yaml` entries. Code finds it by its alias, never by an id.
 enum PinnedTabs {
-    /// Fixed across launches and machines — the workspace snapshot and the
-    /// panes' routing identity both key on it. Spelled as raw bytes (not a
-    /// force-unwrapped `UUID(uuidString:)`) purely for the linter; this is
-    /// `F1E0D0D0-0000-4000-8000-4D6163506E64`.
-    static let workspaceID = UUID(uuid: (
-        0xF1, 0xE0, 0xD0, 0xD0, 0x00, 0x00, 0x40, 0x00,
-        0x80, 0x00, 0x4D, 0x61, 0x63, 0x50, 0x6E, 0x64
-    ))
+    /// The alias of the pinned project: `--project pinned` resolves it.
+    static let alias = "pinned"
 
     static let displayName = "Pinned"
 
@@ -29,8 +20,8 @@ enum PinnedTabs {
     ///
     /// The one test every naming path applies. A name somebody typed is
     /// refused where they typed it (`project create --name`,
-    /// `project rename`, the sidebar's rename, the New Project intent, the
-    /// remote sheet); a name nobody chose — the folder's own, which most
+    /// `project rename`, the sidebar's rename, the New Project intent); a
+    /// name nobody chose — the folder's own, which most
     /// creation paths default to — is suffixed instead (`ProjectStore.create`).
     static func reservesName(_ name: String) -> Bool {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == displayName.lowercased()
@@ -59,11 +50,18 @@ enum PinnedTabs {
     /// `$HOME`-env-first so the benchmark harness's throwaway home isolates it.
     static var fallbackRoot: String { ProjectPath.currentHome }
 
-    /// Synthetic `Project` value for the call sites that render or route by a
-    /// `Project` (MainWindow's workspace view, global tab cycling, the CLI's
-    /// project resolution). Never inserted into `ProjectStore`.
-    static var project: Project {
-        Project(id: workspaceID, name: displayName, path: fallbackRoot)
+    /// The request of the pinned project (design/010 §11, §2).
+    static func newProject(id: String) -> MactermProtocol.Project {
+        .init(id: id, name: displayName, path: "", sidebar: .top, removable: false, alias: alias)
+    }
+
+    /// The pinned project as the app makes it: a new id.
+    static func newProject() -> Project {
+        var project = Project(id: UUID(), name: displayName, path: "")
+        project.sidebar = .top
+        project.removable = false
+        project.alias = alias
+        return project
     }
 }
 

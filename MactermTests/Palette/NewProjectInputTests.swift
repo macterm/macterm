@@ -9,8 +9,7 @@ import Testing
 struct NewProjectInputTests {
     private func makeContext() -> (PaletteContext, WindowState) {
         let tmp = FileManager.default.temporaryDirectory
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(
                 directoryURL: tmp.appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
             )
@@ -18,7 +17,8 @@ struct NewProjectInputTests {
         let window = WindowState()
         state.registerWindow(window)
         state.noteKeyWindow(window)
-        let store = ProjectStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json"))
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
         return (PaletteContext(appState: state, projectStore: store), window)
     }
 
@@ -102,7 +102,7 @@ struct NewProjectInputTests {
         let folder = try makeFolder("api")
         let scope = InputPaletteScope(input: .newProject)
         let (context, _) = makeContext()
-        let existing = context.projectStore.create(name: "API", path: folder.path)
+        let existing = try #require(context.projectStore.create(name: "API", path: folder.path))
 
         let listed = rows(scope, folder.path, context)
         let switchRow = try #require(listed.first)
@@ -148,18 +148,21 @@ struct NewProjectInputTests {
 
     @Test
     func a_remote_spec_gets_the_remote_rows() throws {
-        let (context, window) = makeContext()
+        let (context, _) = makeContext()
         let scope = InputPaletteScope(input: .newProject)
 
         let new = try #require(rows(scope, "devbox:~/dev/api", context).first)
         #expect(new.subtitle == "Add remote project: devbox:~/dev/api")
         #expect(scope.failure == nil)
-        #expect(scope.press(new) == .closed)
-        #expect(window.isNewRemoteProjectSheetPresented, "the dialog adds the project")
-        #expect(window.newRemoteProjectDraft != nil)
+        guard case let .opens(.input(folderStep)) = scope.press(new) else {
+            Issue.record("the remote row opens the folder step of New Remote Project")
+            return
+        }
+        #expect(folderStep.id == "remote-folder:devbox")
+        #expect(folderStep.initialValue == "~/dev/api")
         #expect(context.projectStore.projects.isEmpty)
 
-        let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
+        let existing = try #require(context.projectStore.create(name: "api", path: "devbox:~/dev/api"))
         let known = try #require(rows(scope, "devbox:~/dev/api", context).first)
         #expect(known.subtitle == "Switch to remote project: devbox:~/dev/api")
         let listed = rows(scope, "devbox:~/dev/api", context)
