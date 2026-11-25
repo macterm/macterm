@@ -5,8 +5,10 @@ import AppKit
 // ordered by the KeyRouter so disposition is explicit instead of implicit.
 
 /// Toggles the unified command palette on its chord (`toggleCommandPalette`,
-/// ⌘P by default). When the palette is visible, passes other keys through to
-/// SwiftUI's own key handlers (arrow navigation, escape, etc.).
+/// ⌘P by default). When the palette is visible, a chord whose command opens
+/// a palette screen switches to that screen, and every other binding does
+/// nothing. Keys that are not bindings pass through to SwiftUI's own key
+/// handlers (arrow navigation, escape, typing).
 @MainActor
 final class PaletteResponder: KeyResponder {
     private let appState: AppState
@@ -25,32 +27,38 @@ final class PaletteResponder: KeyResponder {
             appState.isCommandPaletteVisible.toggle()
             return .handled
         }
-        // A palette screen's chord with the palette already up: the app-level
-        // responder that runs bindings stands aside while the palette is
-        // visible, so switch to the screen (or close it) here.
-        let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
-        if appState.isCommandPaletteVisible,
-           let action = HotkeyAction.allCases.first(where: {
-               $0.appCommand.opensPaletteScreen && HotkeyRegistry.matches(event, action: $0)
-           })
-        {
-            if let run = action.appCommand.action(in: ctx) {
-                run()
-            } else if let notice = action.appCommand.unavailableNotice(in: ctx) {
-                appState.presentToast(notice)
-            } else {
-                return .passThrough
-            }
-            return .handled
-        }
         // Capture Palette acts on the palette as it stands, so its
         // chord is answered here, with the palette up, too.
         if appState.isCommandPaletteVisible, HotkeyRegistry.matches(event, action: .capturePaletteScreenshot) {
             PaletteScreenshot.capture(appState: appState)
             return .handled
         }
+        // While the palette is up, it keeps the keyboard. A chord whose
+        // command opens a palette screen (Files, Rename Current Tab, Move to
+        // Project, …) runs that command. Every other binding (⌘T, ⌘W, a
+        // split) is consumed and does nothing: a pass-through would reach
+        // the menu item with the same key equivalent, which would change
+        // the tabs behind the palette. When two bindings share a chord, the
+        // first in `HotkeyAction.allCases` owns it, as in `MainAppResponder`.
+        if appState.isCommandPaletteVisible, paletteWindowIsKey,
+           let action = HotkeyAction.allCases.first(where: { HotkeyRegistry.matches(event, action: $0) })
+        {
+            // While a screen shows Retry, ⌘R is Retry, also when a binding
+            // uses ⌘R. Rename Current Tab, its default owner, has no menu
+            // item, so the pass-through reaches `CommandPalette`.
+            if appState.paletteShowsRetry, Self.isRetryChord(event) { return .passThrough }
+            let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
+            let command = action.appCommand
+            guard (command.paletteScope(in: ctx) ?? command.inputScope(in: ctx)) != nil else { return .handled }
+            if let run = command.action(in: ctx) {
+                run()
+            } else if let notice = command.unavailableNotice(in: ctx) {
+                appState.presentToast(notice)
+            }
+            return .handled
+        }
         // A custom palette's chord: the same two outcomes as a built-in
-        // screen's, with `PaletteHotkeys` as the table — after the screens'
+        // screen's, with `PaletteHotkeys` as the table — after the actions'
         // chords, so a chord bound to both resolves as `MainAppResponder`
         // resolves it when the palette is down.
         if appState.isCommandPaletteVisible,
@@ -61,6 +69,26 @@ final class PaletteResponder: KeyResponder {
         }
         // While the palette is visible, SwiftUI owns arrow / escape / etc.
         return .passThrough
+    }
+
+    /// Whether the key window is the window that shows the palette. Another
+    /// window (Settings, the quick terminal's panel) keeps its keys while a
+    /// palette is up behind it. With no key window (tests, launch), the
+    /// palette's window is the one that takes keys.
+    private var paletteWindowIsKey: Bool {
+        guard let keyWindow = NSApp.keyWindow else { return true }
+        return appState.appDelegate?.isTerminalWindow(keyWindow) ?? true
+    }
+
+    /// The palette's own Retry key, ⌘R (`CommandPalette`), fixed and not a
+    /// binding. It is the palette's key only while a screen shows a failed
+    /// listing: at all other times it is Rename Current Tab's default chord.
+    /// It matches as a binding matches (`HotkeyShortcut.matches`), so a
+    /// keyboard layout or Caps Lock gives the same answer for both.
+    private static let retryShortcut = HotkeyRegistry.parseShortcut("cmd+r")
+
+    static func isRetryChord(_ event: NSEvent) -> Bool {
+        retryShortcut?.matches(event) ?? false
     }
 }
 
@@ -196,11 +224,6 @@ final class MainAppResponder: KeyResponder {
         // user's next keypress reaches the picker instead of triggering actions.
         if HotkeyCaptureState.shared.isCapturing { return .passThrough }
 
-        // When the command palette is visible, let SwiftUI's TextField /
-        // onKeyPress handlers own the keyboard. Otherwise typing "New Tab"
-        // into the palette would fire Cmd+T's New Tab action.
-        if appState.isCommandPaletteVisible { return .passThrough }
-
         // Everything below acts on the main terminal window's workspace.
         // When a different window is key — Settings, an alert sheet — none of
         // it may fire: Cmd+W would close a terminal tab behind the window the
@@ -249,6 +272,12 @@ final class MainAppResponder: KeyResponder {
             }
             return .passThrough
         }
+
+        // The command palette owns the keyboard of its window
+        // (`PaletteResponder`). This check comes after the different-window
+        // branch above, so that ⌘W in Settings closes Settings while a
+        // palette is open behind it.
+        if appState.isCommandPaletteVisible { return .passThrough }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 

@@ -217,7 +217,7 @@ struct AppStateProjectDirectoryTests {
             return
         }
         #expect(input.pill == PalettePill(title: "Change Project Directory"), "an input screen's pill has no glyph")
-        #expect(AppCommand.changeProjectDirectory.opensPaletteScreen, "its chord is answered with the palette up")
+        #expect(AppCommand.changeProjectDirectory.inputScope(in: ctx) != nil, "its chord is answered with the palette up")
         #expect(AppCommand.changeProjectDirectory.paletteIcon == nil)
         #expect(PaletteScopeID.files.pill.icon != nil, "a built-in screen keeps its glyph")
 

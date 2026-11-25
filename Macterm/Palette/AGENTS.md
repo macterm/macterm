@@ -41,8 +41,18 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The panel appears and vanishes in one frame. A view inside the window cannot get the fade at window level. It cannot get the blur of the backdrop either. The panel of the quick terminal gets both for free. A transition that we drew in its place read as a slower fade.
       - The breadcrumb and each pill come and go through `PaletteMotion`. This is `blurReplace` of SwiftUI on an ease-out of 120 ms. Reduce Motion lands them in one frame.
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
-      - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill (none for an input screen) and a chevron. A command whose screen depends on the project (an input screen) returns it from `AppCommand.paletteScreen(in:)`, which the palette row reads. `PaletteResponder` answers the chord of each command that `opensPaletteScreen`.
-      - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
+      - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill (none for an input screen) and a chevron.
+      - Each such command can have a keybind and toggles its screen.
+      - **App hotkeys while the palette is up.** The palette keeps the keyboard of its window: `MainAppResponder` does not act, and no binding reaches the menu bar. `PaletteResponder` answers these chords:
+        - The chord of a command that opens a palette screen (`AppCommand.paletteScope(in:)` or `AppCommand.inputScope`) runs the command, on the root and on every screen. These are Files, Passwords, New Project, Rename Current Tab, Rename Current Project, Move to Project and Change Project Directory.
+        - The palette then shows that screen in place of the stack, and text typed on the old screen is lost. Files, Passwords, New Project and Move to Project toggle: their chord on their own screen closes the palette. Rename Current Tab and Rename Current Project do not toggle: their chord on their own screen does nothing.
+        - Capture Palette captures the palette as it stands.
+        - An extension's chord opens its palette, as when the palette is down.
+        - Every other binding (⌘T, ⌘W, a split, Settings) does nothing. `PaletteResponder` consumes it: a pass-through would reach the menu item with the same key equivalent, which would change the tabs behind the palette.
+        - A binding on a key of the palette (⌃P, ⌃N, ⌥↩) takes that key, as a binding takes a key from a terminal.
+        - The binding branch acts only while the window of the palette is key. In another key window (Settings, the quick terminal's panel), `MainAppResponder` and `QuickTerminalResponder` act as when the palette is closed.
+        - When two bindings share a chord, the first in `HotkeyAction.allCases` owns it, as in `MainAppResponder`.
+      - **⌘R is Retry while a screen shows a failed listing** (`AppState.paletteShowsRetry`), also when Rename Current Tab has ⌘R. At all other times, Rename Current Tab's chord opens its screen.
     - **The results have one notice** (`PaletteNotice.resolve`, drawn by `PaletteNoticeView`): a failure, a first listing in flight, or a search with no match. It is centered, and it fills the results when there are no rows. A failure is the same notice for a listing (with Retry) and for a refused value of an input screen (no Retry). Do not draw a message of a screen in any other place. A row about one command (a muted command with its reason) is a row, not a notice.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.

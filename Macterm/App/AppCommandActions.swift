@@ -475,12 +475,6 @@ extension AppCommand {
         }
     }
 
-    /// The command opens a palette screen: a built-in one (`paletteScope`)
-    /// or an input screen (`paletteScreen(in:)`), when it applies.
-    var opensPaletteScreen: Bool {
-        paletteScope != nil || self == .changeProjectDirectory
-    }
-
     /// The glyph of the command's palette row, also when the row is muted:
     /// the pill glyph of the built-in screen that it opens. An input screen
     /// has none.

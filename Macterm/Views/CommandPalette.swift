@@ -439,9 +439,10 @@ struct CommandPalettePanel: View {
         .onKeyPress(.tab) {
             completeQuery()
         }
-        // ⌘R runs a screen's listing again. Rename Tab's chord, but the app
-        // responder stands aside while the palette is up, and on the root
-        // it stays ignored.
+        // ⌘R runs a screen's listing again. It is also Rename Current Tab's
+        // default chord: `PaletteResponder` lets it through to here only
+        // while the screen shows Retry, or when no binding uses ⌘R. On the
+        // root it stays ignored.
         .onKeyPress(characters: .init(charactersIn: "r")) { press in
             guard press.chordModifiers == .command, let scope else { return .ignored }
             scope.retry()
