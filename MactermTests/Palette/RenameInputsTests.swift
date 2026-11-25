@@ -9,19 +9,14 @@ import Testing
 @MainActor
 struct RenameInputsTests {
     private func makeState() -> (AppState, ProjectStore, Project) {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
-        let store = ProjectStore(fileURL: storeTmp)
-        let project = store.create(name: "alpha", path: "/tmp")
-        state.selectProject(project)
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        let project = TestModel.project(state, name: "alpha", path: "/tmp")
         return (state, store, project)
     }
 
@@ -80,7 +75,7 @@ struct RenameInputsTests {
     func tab_empty_field_gives_back_the_automatic_name() throws {
         let (state, store, project) = makeState()
         let tab = try #require(state.liveTabs[project.id]?.activeTab)
-        ModelWriter.tabSet(tab, title: "build")
+        state.writer.tabSet(tab.id, title: "build")
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         #expect(screen.initialQuery == "build")
         let action = try #require(rows(screen, " ", state, store).first)
@@ -104,9 +99,9 @@ struct RenameInputsTests {
         // since. "build" is a new name again, so it has its action row.
         let (state, store, project) = makeState()
         let tab = try #require(state.liveTabs[project.id]?.activeTab)
-        ModelWriter.tabSet(tab, title: "build")
+        state.writer.tabSet(tab.id, title: "build")
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
-        ModelWriter.tabSet(tab, title: nil)
+        state.writer.tabSet(tab.id, title: nil)
         let action = try #require(rows(screen, "build", state, store).first)
         #expect(screen.press(action) == .closed)
         #expect(tab.customTitle == "build")
@@ -115,11 +110,10 @@ struct RenameInputsTests {
     @Test
     func tab_that_closed_gives_no_row_and_its_row_does_nothing() throws {
         let (state, store, project) = makeState()
-        let ws = try #require(state.liveTabs[project.id])
-        let tab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let tab = try #require(state.createTab(projectID: project.id, projectPath: "/tmp", focus: false).flatMap { state.model.tab($0) })
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         let action = try #require(rows(screen, "build", state, store).first)
-        ModelWriter.tabClose(tab.id, in: ws)
+        state.writer.tabClose(tab.id)
         #expect(screen.press(action) == .closed, "the row of a tab that closed renames nothing")
         #expect(tab.customTitle == nil)
         #expect(rows(screen, "build", state, store).isEmpty)
@@ -131,7 +125,7 @@ struct RenameInputsTests {
         // name typed in full is a name like any other, so it stays fixed.
         let (state, store, project) = makeState()
         let tab = try #require(state.liveTabs[project.id]?.activeTab)
-        ModelWriter.tabSet(tab, title: "build")
+        state.writer.tabSet(tab.id, title: "build")
         let screen = try scope(.renameTab(tab.id, in: project.id, appState: state))
         let auto = tab.autoTitle
         let action = try #require(rows(screen, auto, state, store).first)
@@ -144,7 +138,7 @@ struct RenameInputsTests {
     func tab_escape_changes_nothing() throws {
         let (state, store, project) = makeState()
         let tab = try #require(state.liveTabs[project.id]?.activeTab)
-        ModelWriter.tabSet(tab, title: "build")
+        state.writer.tabSet(tab.id, title: "build")
         try typeThenEscape(
             .renameTab(tab.id, in: project.id, appState: state),
             text: "other",
@@ -158,7 +152,7 @@ struct RenameInputsTests {
         let (state, _, project) = makeState()
         let ws = try #require(state.liveTabs[project.id])
         let first = try #require(ws.activeTab)
-        let second = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let second = try #require(state.createTab(projectID: project.id, projectPath: "/tmp", focus: false).flatMap { state.model.tab($0) })
         let a = try #require(PaletteInput.renameTab(first.id, in: project.id, appState: state))
         let b = try #require(PaletteInput.renameTab(second.id, in: project.id, appState: state))
         #expect(a != b)
@@ -184,7 +178,8 @@ struct RenameInputsTests {
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
         let items = rows(screen, " beta ", state, store)
         #expect(items.map(\.title) == ["Rename to \"beta\""])
-        #expect(try screen.press(#require(items.first)) == .closed)
+        let rename = try #require(items.first)
+        #expect(screen.press(rename) == .closed)
         #expect(store.projects.first { $0.id == project.id }?.name == "beta")
     }
 

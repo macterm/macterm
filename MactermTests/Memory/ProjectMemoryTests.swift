@@ -24,15 +24,8 @@ struct ProjectMemoryTests {
     /// between the writes and the restore.
     @Test
     func the_switch_gates_the_command_and_the_panel() {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "macterm-memory-switch-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: base.appendingPathComponent("w.json")),
-            projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("projects", isDirectory: true))
-        )
-        let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(fileURL: base.appendingPathComponent("p.json")))
+        let state = TestModel.appState()
+        let ctx = AppCommandContext(appState: state, projectStore: TestModel.projectStore(state))
         let preferences = Preferences.shared
         let memory = ProjectMemory.shared
         let (wasOn, wasReader) = (preferences.projectMemory, memory.modelReader)
@@ -208,7 +201,10 @@ struct ProjectMemoryTests {
         shared.modelReader = { .available }
         shared.refreshModelAvailability()
         let memory = ProjectMemory(store: ProjectMemoryStore(directory: directory))
-        let project = UUID()
+        let tree = Project(name: "p", path: "/tmp")
+        let pinnedProject = PinnedTabs.newProject()
+        memory.projectLookup = { id in [tree, pinnedProject].first { $0.id == id } }
+        let project = tree.id
         let make = CommandEnd(paneID: UUID(), projectID: project, command: "make", exitCode: 0, startedAt: nil, finishedAt: now)
 
         preferences.projectMemory = false
@@ -218,8 +214,12 @@ struct ProjectMemoryTests {
         preferences.projectMemory = true
         memory.commandEnded(make)
         #expect(memory.store.entries(for: project).map(\.command) == (ProjectMemory.isSupported ? ["make"] : []))
-        memory.commandEnded(CommandEnd(paneID: UUID(), projectID: PinnedTabs.workspaceID, command: "make", finishedAt: now))
-        #expect(memory.store.entries(for: PinnedTabs.workspaceID).isEmpty)
+        memory.commandEnded(CommandEnd(paneID: UUID(), projectID: pinnedProject.id, command: "make", finishedAt: now))
+        #expect(memory.store.entries(for: pinnedProject.id).isEmpty)
+        // A project that the lookup does not know is not recorded.
+        let unknown = UUID()
+        memory.commandEnded(CommandEnd(paneID: UUID(), projectID: unknown, command: "make", finishedAt: now))
+        #expect(memory.store.entries(for: unknown).isEmpty)
     }
 
     @Test
@@ -441,9 +441,8 @@ struct ProjectMemoryTests {
         let project = UUID()
         store.append(entry("make", exit: 0), to: project)
         store.flush()
-        let badFile = FileManager.default.temporaryDirectory.appendingPathComponent("macterm-bad-projects-\(UUID().uuidString).json")
-        try Data("not json".utf8).write(to: badFile)
-        let projectStore = ProjectStore(fileURL: badFile)
+        // A connection that never read the model: the list is not the user's.
+        let projectStore = ProjectStore(writer: ModelWriter(connection: ModelConnection(server: nil)))
         #expect(projectStore.loadFailed)
 
         ProjectMemory(store: store).attach(projectStore: projectStore) { _ in false }
@@ -453,11 +452,14 @@ struct ProjectMemoryTests {
 
     @Test
     func memory_covers_projects_only() {
-        #expect(ProjectMemory.covers(UUID()))
-        #expect(!ProjectMemory.covers(PinnedTabs.workspaceID))
-        #expect(!ProjectMemory.covers(ScratchTabs.workspaceID))
-        #expect(!ProjectMemory.covers(QuickTerminalService.projectID))
-        #expect(!ProjectMemory.covers(DesktopWidget.projectID))
+        #expect(ProjectMemory.covers(Project(name: "p", path: "/tmp")))
+        #expect(!ProjectMemory.covers(nil))
+        // A group: a project of the tree with no folder.
+        #expect(!ProjectMemory.covers(Project(name: "g", path: "")))
+        #expect(!ProjectMemory.covers(PinnedTabs.newProject()))
+        #expect(!ProjectMemory.covers(ScratchTabs.newProject()))
+        #expect(!ProjectMemory.covers(QuickTerminalService.newProject()))
+        #expect(!ProjectMemory.covers(DesktopWidget(span: DesktopWidgetSpan(columns: 1, rows: 1), topLeft: .zero).newProject))
     }
 
     @Test

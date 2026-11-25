@@ -32,18 +32,18 @@ struct MoveToProjectPaletteScopeTests {
         }
     }
 
-    private func makeFixture() -> Fixture {
+    private func makeFixture() throws -> Fixture {
         let tmp = FileManager.default.temporaryDirectory
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(
                 directoryURL: tmp.appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
             )
         )
-        let store = ProjectStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json"))
-        let work = store.create(name: "Work", path: "/tmp/work")
-        let api = store.create(name: "api", path: "/tmp/api", parent: work.id)
-        let moving = store.create(name: "Home", path: "/tmp")
+        let store = TestModel.projectStore(state)
+        store.onAdd = { state.projectAdded($0) }
+        let work = try #require(store.create(name: "Work", path: "/tmp/work"))
+        let api = try #require(store.create(name: "api", path: "/tmp/api", parent: work.id))
+        let moving = try #require(store.create(name: "Home", path: "/tmp"))
         state.incubatePane = { _ in }
         state.selectProject(moving)
         return Fixture(state: state, store: store, work: work, api: api, moving: moving)
@@ -52,66 +52,66 @@ struct MoveToProjectPaletteScopeTests {
     // MARK: - The screen
 
     @Test
-    func an_empty_query_lists_every_target_by_its_path_and_nothing_else() {
-        let f = makeFixture()
+    func an_empty_query_lists_every_target_by_its_path_and_nothing_else() throws {
+        let f = try makeFixture()
         let rows = f.rows("")
         #expect(rows.map(\.title) == ["Work", "Work/api"])
         #expect(rows.map(\.subtitle) == ["/tmp/work", "/tmp/api"])
     }
 
     @Test
-    func an_empty_query_keeps_the_order_of_the_projects() {
-        let f = makeFixture()
+    func an_empty_query_keeps_the_order_of_the_projects() throws {
+        let f = try makeFixture()
         _ = f.store.create(name: "lib", path: "/tmp/lib", parent: f.api.id)
         _ = f.store.create(name: "Z", path: "/tmp/z")
         #expect(f.rows("").map(\.title) == ["Work", "Work/api", "Work/api/lib", "Z"])
     }
 
     @Test
-    func a_query_matches_the_folder_and_any_letter_case() {
-        let f = makeFixture()
+    func a_query_matches_the_folder_and_any_letter_case() throws {
+        let f = try makeFixture()
         #expect(f.rows("/tmp/api").map(\.title) == ["Work/api"])
         #expect(f.rows("work/API").map(\.title) == ["Work/api"])
     }
 
     @Test
-    func a_query_filters_by_name_or_path() {
-        let f = makeFixture()
+    func a_query_filters_by_name_or_path() throws {
+        let f = try makeFixture()
         #expect(f.rows("ap").map(\.title) == ["Work/api"])
         #expect(f.rows("Work/api").map(\.title) == ["Work/api"])
     }
 
     @Test
-    func a_query_that_names_no_project_gives_no_row() {
-        let f = makeFixture()
+    func a_query_that_names_no_project_gives_no_row() throws {
+        let f = try makeFixture()
         #expect(f.rows("Nowhere").isEmpty)
     }
 
     @Test
-    func a_query_shows_only_projects_never_a_row_for_the_text() {
-        let f = makeFixture()
+    func a_query_shows_only_projects_never_a_row_for_the_text() throws {
+        let f = try makeFixture()
         // Ethan, ui-review 0592: "Work" shows once, as the project.
         #expect(f.rows("Work").map(\.title) == ["Work", "Work/api"])
     }
 
     @Test
     func a_row_moves_the_project_into_it() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let row = try #require(f.rows("api").first)
         row.action()
         #expect(f.store.row(f.moving.id)?.parent == f.api.id)
     }
 
     @Test
-    func the_project_its_parent_and_the_projects_inside_it_are_not_listed() {
-        let f = makeFixture()
+    func the_project_its_parent_and_the_projects_inside_it_are_not_listed() throws {
+        let f = try makeFixture()
         #expect(f.rows("", moving: f.api).map(\.title) == ["Home"])
         #expect(f.rows("", moving: f.work).map(\.title) == ["Home"])
     }
 
     @Test
-    func two_projects_with_one_path_are_two_rows() {
-        let f = makeFixture()
+    func two_projects_with_one_path_are_two_rows() throws {
+        let f = try makeFixture()
         _ = f.store.create(name: "api", path: "/tmp/other", parent: f.work.id)
         #expect(f.rows("Work/api").map(\.subtitle) == ["/tmp/api", "/tmp/other"])
     }
@@ -119,8 +119,8 @@ struct MoveToProjectPaletteScopeTests {
     // MARK: - The commands
 
     @Test
-    func a_top_level_project_has_no_move_out() {
-        let f = makeFixture()
+    func a_top_level_project_has_no_move_out() throws {
+        let f = try makeFixture()
         #expect(AppCommand.newProjectInside.action(in: f.ctx) != nil)
         #expect(AppCommand.moveToProject.action(in: f.ctx) != nil)
         #expect(AppCommand.moveOutOfProject.action(in: f.ctx) == nil)
@@ -130,7 +130,7 @@ struct MoveToProjectPaletteScopeTests {
 
     @Test
     func move_to_project_opens_its_screen_from_the_palette() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let row = try #require(CommandSource().emptyItems(context: f.palette)?.first { $0.title == AppCommand.moveToProject.title })
         let node = try #require(f.state.moveToProjectNode(store: f.store))
         #expect(row.opensScope == .moveToProject(node))
@@ -147,24 +147,25 @@ struct MoveToProjectPaletteScopeTests {
 
     @Test
     func a_pinned_tab_moves_to_the_project_as_an_unpin() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let tab = try makeTab(f, in: f.moving)
         f.state.pinTab(tab, fromProject: f.moving.id)
-        #expect(f.state.moveNode(.tab(projectID: PinnedTabs.workspaceID, tabID: tab), to: f.api, store: f.store, in: nil))
+        let pinnedID = try #require(f.state.pinnedProjectID)
+        #expect(f.state.moveNode(.tab(projectID: pinnedID, tabID: tab), to: f.api, store: f.store, in: nil))
         #expect(f.state.liveTabs[f.api.id]?.tabs.contains { $0.id == tab } == true)
         #expect(f.state.pinnedRecord(tab) == nil)
     }
 
     @Test
     func a_tab_lists_every_project_but_its_own() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let tab = try makeTab(f, in: f.api)
         #expect(f.screen(.tab(projectID: f.api.id, tabID: tab), "").map(\.title) == ["Work", "Home"])
     }
 
     @Test
     func a_row_moves_the_tab_to_the_project_and_opens_it() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let tab = try makeTab(f, in: f.moving)
         let window = WindowState()
         #expect(f.state.moveNode(.tab(projectID: f.moving.id, tabID: tab), to: f.api, store: f.store, in: window))
@@ -176,7 +177,7 @@ struct MoveToProjectPaletteScopeTests {
 
     @Test
     func the_node_is_the_shown_tab_and_on_the_project_screen_the_project() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         let window = WindowState(activeProjectID: f.moving.id)
         f.state.registerWindow(window)
         f.state.noteKeyWindow(window)
@@ -192,18 +193,19 @@ struct MoveToProjectPaletteScopeTests {
     // MARK: - When the commands apply
 
     @Test
-    func move_to_project_is_off_with_no_target() {
-        let f = makeFixture()
-        let tmp = FileManager.default.temporaryDirectory
-        let lone = ProjectStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json"))
-        let only = lone.create(name: "only", path: "/tmp")
-        f.state.selectProject(only)
-        #expect(AppCommand.moveToProject.action(in: AppCommandContext(appState: f.state, projectStore: lone)) == nil)
+    func move_to_project_is_off_with_no_target() throws {
+        let f = try makeFixture()
+        // A model of its own, with one project: no other project to move to.
+        let state = TestModel.appState()
+        let lone = TestModel.projectStore(state)
+        let only = try #require(lone.create(name: "only", path: "/tmp"))
+        state.selectProject(only)
+        #expect(AppCommand.moveToProject.action(in: AppCommandContext(appState: state, projectStore: lone)) == nil)
     }
 
     @Test
     func move_out_of_project_puts_the_project_beside_its_parent() throws {
-        let f = makeFixture()
+        let f = try makeFixture()
         f.state.selectProject(f.api)
         let run = try #require(AppCommand.moveOutOfProject.action(in: f.ctx))
         run()
@@ -211,8 +213,8 @@ struct MoveToProjectPaletteScopeTests {
     }
 
     @Test
-    func a_move_opens_the_target_and_its_parents_in_the_window() {
-        let f = makeFixture()
+    func a_move_opens_the_target_and_its_parents_in_the_window() throws {
+        let f = try makeFixture()
         let window = WindowState()
         #expect(f.state.moveProject(f.moving.id, into: f.api.id, store: f.store, in: window))
         #expect(window.expandedRows.isSuperset(of: [f.api.id, f.work.id]))

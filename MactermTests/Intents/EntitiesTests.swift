@@ -10,16 +10,9 @@ import Testing
 @MainActor
 struct EntitiesTests {
     private func makeHost() -> (AppState, ProjectStore) {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-entity-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-entity-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let appState = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
-        let projectStore = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-entity-tests-store-\(UUID().uuidString).json"))
+        let appState = TestModel.appState()
+        let projectStore = TestModel.projectStore(appState)
+        projectStore.onAdd = { [weak appState] in appState?.projectAdded($0) }
         MactermIntentHost.shared.attachForTesting(appState: appState, projectStore: projectStore)
         return (appState, projectStore)
     }
@@ -30,8 +23,9 @@ struct EntitiesTests {
         name: String,
         path: String = "/tmp"
     ) -> Project {
-        let project = Project(name: name, path: path, sortOrder: projectStore.projects.count)
-        projectStore.add(project)
+        guard let project = projectStore.add(Project(name: name, path: path)) else {
+            preconditionFailure("the test server refused the project")
+        }
         appState.selectProject(project)
         return project
     }
@@ -85,7 +79,48 @@ struct EntitiesTests {
         appState.pinTab(tab.id, fromProject: projectStore.projects[0].id)
 
         let listed = try await MactermProjectQuery().allEntities()
-        #expect(listed.first?.id == PinnedTabs.workspaceID)
+        #expect(listed.first?.id == appState.pinnedProjectID)
+    }
+
+    /// The hidden projects (design/010 §11) are not projects of the tree.
+    /// The quick terminal and the widgets are never offered. Pinned and
+    /// Scratch Tabs are offered only when they have something
+    /// (`IntentTargets.isShortcutTarget`): Pinned first, Scratch Tabs last,
+    /// as the sidebar draws them.
+    @Test
+    func the_hidden_projects_are_offered_only_as_pinned_and_scratch_tabs_with_tabs() async throws {
+        let (appState, projectStore) = makeHost()
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let api = seedProject(appState, projectStore, name: "api")
+        let pinnedID = try #require(appState.ensurePinnedProject())
+        let scratchID = try #require(appState.ensureScratchProject())
+        let quickID = try #require(appState.quickTerminal.ensureTab()).id
+        let quickProject = try #require(appState.model.projectID(ofTab: quickID))
+        let widget = appState.createDesktopWidget()
+        #expect(appState.model.project(widget.id) != nil)
+
+        // Empty, Pinned and Scratch Tabs are not offered.
+        #expect(try await MactermProjectQuery().allEntities().map(\.id) == [api.id])
+        let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
+        for id in [pinnedID, scratchID, quickProject, widget.id] {
+            #expect(throws: MactermIntentError.self) { try IntentTargets.project(id, in: ctx) }
+        }
+
+        // With a tab each, they are, around the projects of the tree.
+        let tab = try #require(appState.liveTabs[api.id]?.tabs.first)
+        appState.pinTab(tab.id, fromProject: api.id)
+        _ = try #require(appState.createScratchTab(focus: false))
+        _ = seedProject(appState, projectStore, name: "web")
+        let listed = try await MactermProjectQuery().allEntities().map(\.id)
+        #expect(listed.first == pinnedID)
+        #expect(listed.last == scratchID)
+        #expect(Set(listed) == Set([pinnedID, scratchID] + projectStore.projects.map(\.id)))
+        #expect(!listed.contains(quickProject))
+        #expect(!listed.contains(widget.id))
+        #expect(try IntentTargets.project(pinnedID, in: ctx).id == pinnedID)
+        #expect(throws: MactermIntentError.self) { try IntentTargets.project(quickProject, in: ctx) }
+        #expect(throws: MactermIntentError.self) { try IntentTargets.project(widget.id, in: ctx) }
     }
 
     // MARK: - Tabs
@@ -99,7 +134,7 @@ struct EntitiesTests {
         let listed = try await MactermTabQuery().allEntities()
 
         // Ordered by project (sidebar order), then tab order — not
-        // `AppState.workspaces` dictionary order, which would reshuffle the
+        // the order of the model's project table, which could reshuffle the
         // picker between openings.
         #expect(listed.count == 2)
         #expect(listed.map(\.project) == ["api", "web"])

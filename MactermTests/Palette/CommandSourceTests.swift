@@ -9,15 +9,13 @@ struct CommandSourceTests {
     private func makeContext(seedProject: Bool = true) -> (PaletteContext, AppState) {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
-        let store = ProjectStore(fileURL: storeTmp)
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
         if seedProject {
             let p = Project(name: "proj", path: "/tmp", sortOrder: 0)
             store.add(p)
@@ -58,9 +56,9 @@ struct CommandSourceTests {
     func renameTab_row_opens_the_input_screen_of_the_active_tab() throws {
         let (ctx, state) = makeContext()
         let projectID = try #require(state.activeProjectID)
-        let ws = try #require(state.liveTabs[projectID])
-        let secondTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
-        ModelWriter.tabSelect(secondTab.id, in: ws)
+        let secondTab = try #require(state.createTab(projectID: projectID, projectPath: "/tmp", focus: false)
+            .flatMap { state.model.tab($0) })
+        state.writer.tabSelect(secondTab.id, in: projectID)
 
         let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
         guard case let .input(input) = item.opensScope else {

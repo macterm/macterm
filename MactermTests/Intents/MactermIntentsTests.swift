@@ -18,26 +18,20 @@ struct MactermIntentsTests {
     // MARK: - Fixtures
 
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+        TestModel.appState()
     }
 
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-store-\(UUID().uuidString).json"))
+    private func makeProjectStore(_ appState: AppState) -> ProjectStore {
+        let store = TestModel.projectStore(appState)
+        store.onAdd = { [weak appState] in appState?.projectAdded($0) }
+        return store
     }
 
     /// Attach the host and open the permission gate — the state a running app
     /// is in once `installResponders` has run and the user has allowed.
     private func makeHost() -> (AppState, ProjectStore) {
         let appState = makeAppState()
-        let projectStore = makeProjectStore()
+        let projectStore = makeProjectStore(appState)
         MactermIntentHost.shared.attachForTesting(appState: appState, projectStore: projectStore)
         IntentPermissionGate.shared.resetForTesting()
         IntentPermissionGate.shared.access = { .allow }
@@ -54,8 +48,9 @@ struct MactermIntentsTests {
         name: String = "demo",
         path: String = "/tmp"
     ) -> Project {
-        let project = Project(name: name, path: path, sortOrder: projectStore.projects.count)
-        projectStore.add(project)
+        guard let project = projectStore.add(Project(name: name, path: path)) else {
+            preconditionFailure("the test server refused the project")
+        }
         appState.selectProject(project)
         return project
     }
@@ -199,7 +194,7 @@ struct MactermIntentsTests {
 
         await #expect(throws: MactermIntentError.self) { try await intent.perform() }
         #expect(projectStore.projects.isEmpty)
-        #expect(appState.workspaces.isEmpty)
+        #expect(appState.model.projects.isEmpty)
     }
 
     @Test
@@ -259,13 +254,37 @@ struct MactermIntentsTests {
         #expect(set.keywords == ["Website", "acme-site"])
     }
 
+    /// Spotlight gets the tree projects only: the hidden projects of the
+    /// model (Pinned, Scratch Tabs, the quick terminal, the widgets) are
+    /// never in the list that `ProjectSpotlightIndex` indexes.
     @Test
-    func a_save_hands_the_saved_list_to_the_spotlight_hook() {
-        let projectStore = makeProjectStore()
+    func the_spotlight_list_has_no_hidden_project() throws {
+        let appState = makeAppState()
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let projectStore = makeProjectStore(appState)
+        var saved: [[String]] = []
+        projectStore.onSave = { saved.append($0.map(\.name)) }
+        _ = try #require(appState.ensurePinnedProject())
+        _ = try #require(appState.createScratchTab(focus: false))
+        _ = try #require(appState.quickTerminal.ensureTab())
+        _ = appState.createDesktopWidget()
+        #expect(appState.model.projects.count == 4)
+
+        _ = try #require(projectStore.create(name: "api", path: "/tmp"))
+
+        #expect(saved == [["api"]])
+        #expect(projectStore.projects.map(\.name) == ["api"])
+    }
+
+    @Test
+    func a_save_hands_the_saved_list_to_the_spotlight_hook() throws {
+        let appState = makeAppState()
+        let projectStore = makeProjectStore(appState)
         var saved: [[String]] = []
         projectStore.onSave = { saved.append($0.map(\.name)) }
 
-        let project = projectStore.create(name: "api", path: "/tmp")
+        let project = try #require(projectStore.create(name: "api", path: "/tmp"))
         projectStore.rename(id: project.id, to: "backend")
         projectStore.removeWithDescendants(project.id)
 
@@ -434,7 +453,7 @@ struct MactermIntentsTests {
         let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let view = NSView()
 
-        MactermPaneEntity.annotate(view, for: pane)
+        MactermPaneEntity.annotate(view, for: pane, addressable: true)
 
         let identifier = try #require(view.appEntityIdentifier)
         #expect(identifier == MactermPaneEntity.identifier(forSession: pane.sessionName))
@@ -444,14 +463,27 @@ struct MactermIntentsTests {
     }
 
     @Test
-    func quick_terminal_and_widget_panes_name_no_entity() {
+    func quick_terminal_and_widget_panes_name_no_entity() throws {
         guard #available(macOS 15.4, *) else { return }
-        for projectID in [QuickTerminalService.projectID, DesktopWidget.projectID] {
+        let (appState, projectStore) = makeHost()
+        defer { teardown() }
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let quick = try #require(appState.quickTerminal.ensureTab()?.focusedPane)
+        let widget = try #require(appState.createDesktopWidget().pane)
+        let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
+        for pane in [quick, widget] {
+            // `PaneSurface` asks whether a window can show the pane's
+            // project. The hidden projects of these panes are not.
+            let project = try #require(appState.model.project(pane.projectID))
+            #expect(!project.isSelectable)
             let view = NSView()
-            MactermPaneEntity.annotate(view, for: Pane(projectPath: "/tmp", projectID: projectID))
-            // `allPanes` walks the workspaces only, so an identifier here
-            // would name a pane that every pane intent reports as not found.
+            MactermPaneEntity.annotate(view, for: pane, addressable: project.isSelectable)
+            // `allPanes` walks the projects that Shortcuts can address only,
+            // so an identifier here would name a pane that every pane intent
+            // reports as not found.
             #expect(view.appEntityIdentifier == nil)
+            #expect(!IntentTargets.allPanes(in: ctx).contains { $0.pane === pane })
         }
     }
 
@@ -679,7 +711,8 @@ struct MactermIntentsTests {
 
         // The pinned workspace is not a project, so it has no memory.
         let pinned = GetMactermProjectMemoryIntent()
-        pinned.project = MactermProjectEntity(PinnedTabs.project)
+        let pinnedID = try #require(appState.ensurePinnedProject())
+        pinned.project = try MactermProjectEntity(#require(appState.model.project(pinnedID)))
         await #expect(throws: MactermIntentError.self) { try await pinned.perform() }
     }
 }

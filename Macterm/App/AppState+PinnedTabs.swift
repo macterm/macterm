@@ -79,8 +79,8 @@ extension AppState {
     /// the first project) — a move, never a kill. An UNLOADED record has no
     /// live tab to move; unpinning it just forgets the declaration.
     func unpinTab(_ tabID: UUID, projects: [Project]) {
-        guard let record = pinnedRecord(tabID), let pinned = pinnedProjectID else { return }
-        guard isPinnedTabLoaded(tabID) else {
+        guard let record = pinnedRecord(tabID) else { return }
+        guard isPinnedTabLoaded(tabID), let pinned = pinnedProjectID else {
             logger.info("unpinTab: forgetting unloaded record \(tabID, privacy: .public)")
             removePinnedRecord(forTab: tabID)
             persistState()

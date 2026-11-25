@@ -7,11 +7,7 @@ import Testing
 @MainActor
 struct AppStateTextFilesTests {
     private func makeAppState(placement: TextFilePlacement) -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
+        let state = TestModel.appState()
         state.textFilePlacement = { placement }
         state.opensTextFileHere = { _ in true }
         return state
@@ -28,9 +24,7 @@ struct AppStateTextFilesTests {
     }
 
     private func seedProject(_ state: AppState, path: String) -> Project {
-        let project = Project(name: "proj", path: path, sortOrder: 0)
-        state.selectProject(project)
-        return project
+        TestModel.project(state, name: "proj", path: path)
     }
 
     // MARK: - Clicked links

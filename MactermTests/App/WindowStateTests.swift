@@ -14,13 +14,36 @@ struct WindowStateTests {
     /// Tempdir-backed, like every other AppState test — never the developer's
     /// real Application Support.
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
-        let projects = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projects)
+        TestModel.appState()
+    }
+
+    /// Put `projects` in the model of `state`, with their ids, each with its
+    /// first tab, as the app does when it adds a project.
+    private func addToModel(_ projects: [Project], _ state: AppState) {
+        for project in projects where state.model.project(project.id) == nil {
+            guard state.writer.projectCreate(project), let stored = state.model.project(project.id) else {
+                Issue.record("the test server refused project \(project.name)")
+                continue
+            }
+            state.projectAdded(stored)
+        }
+    }
+
+    /// A relaunch: a new AppState on the server of `writer`, with the GUI
+    /// state file `gui` and the project files `files`.
+    private func relaunch(
+        _ writer: AppState,
+        gui: URL,
+        files: ProjectFileStore,
+        legacyPanelVisible: @escaping () -> Bool = { false }
+    ) -> AppState {
+        AppState(
+            modelConnection: TestModel.reconnect(writer),
+            workspaceStore: WorkspaceStore(fileURL: TestModel.folder("state").appending(path: "workspaces_v3.json")),
+            guiStateStore: GUIStateStore(fileURL: gui),
+            projectFiles: files,
+            quickTerminal: QuickTerminalSplitState(),
+            legacyPanelVisible: legacyPanelVisible
         )
     }
 
@@ -213,9 +236,10 @@ struct WindowStateTests {
             .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
         let projects = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = AppState(workspaceStore: store, projectFiles: ProjectFileStore(directoryURL: projects))
+        let store = GUIStateStore(fileURL: tmp)
+        let state = TestModel.appState(guiStateStore: store, projectFiles: ProjectFileStore(directoryURL: projects))
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
+        addToModel([project], state)
         state.restoreSelection(projects: [project])
         state.selectProject(project)
         let a = WindowState(activeProjectID: project.id)
@@ -226,7 +250,7 @@ struct WindowStateTests {
 
         state.persistState()
 
-        let saved = store.load().windows
+        let saved = GUIStateStore(fileURL: tmp).load()?.windows ?? []
         #expect(saved.map(\.isKey) == [false, true])
     }
 
@@ -236,6 +260,7 @@ struct WindowStateTests {
         // would render a workspace that no longer exists.
         let state = makeAppState()
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
+        addToModel([project], state)
         state.restoreSelection(projects: [project])
         state.selectProject(project)
         let a = WindowState(activeProjectID: project.id)
@@ -288,13 +313,14 @@ struct WindowStateTests {
     // MARK: - Per-window tab selection
 
     /// A project with `count` tabs, selected in `state`.
-    private func seedProject(_ state: AppState, tabs count: Int, path: String = "/tmp") throws -> (Project, Workspace) {
+    private func seedProject(_ state: AppState, tabs count: Int, path: String = "/tmp") throws -> (Project, LiveTabs) {
         let project = Project(name: "p", path: path, sortOrder: 0)
+        addToModel([project], state)
         state.restoreSelection(projects: [project])
         state.selectProject(project)
         let ws = try #require(state.liveTabs[project.id])
         for _ in 1 ..< count {
-            _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+            _ = try #require(state.createTab(projectID: project.id, projectPath: "/tmp", focus: false))
         }
         return (project, ws)
     }
@@ -510,16 +536,20 @@ struct WindowStateTests {
 
     @Test
     func creating_a_tab_in_the_key_window_records_it_there() throws {
-        // Every writer of Workspace.activeTabID — create, close, cycle, the
-        // CLI — reaches the key window's record through the workspace hook.
+        // Every change of a project's active tab — create, close, cycle, the
+        // CLI — reaches the key window's record through the model's hook.
         let state = makeAppState()
         let (project, ws) = try seedProject(state, tabs: 1)
         let a = WindowState(activeProjectID: project.id)
         state.registerWindow(a)
         state.noteKeyWindow(a)
 
-        let created = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        let created = try #require(state.writer.tabCreate(
+            in: project.id,
+            root: .pane(Pane(projectPath: "/tmp", projectID: project.id))
+        ))
 
+        #expect(ws.activeTabID == created.id)
         #expect(a.activeTabIDs[project.id] == created.id)
         #expect(state.selectedTab(for: project.id, in: a)?.id == created.id)
     }
@@ -554,7 +584,8 @@ struct WindowStateTests {
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
         let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p, q], writer)
         writer.restoreSelection(projects: [p, q])
         writer.selectProject(p)
         writer.selectProject(q)
@@ -566,7 +597,7 @@ struct WindowStateTests {
         writer.noteKeyWindow(w2)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.restoreSelection(projects: [p, q])
         let first = WindowState()
         reader.registerWindow(first)
@@ -593,7 +624,8 @@ struct WindowStateTests {
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
         let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { false })
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p, q], writer)
         writer.restoreSelection(projects: [p, q])
         writer.selectProject(p)
         writer.selectProject(q)
@@ -607,7 +639,7 @@ struct WindowStateTests {
         #expect(!w2.projectMemoryPanelVisible, "the toggle acts on the key window only")
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { true })
+        let reader = relaunch(writer, gui: tmp, files: files, legacyPanelVisible: { true })
         reader.restoreSelection(projects: [p, q])
         let first = WindowState()
         reader.registerWindow(first)
@@ -635,7 +667,8 @@ struct WindowStateTests {
         let files = ProjectFileStore(directoryURL: projects)
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { false })
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p], writer)
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         let w1 = WindowState(activeProjectID: p.id)
@@ -656,7 +689,7 @@ struct WindowStateTests {
         try JSONSerialization.data(withJSONObject: file).write(to: tmp)
 
         var reads = 0
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: {
+        let reader = relaunch(writer, gui: tmp, files: files, legacyPanelVisible: {
             reads += 1
             return true
         })
@@ -696,7 +729,8 @@ struct WindowStateTests {
         let firstFrame = "100 200 1400 900 0 0 3008 1662 "
         let secondFrame = "1508 9 1492 1645 0 0 3008 1662 "
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p], writer)
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         let w1 = WindowState(activeProjectID: p.id)
@@ -707,7 +741,7 @@ struct WindowStateTests {
         writer.registerWindow(w2)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.restoreSelection(projects: [p])
         let first = WindowState()
         reader.registerWindow(first)
@@ -740,7 +774,8 @@ struct WindowStateTests {
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
         let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p, q], writer)
         writer.restoreSelection(projects: [p, q])
         let w1 = WindowState(activeProjectID: p.id, sidebarWidth: 320)
         w1.sidebarVisible = false
@@ -749,7 +784,7 @@ struct WindowStateTests {
         writer.registerWindow(w2)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.restoreSelection(projects: [p, q])
         let first = WindowState()
         reader.restoreWindows(adopting: first)
@@ -779,13 +814,14 @@ struct WindowStateTests {
         let files = ProjectFileStore(directoryURL: projects)
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p], writer)
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         writer.registerWindow(WindowState(activeProjectID: p.id))
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.restoreSelection(projects: [p])
         return (reader, p)
     }
@@ -837,7 +873,8 @@ struct WindowStateTests {
         let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
         let r = Project(name: "r", path: "/tmp/r", sortOrder: 2)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
+        addToModel([p, q, r], writer)
         writer.restoreSelection(projects: [p, q, r])
         let w1 = WindowState(activeProjectID: p.id)
         w1.expandedRows = [q.id, r.id]
@@ -847,7 +884,7 @@ struct WindowStateTests {
         writer.registerWindow(w2)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.restoreSelection(projects: [p, q, r])
         let first = WindowState()
         reader.restoreWindows(adopting: first)
@@ -870,6 +907,7 @@ struct WindowStateTests {
         let state = makeAppState()
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
         let q = Project(name: "q", path: "/tmp/q", sortOrder: 1)
+        addToModel([p, q], state)
         state.restoreSelection(projects: [p, q])
         let window = WindowState(activeProjectID: p.id)
         state.registerWindow(window)
@@ -878,9 +916,6 @@ struct WindowStateTests {
         window.expandedRows.remove(p.id)
         window.activeProjectID = q.id
         #expect(window.expandedRows == [q.id], "only a change of project opens a section")
-
-        window.activeProjectID = PinnedTabs.workspaceID
-        #expect(window.expandedRows == [q.id], "the pinned workspace has no section")
 
         state.removeProject(q.id)
         #expect(!window.expandedRows.contains(q.id))
@@ -912,6 +947,7 @@ struct WindowStateTests {
         Preferences.shared.sidebarWidth = 333
         let state = makeAppState()
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
+        addToModel([project], state)
         state.restoreSelection(projects: [project])
         let first = WindowState()
         state.registerWindow(first)
@@ -1262,27 +1298,27 @@ struct WindowStateTests {
         state.sessionClient = .noop
         state.incubatePane = { _ in }
         _ = try seedProject(state, tabs: 1)
-        state.ensurePinnedWorkspace()
+        let pinnedID = try #require(state.ensurePinnedProject())
         // Through AppState so the tabs get pinned records (selection is
         // record-aware), as Cmd+T's `createTab` does.
-        let first = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
-        let window = WindowState(activeProjectID: PinnedTabs.workspaceID)
+        let first = try #require(state.createTab(projectID: pinnedID, projectPath: "/tmp"))
+        let window = WindowState(activeProjectID: pinnedID)
         state.registerWindow(window)
         state.noteKeyWindow(window)
-        window.activeTabIDs[PinnedTabs.workspaceID] = first
+        window.activeTabIDs[pinnedID] = first
 
-        let created = try #require(state.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
+        let created = try #require(state.createTab(projectID: pinnedID, projectPath: "/tmp"))
 
-        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == created)
-        state.selectTab(first, projectID: PinnedTabs.workspaceID, in: window)
-        #expect(state.selectedTab(for: PinnedTabs.workspaceID, in: window)?.id == first)
+        #expect(state.selectedTab(for: pinnedID, in: window)?.id == created)
+        state.selectTab(first, projectID: pinnedID, in: window)
+        #expect(state.selectedTab(for: pinnedID, in: window)?.id == first)
     }
 
     @Test
     func restoring_a_window_on_the_pinned_workspace_records_no_tab_for_it() async throws {
-        // The pinned selection is restored through the workspace
-        // (`pinnedActiveTabID`); the window snapshot's copy of it must not
-        // become a stale per-window record.
+        // The pinned selection is the server's active tab of the pinned
+        // project; the window snapshot's copy of it must not become a stale
+        // per-window record.
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
         let projects = FileManager.default.temporaryDirectory
@@ -1290,21 +1326,22 @@ struct WindowStateTests {
         let files = ProjectFileStore(directoryURL: projects)
         let p = Project(name: "p", path: "/tmp", sortOrder: 0)
 
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
         writer.sessionClient = .noop
         writer.incubatePane = { _ in }
+        addToModel([p], writer)
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
-        writer.ensurePinnedWorkspace()
-        let firstPinned = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
-        _ = try #require(writer.createTab(projectID: PinnedTabs.workspaceID, projectPath: "/tmp"))
-        writer.selectTab(firstPinned, projectID: PinnedTabs.workspaceID)
-        let w = WindowState(activeProjectID: PinnedTabs.workspaceID)
+        let pinnedID = try #require(writer.ensurePinnedProject())
+        let firstPinned = try #require(writer.createTab(projectID: pinnedID, projectPath: "/tmp"))
+        _ = try #require(writer.createTab(projectID: pinnedID, projectPath: "/tmp"))
+        writer.selectTab(firstPinned, projectID: pinnedID)
+        let w = WindowState(activeProjectID: pinnedID)
         writer.registerWindow(w)
         writer.noteKeyWindow(w)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.sessionClient = .noop
         reader.incubatePane = { _ in }
         reader.restoreSelection(projects: [p])
@@ -1314,14 +1351,14 @@ struct WindowStateTests {
         reader.noteKeyWindow(restored)
         reader.restoreWindows(adopting: restored)
 
-        #expect(restored.activeProjectID == PinnedTabs.workspaceID)
-        #expect(restored.activeTabIDs[PinnedTabs.workspaceID] == nil)
-        let pinned = try #require(reader.pinnedWorkspace)
+        #expect(restored.activeProjectID == pinnedID)
+        #expect(restored.activeTabIDs[pinnedID] == nil)
+        let pinned = try #require(reader.liveTabs[pinnedID])
         #expect(pinned.tabs.count == 2)
-        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == pinned.activeTabID)
+        #expect(reader.selectedTab(for: pinnedID, in: restored)?.id == pinned.activeTabID)
 
-        let created = ModelWriter.tabCreate(in: pinned, projectPath: "/tmp")
-        #expect(reader.selectedTab(for: PinnedTabs.workspaceID, in: restored)?.id == created.id)
+        let created = try #require(reader.createTab(projectID: pinnedID, projectPath: "/tmp"))
+        #expect(reader.selectedTab(for: pinnedID, in: restored)?.id == created)
     }
 
     // MARK: - Project screen (0362)
@@ -1329,7 +1366,7 @@ struct WindowStateTests {
     /// A project with two tabs in a key window, the second tab shown. A
     /// project selection warms the other tab, so no real surface is made in
     /// the test host.
-    private func keyWindowOnTwoTabs(_ state: AppState) throws -> (Project, Workspace, WindowState) {
+    private func keyWindowOnTwoTabs(_ state: AppState) throws -> (Project, LiveTabs, WindowState) {
         state.incubatePane = { _ in }
         let (project, ws) = try seedProject(state, tabs: 2)
         let window = WindowState(activeProjectID: project.id)
@@ -1355,9 +1392,7 @@ struct WindowStateTests {
 
     /// The palette row of `project`, run as the palette runs it.
     private func runPaletteRow(of project: Project, in state: AppState) throws {
-        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
-        store.add(project)
+        let store = TestModel.projectStore(state)
         let item = try #require(ProjectSource().items(
             query: project.name,
             context: PaletteContext(appState: state, projectStore: store)
@@ -1369,11 +1404,11 @@ struct WindowStateTests {
     func a_palette_project_row_shows_the_last_tab_of_the_project() throws {
         let state = makeAppState()
         let (project, ws, window) = try keyWindowOnTwoTabs(state)
-        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        let other = TestModel.project(state, name: "q", select: false)
         state.selectProject(other, in: window)
         // The workspace's active tab moves while the window is away, so the
         // window's own record and the workspace disagree.
-        ModelWriter.tabSelect(ws.tabs[0].id, in: ws)
+        state.writer.tabSelect(ws.tabs[0].id, in: project.id)
 
         try runPaletteRow(of: project, in: state)
 
@@ -1402,7 +1437,7 @@ struct WindowStateTests {
             state.closeTab(tab.id, projectID: project.id)
         }
         #expect(ws.tabs.isEmpty)
-        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        let other = TestModel.project(state, name: "q", select: false)
         state.selectProject(other, in: window)
 
         try runPaletteRow(of: project, in: state)
@@ -1430,8 +1465,7 @@ struct WindowStateTests {
         let (project, _, window) = try keyWindowOnTwoTabs(state)
         let ctx = AppCommandContext(
             appState: state,
-            projectStore: ProjectStore(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
+            projectStore: TestModel.projectStore(state)
         )
         #expect(AppCommand.closeTab.action(in: ctx) != nil)
 
@@ -1488,7 +1522,7 @@ struct WindowStateTests {
         let state = makeAppState()
         let (project, _, window) = try keyWindowOnTwoTabs(state)
         state.showProjectScreen(project, in: window)
-        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        let other = TestModel.project(state, name: "q", select: false)
 
         state.selectProject(other, in: window)
 
@@ -1501,7 +1535,7 @@ struct WindowStateTests {
         let state = makeAppState()
         let (project, ws, window) = try keyWindowOnTwoTabs(state)
         state.showProjectScreen(project, in: window)
-        let other = Project(name: "q", path: "/tmp", sortOrder: 1)
+        let other = TestModel.project(state, name: "q", select: false)
         state.selectProject(other, in: window)
 
         state.selectProject(project, in: window)
@@ -1562,13 +1596,13 @@ struct WindowStateTests {
         let projects = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
         let files = ProjectFileStore(directoryURL: projects)
-        let writer = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let writer = TestModel.appState(guiStateStore: GUIStateStore(fileURL: tmp), projectFiles: files)
         let (project, ws, window) = try keyWindowOnTwoTabs(writer)
         let behind = ws.tabs[1].id
         writer.showProjectScreen(project, in: window)
         writer.persistState()
 
-        let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
+        let reader = relaunch(writer, gui: tmp, files: files)
         reader.incubatePane = { _ in }
         reader.restoreSelection(projects: [project])
         let first = WindowState()
@@ -1590,14 +1624,7 @@ struct WindowStateTests {
 @MainActor
 struct PaletteScopeWindowTests {
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-window-tests-\(UUID().uuidString).json")
-        let projects = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-window-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projects)
-        )
+        TestModel.appState()
     }
 
     @Test

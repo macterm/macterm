@@ -1466,11 +1466,6 @@ final class ControlHandler {
             return try projectTabs(holding: session)
         }
         let project = try resolveProject(args.project)
-        // A project of the tree with no folder (a row of a dev build's group)
-        // holds no tabs, as v1 said.
-        if project.isTreeProject, !project.hasFolder {
-            throw ControlError(code: .notFound, message: "project \"\(project.name)\" has no tabs")
-        }
         return (project, tabs(of: project))
     }
 

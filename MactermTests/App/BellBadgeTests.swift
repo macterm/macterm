@@ -102,22 +102,14 @@ struct BellBadgeAppStateTests {
         features: GhosttyApp.BellFeatures = [.attention],
         appActive: Bool = true
     ) -> (AppState, Recorder, Project) {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+        let state = TestModel.appState()
         let recorder = Recorder()
         state.bellFeatures = { features }
         state.dockBadgeWriter = { recorder.labels.append($0) }
         state.isAppActive = { appActive }
         // No views in tests: the active tab counts as drawn in the key window.
         state.paneIsInKeyWindow = { _ in true }
-        let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
+        let project = TestModel.project(state, name: "proj", path: "/tmp")
         return (state, recorder, project)
     }
 
@@ -187,8 +179,7 @@ struct BellBadgeAppStateTests {
     func the_badge_counts_tabs_across_every_workspace() throws {
         let (state, _, first) = makeAppState(appActive: false)
         let firstPane = try ringingPane(state, first)
-        let second = Project(name: "other", path: "/tmp/other", sortOrder: 1)
-        state.selectProject(second)
+        let second = TestModel.project(state, name: "other", path: "/tmp/other")
         let secondPane = try ringingPane(state, second)
 
         state.syncDockBadge()

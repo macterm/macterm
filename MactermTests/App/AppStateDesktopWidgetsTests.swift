@@ -9,21 +9,32 @@ struct AppStateDesktopWidgetsTests {
     private static let screen = CGRect(x: 0, y: 0, width: 1440, height: 875)
     private static let medium = DesktopWidgetSpan.medium
 
-    /// A store on disk plus an AppState placing widgets on a fixed screen.
+    /// A `gui-state.json` on disk plus an AppState placing widgets on a fixed
+    /// screen.
     private func makeFixture() throws -> (state: AppState, storeURL: URL, dir: URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-widget-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let storeURL = dir.appendingPathComponent("workspaces.json")
+        let storeURL = dir.appendingPathComponent("gui-state.json")
         return (makeState(storeURL: storeURL, dir: dir), storeURL, dir)
     }
 
-    private func makeState(storeURL: URL, dir: URL, screens: [CGRect] = [screen], names: [String]? = nil) -> AppState {
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: ProjectFileStore(directoryURL: dir.appendingPathComponent("projects", isDirectory: true)),
-            quickTerminal: QuickTerminalSplitState()
-        )
+    /// An AppState over a new server, or, with `relaunching`, a relaunch:
+    /// a second AppState on the server of that state, with the same files.
+    private func makeState(
+        storeURL: URL,
+        dir: URL,
+        screens: [CGRect] = [screen],
+        names: [String]? = nil,
+        relaunching prior: AppState? = nil
+    ) -> AppState {
+        let projectFiles = ProjectFileStore(directoryURL: dir.appendingPathComponent("projects", isDirectory: true))
+        let gui = GUIStateStore(fileURL: storeURL)
+        let state = if let prior {
+            TestModel.relaunch(prior, guiStateStore: gui, projectFiles: projectFiles)
+        } else {
+            TestModel.appState(guiStateStore: gui, projectFiles: projectFiles, quickTerminal: QuickTerminalSplitState())
+        }
         let named = zip(screens, names ?? screens.indices.map { "Screen \($0 + 1)" })
             .map { DesktopScreen(name: $1, visibleFrame: $0) }
         state.desktopScreens = { named }
@@ -47,8 +58,13 @@ struct AppStateDesktopWidgetsTests {
         )
     }
 
-    private func savedWidgets(_ storeURL: URL) -> [DesktopWidgetSnapshot] {
-        WorkspaceStore(fileURL: storeURL).load().desktopWidgets
+    private func savedWidgets(_ storeURL: URL) -> [DesktopWidgetState] {
+        GUIStateStore(fileURL: storeURL).load()?.desktopWidgets ?? []
+    }
+
+    /// The session names of the panes of a widget's project in the model.
+    private func modelSessions(_ state: AppState, widget id: UUID) -> [String] {
+        state.model.tabs(of: id).flatMap { $0.splitRoot.allPanes().map(\.sessionName) }
     }
 
     // MARK: - Create
@@ -71,8 +87,11 @@ struct AppStateDesktopWidgetsTests {
         #expect((saved.columns, saved.rows) == (2, 1))
         #expect(saved.command == "htop")
         #expect(CGPoint(x: saved.topLeftX, y: saved.topLeftY) == widget.topLeft)
-        let restored = WorkspaceSerializer.restoreTab(saved.tab, projectID: DesktopWidget.projectID)
-        #expect(restored.splitRoot.allPanes().map(\.sessionName) == [widget.pane?.sessionName])
+        // The tab is in the server's model, in the widget's own project.
+        let project = try #require(state.model.project(widget.id))
+        #expect(project.sidebar == .none)
+        #expect(project.singleTab)
+        #expect(modelSessions(state, widget: widget.id) == [widget.pane?.sessionName])
     }
 
     @Test
@@ -92,13 +111,13 @@ struct AppStateDesktopWidgetsTests {
         #expect(widget.span == DesktopWidgetSpan(columns: 3, rows: 3))
     }
 
-    /// Until the launch restore has run, `workspaces` is empty — a save then
-    /// would write that emptiness over the file about to be restored.
+    /// Until the launch restore has run, the GUI state is not known — a save
+    /// then would write that emptiness over the file about to be restored.
     @Test
     func a_widget_created_before_the_launch_restore_saves_nothing() throws {
         let (state, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let sentinel = #"{"version": 6, "workspaces": [], "pinned": [], "windows": []}"#
+        let sentinel = #"{"version": 1, "pinned": [], "windows": []}"#
         try sentinel.write(to: storeURL, atomically: true, encoding: .utf8)
 
         state.createDesktopWidget()
@@ -223,7 +242,7 @@ struct AppStateDesktopWidgetsTests {
         let second = writer.createDesktopWidget(span: DesktopWidgetSpan(columns: 3, rows: 2))
         writer.beginEditingDesktopWidget(id: second.id)
 
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.restoreSelection(projects: [])
 
         #expect(state.desktopWidgets.map(\.id) == [first.id, second.id])
@@ -233,7 +252,7 @@ struct AppStateDesktopWidgetsTests {
         #expect(restoredFirst.command == "top")
         #expect(restoredFirst.topLeft == first.topLeft)
         #expect(restoredFirst.pane?.sessionName == first.pane?.sessionName)
-        #expect(restoredFirst.pane?.projectID == DesktopWidget.projectID)
+        #expect(restoredFirst.pane?.projectID == first.id)
         #expect(state.desktopWidget(id: second.id)?.span == DesktopWidgetSpan(columns: 3, rows: 2))
     }
 
@@ -245,14 +264,14 @@ struct AppStateDesktopWidgetsTests {
             .appendingPathComponent("macterm-widget-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let storeURL = dir.appendingPathComponent("workspaces.json")
+        let storeURL = dir.appendingPathComponent("gui-state.json")
         let external = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
         let writer = makeState(storeURL: storeURL, dir: dir, screens: [external])
         writer.restoreSelection(projects: [])
         let widget = writer.createDesktopWidget(span: Self.medium)
         #expect(widget.frame.minX > 1440)
 
-        let state = makeState(storeURL: storeURL, dir: dir, screens: [Self.screen])
+        let state = makeState(storeURL: storeURL, dir: dir, screens: [Self.screen], relaunching: writer)
         state.restoreSelection(projects: [])
 
         let restored = try #require(state.desktopWidget(id: widget.id))
@@ -277,7 +296,7 @@ struct AppStateDesktopWidgetsTests {
             }
             return true
         }
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.sessionClient = sessionClient
         state.v1SessionsEnded = .init(read: { false }, write: {})
         state.restoreSelection(projects: [])
@@ -311,21 +330,22 @@ struct AppStateDesktopWidgetsTests {
 
     // MARK: - Remove / exit
 
+    /// The widget's project leaves the model; the server ends its session
+    /// (the server's own tests cover the end).
     @Test
-    func removing_a_widget_kills_its_session_and_forgets_it() async throws {
+    func removing_a_widget_removes_its_project_and_forgets_it() throws {
         let (state, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let killed = WidgetKills()
-        state.sessionClient = recordingClient(into: killed)
         state.restoreSelection(projects: [])
         let keep = state.createDesktopWidget()
         let gone = state.createDesktopWidget()
-        let goneSession = try #require(gone.pane?.sessionName)
+        let gonePane = try #require(gone.pane)
 
         state.removeDesktopWidget(id: gone.id)
 
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [goneSession])
+        #expect(state.model.project(gone.id) == nil)
+        #expect(state.model.pane(gonePane.id) == nil)
+        #expect(state.model.project(keep.id) != nil)
         #expect(state.desktopWidgets.map(\.id) == [keep.id])
         #expect(savedWidgets(storeURL).map(\.id) == [keep.id])
     }
@@ -333,25 +353,23 @@ struct AppStateDesktopWidgetsTests {
     /// A widget always holds a terminal: when its shell exits it starts over
     /// in a new session (the old one is disposed of) instead of closing.
     @Test
-    func a_widget_whose_shell_exits_starts_over_in_a_new_session() async throws {
+    func a_widget_whose_shell_exits_starts_over_in_a_new_session() throws {
         let (state, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let killed = WidgetKills()
-        state.sessionClient = recordingClient(into: killed)
         state.restoreSelection(projects: [])
         let widget = state.createDesktopWidget(command: "htop")
-        let oldSession = try #require(widget.pane?.sessionName)
+        let oldPane = try #require(widget.pane)
+        let oldSession = oldPane.sessionName
 
         state.desktopWidgetShellExited(id: widget.id)
 
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [oldSession])
+        // The old pane leaves the model, and the server ends its session.
+        #expect(state.model.pane(oldPane.id) == nil)
         let newSession = try #require(widget.pane?.sessionName)
         #expect(newSession != oldSession)
         #expect(widget.pane?.start == .typed("htop"))
-        let saved = try #require(savedWidgets(storeURL).first)
-        let restored = WorkspaceSerializer.restoreTab(saved.tab, projectID: DesktopWidget.projectID)
-        #expect(restored.splitRoot.allPanes().map(\.sessionName) == [newSession])
+        #expect(savedWidgets(storeURL).map(\.id) == [widget.id])
+        #expect(modelSessions(state, widget: widget.id) == [newSession])
     }
 
     /// The presenter follows every change, so the desktop always matches the
@@ -513,7 +531,7 @@ extension AppStateDesktopWidgetsTests {
         place(widget, column: 2, row: 1, on: Self.external, in: writer)
 
         let laptopOnly = Displays([Self.laptop])
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.desktopScreens = { laptopOnly.screens }
         state.restoreSelection(projects: [])
         let restored = try #require(state.desktopWidget(id: widget.id))
@@ -580,12 +598,8 @@ extension AppStateDesktopWidgetsTests {
     func a_snapshot_without_placements_takes_one_from_where_the_widget_was() throws {
         let (state, _, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        func snapshot(x: Double, y: Double) -> DesktopWidgetSnapshot {
-            DesktopWidgetSnapshot(
-                id: UUID(),
-                tab: WorkspaceSerializer.snapshotTab(TerminalTab(projectPath: NSHomeDirectory(), projectID: DesktopWidget.projectID)),
-                columns: 2, rows: 1, topLeftX: x, topLeftY: y
-            )
+        func snapshot(x: Double, y: Double) -> DesktopWidgetState {
+            DesktopWidgetState(id: UUID(), columns: 2, rows: 1, topLeftX: x, topLeftY: y)
         }
         let onScreen = snapshot(x: 206, y: 662)
         let offScreen = snapshot(x: 5000, y: 662)
@@ -629,7 +643,7 @@ extension AppStateDesktopWidgetsTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let external = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
         let state = makeState(
-            storeURL: dir.appendingPathComponent("workspaces.json"),
+            storeURL: dir.appendingPathComponent("gui-state.json"),
             dir: dir,
             screens: [Self.screen, external],
             names: ["Built-in", "Studio Display"]
@@ -661,13 +675,13 @@ extension AppStateDesktopWidgetsTests {
     /// (and session) with it, and an edited entry resizes and moves its
     /// widget while it keeps its session.
     @Test
-    func the_file_decides_membership_and_geometry_at_launch() async throws {
+    func the_file_decides_membership_and_geometry_at_launch() throws {
         let (writer, storeURL, dir) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         writer.restoreSelection(projects: [])
         let kept = writer.createDesktopWidget(span: Self.medium, name: "kept")
         let dropped = writer.createDesktopWidget(span: Self.medium, name: "dropped")
-        let droppedSession = try #require(dropped.pane?.sessionName)
+        let droppedPane = try #require(dropped.pane)
         try writeLayout("""
         widgets:
           - name: kept
@@ -681,11 +695,7 @@ extension AppStateDesktopWidgetsTests {
             run: htop
         """, in: dir)
 
-        let killed = WidgetKills()
-        let state = makeState(storeURL: storeURL, dir: dir)
-        var sessionClient = recordingClient(into: killed)
-        sessionClient.listSessions = { nil }
-        state.sessionClient = sessionClient
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.restoreSelection(projects: [])
 
         #expect(state.desktopWidgets.map(\.name) == ["kept", "added"])
@@ -697,8 +707,10 @@ extension AppStateDesktopWidgetsTests {
         #expect(added.span == DesktopWidgetSpan.small)
         #expect(added.topLeft == DesktopWidgetGrid.topLeft(column: 5, row: 2, in: Self.screen))
         #expect(added.pane?.start == .typed("htop"))
-        await killed.settle(expecting: 1)
-        #expect(await killed.names.contains(droppedSession))
+        // The dropped widget's project leaves the model, and the server ends
+        // its session.
+        #expect(state.model.project(dropped.id) == nil)
+        #expect(state.model.pane(droppedPane.id) == nil)
     }
 
     /// An absent file is "no input", never "remove every widget".
@@ -710,7 +722,7 @@ extension AppStateDesktopWidgetsTests {
         let widget = writer.createDesktopWidget()
         try FileManager.default.removeItem(at: layoutFile(dir))
 
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.restoreSelection(projects: [])
 
         #expect(state.desktopWidgets.map(\.id) == [widget.id])
@@ -776,13 +788,13 @@ extension AppStateDesktopWidgetsTests {
         let survivorSession = try #require(survivor.pane?.sessionName)
         let lostSession = try #require(lost.pane?.sessionName)
 
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         var sessionClient = recordingClient(into: WidgetKills())
         sessionClient.listSessions = { [SessionInfo(name: survivorSession)] }
         state.sessionClient = sessionClient
         let presenter = RecordingPresenter()
         state.attachDesktopWidgetPresenter(presenter)
-        let restored = state.restoreDesktopWidgets(WorkspaceStore(fileURL: storeURL).load().desktopWidgets)
+        let restored = state.restoreDesktopWidgets(savedWidgets(storeURL))
         #expect(presenter.syncs.last?.ids.isEmpty == true)
 
         await state.materializeRestoredDesktopWidgets(restored)
@@ -889,7 +901,7 @@ extension AppStateDesktopWidgetsTests {
         state.persistForTermination()
         #expect(try declared(dir).map(\.name) == ["keep"])
 
-        let relaunched = makeState(storeURL: storeURL, dir: dir)
+        let relaunched = makeState(storeURL: storeURL, dir: dir, relaunching: state)
         relaunched.restoreSelection(projects: [])
         #expect(relaunched.desktopWidgets.map(\.id) == [keep.id])
     }
@@ -909,7 +921,7 @@ extension AppStateDesktopWidgetsTests {
         writer.settleDesktopWidget(id: widget.id, frame: CGRect(x: 950, y: 640, width: 344, height: 164))
         #expect(widget.topLeft == CGPoint(x: 960, y: 800))
 
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.restoreSelection(projects: [])
         #expect(state.desktopWidget(id: widget.id)?.topLeft == CGPoint(x: 960, y: 800))
     }
@@ -926,30 +938,10 @@ extension AppStateDesktopWidgetsTests {
         let before = try String(contentsOf: storeURL, encoding: .utf8)
         try writeLayout("widgets:\n  - name: a\n    size: 2x2\n", in: dir)
 
-        let state = makeState(storeURL: storeURL, dir: dir)
+        let state = makeState(storeURL: storeURL, dir: dir, relaunching: writer)
         state.restoreSelection(projects: [])
         #expect(state.desktopWidgets.first?.span == DesktopWidgetSpan.large)
         #expect(try String(contentsOf: storeURL, encoding: .utf8) == before)
-    }
-
-    /// A file with no widgets is written as v6, so an older build — the
-    /// stable channel after a spell on tip — keeps saving for everyone who
-    /// never made a widget; only a file with widgets to protect is v7.
-    @Test
-    func the_schema_version_rises_only_with_widgets_to_protect() throws {
-        let (state, storeURL, dir) = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        func version() throws -> Int {
-            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: storeURL)) as? [String: Any]
-            return object?["version"] as? Int ?? -1
-        }
-        state.restoreSelection(projects: [])
-        state.persistState()
-        #expect(try version() == 6)
-        let widget = state.createDesktopWidget()
-        #expect(try version() == 7)
-        state.removeDesktopWidget(id: widget.id)
-        #expect(try version() == 6)
     }
 }
 

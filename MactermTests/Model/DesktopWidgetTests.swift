@@ -50,27 +50,37 @@ struct DesktopWidgetTests {
         #expect(widget.frame == CGRect(x: 100, y: 456, width: 344, height: 344))
     }
 
-    /// Widget panes belong to no project: they carry the widget routing id
-    /// and group under their own slug in `zmx ls`.
+    /// A widget's pane belongs to the widget's own project, and groups
+    /// under its own slug in `zmx ls`.
     @Test
-    func a_widget_pane_is_routed_outside_every_project() throws {
+    func a_widget_pane_is_in_the_widgets_own_project() throws {
         let widget = DesktopWidget(span: DesktopWidgetSpan.small, topLeft: .zero)
-        let pane = try #require(widget.pane)
-        #expect(pane.projectID == DesktopWidget.projectID)
+        let pane = widget.freshPane()
+        #expect(pane.projectID == widget.id)
         #expect(pane.sessionName.hasPrefix("macterm-widget-"))
         #expect(pane.projectPath == NSHomeDirectory())
+        #expect(widget.tab == nil, "no model: no tab")
+
+        let state = TestModel.appState()
+        let tab = try #require(state.ensureWidgetTab(widget))
+        #expect(widget.tab === tab)
+        #expect(state.model.project(widget.id)?.sidebar == MactermProtocol.ProjectSidebar.none)
+        #expect(state.model.project(widget.id)?.singleTab == true)
+        #expect(widget.pane?.projectID == widget.id)
+        #expect(state.ensureWidgetTab(widget) === tab, "a second call makes nothing")
     }
 
     @Test
     func starting_over_gives_a_fresh_session_running_the_same_command() throws {
-        let widget = DesktopWidget(span: DesktopWidgetSpan.small, topLeft: .zero, command: "htop")
+        let state = TestModel.appState()
+        let widget = state.createDesktopWidget(span: DesktopWidgetSpan.small, command: "htop")
         let before = try #require(widget.pane)
-        widget.startOver()
+        state.desktopWidgetShellExited(id: widget.id)
         let after = try #require(widget.pane)
         #expect(after !== before)
         #expect(after.sessionName != before.sessionName)
         #expect(after.start == .typed("htop"))
-        #expect(widget.tab.splitRoot.allPanes().count == 1)
+        #expect(widget.tab?.splitRoot.allPanes().count == 1)
     }
 
     // MARK: - Grid

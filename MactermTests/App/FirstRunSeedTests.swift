@@ -134,11 +134,10 @@ struct FirstRunSeedTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("workspaces.json")),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: tmp.appendingPathComponent("projects", isDirectory: true))
         )
-        let store = ProjectStore(fileURL: tmp.appendingPathComponent("projects.json"))
+        let store = TestModel.projectStore(state)
 
         #expect(state.seedFirstRunIfNeeded(projectStore: store))
 
@@ -177,17 +176,17 @@ struct FirstRunSeedTests {
             .appendingPathComponent("macterm-firstrun-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        // A present-but-undecodable snapshot is what sets `loadFailed`.
-        let snapshot = tmp.appendingPathComponent("workspaces.json")
+        // A present-but-undecodable `gui-state.json` is what sets `loadFailed`.
+        let snapshot = tmp.appendingPathComponent("gui-state.json")
         try Data("{ not json".utf8).write(to: snapshot)
-        let store = WorkspaceStore(fileURL: snapshot)
+        let store = GUIStateStore(fileURL: snapshot)
         _ = store.load()
 
-        let state = AppState(
-            workspaceStore: store,
+        let state = TestModel.appState(
+            guiStateStore: store,
             projectFiles: ProjectFileStore(directoryURL: tmp.appendingPathComponent("projects", isDirectory: true))
         )
-        let projects = ProjectStore(fileURL: tmp.appendingPathComponent("projects.json"))
+        let projects = TestModel.projectStore(state)
 
         #expect(!state.seedFirstRunIfNeeded(projectStore: projects))
         #expect(projects.projects.isEmpty)

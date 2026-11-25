@@ -4,17 +4,10 @@ import Testing
 
 @MainActor
 struct ControlHandlerTests {
-    // MARK: - Setup helpers (tempdir stores, mirroring AppStateTests)
+    // MARK: - Setup helpers (a model of its own on a test server)
 
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-control-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-control-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+        TestModel.appState()
     }
 
     private func makeHandler(
@@ -23,8 +16,7 @@ struct ControlHandlerTests {
         remoteFolder: RemoteHosts.FolderCheck = .unreachable
     ) -> (ControlHandler, AppState, ProjectStore) {
         let appState = state ?? makeAppState()
-        let projectStore = store ?? ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        let projectStore = store ?? TestModel.projectStore(appState)
         // As `MactermApp` connects them: an added project gets its first tab.
         projectStore.onAdd = { [weak appState] in appState?.projectAdded($0) }
         let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in remoteFolder }
@@ -38,8 +30,9 @@ struct ControlHandlerTests {
         path: String = "/tmp",
         select: Bool = true
     ) -> Project {
-        let project = Project(name: name, path: path, sortOrder: projectStore.projects.count)
-        projectStore.add(project)
+        guard let project = projectStore.add(Project(name: name, path: path)) else {
+            preconditionFailure("the test server refused the project")
+        }
         if select {
             appState.selectProject(project)
         }
@@ -142,6 +135,77 @@ struct ControlHandlerTests {
         #expect(two?.tabCount == 1)
     }
 
+    /// The hidden projects of the model (design/010 §11) are not rows of
+    /// `project list`: Pinned, Scratch Tabs, the quick terminal and each
+    /// desktop widget. Their tabs do not move the indexes of the rows.
+    @Test
+    func project_list_has_no_hidden_project() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let api = seedProject(appState, projectStore, name: "api")
+        let tab = try #require(appState.liveTabs[api.id]?.tabs.first)
+        appState.pinTab(tab.id, fromProject: api.id)
+        _ = try #require(appState.createScratchTab(focus: false))
+        _ = try #require(appState.quickTerminal.ensureTab())
+        let widget = appState.createDesktopWidget()
+        _ = seedProject(appState, projectStore, name: "web")
+        #expect(appState.model.projects.count == 6)
+
+        let response = await handler.handle(request("project.list"))
+
+        let projects = try #require(response.data?.projects)
+        #expect(projects.map(\.name) == ["api", "web"])
+        #expect(projects.map(\.index) == [1, 2])
+        let hidden = try [
+            #require(appState.pinnedProjectID),
+            #require(appState.scratchProjectID),
+            #require(appState.model.project(alias: QuickTerminalService.alias)?.id),
+            widget.id,
+        ].map(\.uuidString)
+        #expect(!projects.contains { hidden.contains($0.id) })
+    }
+
+    /// `--project pinned`, `--project scratch` and `--project quick` find
+    /// the hidden project by its alias, in any case.
+    @Test
+    func a_hidden_project_resolves_by_its_alias() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "api")
+        let api = try #require(projectStore.projects.first)
+        let tab = try #require(appState.liveTabs[api.id]?.tabs.first)
+        appState.pinTab(tab.id, fromProject: api.id)
+        _ = try #require(appState.createScratchTab(focus: false))
+        let quickTab = try #require(appState.quickTerminal.ensureTab())
+
+        let pinned = await handler.handle(request("tab.list", args: ControlArgs(project: "pinned")))
+        #expect(pinned.data?.tabs?.map(\.id) == [tab.id.uuidString])
+        let scratch = await handler.handle(request("tab.list", args: ControlArgs(project: "Scratch")))
+        #expect(scratch.ok)
+        #expect(scratch.data?.tabs?.count == 1)
+        let quick = await handler.handle(request("tab.list", args: ControlArgs(project: "quick")))
+        #expect(quick.data?.tabs?.map(\.id) == [quickTab.id.uuidString])
+        let scratchID = try #require(appState.scratchProjectID)
+        let byID = await handler.handle(request("tab.list", args: ControlArgs(project: scratchID.uuidString)))
+        #expect(byID.data?.tabs?.count == 1)
+    }
+
+    /// `--project scratch` makes the scratch project when it is not there
+    /// (#665): `tab new --project scratch` makes the first scratch tab.
+    @Test
+    func tab_new_in_scratch_makes_the_scratch_project() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        _ = seedProject(appState, projectStore, name: "api")
+        #expect(appState.scratchProjectID == nil)
+
+        let response = await handler.handle(request("tab.new", args: ControlArgs(project: "scratch")))
+
+        #expect(response.ok)
+        let scratchID = try #require(appState.scratchProjectID)
+        #expect(appState.liveTabs[scratchID]?.tabs.count == 1)
+        #expect(projectStore.projects.map(\.name) == ["api"])
+    }
+
     @Test
     func project_list_indexes_every_project_in_tree_order_and_names_its_parent() async {
         let (handler, appState, projectStore) = makeHandler()
@@ -231,12 +295,14 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func tab_list_of_a_group_is_not_found() async {
+    func tab_list_of_a_project_with_no_folder_lists_no_tabs() async {
+        // A project with no folder holds tabs as any project does
+        // (design/010 §11): it has none until one is made, in home.
         let (handler, _, projectStore) = makeHandler()
-        projectStore.add(Project(name: "Work", path: ""))
+        _ = projectStore.add(Project(name: "Work", path: ""))
         let response = await handler.handle(request("tab.list", args: ControlArgs(project: "Work")))
-        #expect(response.error?.code == .notFound)
-        #expect(response.error?.message.contains("has no tabs") == true)
+        #expect(response.error == nil)
+        #expect(response.data?.tabs?.isEmpty == true)
     }
 
     @Test
@@ -423,8 +489,7 @@ struct ControlHandlerTests {
         // The host gets the folder and the destination as typed.
         var asked: [String] = []
         let appState = makeAppState()
-        let projectStore = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        let projectStore = TestModel.projectStore(appState)
         let handler = ControlHandler(appState: appState, projectStore: projectStore) { folder, destination in
             asked.append("\(destination) \(folder)")
             return .exists
@@ -457,8 +522,7 @@ struct ControlHandlerTests {
     func project_create_checks_no_host_for_a_bad_name() async {
         var asked = false
         let appState = makeAppState()
-        let projectStore = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-control-tests-store-\(UUID().uuidString).json"))
+        let projectStore = TestModel.projectStore(appState)
         let handler = ControlHandler(appState: appState, projectStore: projectStore) { _, _ in
             asked = true
             return .exists
@@ -576,7 +640,7 @@ struct ControlHandlerTests {
         #expect(appState.activeProjectID == project.id)
         // …while `pinned` still means the pinned workspace, first.
         let pinned = await handler.handle(request("project.select", args: ControlArgs(project: "Pinned")))
-        #expect(pinned.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
+        #expect(pinned.data?.projects?.first?.id == appState.pinnedProjectID?.uuidString)
     }
 
     @Test
@@ -646,7 +710,7 @@ struct ControlHandlerTests {
 
         let response = await handler.handle(request("project.select", args: ControlArgs(project: "pinned")))
         #expect(response.ok)
-        #expect(response.data?.projects?.first?.id == PinnedTabs.workspaceID.uuidString)
+        #expect(response.data?.projects?.first?.id == appState.pinnedProjectID?.uuidString)
         #expect(response.data?.projects?.first?.index == nil)
     }
 
@@ -727,10 +791,10 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func project_remove_also_removes_the_projects_inside() async {
+    func project_remove_also_removes_the_projects_inside() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore, name: "alpha")
-        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        let child = try #require(projectStore.create(name: "child", path: "/tmp/child", parent: project.id))
         _ = projectStore.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
 
         let response = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
@@ -739,10 +803,10 @@ struct ControlHandlerTests {
     }
 
     @Test
-    func project_remove_refuses_when_a_project_inside_is_busy() async {
+    func project_remove_refuses_when_a_project_inside_is_busy() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore, name: "alpha", select: false)
-        let child = projectStore.create(name: "child", path: "/tmp/child", parent: project.id)
+        let child = try #require(projectStore.create(name: "child", path: "/tmp/child", parent: project.id))
         appState.selectProject(child)
         appState.paneNeedsConfirmClose = { _ in true }
 
@@ -824,11 +888,9 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         _ = seedProject(appState, projectStore, name: "local")
         let selected = appState.activeProjectID
-        let remote = Project(name: "remote", path: "host:~/repo")
-        projectStore.add(remote)
-        // Restored but never opened.
-        let workspace = Workspace(id: remote.id, projectPath: remote.path)
-        appState.liveTabs[remote.id] = workspace
+        // Added but never opened: it has its first tab, and no window shows it.
+        let remote = try #require(projectStore.add(Project(name: "remote", path: "host:~/repo")))
+        let workspace = try #require(appState.liveTabs[remote.id])
         var warmed: [UUID] = []
         appState.incubatePane = { pane in warmed.append(pane.id) }
 
@@ -863,8 +925,7 @@ struct ControlHandlerTests {
         let source = try #require(sourceTab.focusedPane)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: projectStore.projects)
         let sourceFocus = sourceTab.focusedPaneID
-        let sourceHistory = sourceTab.paneFocusHistory.items
-        try ModelWriter.paneZoom(sourceTab, toggling: #require(sourceFocus))
+        appState.writer.paneZoom(tab: sourceTab.id, pane: sourceFocus)
         let selectedTabID = try #require(appState.createTab(projectID: project.id, projectPath: project.path))
         let keyProject = otherProject ? seedProject(appState, projectStore, name: "elsewhere") : project
         let background = WindowState(activeProjectID: project.id)
@@ -878,10 +939,10 @@ struct ControlHandlerTests {
         let recency = workspace.recencyOrder()
         let recentProjects = appState.recentProjects(from: projectStore.projects).map(\.id)
         var selections = 0
-        let onSelection = workspace.onActiveTabChanged
-        workspace.onActiveTabChanged = {
-            selections += 1
-            onSelection?()
+        let onSelection = appState.model.onActiveTabChanged
+        appState.model.onActiveTabChanged = { projectID in
+            if projectID == project.id { selections += 1 }
+            onSelection?(projectID)
         }
         var warmed: [UUID] = []
         appState.incubatePane = { warmed.append($0.id) }
@@ -910,7 +971,6 @@ struct ControlHandlerTests {
         #expect(selections == 0)
         #expect(workspace.activeTabID == selectedTabID)
         #expect(sourceTab.focusedPaneID == sourceFocus)
-        #expect(sourceTab.paneFocusHistory.items == sourceHistory)
         #expect(sourceTab.zoomedPaneID == sourceFocus)
         #expect(background.activeTabIDs == backgroundSelections)
         #expect(key.activeTabIDs == keySelections)
@@ -927,8 +987,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore)
         let activeProject = appState.activeProjectID
         appState.incubatePane = { _ = SurfaceRegistry.shared.ensureView(of: $0) }
-        if pinned { appState.ensurePinnedWorkspace() }
-        let projectID = pinned ? PinnedTabs.workspaceID : project.id
+        let projectID = try pinned ? #require(appState.ensurePinnedProject()) : project.id
         // A split needs a source; create it in the background too.
         let created = await handler.handle(request("tab.new", args: ControlArgs(
             project: projectID.uuidString, focus: false
@@ -973,13 +1032,10 @@ struct ControlHandlerTests {
     func background_split_of_a_remote_tab_warms_only_the_new_pane() async throws {
         let (handler, appState, projectStore) = makeHandler()
         appState.sessionClient = .noop
-        let remote = Project(name: "remote", path: "host:~/repo")
-        projectStore.add(remote)
-        let workspace = Workspace(id: remote.id, projectPath: remote.path)
-        appState.liveTabs[remote.id] = workspace
+        let remote = try #require(projectStore.add(Project(name: "remote", path: "host:~/repo")))
+        let workspace = try #require(appState.liveTabs[remote.id])
         let tab = try #require(workspace.activeTab)
-        let sourceID = try #require(tab.focusedPaneID)
-        _ = ModelWriter.paneSplit(tab, paneID: sourceID, direction: .horizontal)
+        appState.splitPane(direction: .horizontal, projectID: remote.id, projects: projectStore.projects)
         var warmed: [UUID] = []
         appState.incubatePane = { warmed.append($0.id) }
 
@@ -1015,7 +1071,6 @@ struct ControlHandlerTests {
         } else {
             #expect(response.data?.panes?.first?.focused == true)
             #expect(tab.focusedPaneID != previous)
-            #expect(tab.paneFocusHistory.items.first == previous)
         }
     }
 
@@ -1146,7 +1201,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore)
         let workspace = try #require(appState.liveTabs[project.id])
         let tab = try #require(workspace.tabs.first)
-        ModelWriter.tabSet(tab, title: "Custom Name")
+        appState.writer.tabSet(tab.id, title: "Custom Name")
 
         let response = await handler.handle(request("tab.rename", args: ControlArgs(tab: "tab:1", reset: true)))
         #expect(response.ok)
@@ -1779,8 +1834,7 @@ struct ControlHandlerTests {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-layout-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let project = Project(name: "roundtrip", path: dir.path, sortOrder: 0)
-        projectStore.add(project)
+        let project = try #require(projectStore.add(Project(name: "roundtrip", path: dir.path)))
         appState.selectProject(project)
 
         // No file yet → apply reports the miss.

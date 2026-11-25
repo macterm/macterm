@@ -92,7 +92,7 @@ struct LayoutFileTests {
         let file = try LayoutFixture.parse(yaml)
         // Build via the reconciler (the live apply path) against no workspace,
         // so every leaf is freshly spawned from the declaration.
-        let plan = LayoutReconciler.plan(layout: file, workspace: nil, projectRoot: "/proj", projectID: UUID())
+        let plan = LayoutReconciler.plan(layout: file, tabs: [], projectRoot: "/proj", projectID: UUID())
         #expect(plan.tabs.count == 1)
         let panes = plan.tabs[0].root.allPanes()
         #expect(panes.count == 2)
@@ -133,7 +133,7 @@ struct LayoutFileTests {
               second: { }
         """
         let file = try LayoutFixture.parse(yaml)
-        let plan = LayoutReconciler.plan(layout: file, workspace: nil, projectRoot: "/proj", projectID: UUID())
+        let plan = LayoutReconciler.plan(layout: file, tabs: [], projectRoot: "/proj", projectID: UUID())
         #expect(plan.tabs[0].focusedPaneID == plan.tabs[0].root.allPanes().first?.id)
     }
 

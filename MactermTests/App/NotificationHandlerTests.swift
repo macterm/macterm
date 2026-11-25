@@ -74,8 +74,16 @@ struct NotificationHandlerTests {
     }
 
     @Test
-    func a_quick_terminal_pane_is_flagged_so_taps_route_to_the_panel() {
-        let pane = Pane(projectPath: "/tmp", projectID: QuickTerminalService.projectID)
+    func a_quick_terminal_pane_is_flagged_so_taps_route_to_the_panel() throws {
+        // `userInfo` reads the panel's shared state. Adopt it into a test
+        // model and make the quick project there.
+        let shared = QuickTerminalService.shared.splitState
+        let previous = shared.app
+        let state = TestModel.appState(quickTerminal: shared)
+        defer { shared.app = previous }
+        let tab = try #require(shared.ensureTab())
+        let pane = try #require(tab.splitRoot.allPanes().first)
+        #expect(state.model.projectID(ofTab: tab.id) == shared.projectID)
 
         #expect(NotificationHandler.userInfo(for: pane)["isQuickTerminal"] as? Bool == true)
     }

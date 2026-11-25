@@ -13,16 +13,15 @@ import UniformTypeIdentifiers
 @MainActor
 struct OpenFolderTests {
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
+        TestModel.appState()
     }
 
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-open-\(UUID().uuidString).json"))
+    /// The project store of `state`'s model. As in the app, each project
+    /// that it adds gets its first tab.
+    private func makeProjectStore(_ state: AppState) -> ProjectStore {
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        return store
     }
 
     // MARK: - Resolution
@@ -74,7 +73,7 @@ struct OpenFolderTests {
         try Data().write(to: file)
 
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let delegate = AppDelegate()
         delegate.finderServices.attach(appState: state, projectStore: store)
@@ -95,7 +94,7 @@ struct OpenFolderTests {
     @Test
     func a_file_outside_every_project_gets_a_project_for_its_folder() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         state.textFilePlacement = { .split }
         let delegate = AppDelegate()
@@ -148,7 +147,7 @@ struct OpenFolderTests {
     @Test
     func a_folder_opened_during_launch_waits_for_the_restore() {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         let delegate = AppDelegate()
         delegate.finderServices.attach(appState: state, projectStore: store)
 
@@ -166,7 +165,7 @@ struct OpenFolderTests {
         // A directory is not an identity (see `ProjectStore.create`): a second
         // open is a second project, exactly like the folder picker.
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let delegate = AppDelegate()
         delegate.finderServices.attach(appState: state, projectStore: store)
@@ -184,7 +183,7 @@ struct OpenFolderTests {
         // The folder's own name would collide with the pinned workspace's (see
         // `PinnedTabs.reservesName`); opening the folder must still work.
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let delegate = AppDelegate()
         delegate.finderServices.attach(appState: state, projectStore: store)

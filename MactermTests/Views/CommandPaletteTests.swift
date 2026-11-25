@@ -46,18 +46,10 @@ struct CommandPaletteTests {
     /// `scope` is the screen that shows when the palette appears (the
     /// keybind of a screen with the palette closed); nil is the root.
     private func makeHarness(scope: ((AppState, ProjectStore) -> PaletteScopeID?)? = nil) async throws -> Harness {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let filesDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: filesDir)
-        )
-        let store = ProjectStore(fileURL: storeTmp)
-        let project = store.create(name: "admin", path: "/tmp")
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        let project = try #require(store.create(name: "admin", path: "/tmp"))
         state.selectProject(project)
         let window = NSWindow(
             contentRect: NSRect(x: -10000, y: -10000, width: 600, height: 700),
@@ -85,7 +77,7 @@ struct CommandPaletteTests {
         window.makeKey()
         let harness = Harness(
             state: state, store: store, project: project, windowState: windowState, window: window,
-            files: [tmp, storeTmp, filesDir]
+            files: []
         )
         await settle { harness.editor != nil }
         _ = try #require(harness.editor, "the field takes focus: \(harness.report)")

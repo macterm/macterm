@@ -7,15 +7,14 @@ struct TabCyclerTests {
     @Test
     func a_cycle_walks_its_order_and_finishes_on_the_pick() {
         let cycler = TabCycler()
-        let ws = Workspace(id: UUID(), projectPath: "/tmp")
         let ids = [UUID(), UUID(), UUID()]
-        cycler.startIfNeeded(recency: ids, in: ws) { [] }
+        cycler.startIfNeeded(recency: ids, tabs: []) { [] }
         #expect(cycler.isCycling)
         #expect(cycler.selectedTabID == ids[0])
         #expect(cycler.advance())
         #expect(cycler.selectedTabID == ids[1])
         // A second start while one is in flight keeps the cycle.
-        cycler.startIfNeeded(recency: [UUID()], in: ws) { [] }
+        cycler.startIfNeeded(recency: [UUID()], tabs: []) { [] }
         #expect(cycler.order == ids)
         cycler.focus(at: 2)
         cycler.focus(at: 7)
@@ -27,8 +26,7 @@ struct TabCyclerTests {
     @Test
     func a_cycle_of_one_tab_does_not_advance() {
         let cycler = TabCycler()
-        let ws = Workspace(id: UUID(), projectPath: "/tmp")
-        cycler.startIfNeeded(recency: [UUID()], in: ws) { [] }
+        cycler.startIfNeeded(recency: [UUID()], tabs: []) { [] }
         #expect(!cycler.advance())
         _ = cycler.finish()
     }

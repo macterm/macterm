@@ -9,17 +9,13 @@ struct ProjectSourceTests {
     /// A PaletteContext backed entirely by tempdirs (never the developer's real
     /// projects.json or ~/.config/macterm/projects/), with `projects` seeded.
     private func makeContext(_ projects: [Project]) -> (PaletteContext, AppState, ProjectStore) {
-        let wsTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-ps-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-ps-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-ps-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: wsTmp),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
-        let store = ProjectStore(fileURL: storeTmp)
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
         for project in projects {
             store.add(project)
         }

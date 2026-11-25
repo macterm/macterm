@@ -5,17 +5,13 @@ import Testing
 @MainActor
 struct DirectorySourceTests {
     private func makeContext() -> (PaletteContext, AppState, ProjectStore) {
-        let stateTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: stateTmp),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
-        let store = ProjectStore(fileURL: storeTmp)
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
         return (PaletteContext(appState: state, projectStore: store), state, store)
     }
 

@@ -38,11 +38,11 @@ struct FilesPaletteScopeTests {
             "macterm-files-ctx-\(UUID().uuidString)",
             isDirectory: true
         )
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: base.appendingPathComponent("w.json")),
+        let state = TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("projects", isDirectory: true))
         )
-        let store = ProjectStore(fileURL: base.appendingPathComponent("p.json"))
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
         let project = Project(name: "proj", path: remote ? "devbox:~/proj" : path, sortOrder: 0)
         store.add(project)
         state.selectProject(project)
@@ -187,7 +187,9 @@ struct FilesPaletteScopeTests {
         let context = makeContext(path: root.path)
         let state = context.appState
         let project = try #require(context.projectStore.projects.first)
-        if let ws = state.liveTabs[project.id] { ModelWriter.tabReplaceAll(in: ws, with: [], activeTabID: nil) }
+        for tab in state.model.tabs(of: project.id) {
+            state.writer.tabClose(tab.id)
+        }
         #expect(state.focusedPane(for: project.id) == nil)
 
         let src = root.appendingPathComponent("src", isDirectory: true)

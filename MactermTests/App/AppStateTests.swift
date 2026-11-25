@@ -7,19 +7,14 @@ import Testing
 struct AppStateTests {
     // MARK: - Setup helpers
 
-    /// Build an AppState with a temp-file workspace store and a temp-dir
-    /// project-file store so tests don't touch the user's real App Support
-    /// data or `~/.config/macterm/projects`.
+    /// An AppState over a test server of its own, with every file in a temp
+    /// folder, so tests do not touch the user's real data.
     private func makeAppState(
         store: WorkspaceStore? = nil,
+        guiState: GUIStateStore? = nil,
         projectFiles: ProjectFileStore? = nil
     ) -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        return AppState(
-            workspaceStore: store ?? WorkspaceStore(fileURL: tmp),
-            projectFiles: projectFiles ?? makeProjectFileStore()
-        )
+        TestModel.appState(workspaceStore: store, guiStateStore: guiState, projectFiles: projectFiles)
     }
 
     /// Fresh central project-file store rooted in a unique tempdir.
@@ -29,17 +24,15 @@ struct AppStateTests {
         return ProjectFileStore(directoryURL: dir)
     }
 
-    /// A project store in a temp file.
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-store-\(UUID().uuidString).json"))
+    /// The project store of the model of `state`.
+    private func makeProjectStore(_ state: AppState) -> ProjectStore {
+        TestModel.projectStore(state)
     }
 
-    /// Create a project + workspace inside `state` and return the project.
-    private func seedProject(_ state: AppState, name: String = "proj", path: String = "/tmp") -> Project {
-        let p = Project(name: name, path: path, sortOrder: 0)
-        state.selectProject(p)
-        return p
+    /// A project of the model of `state`, with its first tab, and selected.
+    @discardableResult
+    private func seedProject(_ state: AppState, name: String = "proj", path: String = "/tmp", select: Bool = true) -> Project {
+        TestModel.project(state, name: name, path: path, select: select)
     }
 
     // MARK: - Tabs
@@ -328,11 +321,12 @@ struct AppStateTests {
     }
 
     @Test
-    func busy_project_paths_stage_confirmation_through_the_shared_guard() {
+    func busy_project_paths_stage_confirmation_through_the_shared_guard() throws {
         let state = makeAppState()
         state.paneNeedsConfirmClose = { _ in true }
-        let store = makeProjectStore()
-        let p = store.create(name: "proj", path: "/tmp")
+        let store = makeProjectStore(state)
+        let p = try #require(store.create(name: "proj", path: "/tmp"))
+        state.projectAdded(p)
         state.selectProject(p)
 
         state.requestRemoveProject(p.id, store: store)
@@ -355,9 +349,8 @@ struct AppStateTests {
         // The sidebar's half of `project rename`'s refusal: its field has
         // already closed, so the notice is what says why the name didn't take.
         let state = makeAppState()
-        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json"))
-        let project = store.create(name: "alpha", path: "/tmp")
+        let store = makeProjectStore(state)
+        let project = try #require(store.create(name: "alpha", path: "/tmp"))
 
         state.renameProject(project.id, to: "pinned", store: store)
         #expect(store.projects.first?.name == "alpha")
@@ -375,9 +368,8 @@ struct AppStateTests {
     @Test
     func sidebar_rename_refuses_a_slash_with_a_notice() throws {
         let state = makeAppState()
-        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json"))
-        let project = store.create(name: "alpha", path: "/tmp")
+        let store = makeProjectStore(state)
+        let project = try #require(store.create(name: "alpha", path: "/tmp"))
 
         state.renameProject(project.id, to: "Work/api", store: store)
         #expect(store.projects.first?.name == "alpha")
@@ -389,21 +381,20 @@ struct AppStateTests {
     @Test
     func apply_project_rename_writes_nothing_for_an_unchanged_or_refused_name() throws {
         let state = makeAppState()
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json")
-        let store = ProjectStore(fileURL: url)
-        let project = store.create(name: "alpha", path: "/tmp")
-        try FileManager.default.removeItem(at: url)
+        let store = makeProjectStore(state)
+        let project = try #require(store.create(name: "alpha", path: "/tmp"))
+        var writes = 0
+        store.onSave = { _ in writes += 1 }
 
         #expect(state.applyProjectRename(project.id, to: "alpha", store: store) == nil)
         #expect(state.applyProjectRename(project.id, to: "Pinned", store: store) == PinnedTabs.reservedNameMessage)
-        #expect(!FileManager.default.fileExists(atPath: url.path), "no write")
+        #expect(writes == 0, "no write")
         #expect(store.projects.first?.name == "alpha")
         #expect(state.pendingDialog == nil, "the caller says why, not this function")
 
         #expect(state.applyProjectRename(project.id, to: "beta", store: store) == nil)
         #expect(store.projects.first?.name == "beta")
-        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(writes == 1)
     }
 
     @Test
@@ -486,27 +477,13 @@ struct AppStateTests {
     }
 
     @Test
-    func splitPane_no_focused_pane_is_noop() throws {
-        let state = makeAppState()
-        let p = seedProject(state)
-        let tab = try #require(state.liveTabs[p.id]?.activeTab)
-        ModelWriter.tabSetTree(tab, root: tab.splitRoot, focusedPaneID: nil)
-        state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
-        #expect(tab.splitRoot.allPanes().count == 1)
-    }
-
-    @Test
-    func adaptiveBackgroundColor_updatesOwnedPaneOnly() throws {
+    func adaptiveBackgroundColor_updatesOnlyThatPane() throws {
         let state = makeAppState()
         let project = seedProject(state)
         let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         let color = CGColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
 
         state.setAdaptiveBackgroundColor(color, paneID: pane.id, projectID: project.id)
-        #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
-
-        let otherProject = seedProject(state, name: "other", path: "/tmp/other")
-        state.setAdaptiveBackgroundColor(nil, paneID: pane.id, projectID: otherProject.id)
         #expect(SurfaceRegistry.shared.surface(for: pane, in: .incubator).adaptiveBackgroundColor == color)
 
         state.setAdaptiveBackgroundColor(nil, paneID: UUID(), projectID: project.id)
@@ -526,11 +503,11 @@ struct AppStateTests {
         let originalTab = try #require(ws.activeTab)
         let onlyPane = try #require(originalTab.focusedPaneID)
         // Add a second tab so closing the original doesn't leave us with zero.
-        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        _ = state.addTab(ws, projectPath: "/tmp")
         let otherTab = try #require(ws.activeTabID)
 
         // Focus the original tab, then close its only pane.
-        ModelWriter.tabSelect(originalTab.id, in: ws)
+        state.writer.tabSelect(originalTab.id, in: ws.id)
         state.closePane(onlyPane, projectID: p.id)
 
         #expect(ws.tabs.count == 1)
@@ -559,7 +536,7 @@ struct AppStateTests {
 
         // Replace splitRoot with a known HV shape.
         let (tree, ids) = build(H(pane("l1"), V(pane("r1"), pane("r2"))))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["l1"])
+        try #require(state.setTree(tab, root: tree, focusedPaneID: ids["l1"]))
 
         try state.closePane(#require(ids["l1"]), projectID: p.id)
 
@@ -578,7 +555,7 @@ struct AppStateTests {
         let targetInOriginal = try #require(originalTab.focusedPaneID)
 
         // Switch to a new tab, then close a pane on the (now non-active) original.
-        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        _ = state.addTab(ws, projectPath: "/tmp")
         #expect(ws.activeTabID != originalTab.id)
         state.closePane(targetInOriginal, projectID: p.id)
         #expect(originalTab.splitRoot.allPanes().count == 1)
@@ -593,7 +570,7 @@ struct AppStateTests {
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         let ws1 = try #require(state.liveTabs[p1.id])
         // Give p1 a second tab so moving one away doesn't empty it.
-        let moving = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
+        let moving = state.addTab(ws1, projectPath: "/tmp1")
         let staying = try #require(ws1.tabs.first?.id)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path)
@@ -623,19 +600,20 @@ struct AppStateTests {
     }
 
     @Test
-    func moveTab_creates_destination_workspace_when_absent() throws {
+    func moveTab_to_a_project_that_the_model_does_not_have_is_noop() throws {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let ws1 = try #require(state.liveTabs[p1.id])
-        let tab = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
-        // A project that's never been opened — no workspace yet.
+        let tab = state.addTab(ws1, projectPath: "/tmp1")
+        // The server has no such project: it refuses the move.
         let p2 = Project(name: "p2", path: "/tmp2", sortOrder: 1)
         #expect(state.liveTabs[p2.id] == nil)
 
         state.moveTab(tab.id, from: p1.id, to: p2.id, destPath: p2.path)
 
-        let ws2 = try #require(state.liveTabs[p2.id])
-        #expect(ws2.tabs.contains { $0.id == tab.id })
+        #expect(state.liveTabs[p2.id] == nil)
+        #expect(ws1.tabs.contains { $0.id == tab.id })
+        #expect(state.activeProjectID == p1.id)
     }
 
     @Test
@@ -667,9 +645,9 @@ struct AppStateTests {
         let ws = try #require(state.liveTabs[p.id])
         let destTab = try #require(ws.activeTab)
         let destPane = try #require(destTab.splitRoot.allPanes().first?.id)
-        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
+        let sourceTab = state.addTab(ws, projectPath: p.path)
         let sourcePane = try #require(sourceTab.splitRoot.allPanes().first?.id)
-        ModelWriter.tabSelect(destTab.id, in: ws)
+        state.writer.tabSelect(destTab.id, in: ws.id)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .pane(destPane, .top), inProject: p.id)
 
@@ -690,8 +668,8 @@ struct AppStateTests {
         let ws = try #require(state.liveTabs[p.id])
         let destTab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
-        let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
-        ModelWriter.tabSelect(destTab.id, in: ws)
+        let sourceTab = state.addTab(ws, projectPath: p.path)
+        state.writer.tabSelect(destTab.id, in: ws.id)
 
         state.mergeTab(sourceTab.id, from: p.id, at: .rootEdge(.left), inProject: p.id)
 
@@ -760,7 +738,7 @@ struct AppStateTests {
         let original = try #require(tab.focusedPaneID)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let dragged = try #require(tab.focusedPaneID)
-        ModelWriter.paneZoom(tab, toggling: dragged)
+        state.writer.paneZoom(tab: tab.id, pane: dragged)
 
         state.separatePane(dragged, toProject: p.id, destPath: p.path)
 
@@ -847,11 +825,11 @@ struct AppStateTests {
         let other = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.liveTabs[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        let second = state.addTab(ws, projectPath: p.path).id
         // Seed a tab in the sibling project so a leak across projects would show.
         _ = try #require(state.liveTabs[other.id]?.activeTabID)
         state.activeProjectID = p.id
-        ModelWriter.tabSelect(first, in: ws)
+        state.writer.tabSelect(first, in: ws.id)
 
         state.selectNextTab(projectID: p.id)
         #expect(ws.activeTabID == second)
@@ -868,9 +846,9 @@ struct AppStateTests {
         _ = seedProject(state, name: "other", path: "/tmp/other")
         let ws = try #require(state.liveTabs[p.id])
         let first = try #require(ws.activeTabID)
-        let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        let second = state.addTab(ws, projectPath: p.path).id
         state.activeProjectID = p.id
-        ModelWriter.tabSelect(first, in: ws)
+        state.writer.tabSelect(first, in: ws.id)
 
         // At the first tab it wraps to the last rather than crossing over.
         state.selectPreviousTab(projectID: p.id)
@@ -899,7 +877,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
+        try #require(state.setTree(tab, root: tree, focusedPaneID: ids["a"]))
         state.focusPaneInDirection(.right, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -920,7 +898,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"))))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
+        try #require(state.setTree(tab, root: tree, focusedPaneID: ids["a"]))
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
@@ -933,7 +911,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["b"])
+        try #require(state.setTree(tab, root: tree, focusedPaneID: ids["b"]))
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == ids["a"])
     }
@@ -944,7 +922,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
-        ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
+        try #require(state.setTree(tab, root: tree, focusedPaneID: ids["a"]))
         state.cyclePane(forward: false, projectID: p.id)
         #expect(tab.focusedPaneID == ids["b"])
     }
@@ -993,7 +971,7 @@ struct AppStateTests {
         #expect(a.id != b.id)
         let wsA = try #require(state.liveTabs[a.id])
         let wsB = try #require(state.liveTabs[b.id])
-        #expect(wsA !== wsB)
+        #expect(wsA.id != wsB.id)
 
         // Session names differ despite the shared path: the slug matches but
         // each pane's hex suffix comes from its own UUID.
@@ -1035,9 +1013,9 @@ struct AppStateTests {
         let ws1 = try #require(state.liveTabs[p1.id])
         let ws2 = try #require(state.liveTabs[p2.id])
         // Two tabs in each so closing one doesn't empty the workspace.
-        let close1 = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
+        let close1 = state.addTab(ws1, projectPath: "/tmp1")
         let keep1 = try #require(ws1.tabs.first?.id)
-        let close2 = ModelWriter.tabCreate(in: ws2, projectPath: "/tmp2")
+        let close2 = state.addTab(ws2, projectPath: "/tmp2")
         let keep2 = try #require(ws2.tabs.first?.id)
 
         state.closeTabs([
@@ -1057,20 +1035,21 @@ struct AppStateTests {
         // No pane ever gets an NSView in tests, so nothing is "busy" — the
         // removal must run inline rather than staging a confirmation.
         var ran = false
-        state.requestRemoveSelection(projectIDs: [], tabs: [(tab.id, p1.id)], store: makeProjectStore()) { ran = true }
+        state.requestRemoveSelection(projectIDs: [], tabs: [(tab.id, p1.id)], store: makeProjectStore(state)) { ran = true }
 
         #expect(ran)
         #expect(state.pendingDialog == nil)
     }
 
     @Test
-    func requestRemoveSelection_of_projects_asks_with_the_counts() {
+    func requestRemoveSelection_of_projects_asks_with_the_counts() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let a = store.create(name: "a", path: "/tmp/a")
-        let b = store.create(name: "b", path: "/tmp/b")
-        let child = store.create(name: "child", path: "/tmp/child", parent: b.id)
+        let store = makeProjectStore(state)
+        let a = try #require(store.create(name: "a", path: "/tmp/a"))
+        let b = try #require(store.create(name: "b", path: "/tmp/b"))
+        let child = try #require(store.create(name: "child", path: "/tmp/child", parent: b.id))
         _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        state.projectAdded(a)
         state.selectProject(a)
 
         #expect(Set(state.projectsRemoved(with: [a.id, b.id, child.id], store: store)).count == 4, "each project once")
@@ -1084,10 +1063,10 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveSelection_of_empty_projects_runs_at_once() {
+    func requestRemoveSelection_of_empty_projects_runs_at_once() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let a = store.create(name: "a", path: "/tmp/a")
+        let store = makeProjectStore(state)
+        let a = try #require(store.create(name: "a", path: "/tmp/a"))
         var ran = false
         state.requestRemoveSelection(projectIDs: [a.id], tabs: [], store: store) { ran = true }
         #expect(ran)
@@ -1100,7 +1079,7 @@ struct AppStateTests {
         let source = seedProject(state, name: "source", path: "/tmp/source")
         let target = seedProject(state, name: "target", path: "/tmp/target")
         let ws = try #require(state.liveTabs[target.id])
-        _ = ModelWriter.tabCreate(in: ws, projectPath: target.path)
+        _ = state.addTab(ws, projectPath: target.path)
         let moved = try #require(state.liveTabs[source.id]?.tabs.first)
 
         // The sidebar drop at the line above a nested project sends the
@@ -1112,14 +1091,16 @@ struct AppStateTests {
     @Test
     func remove_a_project_with_projects_inside_asks_with_the_counts() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let parent = store.create(name: "parent", path: "/tmp/parent")
-        let child = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        let store = makeProjectStore(state)
+        let parent = try #require(store.create(name: "parent", path: "/tmp/parent"))
+        let child = try #require(store.create(name: "child", path: "/tmp/child", parent: parent.id))
         _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
+        state.projectAdded(parent)
         state.selectProject(parent)
+        state.projectAdded(child)
         state.selectProject(child)
         let ws = try #require(state.liveTabs[child.id])
-        _ = ModelWriter.tabCreate(in: ws, projectPath: child.path)
+        _ = state.addTab(ws, projectPath: child.path)
 
         state.requestRemoveProject(parent.id, store: store)
         let dialog = state.pendingDialog
@@ -1135,11 +1116,12 @@ struct AppStateTests {
     }
 
     @Test
-    func remove_a_project_with_one_tab_and_one_nested_project_says_so_in_the_singular() {
+    func remove_a_project_with_one_tab_and_one_nested_project_says_so_in_the_singular() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let store = makeProjectStore(state)
+        let parent = try #require(store.create(name: "parent", path: "/tmp/parent"))
         _ = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        state.projectAdded(parent)
         state.selectProject(parent)
 
         state.requestRemoveProject(parent.id, store: store)
@@ -1147,22 +1129,23 @@ struct AppStateTests {
     }
 
     @Test
-    func remove_a_project_with_nothing_inside_goes_at_once() {
+    func remove_a_project_with_nothing_inside_goes_at_once() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let p = store.create(name: "proj", path: "/tmp")
+        let store = makeProjectStore(state)
+        let p = try #require(store.create(name: "proj", path: "/tmp"))
         state.requestRemoveProject(p.id, store: store)
         #expect(state.pendingDialog == nil)
         #expect(store.row(p.id) == nil)
     }
 
     @Test
-    func remove_a_busy_project_says_that_a_process_runs() {
+    func remove_a_busy_project_says_that_a_process_runs() throws {
         let state = makeAppState()
         state.paneNeedsConfirmClose = { _ in true }
-        let store = makeProjectStore()
-        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let store = makeProjectStore(state)
+        let parent = try #require(store.create(name: "parent", path: "/tmp/parent"))
         _ = store.create(name: "child", path: "/tmp/child", parent: parent.id)
+        state.projectAdded(parent)
         state.selectProject(parent)
 
         state.requestRemoveProject(parent.id, store: store)
@@ -1177,7 +1160,7 @@ struct AppStateTests {
         let p = seedProject(state)
 
         var ran = false
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.requestRemoveSelection(projectIDs: [p.id], tabs: [], store: store) { ran = true }
         #expect(state.pendingDialog?.kind == .removeSelection)
         state.dismissPendingDialog()
@@ -1261,22 +1244,17 @@ struct AppStateTests {
         #expect(pane.attention == unseenFailure)
     }
 
-    /// The quick terminal's tab is not in `workspaces`. Its focused pane is
+    /// The quick terminal's tab is in a hidden project. Its focused pane is
     /// seen when the flags arrive while the panel is key, and the app need
     /// not be active (the panel is non-activating).
     @Test
     func the_focused_pane_of_a_key_quick_terminal_is_seen_when_its_flags_arrive() throws {
         let quick = QuickTerminalSplitState()
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: quick
-        )
+        let state = TestModel.appState(quickTerminal: quick)
         state.isAppActive = { false }
         var keyPaneIDs: Set<UUID> = []
         state.paneIsInKeyWindow = { keyPaneIDs.contains($0.id) }
-        let pane = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+        let pane = try #require(quick.ensureTab()?.focusedPane)
 
         pane.receiveAttention(unseenFailure)
         state.paneAttentionDidChange(paneID: pane.id)
@@ -1293,17 +1271,12 @@ struct AppStateTests {
     @Test
     func a_run_end_in_a_key_quick_terminal_marks_only_its_focused_pane_seen() throws {
         let quick = QuickTerminalSplitState()
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: quick
-        )
+        let state = TestModel.appState(quickTerminal: quick)
         state.paneIsInKeyWindow = { _ in true }
-        let focused = try #require(quick.focusedPaneID.flatMap { quick.splitRoot.findPane(id: $0) })
+        let focused = try #require(quick.ensureTab()?.focusedPane)
         quick.split(paneID: focused.id, direction: .horizontal, position: .second)
         quick.focusPane(focused.id)
-        let other = try #require(quick.splitRoot.allPanes().first { $0.id != focused.id })
+        let other = try #require(quick.splitRoot?.allPanes().first { $0.id != focused.id })
 
         for pane in [focused, other] {
             pane.receiveAttention(unseenFailure)
@@ -1316,14 +1289,12 @@ struct AppStateTests {
         #expect(other.attention == unseenFailure)
     }
 
-    /// The session keeps the flags across a quit: the saved file has none.
+    /// The session keeps the flags across a quit: the model and the GUI
+    /// state have none, so a relaunch starts idle until the session says.
     @Test
-    func saved_workspaces_hold_no_attention() throws {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-        let state = makeAppState(store: store)
+    func a_relaunch_holds_no_attention() throws {
+        let gui = GUIStateStore(fileURL: TestModel.folder("gui").appending(path: "gui-state.json"))
+        let state = makeAppState(guiState: gui)
         state.isAppActive = { false }
         let project = seedProject(state)
         let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
@@ -1331,9 +1302,11 @@ struct AppStateTests {
         #expect(pane.executionState == .done)
         state.persistState()
 
-        let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
-        #expect(restored.first?.tabs.first?.executionState == .idle)
-        #expect(restored.first?.tabs.first?.splitRoot.allPanes().first?.executionState == .idle)
+        let again = TestModel.relaunch(state, guiStateStore: gui)
+        let tab = try #require(again.liveTabs[project.id]?.activeTab)
+        #expect(tab.executionState == .idle)
+        #expect(tab.splitRoot.allPanes().first?.id == pane.id)
+        #expect(tab.splitRoot.allPanes().first?.executionState == .idle)
     }
 
     // MARK: - Rename state
@@ -1645,8 +1618,7 @@ struct AppStateTests {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-layout-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let p = Project(name: "proj", path: dir.path, sortOrder: 0)
-        state.selectProject(p)
+        let p = seedProject(state, name: "proj", path: dir.path)
         return (p, dir.path)
     }
 
@@ -1678,8 +1650,7 @@ struct AppStateTests {
               second: {}
         """, in: files)
 
-        let project = Project(name: "declared", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "declared", path: dir.path)
 
         let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs.count == 1)
@@ -1701,8 +1672,7 @@ struct AppStateTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let project = Project(name: "No File", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "No File", path: dir.path)
 
         #expect(state.pendingDialog == nil)
         #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
@@ -1727,8 +1697,7 @@ struct AppStateTests {
           - split: { direction: horizontal, first: {} }
         """, in: files)
 
-        let project = Project(name: "broken", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "broken", path: dir.path)
 
         #expect(state.pendingDialog == nil)
         #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
@@ -1749,8 +1718,7 @@ struct AppStateTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let project = Project(name: "Existing", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "Existing", path: dir.path)
         #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
 
         state.applyLayoutPresentingError(project)
@@ -1825,8 +1793,7 @@ struct AppStateTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         writeProjectFile("path: \(dir.path)\ntabs:\n  - name: \"Dev\"\n", in: files)
-        let project = Project(name: "toast", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "toast", path: dir.path)
 
         // Selecting applies nothing, so there is nothing to toast yet.
         #expect(state.activeToast == nil)
@@ -1851,8 +1818,7 @@ struct AppStateTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         writeProjectFile("path: \(dir.path)\ntabs:\n  - name: \"Dev\"\n", in: files)
-        let project = Project(name: "applyhost", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "applyhost", path: dir.path)
         // A second live tab the one-tab declaration doesn't mention: applying
         // would close it, which is what stages the confirmation.
         state.createTab(projectID: project.id, projectPath: dir.path)
@@ -2024,10 +1990,8 @@ struct AppStateTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let alpha = Project(name: "alpha", path: dir.path, sortOrder: 0)
-        let bravo = Project(name: "bravo", path: dir.path, sortOrder: 1)
-        state.selectProject(alpha)
-        state.selectProject(bravo)
+        let alpha = seedProject(state, name: "alpha", path: dir.path)
+        let bravo = seedProject(state, name: "bravo", path: dir.path)
         let siblings = [alpha, bravo]
 
         state.saveLayoutPresentingError(alpha, siblingProjects: siblings)
@@ -2050,8 +2014,7 @@ struct AppStateTests {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let project = Project(name: "plain", path: dir.path, sortOrder: 0)
-        state.selectProject(project)
+        let project = seedProject(state, name: "plain", path: dir.path)
 
         // No layout file → default single-pane workspace.
         #expect(state.liveTabs[project.id]?.tabs.count == 1)
@@ -2068,16 +2031,14 @@ struct AppStateTests {
             .appendingPathComponent("macterm-reopen-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let project = Project(name: "winner", path: dir.path, sortOrder: 0)
-
-        // Pre-seed a saved snapshot for the project: a single-pane workspace.
-        let storeURL = dir.appendingPathComponent("workspaces.json")
-        let store = WorkspaceStore(fileURL: storeURL)
-        let snapshotWS = Workspace(id: project.id, projectPath: dir.path)
-        store.save(WorkspaceSerializer.snapshot([project.id: snapshotWS]))
+        // The model of the server holds the project: a single-pane tab.
+        let files = makeProjectFileStore()
+        let gui = GUIStateStore(fileURL: dir.appendingPathComponent("gui-state.json"))
+        let first = makeAppState(guiState: gui, projectFiles: files)
+        let project = seedProject(first, name: "winner", path: dir.path)
+        first.persistState()
 
         // And a central file declaring a different (two-pane) split.
-        let files = makeProjectFileStore()
         writeProjectFile("""
         path: \(dir.path)
         tabs:
@@ -2092,10 +2053,10 @@ struct AppStateTests {
         Preferences.shared.activeProjectID = project.id
         defer { Preferences.shared.activeProjectID = priorActive }
 
-        let state = makeAppState(store: store, projectFiles: files)
+        let state = TestModel.relaunch(first, guiStateStore: gui)
         state.restoreSelection(projects: [project])
 
-        // Restored snapshot wins: one pane, file NOT applied, NO prompt.
+        // Restored model wins: one pane, file NOT applied, NO prompt.
         let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs[0].splitRoot.allPanes().count == 1)
         #expect(ws.tabs[0].customTitle != "Dev")
@@ -2110,10 +2071,10 @@ struct AppStateTests {
             .appendingPathComponent("macterm-firstopen-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let project = Project(name: "fresh", path: dir.path, sortOrder: 0)
-        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
-
         let files = makeProjectFileStore()
+        let state = makeAppState(projectFiles: files)
+        let project = seedProject(state, name: "fresh", path: dir.path, select: false)
+
         writeProjectFile("""
         path: \(dir.path)
         tabs:
@@ -2128,7 +2089,6 @@ struct AppStateTests {
         Preferences.shared.activeProjectID = project.id
         defer { Preferences.shared.activeProjectID = priorActive }
 
-        let state = makeAppState(store: store, projectFiles: files)
         state.restoreSelection(projects: [project])
 
         let ws = try #require(state.liveTabs[project.id])
@@ -2139,46 +2099,20 @@ struct AppStateTests {
     }
 
     @Test
-    func restore_gives_a_never_opened_project_its_first_tab_and_a_group_none() throws {
-        // A project holds its tabs from the start (design 010 section 11): a
-        // project with no snapshot that no window selects still gets its
-        // first tab at the restore. A group (no folder) holds no tabs.
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-neveropened-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let project = Project(name: "never", path: dir.path, sortOrder: 0)
-        let group = Project(name: "Work", path: "", sortOrder: 1)
-        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
-
-        let priorActive = Preferences.shared.activeProjectID
-        Preferences.shared.activeProjectID = nil
-        defer { Preferences.shared.activeProjectID = priorActive }
-
-        let state = makeAppState(store: store)
-        state.restoreSelection(projects: [project, group])
-
-        #expect(state.activeProjectID == nil)
-        #expect(state.liveTabs[project.id]?.tabs.count == 1)
-        #expect(state.liveTabs[group.id] == nil)
-    }
-
-    @Test
-    func an_added_project_gets_its_first_tab_at_once() {
+    func an_added_project_gets_its_first_tab_at_once() throws {
         let state = makeAppState()
-        let projects = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-added-\(UUID().uuidString).json"))
+        let projects = makeProjectStore(state)
         projects.onAdd = { [weak state] in state?.projectAdded($0) }
         let priorActive = Preferences.shared.activeProjectID
         Preferences.shared.activeProjectID = nil
         defer { Preferences.shared.activeProjectID = priorActive }
         state.restoreSelection(projects: projects.projects)
 
-        let project = projects.create(name: "fresh", path: "/tmp")
-        let group = projects.add(Project(name: "Work", path: ""))
+        let project = try #require(projects.create(name: "fresh", path: "/tmp"))
+        let group = try #require(projects.add(Project(name: "Work", path: "")))
 
         #expect(state.liveTabs[project.id]?.tabs.count == 1)
-        #expect(state.liveTabs[group.id] == nil)
+        #expect(state.liveTabs[group.id]?.tabs.isEmpty == true)
         #expect(state.activeProjectID == nil)
     }
 
@@ -2190,16 +2124,14 @@ struct AppStateTests {
             .appendingPathComponent("macterm-emptyproject-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let project = Project(name: "empty", path: dir.path, sortOrder: 0)
-        let store = WorkspaceStore(fileURL: dir.appendingPathComponent("workspaces.json"))
-
-        let first = makeAppState(store: store)
-        first.selectProject(project)
+        let gui = GUIStateStore(fileURL: dir.appendingPathComponent("gui-state.json"))
+        let first = makeAppState(guiState: gui)
+        let project = seedProject(first, name: "empty", path: dir.path)
         let tabID = try #require(first.liveTabs[project.id]?.tabs.first?.id)
         first.closeTab(tabID, projectID: project.id)
         #expect(first.liveTabs[project.id]?.tabs.isEmpty == true)
 
-        let relaunched = makeAppState(store: store)
+        let relaunched = TestModel.relaunch(first, guiStateStore: gui)
         relaunched.restoreSelection(projects: [project])
         relaunched.selectProject(project)
 
@@ -2291,8 +2223,9 @@ struct AppStateTests {
     @Test
     func a_project_with_no_folder_starts_its_shells_in_the_scratch_folder() throws {
         let state = makeAppState()
-        let p = Project(name: "parent", path: "", sortOrder: 0)
-        state.selectProject(p)
+        let p = seedProject(state, name: "parent", path: "")
+        #expect(state.liveTabs[p.id]?.tabs.isEmpty == true, "a project with no folder starts with no tab")
+        state.createTab(projectID: p.id, projects: [p])
         let pane = try #require(state.liveTabs[p.id]?.activeTab?.focusedPane)
         #expect(pane.projectPath == ScratchTabs.fallbackRoot)
     }
@@ -2300,9 +2233,9 @@ struct AppStateTests {
     @Test
     func next_project_steps_through_a_project_with_no_folder() {
         let state = makeAppState()
-        let a = Project(name: "a", path: "/tmp/a", sortOrder: 0)
-        let parent = Project(name: "p", path: "", sortOrder: 1)
-        let b = Project(name: "b", path: "/tmp/b", sortOrder: 2)
+        let a = seedProject(state, name: "a", path: "/tmp/a")
+        let parent = seedProject(state, name: "p", path: "", select: false)
+        let b = seedProject(state, name: "b", path: "/tmp/b", select: false)
         state.selectProject(a)
         state.selectNextProject(projects: [a, parent, b])
         #expect(state.activeProjectID == parent.id)
@@ -2313,12 +2246,11 @@ struct AppStateTests {
     }
 
     @Test
-    func a_project_with_no_folder_has_no_layout_file() {
+    func a_project_with_no_folder_has_no_layout_file() throws {
         let files = makeProjectFileStore()
         let state = makeAppState(projectFiles: files)
-        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-no-folder-\(UUID().uuidString).json"))
-        let p = store.add(Project(name: "parent", path: ""))
+        let store = makeProjectStore(state)
+        let p = try #require(store.add(Project(name: "parent", path: "")))
         state.selectProject(p)
 
         func isNoFolder(_ error: Error?) -> Bool {
@@ -2344,9 +2276,7 @@ struct AppStateTests {
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(a), focusedPaneID: a.id)
         let tabB = TerminalTab(id: UUID(), splitRoot: bTree, focusedPaneID: nil)
         let tabC = TerminalTab(id: UUID(), splitRoot: .pane(c), focusedPaneID: c.id)
-        let ws = Workspace(id: pid, tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
-
-        let warm = Set(AppState.panesToWarm(in: ws).map(\.id))
+        let warm = Set(AppState.panesToWarm(tabs: [tabA, tabB, tabC], activeTabID: tabA.id).map(\.id))
         // Active tab A's pane is NOT warmed (SwiftUI starts it); B's two + C are.
         #expect(!warm.contains(a.id))
         #expect(warm == Set([bIDs["b1"], bIDs["b2"], c.id].compactMap(\.self)))
@@ -2358,8 +2288,7 @@ struct AppStateTests {
         let pid = UUID()
         let only = Pane(projectPath: "/p", projectID: pid)
         let tab = TerminalTab(id: UUID(), splitRoot: .pane(only), focusedPaneID: only.id)
-        let ws = Workspace(id: pid, tabs: [tab], activeTabID: tab.id)
-        #expect(AppState.panesToWarm(in: ws).isEmpty)
+        #expect(AppState.panesToWarm(tabs: [tab], activeTabID: tab.id).isEmpty)
     }
 
     // MARK: - Run state
@@ -2403,8 +2332,10 @@ struct AppStateTests {
         )
     }
 
+    /// The server ends the sessions of a local tab that closes: the app
+    /// sends no kill of its own, and the panes leave the model.
     @Test
-    func closeTab_kills_every_panes_session() async throws {
+    func closeTab_ends_every_panes_session_on_the_server() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed)
@@ -2415,34 +2346,11 @@ struct AppStateTests {
         #expect(names.count == 2)
 
         // Second tab so the close leaves a valid workspace.
-        _ = state.liveTabs[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
+        _ = state.liveTabs[p.id].map { state.addTab($0, projectPath: "/tmp") }
+        let paneIDs = tab.splitRoot.allPanes().map(\.id)
         state.closeTab(tab.id, projectID: p.id)
 
-        await killed.settle(expecting: names.count)
-        #expect(await killed.names == names)
-    }
-
-    @Test
-    func a_session_that_a_pending_pinned_record_names_is_not_killed_and_needs_no_confirmation() async throws {
-        // A pinned record that waits to load reattaches its session later:
-        // a close that releases a pane on that session must leave it.
-        let killed = KilledSessions()
-        let state = makeAppState()
-        state.sessionClient = recordingClient(into: killed)
-        state.paneNeedsConfirmClose = { _ in true }
-        let p = seedProject(state)
-        let pane = try #require(state.liveTabs[p.id]?.activeTab?.splitRoot.allPanes().first)
-        #expect(state.closeNeedsConfirmation([pane]))
-
-        state.pendingPinnedLiveRestores[UUID()] = TabSnapshot(
-            id: UUID(),
-            customTitle: nil,
-            focusedPaneID: nil,
-            splitRoot: .pane(PaneSnapshot(id: UUID(), projectPath: "/tmp", sessionName: pane.sessionName))
-        )
-
-        #expect(!state.closeNeedsConfirmation([pane]))
-        state.releaseSessions([pane])
+        #expect(paneIDs.allSatisfy { state.model.pane($0) == nil })
         await killed.settleExpectingNone()
         #expect(await killed.names.isEmpty)
     }
@@ -2496,8 +2404,10 @@ struct AppStateTests {
         state.handleProcessExit(target, projectID: p.id)
 
         #expect(tab.splitRoot.findPane(id: target) == nil)
-        await killed.settle(expecting: 1)
-        #expect(await killed.names.contains(name))
+        // The pane left the model: the server ends its session.
+        #expect(state.model.pane(target) == nil)
+        await killed.settleExpectingNone()
+        #expect(await !killed.names.contains(name))
     }
 
     @Test
@@ -2510,7 +2420,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         // A second tab so the close leaves a valid workspace shape.
-        _ = state.liveTabs[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
+        _ = state.liveTabs[p.id].map { state.addTab($0, projectPath: "devbox:~/dev/api") }
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         state.sessionClient = remoteKillRecordingClient(remoteKilled)
@@ -2523,7 +2433,7 @@ struct AppStateTests {
     }
 
     @Test
-    func closePane_kills_only_that_panes_session() async throws {
+    func closePane_ends_only_that_panes_session() async throws {
         let killed = KilledSessions()
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed)
@@ -2533,10 +2443,15 @@ struct AppStateTests {
         let target = try #require(tab.focusedPaneID)
         let targetName = try #require(tab.splitRoot.findPane(id: target)?.sessionName)
 
+        let other = try #require(tab.splitRoot.allPanes().first { $0.id != target })
+
         state.closePane(target, projectID: p.id)
 
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [targetName])
+        #expect(state.model.pane(target) == nil)
+        #expect(state.model.pane(other.id) != nil)
+        // The server ends the session. The app sends no local kill.
+        await killed.settleExpectingNone()
+        #expect(await !killed.names.contains(targetName))
     }
 
     @Test
@@ -2586,7 +2501,7 @@ struct AppStateTests {
         // Give p2 two tabs so there's a middle slot to drop into.
         let dest = try #require(state.liveTabs[p2.id])
         let d0 = dest.tabs[0].id
-        let d1 = ModelWriter.tabCreate(in: dest, projectPath: p2.path).id
+        let d1 = state.addTab(dest, projectPath: p2.path).id
         let moving = try #require(state.liveTabs[p1.id]?.activeTab)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path, toIndex: 1)
@@ -2602,20 +2517,19 @@ struct AppStateTests {
             .appendingPathComponent("macterm-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let storeURL = dir.appendingPathComponent("workspaces.json")
-        let state = makeAppState(store: WorkspaceStore(fileURL: storeURL))
+        let gui = GUIStateStore(fileURL: dir.appendingPathComponent("gui-state.json"))
+        let state = makeAppState(guiState: gui)
         let p = seedProject(state, name: "p", path: "/tmp")
         let ws = try #require(state.liveTabs[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
+        let t2 = state.addTab(ws, projectPath: p.path).id
 
         state.reorderTab(t1, inProject: p.id, toIndex: 2)
         #expect(ws.tabs.map(\.id) == [t2, t1])
 
-        // The reorder persisted: a fresh store reading the same file sees it.
-        let reloaded = WorkspaceStore(fileURL: storeURL).load()
-        let saved = try #require(reloaded.workspaces.first { $0.projectID == p.id })
-        #expect(saved.tabs.map(\.id) == [t2, t1])
+        // The reorder persisted: a relaunch on the same server sees it.
+        let again = TestModel.relaunch(state, guiStateStore: gui)
+        #expect(again.liveTabs[p.id]?.tabs.map(\.id) == [t2, t1])
     }
 
     @Test
@@ -2624,13 +2538,10 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.liveTabs[p.id])
         let t1 = ws.tabs[0].id
-        let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
-        let t3 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
-        ModelWriter.tabPeek(t1, in: ws)
-        let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(
-            fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-tests-move-\(UUID().uuidString).json")
-        ))
+        let t2 = state.addTab(ws, projectPath: p.path).id
+        let t3 = state.addTab(ws, projectPath: p.path).id
+        state.writer.tabPeek(t1, in: ws.id)
+        let ctx = AppCommandContext(appState: state, projectStore: makeProjectStore(state))
 
         #expect(AppCommand.moveTabUp.action(in: ctx) == nil)
         state.moveActiveTab(step: 1, projectID: p.id)
@@ -2651,15 +2562,14 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
-        let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(
-            fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("macterm-tests-move-\(UUID().uuidString).json")
-        ))
+        let ctx = AppCommandContext(appState: state, projectStore: makeProjectStore(state))
         #expect(AppCommand.movePaneRight.action(in: ctx) == nil)
 
         let first = try #require(tab.focusedPaneID)
-        let second = try #require(ModelWriter.paneSplit(tab, paneID: first, direction: .horizontal))
-        ModelWriter.paneFocus(tab, paneID: first)
+        let second = try #require(state.writer.paneSplit(
+            tab: tab.id, target: first, new: Pane(projectPath: p.path, projectID: p.id), direction: .horizontal
+        ))
+        state.writer.paneFocus(first)
         #expect(AppCommand.movePaneLeft.action(in: ctx) == nil)
         #expect(AppCommand.movePaneUp.action(in: ctx) == nil)
         let moveRight = try #require(AppCommand.movePaneRight.action(in: ctx))
@@ -2676,7 +2586,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        _ = state.addTab(ws, projectPath: "/tmp")
 
         // No live surfaces in a unit test → needsConfirmQuit is unreachable →
         // not busy → closes without staging.
@@ -2686,10 +2596,11 @@ struct AppStateTests {
     }
 
     @Test
-    func requestRemoveProject_idle_with_tabs_asks_before_it_removes() {
+    func requestRemoveProject_idle_with_tabs_asks_before_it_removes() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
-        let p = store.create(name: "proj", path: "/tmp")
+        let store = makeProjectStore(state)
+        let p = try #require(store.create(name: "proj", path: "/tmp"))
+        state.projectAdded(p)
         state.selectProject(p)
         state.requestRemoveProject(p.id, store: store)
         #expect(store.row(p.id) != nil)
@@ -2707,7 +2618,7 @@ struct AppStateTests {
         let p = seedProject(state)
         let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
-        _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
+        _ = state.addTab(ws, projectPath: "/tmp")
 
         state.requestCloseTab(tab.id, projectID: p.id)
         #expect(state.pendingDialog?.kind == .closeTab(tabID: tab.id, projectID: p.id))
@@ -2824,140 +2735,89 @@ struct AppStateTests {
 
     // MARK: - Quick terminal persistence
 
-    /// A store on disk plus an AppState adopting its own quick terminal, so
-    /// nothing here writes into the panel's shared split state.
-    private func makeQuickTerminalFixture(
-        quick: QuickTerminalSplitState = QuickTerminalSplitState()
-    ) throws -> (state: AppState, quick: QuickTerminalSplitState, storeURL: URL, dir: URL) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let storeURL = dir.appendingPathComponent("workspaces.json")
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: quick
-        )
-        return (state, quick, storeURL, dir)
+    /// An AppState that adopts its own quick terminal, with its own GUI
+    /// state file, so nothing here writes into the panel's shared split
+    /// state. The quick terminal's tab is made, as the launch does.
+    private func makeQuickTerminalFixture() throws -> (state: AppState, quick: QuickTerminalSplitState, gui: GUIStateStore) {
+        let gui = GUIStateStore(fileURL: TestModel.folder("quick").appending(path: "gui-state.json"))
+        let quick = QuickTerminalSplitState()
+        let state = makeAppState(guiState: gui)
+        state.adoptQuickTerminal(quick)
+        _ = try #require(quick.ensureTab())
+        return (state, quick, gui)
     }
 
-    /// The quick terminal's own mutations persist the moment they happen — a
-    /// split in the panel is as durable as a split in a workspace, not
-    /// something that waits for quit (a crash would otherwise lose the tree
-    /// and orphan the new pane's session).
+    /// The quick terminal's tab is a tab of the server's model: a split in
+    /// the panel is as durable as a split in a project, and a relaunch on
+    /// the same server finds the tree with its session names.
     @Test
-    func a_quick_terminal_split_persists_its_tab_with_session_names_verbatim() throws {
-        let (state, quick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        state.restoreSelection(projects: [])
+    func a_quick_terminal_split_survives_a_relaunch_with_session_names_verbatim() throws {
+        let (state, quick, gui) = try makeQuickTerminalFixture()
 
         try quick.split(paneID: #require(quick.focusedPaneID), direction: .vertical)
-        let names = Set(quick.tab.splitRoot.allPanes().map(\.sessionName))
+        let tab = try #require(quick.tab)
+        let names = Set(tab.splitRoot.allPanes().map(\.sessionName))
         #expect(names.count == 2)
 
-        let saved = try #require(WorkspaceStore(fileURL: storeURL).load().quickTerminal)
-        #expect(saved.id == quick.tab.id)
-        let restored = WorkspaceSerializer.restoreTab(saved, projectID: QuickTerminalService.projectID)
+        let again = TestModel.relaunch(state, guiStateStore: gui)
+        let restored = try #require(again.quickTerminal.tab)
+        #expect(restored.id == tab.id)
         #expect(Set(restored.splitRoot.allPanes().map(\.sessionName)) == names)
     }
 
-    /// Launch hands the persisted tab back to the panel: same tab id, same
-    /// session names (the reattach identity), each pane respawning in the cwd
-    /// it was in rather than the home directory a fresh tab starts from.
+    /// The launch restore keeps the tab that the model has: same tab id,
+    /// same session names (the reattach identity), in the quick terminal's
+    /// project. It makes a new tab only when the model has none.
     @Test
-    func restoreSelection_hands_the_persisted_quick_terminal_back_to_the_panel() throws {
-        let (writer, writerQuick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try writerQuick.split(paneID: #require(writerQuick.focusedPaneID), direction: .horizontal)
-        let expectedNames = Set(writerQuick.tab.splitRoot.allPanes().map(\.sessionName))
-        writer.persistState()
+    func restoreSelection_keeps_the_quick_terminal_tab_of_the_model() throws {
+        let (state, quick, gui) = try makeQuickTerminalFixture()
+        try quick.split(paneID: #require(quick.focusedPaneID), direction: .horizontal)
+        let tab = try #require(quick.tab)
+        let expectedNames = Set(tab.splitRoot.allPanes().map(\.sessionName))
+        state.persistState()
 
-        let fresh = QuickTerminalSplitState()
-        let bornWith = fresh.tab.id
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: fresh
-        )
-        state.restoreSelection(projects: [])
+        let again = TestModel.relaunch(state, guiStateStore: gui)
+        again.restoreSelection(projects: [])
 
-        #expect(fresh.tab.id == writerQuick.tab.id)
-        #expect(fresh.tab.id != bornWith)
-        #expect(Set(fresh.tab.splitRoot.allPanes().map(\.sessionName)) == expectedNames)
-        #expect(fresh.tab.splitRoot.allPanes().allSatisfy { $0.projectID == QuickTerminalService.projectID })
-        #expect(fresh.tab.focusedPaneID != nil)
+        let fresh = again.quickTerminal
+        let restored = try #require(fresh.tab)
+        let quickProjectID = try #require(again.model.project(alias: QuickTerminalService.alias)?.id)
+        #expect(restored.id == tab.id)
+        #expect(again.model.tabs(of: quickProjectID).count == 1)
+        #expect(Set(restored.splitRoot.allPanes().map(\.sessionName)) == expectedNames)
+        #expect(restored.splitRoot.allPanes().allSatisfy { $0.projectID == quickProjectID })
+        #expect(restored.focusedPaneID != nil)
     }
 
-    /// A restore that arrives after the panel has already been shown this run
-    /// is refused: the live tab's sessions would be orphaned by the swap, and
-    /// the fresh tab is the one now worth persisting.
-    @Test
-    func restoreSelection_keeps_a_quick_terminal_that_is_already_on_screen() throws {
-        let (writer, writerQuick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        writer.persistState()
-        let persistedID = writerQuick.tab.id
-
-        let shown = QuickTerminalSplitState()
-        let livePane = try #require(shown.tab.focusedPane)
-        _ = SurfaceRegistry.shared.ensureView(of: livePane)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: shown
-        )
-        state.restoreSelection(projects: [])
-
-        #expect(shown.tab.id != persistedID)
-        #expect(shown.tab.focusedPane === livePane)
-    }
-
-    /// Until the launch restore has run, `workspaces` is empty — a save then
-    /// would write that emptiness over the file about to be restored. The
-    /// panel's hotkey works from the first moment of launch, so a split made
-    /// in that window must wait for the next save rather than cause one.
+    /// Until the launch restore has run, the GUI state is not known: a save
+    /// then would write over the file about to be restored. The panel's
+    /// hotkey works from the first moment of launch, so a split made in that
+    /// window must wait for the next save rather than cause one.
     @Test
     func a_quick_terminal_split_before_the_launch_restore_saves_nothing() throws {
-        let (_, quick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = TestModel.folder("quick").appending(path: "gui-state.json")
         let sentinel = """
-        {"version": 6, "workspaces": [], "pinned": [], "windows": []}
+        {"version": 1, "windows": [], "pinned": []}
         """
-        try sentinel.write(to: storeURL, atomically: true, encoding: .utf8)
+        try sentinel.write(to: file, atomically: true, encoding: .utf8)
+        let quick = QuickTerminalSplitState()
+        let state = makeAppState(guiState: GUIStateStore(fileURL: file))
+        state.adoptQuickTerminal(quick)
+        _ = try #require(quick.ensureTab())
 
         try quick.split(paneID: #require(quick.focusedPaneID), direction: .vertical)
 
-        #expect(try String(contentsOf: storeURL, encoding: .utf8) == sentinel)
+        #expect(try String(contentsOf: file, encoding: .utf8) == sentinel)
     }
 
-    /// A file from before the section existed leaves the fresh tab alone.
-    @Test
-    func restoreSelection_without_a_quick_terminal_section_leaves_the_fresh_tab() throws {
-        let (_, quick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try """
-        {"version": 6, "workspaces": [], "pinned": [], "windows": []}
-        """.write(to: storeURL, atomically: true, encoding: .utf8)
-        let bornWith = quick.tab.id
-
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: quick
-        )
-        state.restoreSelection(projects: [])
-        #expect(quick.tab.id == bornWith)
-    }
-
-    /// The first v2 launch ends the v1 sessions that the restored panes
+    /// The first v2 launch ends the v1 sessions that the panes of the model
     /// name, the quick terminal's included, and only once.
     @Test
     func the_first_v2_launch_ends_the_v1_sessions_that_the_restored_panes_name() async throws {
-        let (writer, writerQuick, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try writerQuick.split(paneID: #require(writerQuick.focusedPaneID), direction: .horizontal)
-        let quickNames = Set(writerQuick.tab.splitRoot.allPanes().map(\.sessionName))
-        writer.persistState()
+        let (state, quick, gui) = try makeQuickTerminalFixture()
+        try quick.split(paneID: #require(quick.focusedPaneID), direction: .horizontal)
+        let quickNames = try Set(#require(quick.tab).splitRoot.allPanes().map(\.sessionName))
+        state.persistState()
 
         let ended = KilledSessions()
         var sessionClient = SessionClient.noop
@@ -2968,14 +2828,10 @@ struct AppStateTests {
             return true
         }
         let endedFlag = LockedBox(false)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: QuickTerminalSplitState()
-        )
-        state.sessionClient = sessionClient
-        state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
-        state.restoreSelection(projects: [])
+        let relaunched = TestModel.relaunch(state, guiStateStore: gui)
+        relaunched.sessionClient = sessionClient
+        relaunched.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
+        relaunched.restoreSelection(projects: [])
 
         await ended.settle(expecting: quickNames.count)
         #expect(await Set(ended.names) == quickNames)
@@ -2986,11 +2842,7 @@ struct AppStateTests {
         #expect(endedFlag.value)
 
         // Once: a second launch ends nothing.
-        let again = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: QuickTerminalSplitState()
-        )
+        let again = TestModel.relaunch(state, guiStateStore: gui)
         let calls = LockedBox(0)
         var counting = SessionClient.noop
         counting.endV1Sessions = { _ in
@@ -2998,7 +2850,7 @@ struct AppStateTests {
             return true
         }
         again.sessionClient = counting
-        again.v1SessionsEnded = state.v1SessionsEnded
+        again.v1SessionsEnded = relaunched.v1SessionsEnded
         again.restoreSelection(projects: [])
         try await Task.sleep(for: .milliseconds(100))
         #expect(calls.value == 0)
@@ -3008,9 +2860,8 @@ struct AppStateTests {
     /// unset, so that the next launch tries again.
     @Test
     func a_v1_session_that_did_not_end_leaves_the_flag_unset() async throws {
-        let (writer, _, storeURL, dir) = try makeQuickTerminalFixture()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        writer.persistState()
+        let (state, _, gui) = try makeQuickTerminalFixture()
+        state.persistState()
 
         let calls = LockedBox(0)
         var sessionClient = SessionClient.noop
@@ -3019,14 +2870,10 @@ struct AppStateTests {
             return false
         }
         let endedFlag = LockedBox(false)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: makeProjectFileStore(),
-            quickTerminal: QuickTerminalSplitState()
-        )
-        state.sessionClient = sessionClient
-        state.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
-        state.restoreSelection(projects: [])
+        let relaunched = TestModel.relaunch(state, guiStateStore: gui)
+        relaunched.sessionClient = sessionClient
+        relaunched.v1SessionsEnded = .init(read: { endedFlag.value }, write: { endedFlag.mutate { $0 = true } })
+        relaunched.restoreSelection(projects: [])
 
         let deadline = Date().addingTimeInterval(5)
         while calls.value == 0, Date() < deadline {
@@ -3061,5 +2908,25 @@ private actor KilledSessions {
     /// fixed-wait limitation) is explicit at the call site.
     func settleExpectingNone() async {
         try? await Task.sleep(for: .milliseconds(200))
+    }
+}
+
+/// Helpers of these tests: requests to the model of the test server.
+@MainActor
+private extension AppState {
+    /// A new tab of one pane in the project of `tabs`, by a request.
+    @discardableResult
+    func addTab(_ tabs: LiveTabs, projectPath: String) -> TerminalTab {
+        let pane = Pane(projectPath: projectPath, projectID: tabs.id)
+        guard let tab = writer.tabCreate(in: tabs.id, root: .pane(pane)) else {
+            preconditionFailure("the test server refused the tab")
+        }
+        return tab
+    }
+
+    /// Gives `tab` the tree `root`, by a request. False when the server
+    /// refused it.
+    func setTree(_ tab: TerminalTab, root: SplitNode, focusedPaneID: UUID?) -> Bool {
+        writer.tabLayout(tab.id, root: root, focusedPaneID: focusedPaneID)
     }
 }

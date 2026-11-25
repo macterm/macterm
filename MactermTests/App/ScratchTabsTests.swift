@@ -8,40 +8,39 @@ import Testing
 struct ScratchTabsTests {
     // MARK: - Setup helpers
 
-    /// AppState with a temp-file store and a no-op zmx (a test must never
-    /// fork the real zmx or reap the developer's live sessions).
-    private func makeState(storeURL: URL? = nil) -> AppState {
-        let storeURL = storeURL ?? FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-scratch-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-scratch-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: storeURL),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+    /// An AppState over a test server, with a no-op session client (a test
+    /// must never reap the developer's live sessions).
+    private func makeState() -> AppState {
+        let state = TestModel.appState()
         state.sessionClient = .noop
         state.incubatePane = { _ in }
         return state
     }
 
     private func seedProject(_ state: AppState, name: String = "proj", path: String = "/tmp") -> Project {
-        let p = Project(name: name, path: path, sortOrder: 0)
-        state.selectProject(p)
-        return p
+        TestModel.project(state, name: name, path: path)
     }
 
-    private var scratchID: UUID { ScratchTabs.workspaceID }
+    /// The scratch project's tabs, read live.
+    private func scratch(_ state: AppState) -> LiveTabs? {
+        state.scratchProjectID.flatMap { state.liveTabs[$0] }
+    }
 
     // MARK: - Identity
 
     @Test
-    func sentinel_is_not_the_pinned_one_and_both_are_synthetic() {
-        #expect(ScratchTabs.workspaceID != PinnedTabs.workspaceID)
-        #expect(Project.synthetic(for: scratchID)?.name == ScratchTabs.displayName)
-        #expect(Project.synthetic(for: PinnedTabs.workspaceID)?.name == PinnedTabs.displayName)
-        #expect(Project.synthetic(for: UUID()) == nil)
-        #expect(Project.isSynthetic(scratchID))
-        #expect(!Project.isSynthetic(UUID()))
+    func the_scratch_project_is_hidden_below_the_tree_and_not_the_pinned_one() {
+        let scratch = ScratchTabs.newProject()
+        let pinned = PinnedTabs.newProject()
+        #expect(ScratchTabs.alias != PinnedTabs.alias)
+        #expect(scratch.alias == ScratchTabs.alias)
+        #expect(scratch.name == ScratchTabs.displayName)
+        #expect(scratch.sidebar == .bottom)
+        #expect(!scratch.isTreeProject)
+        #expect(scratch.isSelectable)
+        #expect(!scratch.hasFolder)
+        #expect(pinned.sidebar == .top)
+        #expect(scratch.id != pinned.id)
     }
 
     @Test
@@ -50,7 +49,7 @@ struct ScratchTabsTests {
             #expect(ScratchTabs.reservesName(name), "\(name)")
             #expect(Project.reservesName(name), "\(name)")
         }
-        for name in ["", "Scratch Tabs 2", "Scratchy", "tabs", "Pinned Tabs", ScratchTabs.workspaceID.uuidString] {
+        for name in ["", "Scratch Tabs 2", "Scratchy", "tabs", "Pinned Tabs"] {
             #expect(!ScratchTabs.reservesName(name), "\(name)")
         }
         // The pinned name still goes through the shared test.
@@ -65,12 +64,13 @@ struct ScratchTabsTests {
     @Test
     func createScratchTab_makes_the_workspace_with_one_tab_in_home_and_selects_it() throws {
         let state = makeState()
-        #expect(state.scratchWorkspace == nil)
+        #expect(state.scratchProjectID == nil)
         #expect(!state.hasScratchTabs)
 
         let id = try #require(state.createScratchTab())
 
-        let ws = try #require(state.scratchWorkspace)
+        let ws = try #require(scratch(state))
+        let scratchID = try #require(state.scratchProjectID)
         #expect(ws.tabs.map(\.id) == [id])
         #expect(ws.activeTabID == id)
         #expect(state.hasScratchTabs)
@@ -83,8 +83,7 @@ struct ScratchTabsTests {
     @Test
     func the_command_applies_without_a_project_where_newTab_does_not() throws {
         let state = makeState()
-        let store = ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-scratch-tests-projects-\(UUID().uuidString).json"))
+        let store = TestModel.projectStore(state)
         let ctx = AppCommandContext(appState: state, projectStore: store)
         #expect(state.activeProjectID == nil)
         // New Tab keeps its rule: nothing to act on without a project.
@@ -93,8 +92,8 @@ struct ScratchTabsTests {
         let action = try #require(AppCommand.newScratchTab.action(in: ctx))
         action()
 
-        #expect(state.scratchWorkspace?.tabs.count == 1)
-        #expect(state.activeProjectID == scratchID)
+        #expect(scratch(state)?.tabs.count == 1)
+        #expect(state.activeProjectID == state.scratchProjectID)
         #expect(HotkeyAction.newScratchTab.defaultShortcut == "cmd+shift+t")
     }
 
@@ -106,14 +105,14 @@ struct ScratchTabsTests {
         let id = try #require(state.createScratchTab(focus: false))
 
         #expect(state.activeProjectID == p.id)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [id])
+        #expect(scratch(state)?.tabs.map(\.id) == [id])
     }
 
     @Test
-    func ensureScratchWorkspace_starts_empty() {
+    func ensureScratchProject_starts_empty() {
         let state = makeState()
-        state.ensureScratchWorkspace()
-        #expect(state.scratchWorkspace?.tabs.isEmpty == true)
+        #expect(state.ensureScratchProject() != nil)
+        #expect(scratch(state)?.tabs.isEmpty == true)
         #expect(!state.hasScratchTabs)
     }
 
@@ -121,14 +120,14 @@ struct ScratchTabsTests {
     func selectScratchTabs_selects_the_workspace_and_its_first_tab() throws {
         let state = makeState()
         let id = try #require(state.createScratchTab(focus: false))
-        if let ws = state.scratchWorkspace { ModelWriter.tabPeek(nil, in: ws) }
+        let scratchID = try #require(state.scratchProjectID)
         let p = seedProject(state)
         #expect(state.activeProjectID == p.id)
 
         state.selectScratchTabs()
 
         #expect(state.activeProjectID == scratchID)
-        #expect(state.scratchWorkspace?.activeTabID == id)
+        #expect(scratch(state)?.activeTabID == id)
     }
 
     // MARK: - Moves
@@ -142,9 +141,10 @@ struct ScratchTabsTests {
         let cwd = pane.projectPath
 
         state.moveTabToScratchTabs(tab.id, from: p.id)
+        let scratchID = try #require(state.scratchProjectID)
 
         #expect(state.liveTabs[p.id]?.tabs.isEmpty == true)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [tab.id])
+        #expect(scratch(state)?.tabs.map(\.id) == [tab.id])
         #expect(pane.projectID == scratchID)
         // The tab keeps its own working directory; only its row moves.
         #expect(pane.projectPath == cwd)
@@ -157,11 +157,12 @@ struct ScratchTabsTests {
         let state = makeState()
         let p = seedProject(state)
         let id = try #require(state.createScratchTab())
-        let pane = try #require(state.scratchWorkspace?.tabs.first?.splitRoot.allPanes().first)
+        let scratchID = try #require(state.scratchProjectID)
+        let pane = try #require(scratch(state)?.tabs.first?.splitRoot.allPanes().first)
 
         state.moveTab(id, from: scratchID, to: p.id, destPath: p.path)
 
-        #expect(state.scratchWorkspace?.tabs.isEmpty == true)
+        #expect(scratch(state)?.tabs.isEmpty == true)
         #expect(state.liveTabs[p.id]?.tabs.map(\.id).contains(id) == true)
         #expect(pane.projectID == p.id)
         #expect(state.activeProjectID == p.id)
@@ -171,15 +172,16 @@ struct ScratchTabsTests {
     func pinning_a_scratch_tab_records_its_origin_and_unpin_returns_it() throws {
         let state = makeState()
         let id = try #require(state.createScratchTab())
+        let scratchID = try #require(state.scratchProjectID)
 
         state.pinTab(id, fromProject: scratchID)
         #expect(state.pinnedRecords.map(\.id) == [id])
         #expect(state.pinnedRecords.first?.originProjectID == scratchID)
-        #expect(state.scratchWorkspace?.tabs.isEmpty == true)
+        #expect(scratch(state)?.tabs.isEmpty == true)
 
         state.unpinTab(id, projects: [])
         #expect(state.pinnedRecords.isEmpty)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [id])
+        #expect(scratch(state)?.tabs.map(\.id) == [id])
         #expect(state.activeProjectID == scratchID)
     }
 
@@ -190,12 +192,14 @@ struct ScratchTabsTests {
         let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.pinTab(tab.id, fromProject: p.id)
 
-        // The origin project is gone from the list: the scratch workspace is
-        // where every tab can live.
+        // The origin project is gone, and no other project is left: the
+        // scratch project is where every tab can live.
+        state.removeProject(p.id)
+        #expect(state.model.project(p.id) == nil)
         state.unpinTab(tab.id, projects: [])
 
         #expect(state.pinnedRecords.isEmpty)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [tab.id])
+        #expect(scratch(state)?.tabs.map(\.id) == [tab.id])
     }
 
     // MARK: - Close
@@ -205,12 +209,13 @@ struct ScratchTabsTests {
         let state = makeState()
         let first = try #require(state.createScratchTab())
         let second = try #require(state.createScratchTab())
+        let scratchID = try #require(state.scratchProjectID)
 
         state.closeTab(second, projectID: scratchID)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [first])
+        #expect(scratch(state)?.tabs.map(\.id) == [first])
 
         state.closeTab(first, projectID: scratchID)
-        #expect(state.scratchWorkspace?.tabs.isEmpty == true)
+        #expect(scratch(state)?.tabs.isEmpty == true)
         #expect(!state.hasScratchTabs)
         // Still the active workspace: the sidebar keeps the rows' place
         // while the user is there, and Cmd+T makes a new scratch tab.
@@ -223,32 +228,38 @@ struct ScratchTabsTests {
     func the_scratch_workspace_is_never_removed() throws {
         let state = makeState()
         let id = try #require(state.createScratchTab())
+        let scratchID = try #require(state.scratchProjectID)
 
         state.removeProject(scratchID)
-        #expect(state.scratchWorkspace?.tabs.map(\.id) == [id])
+        #expect(scratch(state)?.tabs.map(\.id) == [id])
     }
 
     @Test
-    func configuredProjectDirectory_is_home_for_the_scratch_workspace() {
+    func configuredProjectDirectory_is_home_for_the_scratch_workspace() throws {
         let state = makeState()
+        let scratchID = try #require(state.ensureScratchProject())
         #expect(state.configuredProjectDirectory(projectID: scratchID, projects: []) == ProjectPath.currentHome)
     }
 
     // MARK: - Persistence
 
     @Test
-    func scratch_tabs_survive_a_snapshot_round_trip_without_a_project() throws {
-        let storeURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-scratch-tests-\(UUID().uuidString).json")
-        let writer = makeState(storeURL: storeURL)
+    func scratch_tabs_survive_a_relaunch_without_a_project() throws {
+        let gui = GUIStateStore(fileURL: TestModel.folder("scratch").appending(path: "gui-state.json"))
+        let writer = TestModel.appState(guiStateStore: gui)
+        writer.sessionClient = .noop
+        writer.incubatePane = { _ in }
         let id = try #require(writer.createScratchTab())
-        let session = try #require(writer.scratchWorkspace?.tabs.first?.splitRoot.allPanes().first?.sessionName)
+        let scratchID = try #require(writer.scratchProjectID)
+        let session = try #require(scratch(writer)?.tabs.first?.splitRoot.allPanes().first?.sessionName)
         writer.persistState()
 
-        let reader = makeState(storeURL: storeURL)
+        let reader = TestModel.relaunch(writer, guiStateStore: gui)
+        reader.sessionClient = .noop
         reader.restoreSelection(projects: [])
 
-        let ws = try #require(reader.scratchWorkspace)
+        #expect(reader.scratchProjectID == scratchID)
+        let ws = try #require(scratch(reader))
         #expect(ws.tabs.map(\.id) == [id])
         #expect(ws.activeTabID == id)
         let pane = try #require(ws.tabs.first?.splitRoot.allPanes().first)
@@ -257,29 +268,33 @@ struct ScratchTabsTests {
     }
 
     @Test
-    func restore_lands_on_the_scratch_workspace_only_while_it_has_tabs() throws {
-        let storeURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-scratch-tests-\(UUID().uuidString).json")
+    func restore_lands_on_the_scratch_project_only_while_it_has_tabs() throws {
         let priorActive = Preferences.shared.activeProjectID
         defer { Preferences.shared.activeProjectID = priorActive }
+        let gui = GUIStateStore(fileURL: TestModel.folder("scratch").appending(path: "gui-state.json"))
 
-        let writer = makeState(storeURL: storeURL)
+        let writer = TestModel.appState(guiStateStore: gui)
+        writer.sessionClient = .noop
+        writer.incubatePane = { _ in }
         let id = try #require(writer.createScratchTab())
+        let scratchID = try #require(writer.scratchProjectID)
         writer.persistState()
         Preferences.shared.activeProjectID = scratchID
 
-        let reader = makeState(storeURL: storeURL)
+        let reader = TestModel.relaunch(writer, guiStateStore: gui)
+        reader.sessionClient = .noop
         reader.restoreSelection(projects: [])
         #expect(reader.activeProjectID == scratchID)
-        #expect(reader.scratchWorkspace?.activeTabID == id)
+        #expect(scratch(reader)?.activeTabID == id)
 
         // Every scratch tab closed, then quit: the next launch selects nothing.
         writer.closeTab(id, projectID: scratchID)
         writer.persistState()
         Preferences.shared.activeProjectID = scratchID
-        let empty = makeState(storeURL: storeURL)
+        let empty = TestModel.relaunch(writer, guiStateStore: gui)
+        empty.sessionClient = .noop
         empty.restoreSelection(projects: [])
         #expect(empty.activeProjectID == nil)
-        #expect(empty.scratchWorkspace?.tabs.isEmpty == true)
+        #expect(scratch(empty)?.tabs.isEmpty == true)
     }
 }

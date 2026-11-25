@@ -198,40 +198,6 @@ struct PinnedLayoutStoreTests {
         #expect(LayoutBuilder.resolveCwd(nil, projectRoot: PinnedTabs.pathMarker) == ProjectPath.currentHome)
     }
 
-    // MARK: - Snapshot round trip
-
-    @Test
-    func pinned_snapshots_round_trip_through_the_store() {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let store = WorkspaceStore(fileURL: tmp)
-
-        let ws = Workspace(id: PinnedTabs.workspaceID, projectPath: "/tmp")
-        let liveTab = ws.tabs[0]
-        let records = [
-            PinnedTabRecord(
-                id: liveTab.id,
-                declaration: LayoutTab(layout: .pane(LayoutPane(cwd: "/tmp"))),
-                originProjectID: UUID()
-            ),
-            PinnedTabRecord(
-                id: UUID(),
-                declaration: LayoutTab(name: "unloaded", layout: .pane(LayoutPane(run: "btop"))),
-                originProjectID: nil
-            ),
-        ]
-
-        store.save([], pinned: WorkspaceSerializer.snapshotPinned(records: records, workspace: ws))
-        let loaded = WorkspaceStore(fileURL: tmp).load()
-
-        #expect(loaded.pinned.count == 2)
-        #expect(loaded.pinned[0].live?.id == liveTab.id)
-        #expect(loaded.pinned[0].originProjectID == records[0].originProjectID)
-        #expect(loaded.pinned[1].live == nil)
-        #expect(loaded.pinned[1].declaration == records[1].declaration)
-    }
-
     // MARK: - Id-less entry matching
 
     private func record(name: String? = nil, run: String? = nil) -> PinnedTabRecord {
