@@ -24,8 +24,8 @@ final class ProjectStore {
     /// the shared preference — swift-testing runs suites in parallel.
     @ObservationIgnored
     var autoAssignsColors: () -> Bool = { Preferences.shared.autoAssignProjectColors }
-    /// Called with the list after each change of the projects of the model,
-    /// by any client, and when the model is installed (the Spotlight index,
+    /// Called with the list after each change of it, by any client, and when
+    /// the model is installed with another list (the Spotlight index,
     /// `ProjectSpotlightIndex`).
     @ObservationIgnored
     var onSave: (([Project]) -> Void)?
@@ -35,11 +35,21 @@ final class ProjectStore {
     @ObservationIgnored
     var onAdd: ((Project) -> Void)?
 
+    /// The list that `onSave` got last. A change of a hidden project (a
+    /// pinned tab, a widget) changes the model's projects but not this
+    /// list, and `onSave` does not get it again.
+    @ObservationIgnored
+    private var lastSaved: [Project]?
+
     init(writer: ModelWriter) {
         self.writer = writer
+        if !loadFailed { lastSaved = projects }
         writer.mirror.onProjectsChanged = { [weak self] in
             guard let self else { return }
-            onSave?(projects)
+            let list = projects
+            guard list != lastSaved else { return }
+            lastSaved = list
+            onSave?(list)
         }
     }
 
