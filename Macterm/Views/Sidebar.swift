@@ -302,20 +302,30 @@ struct SidebarContent: View {
             // `.dropDestination` drop slot works on this bare ForEach:
             // its rows are flat, not the DisclosureGroups that crash the
             // project ForEach's accept (see the notes below).
-            if showsScratchRows {
-                ForEach(Array(scratchTabs.enumerated()), id: \.element.id) { tabIndex, tab in
-                    tabRow(tab: tab, index: tabIndex, project: ScratchTabs.project)
-                }
-                .dropDestination(for: TabSlotDropItem.self) { items, offset in
-                    for item in items {
-                        switch item {
-                        case let .tab(tab):
-                            receiveTabDrop([tab], into: ScratchTabs.project, at: offset)
-                        case let .pane(pane):
-                            receivePaneDrop([pane], into: ScratchTabs.project, at: offset)
+            //
+            // With the gap guard, the slot above the first scratch row is the
+            // slot after the last top-level project (`OutlineGapDropGuard`
+            // gives a project drag no other scratch slot). A project dropped
+            // there goes to the end of the top level.
+            if showsScratchRows, presentation.hasProjectDropSlots {
+                scratchRows
+                    .dropDestination(for: ProjectSlotDropItem.self) { items, offset in
+                        for item in items {
+                            switch item {
+                            case let .project(dragged):
+                                receiveProjectSlotDrop([dragged], into: nil, at: projectStore.children(of: nil).count)
+                            case let .tab(tab):
+                                receiveSlotDrop([.tab(tab)], into: ScratchTabs.project, at: offset)
+                            case let .pane(pane):
+                                receiveSlotDrop([.pane(pane)], into: ScratchTabs.project, at: offset)
+                            }
                         }
                     }
-                }
+            } else if showsScratchRows {
+                scratchRows
+                    .dropDestination(for: TabSlotDropItem.self) { items, offset in
+                        receiveSlotDrop(items, into: ScratchTabs.project, at: offset)
+                    }
             }
             // A project drag lands in one of two places: on a header, inside
             // that project (see `projectHeader`), or in a drop slot among
@@ -632,6 +642,12 @@ struct SidebarContent: View {
     private func childSections(_ node: SidebarNode, open: Bool) -> some DynamicViewContent {
         ForEach(node.children) { child in
             projectSection(child, parentsOpen: open)
+        }
+    }
+
+    private var scratchRows: some DynamicViewContent {
+        ForEach(Array(scratchTabs.enumerated()), id: \.element.id) { tabIndex, tab in
+            tabRow(tab: tab, index: tabIndex, project: ScratchTabs.project)
         }
     }
 

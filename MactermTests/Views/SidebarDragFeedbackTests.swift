@@ -116,8 +116,10 @@ struct SidebarDragFeedbackTests {
 
     /// A project drag opens its gap at the project slot nearest to the
     /// pointer, and the drop lands at that slot. The rows: A (A0, A1),
-    /// B (B0, B.x (Bx0), B.y), C, D (D0, D.e), and a scratch row S0, as the
-    /// sidebar has them. B.y, C and D.e have no rows. The test calls the outline view, so the header rows
+    /// B (B0, B.x (Bx0), B.y), C, D (D0, D.e), and scratch rows S0 and S1, as
+    /// the sidebar has them. B.y, C and D.e have no rows. The scratch
+    /// `ForEach` takes a project at its first slot, as with the gap guard in
+    /// the app. The test calls the outline view, so the header rows
     /// do not take the drag here as their own drop views do in the app.
     @Test
     func a_project_drag_drops_at_the_slot_of_its_gap() async throws {
@@ -137,8 +139,8 @@ struct SidebarDragFeedbackTests {
                 .dropDestination(for: MovableProject.self) { _, offset in
                     drops.entries.append("top \(offset)")
                 }
-            ForEach(["S0"], id: \.self) { Text($0) }
-                .dropDestination(for: MovableTab.self) { _, offset in
+            ForEach(["S0", "S1"], id: \.self) { Text($0) }
+                .dropDestination(for: MovableProject.self) { _, offset in
                     drops.entries.append("scratch \(offset)")
                 }
         }
@@ -156,10 +158,10 @@ struct SidebarDragFeedbackTests {
         window.layoutIfNeeded()
 
         // Rows: 0 A, 1 A0, 2 A1, 3 B, 4 B0, 5 B.x, 6 Bx0, 7 B.y, 8 C, 9 D,
-        // 10 D0, 11 D.e, 12 S0.
+        // 10 D0, 11 D.e, 12 S0, 13 S1.
         let outline = try #require(await poll {
             window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
-                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 13 ? $0 : nil
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 14 ? $0 : nil
             }
         })
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
@@ -182,11 +184,14 @@ struct SidebarDragFeedbackTests {
             return await poll { drops.entries.isEmpty ? nil : drops.entries } ?? []
         }
 
-        // On A's tabs (A has no projects inside): after A.
+        // On A's tabs (A has no projects inside): the nearer of the slots
+        // before A and after A.
+        #expect(await drop(row: 1, fraction: 0.2) == ["top 0"])
         #expect(await drop(row: 2, fraction: 0.5) == ["top 1"])
         // On the upper half of B's row: before B, the same slot.
         #expect(await drop(row: 3, fraction: 0.1) == ["top 1"])
-        // On B's tab: inside B, before its first project.
+        // On B's tab: inside B, before its first project, which is nearer
+        // than the slot before B.
         #expect(await drop(row: 4, fraction: 0.5) == ["into B 0"])
         // On the tab of B.x: after B.x, inside B.
         #expect(await drop(row: 6, fraction: 0.5) == ["into B 1"])
@@ -198,9 +203,79 @@ struct SidebarDragFeedbackTests {
         // On D's tab, where the only project inside has no rows: inside D.
         #expect(await drop(row: 10, fraction: 0.5) == ["into D 0"])
         #expect(await drop(row: 11, fraction: 0.9) == ["into D 1"])
-        // On the scratch row, which owns the slot after the last project:
-        // no drop.
-        #expect(await drop(row: 12, fraction: 0.5).isEmpty)
+        // On the scratch rows: the slot after the last project, which is
+        // the first slot of the scratch rows.
+        #expect(await drop(row: 12, fraction: 0.5) == ["scratch 0"])
+        #expect(await drop(row: 13, fraction: 0.9) == ["scratch 0"])
+    }
+
+    /// A held drag opens a closed project while the gap is open (the
+    /// spring-open of a project header). SwiftUI then changes the rows in
+    /// the middle of the drag. Without the row-update part of
+    /// `OutlineGapDropGuard`, AppKit raises "Setting the gap row (index -1)
+    /// while updating" and the test process stops.
+    @Test
+    func a_project_that_opens_during_a_drag_keeps_the_gap_and_the_drop() async throws {
+        let drops = DropLog()
+        let expansion = ProbeExpansion(open: ["B"])
+        let tree = [
+            ProbeNode(name: "A", tabs: ["A0"], children: []),
+            ProbeNode(name: "B", tabs: ["B0", "B1"], children: [
+                ProbeNode(name: "B.x", tabs: ["Bx0"], children: []),
+                ProbeNode(name: "B.y", tabs: [], children: []),
+            ]),
+            ProbeNode(name: "C", tabs: ["C0"], children: []),
+        ]
+        let projectType = NSPasteboard.PasteboardType(UTType.mactermProject.identifier)
+        let content = List {
+            ForEach(tree) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
+                .dropDestination(for: MovableProject.self) { _, offset in
+                    drops.entries.append("top \(offset)")
+                }
+        }
+        .listStyle(.sidebar)
+        .background { SidebarDragFeedback(branchTypes: [projectType], isGuarded: .constant(false)) }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: content)
+        window.layoutIfNeeded()
+
+        // Rows: 0 A, 1 B, 2 B0, 3 B1, 4 B.x (closed), 5 B.y, 6 C.
+        let outline = try #require(await poll {
+            window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 7 ? $0 : nil
+            }
+        })
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        try pasteboard.setData(JSONEncoder().encode(MovableProject(projectID: UUID())), forType: projectType)
+        func point(row: Int, fraction: CGFloat) -> NSPoint {
+            let rect = outline.rect(ofRow: row)
+            return outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+        }
+
+        // On the line between B.x and B.y: the gap opens after B.x.
+        let drag = FakeDrag(location: point(row: 4, fraction: 0.9), pasteboard: pasteboard, window: window)
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        // B.x opens under the held drag.
+        expansion.open.insert("B.x")
+        let opened = await poll { outline.numberOfRows == 8 ? true : nil }
+        #expect(opened == true)
+        // The next drag update opens the gap again, after B.x and its tab.
+        drag.location = point(row: 5, fraction: 0.9)
+        #expect(!outline.draggingUpdated(drag).isEmpty)
+        #expect(outline.prepareForDragOperation(drag))
+        #expect(outline.performDragOperation(drag))
+        outline.concludeDragOperation(drag)
+        let log = await poll { drops.entries.isEmpty ? nil : drops.entries }
+        #expect(log == ["into B 1"])
     }
 
     private func sidebarList() -> some View {
@@ -239,9 +314,16 @@ private struct ProbeNode: Identifiable {
 private struct ProbeProjectRow: View {
     let node: ProbeNode
     let drops: DropLog
+    /// The open projects. Nil: every project is open.
+    var expansion: ProbeExpansion?
 
     var body: some View {
-        DisclosureGroup(isExpanded: .constant(true)) {
+        DisclosureGroup(isExpanded: Binding(
+            get: { expansion?.open.contains(node.name) ?? true },
+            set: { isOpen in
+                if isOpen { expansion?.open.insert(node.name) } else { expansion?.open.remove(node.name) }
+            }
+        )) {
             if node.tabs.isEmpty {
                 ForEach(node.tabs, id: \.self) { Text($0) }
             } else {
@@ -251,9 +333,9 @@ private struct ProbeProjectRow: View {
                     }
             }
             if node.children.isEmpty {
-                ForEach(node.children) { ProbeProjectRow(node: $0, drops: drops) }
+                ForEach(node.children) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
             } else {
-                ForEach(node.children) { ProbeProjectRow(node: $0, drops: drops) }
+                ForEach(node.children) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
                     .dropDestination(for: MovableProject.self) { _, offset in
                         drops.entries.append("into \(node.name) \(offset)")
                     }
@@ -261,6 +343,14 @@ private struct ProbeProjectRow: View {
         } label: {
             Text(node.name)
         }
+    }
+}
+
+@MainActor @Observable
+private final class ProbeExpansion {
+    var open: Set<String>
+    init(open: Set<String>) {
+        self.open = open
     }
 }
 
