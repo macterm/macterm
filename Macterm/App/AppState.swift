@@ -820,6 +820,12 @@ final class AppState {
         set { keyOrFirstWindow?.isCommandPaletteVisible = newValue }
     }
 
+    /// The palette's screen shows a failed listing with Retry, so ⌘R is
+    /// Retry (`PaletteResponder`).
+    var paletteShowsRetry: Bool {
+        keyOrFirstWindow?.paletteStack.last?.scope.failure?.retryable == true
+    }
+
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
     /// screens was up. A different screen starts from its own text
     /// (`PaletteScope.initialQuery`: empty for a search) — text typed for
