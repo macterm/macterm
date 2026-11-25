@@ -5702,23 +5702,6 @@
         }
       }
     },
-    "New Project \"%@\"" : {
-      "comment" : "Palette: the action row of the New Project screen for a typed folder",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로운 프로젝트 “%@”"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新建项目“%@”"
-          }
-        }
-      }
-    },
     "New Project Inside" : {
       "localizations" : {
         "ko" : {
@@ -10312,23 +10295,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅在 git 仓库中提供摘要。"
-          }
-        }
-      }
-    },
-    "Switch to \"%@\"" : {
-      "comment" : "Palette: the action row of the New Project screen for a folder that a project has",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%@”(으)로 전환"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "切换到“%@”"
           }
         }
       }
