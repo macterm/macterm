@@ -1057,7 +1057,6 @@ struct SidebarContent: View {
     /// row shows.
     private func newProject(inside parent: Project) {
         appState.newProject(inside: parent, store: projectStore, in: windowState)
-        }
     }
 
     private func requestProjectRename(_ projectID: UUID) {
