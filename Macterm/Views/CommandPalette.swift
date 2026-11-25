@@ -391,7 +391,7 @@ struct CommandPalettePanel: View {
                 isFieldFocused = true
                 // Select the preserved text so a fresh keystroke replaces it
                 // while arrows/edits still work — Spotlight/Raycast behavior.
-                selectFieldText()
+                selectFieldText(once: query)
             }
         }
         .onChange(of: query) {
@@ -537,29 +537,25 @@ struct CommandPalettePanel: View {
         }
     }
 
-    /// Select all text in the focused search field via the window's field
-    /// editor, so reopening the palette with a preserved query highlights it.
-    private func selectFieldText() {
-        guard !query.isEmpty,
-              let window = NSApp.keyWindow,
-              let editor = window.fieldEditor(false, for: nil)
-        else { return }
-        editor.selectAll(nil)
-    }
-
-    /// Select `text` in the field when the field shows it. A screen entered
-    /// from a row of the palette sets its value in the query, and SwiftUI
-    /// writes it into the field only at the end of the run-loop turn. A
-    /// selection made before that is lost, because the write puts the cursor
-    /// at the end. The select therefore waits, one main-queue turn at a time,
-    /// until the field editor holds `text`, and stops when the user changed
-    /// the query or after `attempts` turns.
+    /// Select `text` in the palette field when the field shows it, so that
+    /// a keystroke replaces it. The palette opened with a kept query, and a
+    /// screen that starts on its value, use it.
+    ///
+    /// A screen entered from a palette row showed its value with the cursor
+    /// at the end: the field did not yet hold the new text when the select
+    /// ran one main-queue turn later (the UI review of PR 957). The exact
+    /// cause is not measured. The select therefore does not depend on when
+    /// the write comes. It waits, one main-queue turn at a time, until the
+    /// field has focus and its field editor holds `text`. It stops when the
+    /// user changed the query, or after `attempts` turns.
     private func selectFieldText(once text: String, attempts: Int = 5) {
         DispatchQueue.main.async {
-            guard !text.isEmpty, query == text,
-                  let editor = NSApp.keyWindow?.fieldEditor(false, for: nil)
-            else { return }
-            if editor.string == text {
+            guard !text.isEmpty, query == text else { return }
+            if let window = NSApp.keyWindow,
+               let editor = window.fieldEditor(false, for: nil),
+               window.firstResponder === editor,
+               editor.string == text
+            {
                 editor.selectAll(nil)
             } else if attempts > 1 {
                 selectFieldText(once: text, attempts: attempts - 1)
