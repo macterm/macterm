@@ -96,6 +96,7 @@ struct ProjectMemorySuggestionsTests {
             entry("git branch -D old", minutesAgo: 3),
             entry("git rebase main", minutesAgo: 2),
             entry("make test && git push -f", minutesAgo: 1),
+            entry("git push --force", minutesAgo: 0),
         ]
         let all = ProjectMemorySuggestions.candidates(entries: entries).map { suggestion($0) }
         var dirty = GitStatus(branch: "main", upstream: "origin/main")
@@ -114,23 +115,35 @@ struct ProjectMemorySuggestionsTests {
         let clean = GitStatus(branch: "main", upstream: "origin/main")
         var ahead = clean
         ahead.ahead = 1
+        var behind = clean
+        behind.behind = 1
+        var untracked = clean
+        untracked.untracked = 1
         var dirty = clean
-        dirty.untracked = 1
+        dirty.unstaged = 1
+        var stashed = clean
+        stashed.stashes = 1
 
         #expect(!supports("git push", clean))
         #expect(supports("git push", ahead))
-        #expect(!supports("git push origin main --force-with-lease", ahead))
+        #expect(!supports("git push origin main", ahead))
+        #expect(supports("git pull", behind))
+        #expect(!supports("git pull --rebase", behind))
+        #expect(!supports("git fetch --prune", clean))
         #expect(!supports("git add -A", clean))
-        #expect(supports("git add -A", dirty))
+        #expect(supports("git add -A", untracked))
+        // Diff, commit and a plain stash do nothing with only untracked files.
+        #expect(!supports("git diff", untracked))
+        #expect(supports("git diff", dirty))
+        #expect(!supports("git commit -m wip", untracked))
         #expect(supports("git commit -m wip", dirty))
         #expect(!supports("git stash", clean))
         #expect(supports("git stash", dirty))
         #expect(!supports("git stash pop", dirty))
-        var stashed = clean
-        stashed.stashes = 1
         #expect(supports("git stash pop", stashed))
-        #expect(!ProjectMemorySuggestions.isDestructive(["restore", "--staged", "a.swift"]))
-        #expect(ProjectMemorySuggestions.isDestructive(["restore", "a.swift"]))
+        #expect(supports("git stash list -n 3", stashed))
+        #expect(supports("git log --oneline", clean))
+        #expect(!supports("git log", nil))
         // An unknown subcommand, or an option before it, is never offered.
         #expect(!supports("git merge feature", dirty))
         #expect(!supports("git cherry-pick abc123", dirty))
@@ -138,6 +151,39 @@ struct ProjectMemorySuggestionsTests {
         // Every git part of a compound command must pass.
         #expect(supports("make test && git add -A", dirty))
         #expect(!supports("git add -A && git push", dirty))
-        #expect(!supports("GIT_DIR=x git clean -fd", dirty))
+    }
+
+    @Test
+    func the_destructive_forms_are_known() {
+        let destructive = [
+            "clean -fd", "clean", "reset --hard", "reset --merge HEAD~1", "checkout .", "checkout -- a.swift",
+            "checkout -f main", "restore a.swift", "restore --staged --worktree a.swift", "push --force",
+            "push -f", "push -uf origin main", "push --force-with-lease", "push origin +main",
+            "branch -D old", "stash drop", "stash clear", "rebase main", "filter-branch --all",
+            "gc --prune=now", "commit --amend", "diff --output=README.md", "log --output=x",
+        ]
+        for command in destructive {
+            #expect(ProjectMemorySuggestions.isDestructive(command.split(separator: " ").map(String.init)), "\(command)")
+        }
+        let safe = ["restore --staged a.swift", "reset HEAD a.swift", "checkout main", "push", "branch -d old", "stash", "diff"]
+        for command in safe {
+            #expect(!ProjectMemorySuggestions.isDestructive(command.split(separator: " ").map(String.init)), "\(command)")
+        }
+    }
+
+    @Test
+    func a_git_word_that_the_parse_does_not_see_fails_closed() {
+        var git = GitStatus(branch: "main", upstream: "origin/main", ahead: 1, behind: 1)
+        git.unstaged = 1
+        git.stashes = 1
+        for command in [
+            "sudo git clean -fd", "env git status", "xargs git add", "(git status)", "\\git status",
+            "/opt/homebrew/bin/git status", "bash -c 'git status'", "if true; then git status; fi",
+            "echo $(git status)", "git status $(git clean -fd)", "git status `git clean -fd`",
+            "FOO=\"a b\" git clean -fd", "GIT_DIR=x git clean -fd", "git status git clean -fd",
+        ] {
+            #expect(!ProjectMemorySuggestions.gitStateSupports(command, git: git), "\(command)")
+        }
+        #expect(ProjectMemorySuggestions.gitStateSupports("GIT_PAGER=cat git status", git: git))
     }
 }
