@@ -824,26 +824,34 @@ struct SidebarContent: View {
         }
     }
 
-    /// The items that move a project in the tree (design 013): New Project
-    /// Inside, Move Into Project, Move Out of Project (only inside another
-    /// project), and Move Up and Down among the projects of its parent.
+    /// Move to Project for a node of the tree, a project or a tab (Ethan,
+    /// ui-review 0601): one menu of the projects that the node can move to,
+    /// each by its path of names, as the palette's screen lists them.
     @ViewBuilder
-    private func treeMoveItems(_ project: Project) -> some View {
-        Button("New Project Inside") { openProject(inside: project) }
-        let targets = SidebarTree.moveTargets(for: project.id, in: projectStore)
+    private func moveToProjectMenu(_ node: SidebarItem) -> some View {
+        let targets = SidebarTree.moveDestinations(for: node, in: projectStore)
         if targets.isEmpty {
             // A disabled item, not a disabled `Menu`: see `worktreesMenu`.
-            Button("Move Into Project") {}
+            Button("Move to Project") {}
                 .disabled(true)
         } else {
-            Menu("Move Into Project") {
+            Menu("Move to Project") {
                 ForEach(targets) { target in
                     Button(SidebarTree.pathName(of: target, in: projectStore)) {
-                        appState.moveProject(project.id, into: target.id, store: projectStore, in: windowState)
+                        appState.moveNode(node, to: target, store: projectStore, in: windowState)
                     }
                 }
             }
         }
+    }
+
+    /// The items that move a project in the tree (design 013): New Project
+    /// Inside, Move to Project, Move Out of Project (only inside another
+    /// project), and Move Up and Down among the projects of its parent.
+    @ViewBuilder
+    private func treeMoveItems(_ project: Project) -> some View {
+        Button("New Project Inside") { openProject(inside: project) }
+        moveToProjectMenu(.project(project.id))
         if project.parent != nil {
             Button("Move Out of Project") { projectStore.moveOut(project.id) }
         }
@@ -977,17 +985,7 @@ struct SidebarContent: View {
             appState.reorderTab(tab.id, inProject: project.id, toIndex: tabIndex + 2)
         }
         .disabled(tabIndex >= tabs.count - 1)
-        let moveTargets = projectStore.projects.filter { $0.id != project.id }
-        if !moveTargets.isEmpty {
-            Menu("Move to Project") {
-                ForEach(moveTargets) { destination in
-                    Button(destination.name) {
-                        appState.moveTab(tab.id, from: project.id, to: destination.id, destPath: destination.path)
-                        windowState.expandedRows.insert(destination.id)
-                    }
-                }
-            }
-        }
+        moveToProjectMenu(.tab(projectID: project.id, tabID: tab.id))
         if project.id != ScratchTabs.workspaceID {
             // Out of the project, shells intact (#665). The tab keeps its own
             // working directory; only its row moves below the projects.

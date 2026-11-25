@@ -80,7 +80,7 @@ enum MactermKeybind: String, AppEnum {
     case passwordManager = "password_manager"
     case files
     case newProjectInside = "new_project_inside"
-    case moveIntoProject = "move_into_project"
+    case moveToProject = "move_to_project"
     case moveOutOfProject = "move_out_of_project"
     case capturePaletteScreenshot = "capture_palette_screenshot"
 
@@ -153,7 +153,7 @@ enum MactermKeybind: String, AppEnum {
         .passwordManager: "Password Manager",
         .files: "Files",
         .newProjectInside: "New Project Inside",
-        .moveIntoProject: "Move Into Project",
+        .moveToProject: "Move to Project",
         .moveOutOfProject: "Move Out of Project",
         .capturePaletteScreenshot: "Capture Palette",
     ]

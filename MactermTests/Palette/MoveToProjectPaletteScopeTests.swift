@@ -2,10 +2,10 @@ import Foundation
 @testable import Macterm
 import Testing
 
-/// The Move Into Project screen (`MoveIntoProjectPaletteScope`) and the three
-/// project tree commands that act on the active project.
+/// The Move to Project screen (`MoveToProjectPaletteScope`), for a project
+/// and for a tab, and the three commands of the tree.
 @MainActor
-struct MoveIntoProjectPaletteScopeTests {
+struct MoveToProjectPaletteScopeTests {
     /// A tree: Work, Work/api, Home; the active project is `moving`, at the
     /// top level.
     @MainActor
@@ -21,7 +21,12 @@ struct MoveIntoProjectPaletteScopeTests {
         /// The rows of the screen that moves `project` (default `moving`)
         /// for `query`.
         func rows(_ query: String, moving project: Project? = nil) -> [PaletteItem] {
-            MoveIntoProjectPaletteScope(projectID: (project ?? moving).id)
+            screen(.project((project ?? moving).id), query)
+        }
+
+        /// The rows of the screen that moves `node` for `query`.
+        func screen(_ node: SidebarItem, _ query: String) -> [PaletteItem] {
+            MoveToProjectPaletteScope(node: node)
                 .sections(for: PaletteQuery(raw: query), context: palette)
                 .flatMap(\.items)
         }
@@ -39,6 +44,7 @@ struct MoveIntoProjectPaletteScopeTests {
         let work = store.create(name: "Work", path: "/tmp/work")
         let api = store.create(name: "api", path: "/tmp/api", parent: work.id)
         let moving = store.create(name: "Home", path: "/tmp")
+        state.incubatePane = { _ in }
         state.selectProject(moving)
         return Fixture(state: state, store: store, work: work, api: api, moving: moving)
     }
@@ -116,27 +122,71 @@ struct MoveIntoProjectPaletteScopeTests {
     func a_top_level_project_has_no_move_out() {
         let f = makeFixture()
         #expect(AppCommand.newProjectInside.action(in: f.ctx) != nil)
-        #expect(AppCommand.moveIntoProject.action(in: f.ctx) != nil)
+        #expect(AppCommand.moveToProject.action(in: f.ctx) != nil)
         #expect(AppCommand.moveOutOfProject.action(in: f.ctx) == nil)
         let titles = CommandSource().emptyItems(context: f.palette)?.map(\.title) ?? []
         #expect(!titles.contains(AppCommand.moveOutOfProject.title))
     }
 
     @Test
-    func move_into_project_opens_its_screen_from_the_palette() throws {
+    func move_to_project_opens_its_screen_from_the_palette() throws {
         let f = makeFixture()
-        let row = try #require(CommandSource().emptyItems(context: f.palette)?.first { $0.title == AppCommand.moveIntoProject.title })
-        #expect(row.opensScope == .moveIntoProject(f.moving.id))
+        let row = try #require(CommandSource().emptyItems(context: f.palette)?.first { $0.title == AppCommand.moveToProject.title })
+        let node = try #require(f.state.moveToProjectNode(store: f.store))
+        #expect(row.opensScope == .moveToProject(node))
+    }
+
+    // MARK: - A tab
+
+    /// A tab of `project`, which becomes the active project with this tab
+    /// active.
+    private func makeTab(_ f: Fixture, in project: Project) throws -> UUID {
+        f.state.selectProject(project)
+        return try #require(f.state.createTab(projectID: project.id, projects: f.store.projects))
     }
 
     @Test
-    func move_into_project_is_off_with_no_target() {
+    func a_tab_lists_every_project_but_its_own() throws {
+        let f = makeFixture()
+        let tab = try makeTab(f, in: f.api)
+        #expect(f.screen(.tab(projectID: f.api.id, tabID: tab), "").map(\.title) == ["Work", "Home"])
+    }
+
+    @Test
+    func a_row_moves_the_tab_to_the_project_and_opens_it() throws {
+        let f = makeFixture()
+        let tab = try makeTab(f, in: f.moving)
+        let window = WindowState()
+        #expect(f.state.moveNode(.tab(projectID: f.moving.id, tabID: tab), to: f.api, store: f.store, in: window))
+        #expect(f.state.workspaces[f.api.id]?.tabs.contains { $0.id == tab } == true)
+        #expect(f.state.workspaces[f.moving.id]?.tabs.contains { $0.id == tab } != true)
+        #expect(window.expandedRows.isSuperset(of: [f.api.id, f.work.id]))
+        #expect(!f.state.moveNode(.tab(projectID: f.api.id, tabID: tab), to: f.api, store: f.store, in: window), "not into its own project")
+    }
+
+    @Test
+    func the_command_moves_the_shown_tab_and_on_the_project_screen_the_project() throws {
+        let f = makeFixture()
+        let window = WindowState(activeProjectID: f.moving.id)
+        f.state.registerWindow(window)
+        f.state.noteKeyWindow(window)
+        let tab = try makeTab(f, in: f.moving)
+        f.state.selectTab(tab, projectID: f.moving.id, in: window)
+        #expect(f.state.moveToProjectNode(store: f.store) == .tab(projectID: f.moving.id, tabID: tab))
+        f.state.showProjectScreen(f.moving, in: window)
+        #expect(f.state.moveToProjectNode(store: f.store) == .project(f.moving.id))
+    }
+
+    // MARK: - When the commands apply
+
+    @Test
+    func move_to_project_is_off_with_no_target() {
         let f = makeFixture()
         let tmp = FileManager.default.temporaryDirectory
         let lone = ProjectStore(fileURL: tmp.appendingPathComponent("macterm-tests-\(UUID().uuidString).json"))
         let only = lone.create(name: "only", path: "/tmp")
         f.state.selectProject(only)
-        #expect(AppCommand.moveIntoProject.action(in: AppCommandContext(appState: f.state, projectStore: lone)) == nil)
+        #expect(AppCommand.moveToProject.action(in: AppCommandContext(appState: f.state, projectStore: lone)) == nil)
     }
 
     @Test

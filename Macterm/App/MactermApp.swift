@@ -236,10 +236,10 @@ struct MactermApp: App {
                     titleOverride: "New Project Inside…"
                 )
                 AppCommandMenuItem(
-                    command: .moveIntoProject,
+                    command: .moveToProject,
                     appState: appState,
                     projectStore: projectStore,
-                    titleOverride: "Move Into Project…"
+                    titleOverride: "Move to Project…"
                 )
                 AppCommandMenuItem(
                     command: .moveOutOfProject,

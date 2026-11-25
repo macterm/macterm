@@ -5446,38 +5446,6 @@
         }
       }
     },
-    "Move Into Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 안으로 이동"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移入项目"
-          }
-        }
-      }
-    },
-    "Move Into Project…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 안으로 이동…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移入项目…"
-          }
-        }
-      }
-    },
     "Move Out of Project" : {
       "localizations" : {
         "ko" : {
@@ -5618,6 +5586,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "移到项目"
+          }
+        }
+      }
+    },
+    "Move to Project…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트로 이동…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移到项目…"
           }
         }
       }

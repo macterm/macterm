@@ -54,12 +54,21 @@ enum SidebarTree {
         return store.move(id, into: target.id)
     }
 
-    /// The projects that `id` can move into with Move Into Project: every
+    /// The projects that `id` can move into with Move to Project: every
     /// project except its own parent, itself, and the projects inside it.
     static func moveTargets(for id: UUID, in store: ProjectStore) -> [Project] {
         let parent = store.row(id)?.parent
         return store.projects.filter { target in
             target.id != parent && target.id != id && !store.ancestors(of: target.id).contains(id)
+        }
+    }
+
+    /// The projects that `node` can move to with Move to Project: for a
+    /// project, `moveTargets`; for a tab, every project but its own.
+    static func moveDestinations(for node: SidebarItem, in store: ProjectStore) -> [Project] {
+        switch node {
+        case let .project(id): moveTargets(for: id, in: store)
+        case let .tab(projectID, _): store.projects.filter { $0.id != projectID }
         }
     }
 
