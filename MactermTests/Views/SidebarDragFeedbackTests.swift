@@ -309,7 +309,8 @@ struct SidebarDragFeedbackTests {
     /// rows (ui-review 0613: a gap opened after the last pinned row). On the
     /// first tab of a project, the slot before the project would move the
     /// header under the pointer, where its drop view takes the drag. So the
-    /// gap goes after the tabs there, and it stays open.
+    /// gap goes after the tabs there. (The fake drag calls the outline view,
+    /// so the test checks the slot, not the routing to the header.)
     @Test
     func a_project_drag_has_no_slot_on_pinned_rows_and_a_stable_slot_on_a_first_tab() async throws {
         let drops = DropLog()
@@ -375,9 +376,16 @@ struct SidebarDragFeedbackTests {
             return await poll { drops.entries.isEmpty ? nil : drops.entries } ?? []
         }
 
-        // On the pinned rows: no drop.
-        #expect(await drop(row: 0, fraction: 0.5).isEmpty)
-        #expect(await drop(row: 1, fraction: 0.5).isEmpty)
+        // On the pinned rows: the guard gives AppKit no slot, so no gap
+        // opens and no drop lands.
+        for (row, fraction) in [(0, 0.2), (0, 0.5), (1, 0.5), (1, 0.9)] {
+            let rect = outline.rect(ofRow: base + row)
+            let location = outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+            let drag = FakeDrag(location: location, pasteboard: pasteboard, window: window)
+            #expect(outline.draggingEntered(drag).isEmpty, "pinned row \(row) at \(fraction)")
+            #expect(outline.draggingUpdated(drag).isEmpty, "pinned row \(row) at \(fraction)")
+            outline.draggingExited(drag)
+        }
         #expect(await drop(row: 1, fraction: 0.9).isEmpty)
         // On the first tab of P: before P at its upper edge, else after P.
         #expect(await drop(row: 3, fraction: 0.1) == ["top 0"])
