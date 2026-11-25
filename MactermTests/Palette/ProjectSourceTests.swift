@@ -79,7 +79,7 @@ struct ProjectSourceTests {
         #expect(store.move(handlers.id, into: api.id))
 
         let deep = try #require(ProjectSource().items(query: "handlers", context: ctx).first)
-        #expect(deep.subtitle == "Work / api")
+        #expect(deep.subtitle == "Work/api")
         let child = try #require(ProjectSource().items(query: "api", context: ctx).first { $0.title == "api" })
         #expect(child.subtitle == "Work")
         let top = try #require(ProjectSource().items(query: "Work", context: ctx).first { $0.title == "Work" })

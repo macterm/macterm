@@ -2126,7 +2126,7 @@ final class AppState {
     /// same verdict as `judgeClose`, without the retention of pinned tabs:
     /// the rows of the quit dialog.
     func panesThatNeedConfirmClose(_ panes: [Pane]) async -> [Pane] {
-        let plain = panes.filter(paneRunsPlainShell)
+        let plain = plainShellsToJudge(panes)
         var answers: [UUID: Bool] = [:]
         if !plain.isEmpty {
             answers = await withCheckedContinuation { continuation in
@@ -2141,7 +2141,15 @@ final class AppState {
     /// so its busy answer cannot stop the wait for the others.
     private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
         let retained = pendingPinnedSessionNames()
-        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
+        return plainShellsToJudge(closing).filter { !retained.contains($0.sessionName) }
+    }
+
+    /// The plain shells of `panes` whose host must answer. Only
+    /// `confirm-close-surface = true` asks a host: for `false` and `always`
+    /// the surface's reading is the verdict (`ConfirmCloseSurface`).
+    private func plainShellsToJudge(_ panes: [Pane]) -> [Pane] {
+        guard confirmCloseSurface().judgesPaneState else { return [] }
+        return panes.filter(paneRunsPlainShell)
     }
 
     /// Asks the host of each plain shell in `plain` whether the shell is
@@ -2195,12 +2203,17 @@ final class AppState {
     }
 
     /// The per-pane half of the verdict — `Pane.needsConfirmClose` in
-    /// production. A seam because that property short-circuits on
-    /// `hasSurface`, and no pane in a windowless test ever builds one, so
+    /// production. A seam because that property short-circuits on a
+    /// missing surface, and no pane in a windowless test ever builds one, so
     /// without it the tab- and project-level guards could only be tested
     /// against an always-idle pane.
     @ObservationIgnored
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
+
+    /// The user's `confirm-close-surface` (`GhosttyApp.confirmCloseSurface`),
+    /// read at each close. A seam, as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var confirmCloseSurface: () -> ConfirmCloseSurface = { GhosttyApp.shared.confirmCloseSurface }
 
     /// Whether the pane runs a plain shell (`Pane.runsPlainShell`). A seam,
     /// as `paneNeedsConfirmClose`.
@@ -2263,23 +2276,32 @@ final class AppState {
         return selected
     }
 
-    /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name that `Project.nameRefusal` refuses
-    /// (a slash, a reserved name) gets a notice and the old name stays — as
-    /// `project rename` refuses it with a `bad_request`. The field has closed
-    /// by the time the name arrives, so the notice is the one place left to
-    /// say why.
+    /// Rename a project from its sidebar row (the inline edit). A name that
+    /// `Project.nameRefusal` refuses (a slash, a reserved name) gets a notice
+    /// and the old name stays, as `project rename` refuses it with a
+    /// `bad_request`. The field has closed by the time the name arrives, so
+    /// the notice is the one place left to say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.nameRefusal(for: name) {
+        if let message = applyProjectRename(projectID, to: name, store: store) {
             present(.notice(
                 .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
             ))
-            return
         }
+    }
+
+    /// The one check and write of a project rename in the GUI (the sidebar
+    /// row and the palette's Rename Current Project). Returns why `name` is
+    /// refused, and then changes nothing. Returns nil when the rename is
+    /// done or when the name does not change. An unchanged name writes
+    /// nothing.
+    func applyProjectRename(_ projectID: UUID, to name: String, store: ProjectStore) -> String? {
+        if let message = Project.nameRefusal(for: name) { return message }
+        guard store.projects.first(where: { $0.id == projectID })?.name != name else { return nil }
         store.rename(id: projectID, to: name)
+        return nil
     }
 
     /// Update the active project's path to wherever the focused pane currently
@@ -3529,7 +3551,7 @@ final class AppState {
         sidebarVisible = true
         let tabID = tab.id
         // Defer a tick so the sidebar row's TextField exists before it's asked
-        // to begin editing — same reason as the Rename Tab command.
+        // to begin editing.
         DispatchQueue.main.async { self.renamingTabID = tabID }
     }
 
@@ -3539,6 +3561,13 @@ final class AppState {
     func setTabTitle(containing paneID: UUID, projectID: UUID, title: String?) {
         guard let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: paneID) })
         else { return }
+        setTabTitle(tab, title: title)
+    }
+
+    /// The one write of a tab's custom title from the GUI (the sidebar row,
+    /// the palette's Rename Current Tab, the ghostty keybind). nil gives back
+    /// the automatic title.
+    func setTabTitle(_ tab: TerminalTab, title: String?) {
         ModelWriter.tabSet(tab, title: title)
         saveWorkspaces()
     }

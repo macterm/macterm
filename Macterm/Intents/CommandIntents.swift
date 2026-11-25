@@ -79,6 +79,9 @@ enum MactermKeybind: String, AppEnum {
     case autofillPassword = "autofill_password"
     case passwordManager = "password_manager"
     case files
+    case newProjectInside = "new_project_inside"
+    case moveToProject = "move_to_project"
+    case moveOutOfProject = "move_out_of_project"
     case capturePaletteScreenshot = "capture_palette_screenshot"
 
     /// The action this case names, nil if it has been retired upstream.
@@ -149,6 +152,9 @@ enum MactermKeybind: String, AppEnum {
         .autofillPassword: "Autofill Password",
         .passwordManager: "Password Manager",
         .files: "Files",
+        .newProjectInside: "New Project Inside",
+        .moveToProject: "Move to Project",
+        .moveOutOfProject: "Move Out of Project",
         .capturePaletteScreenshot: "Capture Palette",
     ]
 }

@@ -54,7 +54,7 @@ enum SidebarTree {
         return store.move(id, into: target.id)
     }
 
-    /// The projects that `id` can move into with Move Into Project: every
+    /// The projects that `id` can move into with Move to Project: every
     /// project except its own parent, itself, and the projects inside it.
     static func moveTargets(for id: UUID, in store: ProjectStore) -> [Project] {
         let parent = store.row(id)?.parent
@@ -63,10 +63,21 @@ enum SidebarTree {
         }
     }
 
-    /// The name of a project in a menu: the names of the projects above it
-    /// and its own, joined with " / ", so two projects of one name differ.
+    /// The projects that `node` can move to with Move to Project: for a
+    /// project, `moveTargets`; for a tab, every project but its own.
+    static func moveDestinations(for node: SidebarItem, in store: ProjectStore) -> [Project] {
+        switch node {
+        case let .project(id): moveTargets(for: id, in: store)
+        case let .tab(projectID, _): store.projects.filter { $0.id != projectID }
+        }
+    }
+
+    /// The path of names of a project (`Work/api`): the names of the
+    /// projects above it and its own, joined with "/" (Ethan, 2026-11-23).
+    /// A project name has no slash (`Project.nameRefusal`), so the path
+    /// reads one way.
     static func pathName(of project: Project, in store: ProjectStore) -> String {
         let names = store.ancestors(of: project.id).reversed().compactMap { store.row($0)?.name }
-        return (names + [project.name]).joined(separator: " / ")
+        return (names + [project.name]).joined(separator: "/")
     }
 }
