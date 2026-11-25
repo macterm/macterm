@@ -571,14 +571,11 @@ struct CommandPalettePanel: View {
     /// the keypress fall through (`.ignored`) to default focus traversal in
     /// that case.
     private func completeQuery() -> KeyPress.Result {
-        // An input screen's completion rows: the selected one, or the top
-        // one when the selection is on no completion (the action row).
+        // An input screen's completion and choice rows
+        // (`InputPaletteScope.tabText`).
         if let inputScope {
-            let selected = flatItems.indices.contains(selectedIndex)
-                ? inputScope.completion(for: flatItems[selectedIndex]) : nil
-            guard let completion = selected ?? flatItems.lazy.compactMap(inputScope.completion(for:)).first,
-                  completion != query
-            else { return .ignored }
+            let selected = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
+            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .ignored }
             query = completion
             return .handled
         }
@@ -664,9 +661,9 @@ struct CommandPalettePanel: View {
         let itemID: String
     }
 
-    /// Return or a click on an input screen: the action row runs its
-    /// action, a completion row goes into the field, and no row does
-    /// nothing. The palette closes when the action ran, and stays with the
+    /// Return or a click on an input screen: the action row and a choice
+    /// run their action, a completion row goes into the field, and no row
+    /// does nothing. The palette closes when the action ran, and stays with the
     /// reason when it refused.
     private func runInputRow(_ inputScope: InputPaletteScope) {
         let item = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
@@ -1007,6 +1004,7 @@ private struct CommandPaletteRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(item.isEnabled ? MactermTheme.fgMuted : MactermTheme.fgDim)
                         .lineLimit(1)
+                        .truncationMode(item.subtitleIsPath && !showsAlt ? .middle : .tail)
                 }
             }
             // At least a key-cap tall, so a row with a keybind and one

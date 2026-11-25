@@ -13,7 +13,10 @@ import Foundation
 /// row is the selected row** (Ethan, 0578): with no row selected, Return
 /// does nothing, and the field text is never committed in another way.
 /// The rows under the action row are completions: Return, Tab or a click
-/// puts one in the field, and never runs the action. Escape, or Backspace
+/// puts one in the field, and never runs the action. A screen can instead
+/// give rows that are actions themselves (`choices`, folder rows): the
+/// selection rests on the first one, Return or a click runs the selected
+/// one, and Tab puts its folder in the field. Escape, or Backspace
 /// at an empty field, pops the screen like any screen. An action that
 /// refuses when it runs keeps the screen and shows the reason, until the
 /// text changes.
@@ -35,8 +38,14 @@ struct PaletteInput: Hashable {
     let initialValue: String
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
+    /// The rows that are actions themselves, best first: Return or a click
+    /// on one runs it, and Tab puts its `value` in the field. A folder
+    /// screen gives the folder rows here, so that a folder row is the
+    /// action (Ethan, 0594).
+    let choices: @MainActor (String, PaletteContext) -> [PaletteInputChoice]
     /// What the text in the field gives: the action row when the value is
-    /// valid, the notice when it is not, or nothing (an empty field).
+    /// valid, the notice when it is not, or nothing (an empty field, or a
+    /// text whose rows are `choices`).
     let check: @MainActor (String) -> PaletteInputCheck
 
     init(
@@ -45,6 +54,7 @@ struct PaletteInput: Hashable {
         prompt: String,
         initialValue: String = "",
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
+        choices: @escaping @MainActor (String, PaletteContext) -> [PaletteInputChoice] = { _, _ in [] },
         check: @escaping @MainActor (String) -> PaletteInputCheck
     ) {
         self.id = id
@@ -52,6 +62,7 @@ struct PaletteInput: Hashable {
         self.prompt = prompt
         self.initialValue = initialValue
         self.completions = completions
+        self.choices = choices
         self.check = check
     }
 
@@ -69,15 +80,17 @@ struct PaletteInput: Hashable {
     }
 
     /// Completions for a field that holds a local directory
-    /// (`PathCompleter`): the directories under the typed path, each by
-    /// its name. A remote spec gets none.
+    /// (`PathCompleter`): the directories under the typed path, as the rows
+    /// of `PathRow`, with `action` as the words before the path. A remote
+    /// spec gets none.
     @MainActor
-    static func pathCompletions(_ text: String) -> [PaletteCompletion] {
+    static func pathCompletions(_ text: String, action: PathRow.Action) -> [PaletteCompletion] {
         guard let completion = PathCompleter.complete(text) else { return [] }
         return completion.children.map { child in
             PaletteCompletion(
-                title: (child as NSString).lastPathComponent,
-                value: PathCompleter.fieldText(for: child, typed: text)
+                title: PathRow.title(for: child),
+                value: PathCompleter.fieldText(for: child, typed: text),
+                subtitle: action.subtitle(for: child)
             )
         }
     }
@@ -132,11 +145,21 @@ struct PaletteInputAction {
     let run: @MainActor () -> PaletteCommit
 }
 
+/// A row of an input screen that is an action itself
+/// (`PaletteInput.choices`): Return or a click runs the action of `item`
+/// and closes the palette. Tab puts `value` in the field, when it has one.
+struct PaletteInputChoice {
+    let item: PaletteItem
+    let value: String?
+}
+
 /// A row under an input field: what it shows, and the text the field takes
 /// when the row is picked.
 struct PaletteCompletion: Equatable {
     let title: String
     let value: String
+    /// A path row's subtitle (`PathRow`), cut in the middle when long.
+    var subtitle: String?
 }
 
 /// What the run of an input screen's action did.
@@ -161,6 +184,7 @@ final class InputPaletteScope: PaletteScope {
     /// line goes when the text changes.
     private var refusal: (text: String, reason: String)?
     private var completions: [PaletteCompletion] = []
+    private var choices: [PaletteInputChoice] = []
     /// True until the screen has shown once: only then does the panel
     /// select the field's text, the initial value.
     var isFirstShow = true
@@ -178,7 +202,7 @@ final class InputPaletteScope: PaletteScope {
     var placeholder: String { input.prompt }
     var initialQuery: String { text }
 
-    func sections(for query: PaletteQuery, context _: PaletteContext) -> [PaletteSection] {
+    func sections(for query: PaletteQuery, context: PaletteContext) -> [PaletteSection] {
         text = query.raw
         if let refusal, refusal.text != text { self.refusal = nil }
         action = nil
@@ -194,7 +218,10 @@ final class InputPaletteScope: PaletteScope {
             failure = nil
         }
         completions = input.completions(text)
-        var items = completions.map { PaletteItem(id: Self.itemID($0), title: $0.title, action: {}) }
+        choices = input.choices(text, context)
+        var items = choices.map(\.item) + completions.map {
+            PaletteItem(id: Self.itemID($0), title: $0.title, subtitle: $0.subtitle, subtitleIsPath: $0.subtitle != nil, action: {})
+        }
         if let action {
             items.insert(PaletteItem(id: Self.actionItemID, title: action.title, action: {}), at: 0)
         }
@@ -209,26 +236,48 @@ final class InputPaletteScope: PaletteScope {
         action != nil && item.id == Self.actionItemID
     }
 
+    /// Whether `item` is a row of `PaletteInput.choices`.
+    func isChoice(_ item: PaletteItem) -> Bool {
+        choices.contains { $0.item.id == item.id }
+    }
+
     /// The id of the row where the selection rests on a new list: the
-    /// action row, else the Cancel row of an empty field, else no row.
+    /// action row, else the first choice, else the Cancel row of an empty
+    /// field, else no row.
     var restingItemID: String? {
         if action != nil { return Self.actionItemID }
+        if let first = choices.first { return first.item.id }
         return text.isEmpty ? Self.cancelItemID : nil
     }
 
-    /// The text that `item`, a completion row of this screen, puts in the
-    /// field.
+    /// The text that `item`, a completion row or a choice of this screen,
+    /// puts in the field.
     func completion(for item: PaletteItem) -> String? {
-        completions.first { Self.itemID($0) == item.id }?.value
+        if let choice = choices.first(where: { $0.item.id == item.id }) { return choice.value }
+        return completions.first { Self.itemID($0) == item.id }?.value
+    }
+
+    /// What Tab puts in the field: the value of the selected row, else the
+    /// first value of `rows`. A value that the field already has is skipped,
+    /// so a second Tab on a folder goes into it. Nil when no row gives a new
+    /// value.
+    func tabText(selected item: PaletteItem?, rows: [PaletteItem]) -> String? {
+        if let item, let value = completion(for: item), value != text { return value }
+        return rows.lazy.compactMap { self.completion(for: $0) }.first { $0 != self.text }
     }
 
     /// What Return or a click on `item` does, with `item` nil when no row
-    /// is selected. The action row runs its action. The Cancel row leaves
-    /// the screen. A completion row gives its text for the field. No row,
-    /// or the text that the field already has, does nothing.
+    /// is selected. The action row and a choice run their action. The
+    /// Cancel row leaves the screen. A completion row gives its text for
+    /// the field. No row, or the text that the field already has, does
+    /// nothing.
     func press(_ item: PaletteItem?) -> PaletteInputPress {
         guard let item else { return .nothing }
         if item.id == Self.cancelItemID, text.isEmpty { return .cancelled }
+        if let choice = choices.first(where: { $0.item.id == item.id }) {
+            choice.item.action()
+            return .closed
+        }
         guard isAction(item), let action else {
             guard let completion = completion(for: item), completion != text else { return .nothing }
             return .fill(completion)
