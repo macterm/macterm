@@ -129,8 +129,8 @@ struct MainAppResponderTests {
 }
 
 /// While the palette is up, a chord whose command opens a palette screen
-/// switches the palette to it; every other binding does nothing, and the
-/// palette's own keys stay the palette's.
+/// switches the palette to it; every other binding does nothing, and a key
+/// that is no binding is the palette's.
 @MainActor
 struct PaletteResponderTests {
     private struct Fixture {
@@ -223,16 +223,13 @@ struct PaletteResponderTests {
         #expect(fx.state.isCommandPaletteVisible)
     }
 
-    /// ⌃N moves the palette's selection, also when a binding uses ⌃N.
+    /// A key that is no binding (⌘C) is the palette field's.
     @Test
-    func the_palettes_own_keys_win_over_a_binding() throws {
+    func a_key_that_is_no_binding_passes_through() throws {
         let fx = makeFixture()
-        let restore = bind(.newTab, to: "ctrl+n")
-        defer { restore() }
-        let tabs = fx.state.workspaces[fx.project.id]?.tabs.count
-
-        #expect(try fx.responder.handle(keyDown("ctrl+n")) == .passThrough)
-        #expect(fx.state.workspaces[fx.project.id]?.tabs.count == tabs)
+        let copy = try keyDown("cmd+c")
+        try #require(!HotkeyAction.allCases.contains { HotkeyRegistry.matches(copy, action: $0) })
+        #expect(fx.responder.handle(copy) == .passThrough)
     }
 
     @Test

@@ -6,8 +6,9 @@ import AppKit
 
 /// Toggles the unified command palette on its chord (`toggleCommandPalette`,
 /// ⌘P by default). When the palette is visible, a chord whose command opens
-/// a palette screen switches to that screen; other keys pass through to
-/// SwiftUI's own key handlers (arrow navigation, escape, etc.).
+/// a palette screen switches to that screen, and every other binding does
+/// nothing. Keys that are not bindings pass through to SwiftUI's own key
+/// handlers (arrow navigation, escape, typing).
 @MainActor
 final class PaletteResponder: KeyResponder {
     private let appState: AppState
@@ -32,23 +33,20 @@ final class PaletteResponder: KeyResponder {
             PaletteScreenshot.capture(appState: appState)
             return .handled
         }
-        // While the palette is up, `MainAppResponder` does not act, and no
-        // binding reaches the menu bar: the palette keeps the keyboard. One
-        // kind of binding acts: a chord whose command opens a palette screen
-        // (Files, Rename Current Tab, Move to Project, …) runs that command.
-        // The palette then shows that screen in place of the stack, or
-        // closes when the command toggles and its screen is already up.
-        // Every other binding (⌘T, ⌘W, a split) does nothing. It is consumed
-        // here, because a pass-through would reach the menu item with the
-        // same key equivalent, and that item would open or close a tab
-        // behind the palette. The chord resolves to its command as in
-        // `MainAppResponder`, so two bindings on one chord give one answer
-        // in both places.
+        // While the palette is up, it keeps the keyboard. A chord whose
+        // command opens a palette screen (Files, Rename Current Tab, Move to
+        // Project, …) runs that command. Every other binding (⌘T, ⌘W, a
+        // split) is consumed and does nothing: a pass-through would reach
+        // the menu item with the same key equivalent, which would change
+        // the tabs behind the palette. When two bindings share a chord, the
+        // first in `HotkeyAction.allCases` owns it, as in `MainAppResponder`.
         if appState.isCommandPaletteVisible, paletteWindowIsKey,
            let action = HotkeyAction.allCases.first(where: { HotkeyRegistry.matches(event, action: $0) })
         {
-            // The palette's own keys win over a binding on the same chord.
-            if Self.isPaletteKey(event, showsRetry: appState.paletteShowsRetry) { return .passThrough }
+            // While a screen shows Retry, ⌘R is Retry, also when a binding
+            // uses ⌘R. Rename Current Tab, its default owner, has no menu
+            // item, so the pass-through reaches `CommandPalette`.
+            if appState.paletteShowsRetry, Self.isRetryChord(event) { return .passThrough }
             let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
             let command = action.appCommand
             guard (command.paletteScope(in: ctx) ?? command.inputScope(in: ctx)) != nil else { return .handled }
@@ -82,24 +80,15 @@ final class PaletteResponder: KeyResponder {
         return appState.appDelegate?.isTerminalWindow(keyWindow) ?? true
     }
 
-    /// The chords that `CommandPalette` answers itself and that a binding
-    /// can also use (a binding always has a modifier): ⌃P and ⌃N move the
-    /// selection, and ⌥↩ runs the alt action of a row. Keep this list the
-    /// same as the palette's `onKeyPress` handlers.
-    private static let paletteKeys = ["ctrl+p", "ctrl+n", "opt+return"].compactMap(HotkeyRegistry.parseShortcut)
-
-    /// The palette's own Retry key, ⌘R, fixed and not a binding. It is the
-    /// palette's key only while a screen shows a failed listing: at all
-    /// other times it is Rename Current Tab's default chord.
+    /// The palette's own Retry key, ⌘R (`CommandPalette`), fixed and not a
+    /// binding. It is the palette's key only while a screen shows a failed
+    /// listing: at all other times it is Rename Current Tab's default chord.
+    /// It matches as a binding matches (`HotkeyShortcut.matches`), so a
+    /// keyboard layout or Caps Lock gives the same answer for both.
     private static let retryShortcut = HotkeyRegistry.parseShortcut("cmd+r")
 
-    /// Whether `event` is a key of the palette itself, which a binding on
-    /// the same chord must not take. Each matches as a binding matches
-    /// (`HotkeyShortcut.matches`), so a keyboard layout or Caps Lock gives
-    /// the same answer for both.
-    static func isPaletteKey(_ event: NSEvent, showsRetry: Bool) -> Bool {
-        if showsRetry, retryShortcut?.matches(event) == true { return true }
-        return paletteKeys.contains { $0.matches(event) }
+    static func isRetryChord(_ event: NSEvent) -> Bool {
+        retryShortcut?.matches(event) ?? false
     }
 }
 
@@ -235,11 +224,6 @@ final class MainAppResponder: KeyResponder {
         // user's next keypress reaches the picker instead of triggering actions.
         if HotkeyCaptureState.shared.isCapturing { return .passThrough }
 
-        // When the command palette is visible, let SwiftUI's TextField /
-        // onKeyPress handlers own the keyboard. Otherwise typing "New Tab"
-        // into the palette would fire Cmd+T's New Tab action.
-        if appState.isCommandPaletteVisible { return .passThrough }
-
         // Everything below acts on the main terminal window's workspace.
         // When a different window is key — Settings, an alert sheet — none of
         // it may fire: Cmd+W would close a terminal tab behind the window the
@@ -288,6 +272,12 @@ final class MainAppResponder: KeyResponder {
             }
             return .passThrough
         }
+
+        // The command palette owns the keyboard of its window
+        // (`PaletteResponder`). This check comes after the different-window
+        // branch above, so that ⌘W in Settings closes Settings while a
+        // palette is open behind it.
+        if appState.isCommandPaletteVisible { return .passThrough }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
