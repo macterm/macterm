@@ -284,13 +284,13 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let before = appState.workspaces[project.id]?.tabs.count ?? 0
+        let before = appState.liveTabs[project.id]?.tabs.count ?? 0
 
         let intent = NewMactermTabIntent()
         intent.project = MactermProjectEntity(project)
         let result = try await intent.perform()
 
-        let tabs = try #require(appState.workspaces[project.id]?.tabs)
+        let tabs = try #require(appState.liveTabs[project.id]?.tabs)
         #expect(tabs.count == before + 1)
         #expect(result.value?.id == tabs.last?.id)
     }
@@ -306,7 +306,7 @@ struct MactermIntentsTests {
         intent.command = "  npm run dev  "
         _ = try await intent.perform()
 
-        let tab = try #require(appState.workspaces[project.id]?.tabs.last)
+        let tab = try #require(appState.liveTabs[project.id]?.tabs.last)
         let pane = try #require(tab.splitRoot.allPanes().first)
         // The command is a typed `PaneStartCommand`, the layout `run:`
         // path, not a paste — trimmed, because a trailing space in a Shortcuts
@@ -325,7 +325,7 @@ struct MactermIntentsTests {
         intent.command = "   "
         _ = try await intent.perform()
 
-        let pane = try #require(appState.workspaces[project.id]?.tabs.last?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.last?.splitRoot.allPanes().first)
         #expect(pane.start == nil)
     }
 
@@ -335,7 +335,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         _ = appState.createTab(projectID: project.id, projects: projectStore.projects)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let first = try #require(workspace.tabs.first)
         try appState.selectTab(#require(workspace.tabs.last).id, projectID: project.id)
 
@@ -356,7 +356,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         _ = appState.createTab(projectID: project.id, projects: projectStore.projects)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let doomed = try #require(workspace.tabs.last)
         let before = workspace.tabs.count
 
@@ -413,7 +413,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
 
         let entity = MactermPaneEntity(pane, projectID: project.id, in: ctx)
@@ -431,7 +431,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let view = NSView()
 
         MactermPaneEntity.annotate(view, for: pane)
@@ -460,7 +460,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
 
         let intent = RunCommandInMactermPaneIntent()
@@ -476,7 +476,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = RunCommandInMactermPaneIntent()
         intent.command = ""
@@ -495,7 +495,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = SendKeyToMactermPaneIntent()
         intent.key = "ctrl+nonsense"
@@ -522,7 +522,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         pane.foregroundProcessName = "hx"
 
         #expect(GetMactermPaneDetailsIntent.value(of: .id, for: pane) == pane.id.uuidString)
@@ -540,7 +540,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = GetMactermPaneContentsIntent()
         intent.scrollback = false
@@ -582,7 +582,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         let delegate = attachDelegate(appState, projectStore)
-        let before = appState.workspaces[project.id]?.tabs.count ?? 0
+        let before = appState.liveTabs[project.id]?.tabs.count ?? 0
 
         let intent = InvokeMactermKeybindIntent()
         intent.keybind = .newTab
@@ -591,7 +591,7 @@ struct MactermIntentsTests {
         #expect(result.value == true)
         // The action ran through `AppCommand.newTab.action(in:)` — the same
         // closure the palette, the menu bar and the Dock menu run.
-        #expect(appState.workspaces[project.id]?.tabs.count == before + 1)
+        #expect(appState.liveTabs[project.id]?.tabs.count == before + 1)
         #expect(appState.appDelegate === delegate)
     }
 

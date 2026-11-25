@@ -48,7 +48,7 @@ struct BackgroundCreationTests {
         state.registerWindow(onQ)
         state.noteKeyWindow(otherWindowIsKey ? onQ : onP)
 
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
 
         let newID = try #require(state.splitPane(
@@ -69,7 +69,7 @@ struct BackgroundCreationTests {
         let p = seedProject(state, name: "p", path: "/p")
         // No window at all: SwiftUI never renders the new pane, so it must be
         // started off-screen.
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
 
         let newID = try #require(state.splitPane(
@@ -94,7 +94,7 @@ struct BackgroundCreationTests {
         state.registerWindow(window)
         state.noteKeyWindow(window)
 
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let source = try #require(tab.focusedPane)
         ModelWriter.paneZoom(tab, toggling: source.id)
 
@@ -117,8 +117,8 @@ struct BackgroundCreationTests {
 
         let p = seedProject(state, name: "p", path: "/p")
         let q = seedProject(state, name: "q", path: "/q")
-        let wsP = try #require(state.workspaces[p.id])
-        let wsQ = try #require(state.workspaces[q.id])
+        let wsP = try #require(state.liveTabs[p.id])
+        let wsQ = try #require(state.liveTabs[q.id])
         let originalTab = try #require(wsP.activeTab)
         let qTab = try #require(wsQ.activeTab)
 
@@ -162,7 +162,7 @@ struct BackgroundCreationTests {
         state.paneNeedsConfirmClose = { _ in false }
 
         let p = seedProject(state, name: "p", path: "/p")
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let firstTab = try #require(ws.activeTab)
 
         // A second tab becomes active; the first is now the "unseen" tab.
@@ -191,7 +191,7 @@ struct BackgroundCreationTests {
         state.paneNeedsConfirmClose = { _ in false }
 
         let origin = seedProject(state, name: "origin", path: "/origin")
-        let tab = try #require(state.workspaces[origin.id]?.activeTab)
+        let tab = try #require(state.liveTabs[origin.id]?.activeTab)
 
         // Pin the tab, then warm it while it lives in the pinned workspace —
         // the exit closure is wired there.
@@ -209,7 +209,7 @@ struct BackgroundCreationTests {
         state.moveTab(tab.id, from: PinnedTabs.workspaceID, to: dest.id, destPath: dest.path)
         #expect(pane.projectID == dest.id)
 
-        let wsDest = try #require(state.workspaces[dest.id])
+        let wsDest = try #require(state.liveTabs[dest.id])
 
         // Simulate the exit. The closure must read the pane's project NOW
         // (the destination), so the pane — and its single-pane tab — close in

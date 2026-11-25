@@ -151,7 +151,7 @@ struct FirstRunSeedTests {
         #expect(project.path == ProjectPath.currentHome)
         #expect(state.activeProjectID == project.id)
         // One tab with a plain shell: no tutorial, no command.
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs.count == 1)
         let pane = try #require(ws.tabs.first?.splitRoot.allPanes().first)
         #expect(pane.start == nil)

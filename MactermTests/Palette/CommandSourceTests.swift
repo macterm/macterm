@@ -58,7 +58,7 @@ struct CommandSourceTests {
     func renameTab_row_opens_the_input_screen_of_the_active_tab() throws {
         let (ctx, state) = makeContext()
         let projectID = try #require(state.activeProjectID)
-        let ws = try #require(state.workspaces[projectID])
+        let ws = try #require(state.liveTabs[projectID])
         let secondTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         ModelWriter.tabSelect(secondTab.id, in: ws)
 

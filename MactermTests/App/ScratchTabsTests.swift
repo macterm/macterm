@@ -137,13 +137,13 @@ struct ScratchTabsTests {
     func moveTabToScratchTabs_rebinds_the_panes_and_leaves_the_project() throws {
         let state = makeState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         let cwd = pane.projectPath
 
         state.moveTabToScratchTabs(tab.id, from: p.id)
 
-        #expect(state.workspaces[p.id]?.tabs.isEmpty == true)
+        #expect(state.liveTabs[p.id]?.tabs.isEmpty == true)
         #expect(state.scratchWorkspace?.tabs.map(\.id) == [tab.id])
         #expect(pane.projectID == scratchID)
         // The tab keeps its own working directory; only its row moves.
@@ -162,7 +162,7 @@ struct ScratchTabsTests {
         state.moveTab(id, from: scratchID, to: p.id, destPath: p.path)
 
         #expect(state.scratchWorkspace?.tabs.isEmpty == true)
-        #expect(state.workspaces[p.id]?.tabs.map(\.id).contains(id) == true)
+        #expect(state.liveTabs[p.id]?.tabs.map(\.id).contains(id) == true)
         #expect(pane.projectID == p.id)
         #expect(state.activeProjectID == p.id)
     }
@@ -187,7 +187,7 @@ struct ScratchTabsTests {
     func unpin_with_no_project_and_no_scratch_origin_lands_in_the_scratch_workspace() throws {
         let state = makeState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.pinTab(tab.id, fromProject: p.id)
 
         // The origin project is gone from the list: the scratch workspace is

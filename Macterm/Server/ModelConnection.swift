@@ -22,8 +22,15 @@ private let logger = Logger(subsystem: appBundleID, category: "ModelConnection")
 @MainActor
 final class ModelConnection {
     let mirror: ModelMirror
-    private let server: LocalServer?
-    private var connection: ServerConnection?
+    let server: LocalServer?
+    private var connection: ServerConnection? {
+        didSet { holder.set(connection) }
+    }
+    /// Ends the connection when this object goes (a test's AppState): the
+    /// server exits once no client is left.
+    private let holder = LinkHolder()
+    /// `close` ran: no reconnect.
+    private var isClosed = false
     private var connecting = false
     private let queue = BatchQueue()
     /// Counts the connections, so that a late subscribe of an old one does
@@ -65,35 +72,58 @@ final class ModelConnection {
         let current = generation
         do {
             let link = try await Task.detached { try await server.connect() }.value
-            let queue = queue
-            link.setBatchHandler { batch in
-                queue.append(batch)
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { [weak self] in self?.drain() }
-                }
-            }
+            link.setBatchHandler(batchHandler())
             let state = try await link.call(MactermProtocol.StateSubscribe.self, .init(), timeout: serverRequestTimeout)
             guard current == generation else {
                 link.close()
                 return
             }
-            connection = link
-            mirror.install(state)
-            drain()
-            if state.model == nil {
-                logger.error("model: the server has no model")
-            } else if state.readonly {
-                logger.warning("model: the server's model is read-only")
-            }
-            onInstall?(state)
+            install(link, state)
         } catch {
             logger.error("model: connect failed: \(String(describing: error), privacy: .public)")
             scheduleReconnect()
         }
     }
 
-    /// Ends the connection (tests, quit).
+    /// Connects on this thread, with no reconnect: the unit tests, whose
+    /// server is their own.
+    func connectNow() throws {
+        guard let server else { throw ServerClientError.noAnswer }
+        generation += 1
+        let link = try server.connectBlocking()
+        link.setBatchHandler(batchHandler())
+        let state = try link.callBlocking(MactermProtocol.StateSubscribe.self, .init(), timeout: .seconds(10))
+        install(link, state)
+    }
+
+    /// Queues each batch on the reader thread, before the reply that
+    /// follows it, and drains the queue in a main-queue turn (the batches of
+    /// other clients). A `send` drains it at once.
+    private func batchHandler() -> @Sendable (ServerEventBatch?) -> Void {
+        let queue = queue
+        return { [weak self] batch in
+            queue.append(batch)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.drain() }
+            }
+        }
+    }
+
+    private func install(_ link: ServerConnection, _ state: MactermProtocol.StateSubscribe.Result) {
+        connection = link
+        mirror.install(state)
+        drain()
+        if state.model == nil {
+            logger.error("model: the server has no model")
+        } else if state.readonly {
+            logger.warning("model: the server's model is read-only")
+        }
+        onInstall?(state)
+    }
+
+    /// Ends the connection for good (tests, quit).
     func close() {
+        isClosed = true
         generation += 1
         connection?.close()
         connection = nil
@@ -145,7 +175,7 @@ final class ModelConnection {
     private var reconnectTask: Task<Void, Never>?
 
     private func scheduleReconnect() {
-        guard reconnectTask == nil, !connecting else { return }
+        guard reconnectTask == nil, !connecting, !isClosed else { return }
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard let self else { return }
@@ -178,5 +208,19 @@ private final class BatchQueue: @unchecked Sendable {
             defer { items = [] }
             return items
         }
+    }
+}
+
+/// The connection of a `ModelConnection`, closed when the holder goes.
+private final class LinkHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var link: ServerConnection?
+
+    func set(_ link: ServerConnection?) {
+        lock.withLock { self.link = link }
+    }
+
+    deinit {
+        link?.close()
     }
 }

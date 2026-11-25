@@ -61,12 +61,12 @@ struct PinnedTabsTests {
     func pinTab_moves_tab_into_pinned_workspace_and_records_it() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
 
         fx.state.pinTab(tab.id, fromProject: p.id)
 
-        #expect(fx.state.workspaces[p.id]?.tabs.isEmpty == true)
+        #expect(fx.state.liveTabs[p.id]?.tabs.isEmpty == true)
         #expect(fx.state.pinnedWorkspace?.tabs.map(\.id) == [tab.id])
         #expect(fx.state.pinnedRecords.map(\.id) == [tab.id])
         #expect(fx.state.pinnedRecords.first?.originProjectID == p.id)
@@ -78,7 +78,7 @@ struct PinnedTabsTests {
     func pinTab_writes_pinned_yaml_with_marker_and_id() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
 
         fx.state.pinTab(tab.id, fromProject: p.id)
 
@@ -92,7 +92,7 @@ struct PinnedTabsTests {
     func moveTab_into_pinned_routes_to_pin() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
 
         fx.state.moveTab(tab.id, from: p.id, to: pinnedID, destPath: "/anything")
 
@@ -116,14 +116,14 @@ struct PinnedTabsTests {
     func unpinTab_returns_loaded_tab_to_origin_project() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
 
         fx.state.unpinTab(tab.id, projects: [p])
 
         #expect(fx.state.pinnedRecords.isEmpty)
         #expect(fx.state.pinnedWorkspace?.tabs.isEmpty == true)
-        #expect(fx.state.workspaces[p.id]?.tabs.map(\.id) == [tab.id])
+        #expect(fx.state.liveTabs[p.id]?.tabs.map(\.id) == [tab.id])
         #expect(tab.splitRoot.allPanes().first?.projectID == p.id)
     }
 
@@ -153,7 +153,7 @@ struct PinnedTabsTests {
             .appendingPathComponent("macterm-tests-projstore-\(UUID().uuidString).json")
         let ctx = AppCommandContext(appState: fx.state, projectStore: ProjectStore(fileURL: storeTmp))
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
 
         // Active tab is the pinned one → close unloads, keeping the record.
@@ -170,14 +170,14 @@ struct PinnedTabsTests {
         _ = try #require(fx.state.createTab(projectID: p.id, projectPath: p.path))
         let closeNormal = try #require(AppCommand.closeTab.action(in: ctx))
         closeNormal()
-        #expect(fx.state.workspaces[p.id]?.tabs.isEmpty == true)
+        #expect(fx.state.liveTabs[p.id]?.tabs.isEmpty == true)
     }
 
     @Test
     func requestCloseTab_unloads_pinned_tab_keeping_the_record() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
 
         fx.state.requestCloseTab(tab.id, projectID: pinnedID)
@@ -192,7 +192,7 @@ struct PinnedTabsTests {
     func closeTabs_bulk_unloads_pinned_and_closes_normal_tabs() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let pinnedTab = ws.tabs[0]
         let normalTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(pinnedTab.id, fromProject: p.id)
@@ -204,14 +204,14 @@ struct PinnedTabsTests {
 
         #expect(fx.state.pinnedWorkspace?.tabs.isEmpty == true)
         #expect(fx.state.pinnedRecords.map(\.id) == [pinnedTab.id])
-        #expect(fx.state.workspaces[p.id]?.tabs.isEmpty == true)
+        #expect(fx.state.liveTabs[p.id]?.tabs.isEmpty == true)
     }
 
     @Test
     func closePane_last_pane_of_pinned_tab_unloads_it() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         let paneID = try #require(tab.splitRoot.allPanes().first?.id)
 
@@ -225,7 +225,7 @@ struct PinnedTabsTests {
     func closePane_allows_inner_pane_of_pinned_split() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         let newPane = try #require(ModelWriter.paneSplit(tab, paneID: tab.splitRoot.allPanes()[0].id, direction: .horizontal))
 
@@ -241,7 +241,7 @@ struct PinnedTabsTests {
     func paneProcessExited_last_pane_unloads_tab_keeping_record() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         let paneID = try #require(tab.splitRoot.allPanes().first?.id)
 
@@ -281,7 +281,7 @@ struct PinnedTabsTests {
     func paneProcessExited_in_normal_project_closes_as_before() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         let paneID = try #require(tab.splitRoot.allPanes().first?.id)
 
@@ -296,7 +296,7 @@ struct PinnedTabsTests {
     func pinned_tabs_persist_and_restore_as_records_with_live_snapshots() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         fx.state.persistState()
 
@@ -313,7 +313,7 @@ struct PinnedTabsTests {
     func materialize_respawns_dead_sessions_from_the_declaration() async throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         let originalSession = try #require(tab.splitRoot.allPanes().first?.sessionName)
         fx.state.pinTab(tab.id, fromProject: p.id)
         fx.state.persistState()
@@ -369,7 +369,7 @@ struct PinnedTabsTests {
     func materialize_reattaches_surviving_sessions() async throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         let sessionName = try #require(tab.splitRoot.allPanes().first?.sessionName)
         fx.state.pinTab(tab.id, fromProject: p.id)
         fx.state.persistState()
@@ -397,7 +397,7 @@ struct PinnedTabsTests {
     func materialize_failed_listing_reattaches_conservatively() async throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         fx.state.persistState()
 
@@ -451,7 +451,7 @@ struct PinnedTabsTests {
         fx.state.restoreSelection(projects: [project])
         await fx.state.materializeRestoredPinnedTabs()
 
-        let projectSessions = fx.state.workspaces[project.id]?.tabs.flatMap { $0.splitRoot.allPanes().map(\.sessionName) }
+        let projectSessions = fx.state.liveTabs[project.id]?.tabs.flatMap { $0.splitRoot.allPanes().map(\.sessionName) }
         #expect(projectSessions == [session])
         #expect(fx.state.pinnedRecords.map(\.id) == [pinnedTabID])
         let pinnedPanes = fx.state.pinnedWorkspace?.tabs.flatMap { $0.splitRoot.allPanes() } ?? []
@@ -466,7 +466,7 @@ struct PinnedTabsTests {
     func foreground_change_schedules_a_declaration_refresh() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         let pane = try #require(tab.splitRoot.allPanes().first)
 
@@ -483,7 +483,7 @@ struct PinnedTabsTests {
     func persistRefreshedPinnedDeclarations_recaptures_and_rewrites_the_file() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
 
         // The declaration was captured at pin time; a later change to the tab
@@ -503,7 +503,7 @@ struct PinnedTabsTests {
     func declaration_refresh_never_erases_an_established_run() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         // The record was pinned with a run: (hand-set here; live capture in
         // tests always reads idle, which is exactly the hazard).
@@ -524,7 +524,7 @@ struct PinnedTabsTests {
     func pinned_active_tab_survives_a_restart() async throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let first = ws.tabs[0]
         let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
@@ -568,7 +568,7 @@ struct PinnedTabsTests {
         fx.state.moveTab(recordID, from: pinnedID, to: p.id, destPath: p.path)
 
         #expect(fx.state.pinnedRecords.isEmpty)
-        let moved = try #require(fx.state.workspaces[p.id]?.tabs.first { $0.id == recordID })
+        let moved = try #require(fx.state.liveTabs[p.id]?.tabs.first { $0.id == recordID })
         #expect(moved.splitRoot.allPanes().first?.start == .typed("btop"))
         #expect(moved.splitRoot.allPanes().first?.projectID == p.id)
     }
@@ -577,7 +577,7 @@ struct PinnedTabsTests {
     func reorderTab_in_pinned_moves_the_record_too() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let first = ws.tabs[0]
         let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
@@ -594,7 +594,7 @@ struct PinnedTabsTests {
     func moveActiveTab_in_pinned_steps_past_one_sidebar_row() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         // An UNLOADED record below the loaded tab: one step down passes it.
         let unloadedID = UUID()
@@ -617,7 +617,7 @@ struct PinnedTabsTests {
     func selectTabByIndex_in_pinned_counts_sidebar_rows() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         // An UNLOADED record ahead of the loaded tab: index 0 must reach it.
         let unloadedID = UUID()
@@ -637,7 +637,7 @@ struct PinnedTabsTests {
     func project_cycling_steps_through_the_pinned_slot() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         #expect(fx.state.activeProjectID == pinnedID)
 
@@ -652,7 +652,7 @@ struct PinnedTabsTests {
     func write_time_absorption_adopts_the_files_order() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let a = ws.tabs[0]
         let b = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(a.id, fromProject: p.id)
@@ -686,7 +686,7 @@ struct PinnedTabsTests {
     func separated_pane_lands_at_the_record_slot_the_drop_named() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         // An unloaded record occupies row 0; the drop names slot 1 (below it).
         let unloadedID = UUID()
         fx.state.pinnedRecords = [PinnedTabRecord(
@@ -745,7 +745,7 @@ struct PinnedTabsTests {
     func launch_reconcile_unpins_restorable_live_tab_removed_from_file() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         fx.state.persistState()
 
@@ -762,7 +762,7 @@ struct PinnedTabsTests {
 
         #expect(state2.pinnedRecords.isEmpty)
         // Honored as a MOVE: the tab landed in its origin project.
-        #expect(state2.workspaces[p.id]?.tabs.map(\.id) == [tab.id])
+        #expect(state2.liveTabs[p.id]?.tabs.map(\.id) == [tab.id])
     }
 
     @Test
@@ -785,7 +785,7 @@ struct PinnedTabsTests {
     func invalid_pinned_yaml_suspends_writes_and_preserves_the_file() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id) // creates a valid file
 
         // The user breaks the file mid-edit.
@@ -804,7 +804,7 @@ struct PinnedTabsTests {
     func external_addition_is_absorbed_before_the_next_write() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let first = ws.tabs[0]
         let second = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(first.id, fromProject: p.id)
@@ -832,7 +832,7 @@ struct PinnedTabsTests {
     func nextTabInProject_cycles_pinned_records_and_restores_unloaded_ones() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
         let unloadedID = UUID()
         fx.state.pinnedRecords.append(PinnedTabRecord(
@@ -857,7 +857,7 @@ struct PinnedTabsTests {
     func selectGlobalTab_cycles_through_pinned_first() throws {
         let fx = makeFixture()
         let p = seedProject(fx.state)
-        let ws = try #require(fx.state.workspaces[p.id])
+        let ws = try #require(fx.state.liveTabs[p.id])
         let pinnedTab = ws.tabs[0]
         let projectTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
         fx.state.pinTab(pinnedTab.id, fromProject: p.id)
@@ -866,7 +866,7 @@ struct PinnedTabsTests {
         fx.state.selectGlobalTab(.next, projects: [p])
 
         #expect(fx.state.activeProjectID == p.id)
-        #expect(fx.state.workspaces[p.id]?.activeTabID == projectTab.id)
+        #expect(fx.state.liveTabs[p.id]?.activeTabID == projectTab.id)
 
         fx.state.selectGlobalTab(.next, projects: [p])
         #expect(fx.state.activeProjectID == pinnedID)

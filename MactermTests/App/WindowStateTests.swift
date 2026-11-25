@@ -292,7 +292,7 @@ struct WindowStateTests {
         let project = Project(name: "p", path: path, sortOrder: 0)
         state.restoreSelection(projects: [project])
         state.selectProject(project)
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         for _ in 1 ..< count {
             _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         }
@@ -1579,7 +1579,7 @@ struct WindowStateTests {
         #expect(first.activeProjectID == project.id)
         #expect(first.showsProjectScreen)
         #expect(reader.selectedTab(for: project.id, in: first) == nil)
-        #expect(reader.workspaces[project.id]?.activeTabID == behind)
+        #expect(reader.liveTabs[project.id]?.activeTabID == behind)
 
         reader.cycleRecentTab(projectID: project.id)
         #expect(reader.selectedTab(for: project.id, in: first)?.id == behind)

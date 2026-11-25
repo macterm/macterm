@@ -88,7 +88,7 @@ struct ControlHandlerTests {
     func a_request_requiring_a_newer_protocol_fails_before_any_side_effect() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore, name: "target")
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let tabsBefore = workspace.tabs.count
 
         var req = request("tab.new", args: ControlArgs(project: project.name))
@@ -280,7 +280,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.isAppActive = { false }
-        let pane = try #require(appState.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.activeTab?.splitRoot.allPanes().first)
 
         pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         var response = await handler.handle(request("pane.list"))
@@ -332,7 +332,7 @@ struct ControlHandlerTests {
     func session_list_maps_entries_and_live_panes() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.activeTab?.splitRoot.allPanes().first)
         stubZmx(
             appState,
             sessions: [
@@ -718,12 +718,12 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore, name: "alpha")
         #expect(projectStore.projects.count == 1)
-        #expect(appState.workspaces[project.id] != nil)
+        #expect(appState.liveTabs[project.id] != nil)
 
         let response = await handler.handle(request("project.remove", args: ControlArgs(project: "alpha")))
         #expect(response.ok)
         #expect(projectStore.projects.isEmpty)
-        #expect(appState.workspaces[project.id] == nil)
+        #expect(appState.liveTabs[project.id] == nil)
     }
 
     @Test
@@ -793,10 +793,10 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         appState.newTabInheritsWorkingDirectory = { true }
         let project = seedProject(appState, projectStore, name: "target", path: "/target-project")
-        let targetPane = try #require(appState.workspaces[project.id]?.activeTab?.focusedPane)
+        let targetPane = try #require(appState.liveTabs[project.id]?.activeTab?.focusedPane)
         SurfaceRegistry.shared.ensureView(of: targetPane).currentPwd = "/target-project/src"
         let activeProject = seedProject(appState, projectStore, name: "active", path: "/active-project")
-        let activePane = try #require(appState.workspaces[activeProject.id]?.activeTab?.focusedPane)
+        let activePane = try #require(appState.liveTabs[activeProject.id]?.activeTab?.focusedPane)
         SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/active-project/elsewhere"
 
         let response = await handler.handle(request(
@@ -807,7 +807,7 @@ struct ControlHandlerTests {
         let info = try #require(response.data?.tabs?.first)
         #expect(info.index == 2)
         #expect(info.active == true)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         #expect(workspace.tabs.count == 2)
         let newPane = try #require(workspace.tabs.last?.focusedPane)
         #expect(newPane.projectPath == "/target-project/src")
@@ -828,7 +828,7 @@ struct ControlHandlerTests {
         projectStore.add(remote)
         // Restored but never opened.
         let workspace = Workspace(id: remote.id, projectPath: remote.path)
-        appState.workspaces[remote.id] = workspace
+        appState.liveTabs[remote.id] = workspace
         var warmed: [UUID] = []
         appState.incubatePane = { pane in warmed.append(pane.id) }
 
@@ -858,7 +858,7 @@ struct ControlHandlerTests {
     ) async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore, name: "caller")
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let sourceTab = try #require(workspace.activeTab)
         let source = try #require(sourceTab.focusedPane)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: projectStore.projects)
@@ -935,7 +935,7 @@ struct ControlHandlerTests {
         )))
         let info = try #require(created.data?.tabs?.first)
         let tabID = try #require(UUID(uuidString: info.id))
-        let workspace = try #require(appState.workspaces[projectID])
+        let workspace = try #require(appState.liveTabs[projectID])
         let tab = try #require(workspace.tabs.first { $0.id == tabID })
         let source = try #require(tab.focusedPane)
         let selected = workspace.activeTabID
@@ -976,7 +976,7 @@ struct ControlHandlerTests {
         let remote = Project(name: "remote", path: "host:~/repo")
         projectStore.add(remote)
         let workspace = Workspace(id: remote.id, projectPath: remote.path)
-        appState.workspaces[remote.id] = workspace
+        appState.liveTabs[remote.id] = workspace
         let tab = try #require(workspace.activeTab)
         let sourceID = try #require(tab.focusedPaneID)
         _ = ModelWriter.paneSplit(tab, paneID: sourceID, direction: .horizontal)
@@ -999,7 +999,7 @@ struct ControlHandlerTests {
     func foreground_creation_still_selects_without_incubation(command: String, focus: Bool?) async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let tab = try #require(workspace.activeTab)
         let previous = tab.focusedPaneID
         var warmed: [UUID] = []
@@ -1024,7 +1024,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.createTab(projectID: project.id, projectPath: project.path)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let firstID = try #require(workspace.tabs.first?.id)
 
         let response = await handler.handle(request("tab.select", args: ControlArgs(tab: "tab:1")))
@@ -1040,7 +1040,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.createTab(projectID: project.id, projectPath: project.path)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         #expect(workspace.tabs.count == 2)
 
         let response = await handler.handle(request("tab.close", args: ControlArgs(tab: "tab:2")))
@@ -1063,7 +1063,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore)
         appState.createTab(projectID: project.id, projectPath: project.path)
         appState.createTab(projectID: project.id, projectPath: project.path)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let ids = workspace.tabs.map(\.id)
         #expect(ids.count == 3)
 
@@ -1088,7 +1088,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.createTab(projectID: project.id, projectPath: project.path)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let before = workspace.tabs.map(\.id)
 
         let response = await handler.handle(request("tab.move", args: ControlArgs(tab: "tab:2", slot: 2)))
@@ -1102,7 +1102,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.createTab(projectID: project.id, projectPath: project.path)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let before = workspace.tabs.map(\.id)
 
         let noTab = await handler.handle(request("tab.move", args: ControlArgs(slot: 1)))
@@ -1129,7 +1129,7 @@ struct ControlHandlerTests {
     func tab_rename_sets_custom_title_and_persists() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let tab = try #require(workspace.tabs.first)
         #expect(tab.customTitle == nil)
 
@@ -1144,7 +1144,7 @@ struct ControlHandlerTests {
     func tab_rename_reset_clears_custom_title_and_restores_auto_title() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let tab = try #require(workspace.tabs.first)
         ModelWriter.tabSet(tab, title: "Custom Name")
 
@@ -1158,7 +1158,7 @@ struct ControlHandlerTests {
     func tab_rename_trims_whitespace() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let tab = try #require(workspace.tabs.first)
 
         let response = await handler.handle(request("tab.rename", args: ControlArgs(tab: "tab:1", title: "  Trimmed Title  ")))
@@ -1170,7 +1170,7 @@ struct ControlHandlerTests {
     func tab_rename_validates_arguments() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        _ = try #require(appState.workspaces[project.id])
+        _ = try #require(appState.liveTabs[project.id])
 
         // Missing tab selector
         let noTab = await handler.handle(request("tab.rename", args: ControlArgs(title: "New Title")))
@@ -1199,7 +1199,7 @@ struct ControlHandlerTests {
     func pane_split_directions_and_command() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
 
         let right = await handler.handle(request(
             "pane.split", args: ControlArgs(run: "yes", direction: "right")
@@ -1224,7 +1224,7 @@ struct ControlHandlerTests {
     func pane_split_leading_direction_places_the_new_pane_before_the_target(direction: String) async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let target = try #require(tab.splitRoot.allPanes().first)
 
         let response = await handler.handle(request("pane.split", args: ControlArgs(direction: direction)))
@@ -1240,7 +1240,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         appState.newSplitInheritsWorkingDirectory = { true }
         let project = seedProject(appState, projectStore, path: "/project")
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let source = try #require(tab.splitRoot.allPanes().first)
         SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/source"
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
@@ -1278,7 +1278,7 @@ struct ControlHandlerTests {
     func session_selector_resolves_outside_the_active_project() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let home = seedProject(appState, projectStore, name: "home")
-        let homeTab = try #require(appState.workspaces[home.id]?.activeTab)
+        let homeTab = try #require(appState.liveTabs[home.id]?.activeTab)
         let pane = try #require(homeTab.splitRoot.allPanes().first)
         _ = seedProject(appState, projectStore, name: "elsewhere")
         #expect(appState.activeProjectID != home.id)
@@ -1307,7 +1307,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         appState.newSplitInheritsWorkingDirectory = { true }
         let project = seedProject(appState, projectStore, path: "devbox:~/repo")
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
         SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/repo/src"
 
@@ -1325,7 +1325,7 @@ struct ControlHandlerTests {
     func pane_focus_selects_pane_across_tabs() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let firstTab = try #require(workspace.tabs.first)
         let firstPane = try #require(firstTab.splitRoot.allPanes().first)
         appState.createTab(projectID: project.id, projectPath: project.path)
@@ -1347,7 +1347,7 @@ struct ControlHandlerTests {
     func pane_focus_direction_moves_from_the_target_and_no_ops_at_the_edge() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let left = try #require(tab.splitRoot.allPanes().first)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         let panes = tab.splitRoot.allPanes()
@@ -1384,7 +1384,7 @@ struct ControlHandlerTests {
     func pane_close_requires_explicit_target() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         #expect(tab.splitRoot.allPanes().count == 2)
 
@@ -1409,7 +1409,7 @@ struct ControlHandlerTests {
     {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         let plain = try #require(tab.splitRoot.allPanes().last)
         appState.paneNeedsConfirmClose = { $0.id == plain.id }
@@ -1456,7 +1456,7 @@ struct ControlHandlerTests {
             "project.remove", args: ControlArgs(project: fx.project.name)
         ))
         #expect(response.ok)
-        #expect(fx.state.workspaces[fx.project.id] == nil)
+        #expect(fx.state.liveTabs[fx.project.id] == nil)
     }
 
     @Test
@@ -1506,7 +1506,7 @@ struct ControlHandlerTests {
             "tab.close", args: ControlArgs(project: fx.project.name, tab: "tab:1")
         ))
         #expect(response.ok)
-        #expect(fx.state.workspaces[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } != true)
+        #expect(fx.state.liveTabs[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } != true)
     }
 
     @Test
@@ -1516,7 +1516,7 @@ struct ControlHandlerTests {
             "tab.close", args: ControlArgs(project: fx.project.name, tab: "tab:1")
         ))
         #expect(response.error?.code == .busy)
-        #expect(fx.state.workspaces[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } == true)
+        #expect(fx.state.liveTabs[fx.project.id]?.tabs.contains { $0.id == fx.tab.id } == true)
     }
 
     @Test
@@ -1526,7 +1526,7 @@ struct ControlHandlerTests {
             "project.remove", args: ControlArgs(project: fx.project.name)
         ))
         #expect(response.error?.code == .busy)
-        #expect(fx.state.workspaces[fx.project.id] != nil)
+        #expect(fx.state.liveTabs[fx.project.id] != nil)
     }
 
     @Test
@@ -1536,7 +1536,7 @@ struct ControlHandlerTests {
             "project.remove", args: ControlArgs(project: fx.project.name)
         ))
         #expect(response.ok)
-        #expect(fx.state.workspaces[fx.project.id] == nil)
+        #expect(fx.state.liveTabs[fx.project.id] == nil)
     }
 
     @Test
@@ -1635,7 +1635,7 @@ struct ControlHandlerTests {
     func pane_zoom_toggles_tab_zoom_state() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         #expect(tab.zoomedPaneID == nil)
 
@@ -1654,7 +1654,7 @@ struct ControlHandlerTests {
         let project = seedProject(appState, projectStore)
         // A horizontal split gives a horizontal-axis branch at the root.
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let focused = try #require(tab.focusedPaneID)
 
         let response = await handler.handle(request(
@@ -1673,7 +1673,7 @@ struct ControlHandlerTests {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let focused = try #require(tab.focusedPaneID).uuidString
 
         let badAxis = await handler.handle(request(
@@ -1699,7 +1699,7 @@ struct ControlHandlerTests {
         // Only a horizontal split exists; asking to resize a vertical split
         // around the pane finds no matching branch.
         appState.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let focused = try #require(tab.focusedPaneID).uuidString
 
         let response = await handler.handle(request(
@@ -1731,7 +1731,7 @@ struct ControlHandlerTests {
     func grid_builds_cells_and_reports_created_panes() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
 
         let response = await handler.handle(request(
             "grid", args: ControlArgs(run: "yes", rows: 2, cols: 2)
@@ -1804,7 +1804,7 @@ struct ControlHandlerTests {
     func pane_password_reads_idle_for_a_pane_without_a_prompt() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
 
         let response = await handler.handle(request("pane.password", args: ControlArgs(pane: pane.id.uuidString)))
@@ -1816,7 +1816,7 @@ struct ControlHandlerTests {
     func pane_password_rejects_an_unknown_answer_and_an_answer_with_no_bubble() async throws {
         let (handler, appState, projectStore) = makeHandler()
         let project = seedProject(appState, projectStore)
-        let tab = try #require(appState.workspaces[project.id]?.activeTab)
+        let tab = try #require(appState.liveTabs[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first).id.uuidString
 
         let unknown = await handler.handle(request("pane.password", args: ControlArgs(pane: pane, answer: "maybe")))

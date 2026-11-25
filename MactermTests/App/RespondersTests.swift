@@ -50,16 +50,16 @@ struct MainAppResponderTests {
         // directory for the new pane from `projectStore.projects`.
         fx.projects.add(project)
         fx.state.selectProject(project)
-        let tab = try #require(fx.state.workspaces[project.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[project.id]?.activeTab)
         #expect(tab.splitRoot.allPanes().count == 1)
 
         #expect(try fx.responder.handle(keyDown(for: .splitDown)) == .handled)
         #expect(tab.splitRoot.allPanes().count == 2)
 
-        _ = fx.state.workspaces[project.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
-        let before = fx.state.workspaces[project.id]?.activeTabID
+        _ = fx.state.liveTabs[project.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
+        let before = fx.state.liveTabs[project.id]?.activeTabID
         #expect(try fx.responder.handle(keyDown(for: .nextTabInProject)) == .handled)
-        #expect(fx.state.workspaces[project.id]?.activeTabID != before)
+        #expect(fx.state.liveTabs[project.id]?.activeTabID != before)
     }
 
     /// A hidden toolbar takes the traffic lights and the window drag with it,

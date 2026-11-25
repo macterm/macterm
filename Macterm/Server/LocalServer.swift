@@ -111,6 +111,17 @@ struct LocalServer {
         }
     }
 
+    /// `connect` with no replacement, blocking the calling thread: the unit
+    /// tests, which run a server of their own in a folder of their own.
+    func connectBlocking() throws -> ServerConnection {
+        do {
+            return try ServerConnection.connect(path: socketPath)
+        } catch ServerClientError.noAnswer {
+            try runServerCommand().get()
+            return try ServerConnection.connect(path: socketPath)
+        }
+    }
+
     private func open() async throws -> ServerConnection {
         let path = socketPath
         return try await withCheckedThrowingContinuation { continuation in

@@ -59,7 +59,7 @@ struct AppStateSessionRestartTests {
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         #expect(command(state, projectStore) == nil)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.splitRoot.allPanes().first)
         state.outdatedSessions = [pane.sessionName]
         #expect(command(state, projectStore) != nil)
     }
@@ -72,7 +72,7 @@ struct AppStateSessionRestartTests {
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         let old = panes[0], kept = panes[1]
@@ -100,7 +100,7 @@ struct AppStateSessionRestartTests {
         state.paneNeedsConfirmClose = { _ in true }
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let old = try #require(tab.splitRoot.allPanes().first)
         state.outdatedSessions = [old.sessionName]
 
@@ -118,7 +118,7 @@ struct AppStateSessionRestartTests {
         let state = makeState()
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         #expect(!state.showsOutdatedSessionBadge(pane))
         state.outdatedSessions = [pane.sessionName]
@@ -135,7 +135,7 @@ struct AppStateSessionRestartTests {
         let project = Project(name: "p", path: "/tmp", sortOrder: 0)
         state.selectProject(project)
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let panes = tab.splitRoot.allPanes()
         state.outdatedSessions = Set(panes.map(\.sessionName))
 

@@ -87,7 +87,7 @@ struct OpenFolderTests {
         let project = try #require(store.projects.first)
         #expect(store.projects.map(\.path) == [ProjectPath.canonicalLocal(dir.path(percentEncoded: false))])
         #expect(state.activeProjectID == project.id)
-        let editor = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let editor = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         #expect(editor.env?[TextFileEditor.fileVariable] == (file.path(percentEncoded: false) as NSString).standardizingPath)
         #expect(editor.start == .typed(TextFileEditor.typedCommand))
     }
@@ -104,7 +104,7 @@ struct OpenFolderTests {
         delegate.application(NSApplication.shared, open: [URL(fileURLWithPath: "/Users/me/scratch/todo.txt")])
 
         #expect(store.projects.map(\.path) == ["/Users/me/scratch"])
-        let editor = try #require(state.workspaces[store.projects[0].id]?.activeTab?.focusedPane)
+        let editor = try #require(state.liveTabs[store.projects[0].id]?.activeTab?.focusedPane)
         #expect(editor.env?[TextFileEditor.fileVariable] == "/Users/me/scratch/todo.txt")
     }
 

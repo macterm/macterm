@@ -187,7 +187,7 @@ struct FilesPaletteScopeTests {
         let context = makeContext(path: root.path)
         let state = context.appState
         let project = try #require(context.projectStore.projects.first)
-        if let ws = state.workspaces[project.id] { ModelWriter.tabReplaceAll(in: ws, with: [], activeTabID: nil) }
+        if let ws = state.liveTabs[project.id] { ModelWriter.tabReplaceAll(in: ws, with: [], activeTabID: nil) }
         #expect(state.focusedPane(for: project.id) == nil)
 
         let src = root.appendingPathComponent("src", isDirectory: true)

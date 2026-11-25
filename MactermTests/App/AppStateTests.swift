@@ -49,7 +49,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.newTabInheritsWorkingDirectory = { true }
         let localProject = seedProject(state, path: "/project")
-        let localWorkspace = try #require(state.workspaces[localProject.id])
+        let localWorkspace = try #require(state.liveTabs[localProject.id])
         let activePane = try #require(localWorkspace.activeTab?.focusedPane)
         SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
@@ -75,7 +75,7 @@ struct AppStateTests {
         // under the project, like every other tab the project owns.
         let state = makeAppState()
         let project = seedProject(state, path: "/project")
-        let workspace = try #require(state.workspaces[project.id])
+        let workspace = try #require(state.liveTabs[project.id])
 
         let tabID = try #require(state.createTab(
             projectID: project.id,
@@ -95,7 +95,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.newTabInheritsWorkingDirectory = { true }
         let remoteProject = seedProject(state, path: "devbox:~/repo")
-        let remoteWorkspace = try #require(state.workspaces[remoteProject.id])
+        let remoteWorkspace = try #require(state.liveTabs[remoteProject.id])
 
         state.createTab(projectID: remoteProject.id, projects: [remoteProject])
 
@@ -108,7 +108,7 @@ struct AppStateTests {
     func creation_preserves_environment_with_either_focus_policy(kind: String, focus: Bool) throws {
         let state = makeAppState()
         let project = seedProject(state)
-        let workspace = try #require(state.workspaces[project.id])
+        let workspace = try #require(state.liveTabs[project.id])
         let originalTab = try #require(workspace.activeTab)
         let source = try #require(originalTab.focusedPane)
         let environment = ["MACTERM_TEST_ENV": "literal $value with spaces"]
@@ -144,7 +144,7 @@ struct AppStateTests {
     func splitPane_adds_pane_and_focuses_it() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let before = tab.focusedPaneID
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         #expect(tab.splitRoot.allPanes().count == 2)
@@ -159,7 +159,7 @@ struct AppStateTests {
         // surface counts as the leader, so a new pane never blurs.
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
 
         #expect(state.isLeader(pane))
@@ -192,7 +192,7 @@ struct AppStateTests {
         path: String = "/tmp"
     ) throws -> TwoWindows {
         let p = seedProject(state, name: "proj", path: path)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         let a = WindowState(activeProjectID: p.id)
         let b = WindowState(activeProjectID: p.id)
@@ -410,7 +410,7 @@ struct AppStateTests {
     func set_tab_title_sets_and_clears_the_custom_title() throws {
         let state = makeAppState()
         let project = seedProject(state, path: "/project")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         state.setTabTitle(tab, title: "build")
         #expect(tab.customTitle == "build")
         state.setTabTitle(tab, title: nil)
@@ -423,7 +423,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.newSplitInheritsWorkingDirectory = { true }
         let project = seedProject(state, path: "/project")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let activePane = try #require(tab.focusedPane)
         SurfaceRegistry.shared.ensureView(of: activePane).currentPwd = "/project/src"
 
@@ -451,7 +451,7 @@ struct AppStateTests {
         state.newSplitInheritsWorkingDirectory = { true }
         let project = seedProject(state, path: "devbox:~/repo")
         state.createTab(projectID: project.id, projectPath: "devbox:~/repo/sub")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         #expect(tab.focusedPane?.projectPath == "devbox:~/repo/sub")
 
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
@@ -467,7 +467,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.newSplitInheritsWorkingDirectory = { false }
         let project = seedProject(state, path: "/project")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let source = try #require(tab.focusedPane)
         SurfaceRegistry.shared.ensureView(of: source).currentPwd = "/project/src"
 
@@ -489,7 +489,7 @@ struct AppStateTests {
     func splitPane_no_focused_pane_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         ModelWriter.tabSetTree(tab, root: tab.splitRoot, focusedPaneID: nil)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         #expect(tab.splitRoot.allPanes().count == 1)
@@ -499,7 +499,7 @@ struct AppStateTests {
     func adaptiveBackgroundColor_updatesOwnedPaneOnly() throws {
         let state = makeAppState()
         let project = seedProject(state)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         let color = CGColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1)
 
         state.setAdaptiveBackgroundColor(color, paneID: pane.id, projectID: project.id)
@@ -522,7 +522,7 @@ struct AppStateTests {
     func closePane_last_pane_closes_the_whole_tab() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let originalTab = try #require(ws.activeTab)
         let onlyPane = try #require(originalTab.focusedPaneID)
         // Add a second tab so closing the original doesn't leave us with zero.
@@ -541,7 +541,7 @@ struct AppStateTests {
     func closePane_middle_pane_removes_from_tree() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         #expect(tab.splitRoot.allPanes().count == 2)
         let target = try #require(tab.focusedPaneID)
@@ -555,7 +555,7 @@ struct AppStateTests {
     func closePane_HV_close_regression() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
 
         // Replace splitRoot with a known HV shape.
         let (tree, ids) = build(H(pane("l1"), V(pane("r1"), pane("r2"))))
@@ -572,7 +572,7 @@ struct AppStateTests {
     func closePane_from_non_active_tab_still_works() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let originalTab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let targetInOriginal = try #require(originalTab.focusedPaneID)
@@ -591,7 +591,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let ws1 = try #require(state.workspaces[p1.id])
+        let ws1 = try #require(state.liveTabs[p1.id])
         // Give p1 a second tab so moving one away doesn't empty it.
         let moving = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let staying = try #require(ws1.tabs.first?.id)
@@ -600,7 +600,7 @@ struct AppStateTests {
 
         // Source lost the tab; destination gained it (object reused, surfaces intact).
         #expect(ws1.tabs.map(\.id) == [staying])
-        let ws2 = try #require(state.workspaces[p2.id])
+        let ws2 = try #require(state.liveTabs[p2.id])
         #expect(ws2.tabs.contains { $0.id == moving.id })
         // Destination is now active with the moved tab selected.
         #expect(state.activeProjectID == p2.id)
@@ -612,29 +612,29 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let ws1 = try #require(state.workspaces[p1.id])
+        let ws1 = try #require(state.liveTabs[p1.id])
         let only = try #require(ws1.tabs.first?.id)
 
         state.moveTab(only, from: p1.id, to: p2.id, destPath: p2.path)
 
         #expect(ws1.tabs.isEmpty)
         #expect(ws1.activeTabID == nil)
-        #expect(state.workspaces[p2.id]?.tabs.contains { $0.id == only } == true)
+        #expect(state.liveTabs[p2.id]?.tabs.contains { $0.id == only } == true)
     }
 
     @Test
     func moveTab_creates_destination_workspace_when_absent() throws {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
-        let ws1 = try #require(state.workspaces[p1.id])
+        let ws1 = try #require(state.liveTabs[p1.id])
         let tab = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         // A project that's never been opened — no workspace yet.
         let p2 = Project(name: "p2", path: "/tmp2", sortOrder: 1)
-        #expect(state.workspaces[p2.id] == nil)
+        #expect(state.liveTabs[p2.id] == nil)
 
         state.moveTab(tab.id, from: p1.id, to: p2.id, destPath: p2.path)
 
-        let ws2 = try #require(state.workspaces[p2.id])
+        let ws2 = try #require(state.liveTabs[p2.id])
         #expect(ws2.tabs.contains { $0.id == tab.id })
     }
 
@@ -642,7 +642,7 @@ struct AppStateTests {
     func moveTab_same_project_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let before = ws.tabs.map(\.id)
         try state.moveTab(#require(before.first), from: p.id, to: p.id, destPath: p.path)
         #expect(ws.tabs.map(\.id) == before)
@@ -653,9 +653,9 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let ws2Before = try #require(state.workspaces[p2.id]).tabs.count
+        let ws2Before = try #require(state.liveTabs[p2.id]).tabs.count
         state.moveTab(UUID(), from: p1.id, to: p2.id, destPath: p2.path)
-        #expect(state.workspaces[p2.id]?.tabs.count == ws2Before)
+        #expect(state.liveTabs[p2.id]?.tabs.count == ws2Before)
     }
 
     // MARK: - Merge a tab into the workspace's active tab (#227)
@@ -664,7 +664,7 @@ struct AppStateTests {
     func mergeTab_at_pane_target_splits_in_zone_direction() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let destTab = try #require(ws.activeTab)
         let destPane = try #require(destTab.splitRoot.allPanes().first?.id)
         let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
@@ -687,7 +687,7 @@ struct AppStateTests {
     func mergeTab_at_rootEdge_equalizes_to_thirds() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let destTab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let sourceTab = ModelWriter.tabCreate(in: ws, projectPath: p.path)
@@ -707,7 +707,7 @@ struct AppStateTests {
     func mergeTab_when_active_tab_is_source_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         state.mergeTab(tab.id, from: p.id, at: .rootEdge(.bottom), inProject: p.id)
         #expect(ws.tabs.count == 1)
@@ -720,7 +720,7 @@ struct AppStateTests {
     func separateTabPanes_gives_each_pane_its_own_tab() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         state.splitPane(direction: .vertical, projectID: p.id, projects: [p])
@@ -743,7 +743,7 @@ struct AppStateTests {
     func separateTabPanes_single_pane_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         state.separateTabPanes(tab.id, projectID: p.id)
         #expect(ws.tabs.count == 1)
@@ -755,7 +755,7 @@ struct AppStateTests {
     func separatePane_splits_the_pane_into_its_own_tab() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         let original = try #require(tab.focusedPaneID)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
@@ -780,7 +780,7 @@ struct AppStateTests {
     func separatePane_at_index_lands_at_that_slot() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let dragged = try #require(tab.focusedPaneID)
@@ -797,8 +797,8 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let ws1 = try #require(state.workspaces[p1.id])
-        let ws2 = try #require(state.workspaces[p2.id])
+        let ws1 = try #require(state.liveTabs[p1.id])
+        let ws2 = try #require(state.liveTabs[p2.id])
         state.selectProject(p1)
         state.splitPane(direction: .horizontal, projectID: p1.id, projects: [p1])
         let sourceTab = try #require(ws1.activeTab)
@@ -821,7 +821,7 @@ struct AppStateTests {
     func separatePane_only_pane_of_its_tab_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         let onlyPane = try #require(tab.focusedPaneID)
         state.separatePane(onlyPane, toProject: p.id, destPath: p.path)
@@ -833,7 +833,7 @@ struct AppStateTests {
     func separatePane_unknown_pane_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         state.separatePane(UUID(), toProject: p.id, destPath: p.path)
         #expect(ws.tabs.count == 1)
     }
@@ -845,11 +845,11 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         let other = seedProject(state, name: "other", path: "/tmp/other")
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let first = try #require(ws.activeTabID)
         let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         // Seed a tab in the sibling project so a leak across projects would show.
-        _ = try #require(state.workspaces[other.id]?.activeTabID)
+        _ = try #require(state.liveTabs[other.id]?.activeTabID)
         state.activeProjectID = p.id
         ModelWriter.tabSelect(first, in: ws)
 
@@ -866,7 +866,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         _ = seedProject(state, name: "other", path: "/tmp/other")
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let first = try #require(ws.activeTabID)
         let second = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         state.activeProjectID = p.id
@@ -884,7 +884,7 @@ struct AppStateTests {
     func selectNextTab_single_tab_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let only = try #require(ws.activeTabID)
         state.selectNextTab(projectID: p.id)
         state.selectPreviousTab(projectID: p.id)
@@ -897,7 +897,7 @@ struct AppStateTests {
     func focusPaneInDirection_right_in_horizontal_split() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
         ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.focusPaneInDirection(.right, projectID: p.id)
@@ -908,7 +908,7 @@ struct AppStateTests {
     func focusPaneInDirection_no_neighbor_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let before = tab.focusedPaneID
         state.focusPaneInDirection(.right, projectID: p.id)
         #expect(tab.focusedPaneID == before)
@@ -918,7 +918,7 @@ struct AppStateTests {
     func cyclePane_forward_advances_in_tree_order() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), V(pane("b"), pane("c"))))
         ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: true, projectID: p.id)
@@ -931,7 +931,7 @@ struct AppStateTests {
     func cyclePane_forward_wraps_at_end() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
         ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["b"])
         state.cyclePane(forward: true, projectID: p.id)
@@ -942,7 +942,7 @@ struct AppStateTests {
     func cyclePane_backward_wraps_at_start() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let (tree, ids) = build(H(pane("a"), pane("b")))
         ModelWriter.tabSetTree(tab, root: tree, focusedPaneID: ids["a"])
         state.cyclePane(forward: false, projectID: p.id)
@@ -953,7 +953,7 @@ struct AppStateTests {
     func cyclePane_single_pane_is_noop() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let before = tab.focusedPaneID
         state.cyclePane(forward: true, projectID: p.id)
         #expect(tab.focusedPaneID == before)
@@ -967,7 +967,7 @@ struct AppStateTests {
         let p = seedProject(state)
         #expect(state.activeProjectID == p.id)
         state.removeProject(p.id)
-        #expect(state.workspaces[p.id] == nil)
+        #expect(state.liveTabs[p.id] == nil)
         #expect(state.activeProjectID == nil)
     }
 
@@ -991,8 +991,8 @@ struct AppStateTests {
         let b = seedProject(state, name: "b", path: "/tmp/shared")
 
         #expect(a.id != b.id)
-        let wsA = try #require(state.workspaces[a.id])
-        let wsB = try #require(state.workspaces[b.id])
+        let wsA = try #require(state.liveTabs[a.id])
+        let wsB = try #require(state.liveTabs[b.id])
         #expect(wsA !== wsB)
 
         // Session names differ despite the shared path: the slug matches but
@@ -1013,9 +1013,9 @@ struct AppStateTests {
 
         state.removeProjects([p1.id, p3.id])
 
-        #expect(state.workspaces[p1.id] == nil)
-        #expect(state.workspaces[p3.id] == nil)
-        #expect(state.workspaces[p2.id] != nil)
+        #expect(state.liveTabs[p1.id] == nil)
+        #expect(state.liveTabs[p3.id] == nil)
+        #expect(state.liveTabs[p2.id] != nil)
     }
 
     @Test
@@ -1023,7 +1023,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state)
         state.removeProjects([])
-        #expect(state.workspaces[p.id] != nil)
+        #expect(state.liveTabs[p.id] != nil)
         #expect(state.activeProjectID == p.id)
     }
 
@@ -1032,8 +1032,8 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let ws1 = try #require(state.workspaces[p1.id])
-        let ws2 = try #require(state.workspaces[p2.id])
+        let ws1 = try #require(state.liveTabs[p1.id])
+        let ws2 = try #require(state.liveTabs[p2.id])
         // Two tabs in each so closing one doesn't empty the workspace.
         let close1 = ModelWriter.tabCreate(in: ws1, projectPath: "/tmp1")
         let keep1 = try #require(ws1.tabs.first?.id)
@@ -1053,7 +1053,7 @@ struct AppStateTests {
     func requestRemoveSelection_of_tabs_runs_removal_immediately_when_no_pane_busy() throws {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
-        let tab = try #require(state.workspaces[p1.id]?.tabs.first)
+        let tab = try #require(state.liveTabs[p1.id]?.tabs.first)
         // No pane ever gets an NSView in tests, so nothing is "busy" — the
         // removal must run inline rather than staging a confirmation.
         var ran = false
@@ -1099,9 +1099,9 @@ struct AppStateTests {
         let state = makeAppState()
         let source = seedProject(state, name: "source", path: "/tmp/source")
         let target = seedProject(state, name: "target", path: "/tmp/target")
-        let ws = try #require(state.workspaces[target.id])
+        let ws = try #require(state.liveTabs[target.id])
         _ = ModelWriter.tabCreate(in: ws, projectPath: target.path)
-        let moved = try #require(state.workspaces[source.id]?.tabs.first)
+        let moved = try #require(state.liveTabs[source.id]?.tabs.first)
 
         // The sidebar drop at the line above a nested project sends the
         // target's tab count as the slot.
@@ -1118,7 +1118,7 @@ struct AppStateTests {
         _ = store.create(name: "grandchild", path: "/tmp/grandchild", parent: child.id)
         state.selectProject(parent)
         state.selectProject(child)
-        let ws = try #require(state.workspaces[child.id])
+        let ws = try #require(state.liveTabs[child.id])
         _ = ModelWriter.tabCreate(in: ws, projectPath: child.path)
 
         state.requestRemoveProject(parent.id, store: store)
@@ -1130,8 +1130,8 @@ struct AppStateTests {
 
         state.confirmPendingDialog()
         #expect(store.projects.isEmpty, "Remove removes every project inside")
-        #expect(state.workspaces[parent.id] == nil)
-        #expect(state.workspaces[child.id] == nil)
+        #expect(state.liveTabs[parent.id] == nil)
+        #expect(state.liveTabs[child.id] == nil)
     }
 
     @Test
@@ -1199,7 +1199,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.isAppActive = { true }
         let project = seedProject(state)
-        let background = try #require(state.workspaces[project.id]?.activeTab)
+        let background = try #require(state.liveTabs[project.id]?.activeTab)
         state.createTab(projectID: project.id, projects: [project])
         let pane = try #require(background.focusedPane)
         pane.receiveAttention(unseenFailure)
@@ -1218,7 +1218,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         _ = seedProject(state, name: "p2", path: "/tmp2")
-        let pane = try #require(state.workspaces[p1.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[p1.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
 
         state.selectProject(p1)
@@ -1232,7 +1232,7 @@ struct AppStateTests {
         state.paneIsInKeyWindow = { _ in true }
         state.isAppActive = { false }
         let project = seedProject(state)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
 
         state.paneAttentionDidChange(paneID: pane.id)
@@ -1252,7 +1252,7 @@ struct AppStateTests {
         state.isAppActive = { true }
         state.paneIsInKeyWindow = { _ in false }
         let project = seedProject(state)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
 
         state.paneAttentionDidChange(paneID: pane.id)
@@ -1326,7 +1326,7 @@ struct AppStateTests {
         let state = makeAppState(store: store)
         state.isAppActive = { false }
         let project = seedProject(state)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
         #expect(pane.executionState == .done)
         state.persistState()
@@ -1358,7 +1358,7 @@ struct AppStateTests {
     func renameTabContaining_targets_the_panes_tab() async throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let paneID = try #require(tab.splitRoot.allPanes().first?.id)
         state.sidebarVisible = false
 
@@ -1391,7 +1391,7 @@ struct AppStateTests {
     func setTabTitleContaining_sets_and_clears_customTitle() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let paneID = try #require(tab.splitRoot.allPanes().first?.id)
 
         state.setTabTitle(containing: paneID, projectID: p.id, title: "deploy")
@@ -1443,7 +1443,7 @@ struct AppStateTests {
     func requestClosePane_without_running_process_closes_immediately() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let target = try #require(tab.focusedPaneID)
         // No GhosttyTerminalNSView is ever created in tests, so needsConfirmQuit is false.
@@ -1460,7 +1460,7 @@ struct AppStateTests {
     private func plainShellTab(answer: Bool?) throws -> (state: AppState, project: Project, tab: TerminalTab, target: UUID) {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let target = try #require(tab.focusedPaneID)
         state.paneNeedsConfirmClose = { _ in true }
@@ -1681,7 +1681,7 @@ struct AppStateTests {
         let project = Project(name: "declared", path: dir.path, sortOrder: 0)
         state.selectProject(project)
 
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs.count == 1)
         #expect(ws.tabs[0].customTitle == nil)
         #expect(ws.tabs[0].splitRoot.allPanes().count == 1)
@@ -1705,7 +1705,7 @@ struct AppStateTests {
         state.selectProject(project)
 
         #expect(state.pendingDialog == nil)
-        #expect(state.workspaces[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
+        #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
         // Nothing is written on open — files appear only on explicit Save Layout.
         #expect(files.find(forProjectPath: dir.path) == nil)
     }
@@ -1731,7 +1731,7 @@ struct AppStateTests {
         state.selectProject(project)
 
         #expect(state.pendingDialog == nil)
-        #expect(state.workspaces[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
+        #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
 
         state.applyLayoutPresentingError(project)
 
@@ -1751,14 +1751,14 @@ struct AppStateTests {
 
         let project = Project(name: "Existing", path: dir.path, sortOrder: 0)
         state.selectProject(project)
-        #expect(state.workspaces[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
+        #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
 
         state.applyLayoutPresentingError(project)
 
         #expect(state.pendingDialog?.kind == .layoutError(verb: .apply))
         #expect(files.find(forProjectPath: dir.path) == nil)
         // The live workspace is untouched by a failed apply.
-        #expect(state.workspaces[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
+        #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
     }
 
     // MARK: - Action toasts
@@ -2054,8 +2054,8 @@ struct AppStateTests {
         state.selectProject(project)
 
         // No layout file → default single-pane workspace.
-        #expect(state.workspaces[project.id]?.tabs.count == 1)
-        #expect(state.workspaces[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
+        #expect(state.liveTabs[project.id]?.tabs.count == 1)
+        #expect(state.liveTabs[project.id]?.tabs[0].splitRoot.allPanes().count == 1)
     }
 
     @Test
@@ -2096,7 +2096,7 @@ struct AppStateTests {
         state.restoreSelection(projects: [project])
 
         // Restored snapshot wins: one pane, file NOT applied, NO prompt.
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs[0].splitRoot.allPanes().count == 1)
         #expect(ws.tabs[0].customTitle != "Dev")
         #expect(state.pendingDialog == nil)
@@ -2131,7 +2131,7 @@ struct AppStateTests {
         let state = makeAppState(store: store, projectFiles: files)
         state.restoreSelection(projects: [project])
 
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         #expect(ws.tabs.count == 1)
         #expect(ws.tabs[0].customTitle == nil)
         #expect(ws.tabs[0].splitRoot.allPanes().count == 1)
@@ -2159,8 +2159,8 @@ struct AppStateTests {
         state.restoreSelection(projects: [project, group])
 
         #expect(state.activeProjectID == nil)
-        #expect(state.workspaces[project.id]?.tabs.count == 1)
-        #expect(state.workspaces[group.id] == nil)
+        #expect(state.liveTabs[project.id]?.tabs.count == 1)
+        #expect(state.liveTabs[group.id] == nil)
     }
 
     @Test
@@ -2177,8 +2177,8 @@ struct AppStateTests {
         let project = projects.create(name: "fresh", path: "/tmp")
         let group = projects.add(Project(name: "Work", path: ""))
 
-        #expect(state.workspaces[project.id]?.tabs.count == 1)
-        #expect(state.workspaces[group.id] == nil)
+        #expect(state.liveTabs[project.id]?.tabs.count == 1)
+        #expect(state.liveTabs[group.id] == nil)
         #expect(state.activeProjectID == nil)
     }
 
@@ -2195,15 +2195,15 @@ struct AppStateTests {
 
         let first = makeAppState(store: store)
         first.selectProject(project)
-        let tabID = try #require(first.workspaces[project.id]?.tabs.first?.id)
+        let tabID = try #require(first.liveTabs[project.id]?.tabs.first?.id)
         first.closeTab(tabID, projectID: project.id)
-        #expect(first.workspaces[project.id]?.tabs.isEmpty == true)
+        #expect(first.liveTabs[project.id]?.tabs.isEmpty == true)
 
         let relaunched = makeAppState(store: store)
         relaunched.restoreSelection(projects: [project])
         relaunched.selectProject(project)
 
-        let ws = try #require(relaunched.workspaces[project.id])
+        let ws = try #require(relaunched.liveTabs[project.id])
         #expect(ws.tabs.isEmpty)
         #expect(ws.activeTabID == nil)
     }
@@ -2213,7 +2213,7 @@ struct AppStateTests {
         let files = makeProjectFileStore()
         let state = makeAppState(projectFiles: files)
         let (p, root) = seedProjectWithDir(state)
-        let beforeTabIDs = try #require(state.workspaces[p.id]).tabs.map(\.id)
+        let beforeTabIDs = try #require(state.liveTabs[p.id]).tabs.map(\.id)
 
         // Invalid: a `split` mapping missing its `second` child.
         writeProjectFile("path: \(root)\ntabs:\n  - split: { direction: horizontal, first: {} }\n", in: files)
@@ -2221,7 +2221,7 @@ struct AppStateTests {
 
         #expect(error != nil)
         // Workspace is untouched — same tabs, nothing spawned or closed.
-        #expect(state.workspaces[p.id]?.tabs.map(\.id) == beforeTabIDs)
+        #expect(state.liveTabs[p.id]?.tabs.map(\.id) == beforeTabIDs)
         #expect(state.pendingDialog == nil)
     }
 
@@ -2229,12 +2229,12 @@ struct AppStateTests {
     func applyLayout_missing_file_returns_error_and_does_not_apply() throws {
         let state = makeAppState()
         let (p, _) = seedProjectWithDir(state)
-        let beforeTabIDs = try #require(state.workspaces[p.id]).tabs.map(\.id)
+        let beforeTabIDs = try #require(state.liveTabs[p.id]).tabs.map(\.id)
 
         let error = state.applyLayout(project: p)
 
         #expect(error != nil)
-        #expect(state.workspaces[p.id]?.tabs.map(\.id) == beforeTabIDs)
+        #expect(state.liveTabs[p.id]?.tabs.map(\.id) == beforeTabIDs)
         #expect(state.pendingDialog == nil)
     }
 
@@ -2245,13 +2245,13 @@ struct AppStateTests {
         let files = makeProjectFileStore()
         let state = makeAppState(projectFiles: files)
         let (p, root) = seedProjectWithDir(state)
-        let beforeTabIDs = try #require(state.workspaces[p.id]).tabs.map(\.id)
+        let beforeTabIDs = try #require(state.liveTabs[p.id]).tabs.map(\.id)
 
         writeProjectFile("name: bare\npath: \(root)\n", in: files)
         let error = state.applyLayout(project: p)
 
         #expect(error != nil)
-        #expect(state.workspaces[p.id]?.tabs.map(\.id) == beforeTabIDs)
+        #expect(state.liveTabs[p.id]?.tabs.map(\.id) == beforeTabIDs)
         #expect(state.pendingDialog == nil)
     }
 
@@ -2293,7 +2293,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p = Project(name: "parent", path: "", sortOrder: 0)
         state.selectProject(p)
-        let pane = try #require(state.workspaces[p.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[p.id]?.activeTab?.focusedPane)
         #expect(pane.projectPath == ScratchTabs.fallbackRoot)
     }
 
@@ -2375,7 +2375,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.isAppActive = { false }
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
-        let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
+        let pane = try #require(state.liveTabs[p.id]?.activeTab?.splitRoot.allPanes().first)
         pane.receiveSessionStatus(MactermProtocol.Status(state: .running))
         state.settleAllPanes()
         #expect(pane.executionState == .running)
@@ -2409,13 +2409,13 @@ struct AppStateTests {
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let names = Set(tab.splitRoot.allPanes().map(\.sessionName))
         #expect(names.count == 2)
 
         // Second tab so the close leaves a valid workspace.
-        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
+        _ = state.liveTabs[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
         state.closeTab(tab.id, projectID: p.id)
 
         await killed.settle(expecting: names.count)
@@ -2431,7 +2431,7 @@ struct AppStateTests {
         state.sessionClient = recordingClient(into: killed)
         state.paneNeedsConfirmClose = { _ in true }
         let p = seedProject(state)
-        let pane = try #require(state.workspaces[p.id]?.activeTab?.splitRoot.allPanes().first)
+        let pane = try #require(state.liveTabs[p.id]?.activeTab?.splitRoot.allPanes().first)
         #expect(state.closeNeedsConfirmation([pane]))
 
         state.pendingPinnedLiveRestores[UUID()] = TabSnapshot(
@@ -2456,7 +2456,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed, remoteInto: remoteKilled)
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let target = try #require(tab.focusedPaneID)
         let targetName = try #require(tab.splitRoot.findPane(id: target)?.sessionName)
@@ -2489,7 +2489,7 @@ struct AppStateTests {
         state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let target = try #require(tab.focusedPaneID)
         let name = try #require(tab.splitRoot.findPane(id: target)?.sessionName)
 
@@ -2510,14 +2510,14 @@ struct AppStateTests {
         let state = makeAppState()
         let p = seedProject(state, name: "remote", path: "devbox:~/dev/api")
         // A second tab so the close leaves a valid workspace shape.
-        _ = state.workspaces[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        _ = state.liveTabs[p.id].map { ModelWriter.tabCreate(in: $0, projectPath: "devbox:~/dev/api") }
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         state.sessionClient = remoteKillRecordingClient(remoteKilled)
 
         state.handleProcessExit(pane.id, projectID: p.id)
 
-        #expect(state.workspaces[p.id]?.tabs.allSatisfy { $0.splitRoot.findPane(id: pane.id) == nil } == true)
+        #expect(state.liveTabs[p.id]?.tabs.allSatisfy { $0.splitRoot.findPane(id: pane.id) == nil } == true)
         await remoteKilled.settle(expecting: 1)
         #expect(await remoteKilled.names == [pane.sessionName])
     }
@@ -2528,7 +2528,7 @@ struct AppStateTests {
         let state = makeAppState()
         state.sessionClient = recordingClient(into: killed)
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         state.splitPane(direction: .horizontal, projectID: p.id, projects: [p])
         let target = try #require(tab.focusedPaneID)
         let targetName = try #require(tab.splitRoot.findPane(id: target)?.sessionName)
@@ -2546,7 +2546,7 @@ struct AppStateTests {
         state.sessionClient = recordingClient(into: killed)
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let moving = try #require(state.workspaces[p1.id]?.tabs.first?.id)
+        let moving = try #require(state.liveTabs[p1.id]?.tabs.first?.id)
 
         state.moveTab(moving, from: p1.id, to: p2.id, destPath: p2.path)
 
@@ -2559,7 +2559,7 @@ struct AppStateTests {
         let state = makeAppState()
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
-        let tab = try #require(state.workspaces[p1.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p1.id]?.activeTab)
         // Split so the moved tab carries more than one pane to restamp.
         state.splitPane(direction: .horizontal, projectID: p1.id, projects: [p1])
         let panes = tab.splitRoot.allPanes()
@@ -2584,16 +2584,16 @@ struct AppStateTests {
         let p1 = seedProject(state, name: "p1", path: "/tmp1")
         let p2 = seedProject(state, name: "p2", path: "/tmp2")
         // Give p2 two tabs so there's a middle slot to drop into.
-        let dest = try #require(state.workspaces[p2.id])
+        let dest = try #require(state.liveTabs[p2.id])
         let d0 = dest.tabs[0].id
         let d1 = ModelWriter.tabCreate(in: dest, projectPath: p2.path).id
-        let moving = try #require(state.workspaces[p1.id]?.activeTab)
+        let moving = try #require(state.liveTabs[p1.id]?.activeTab)
 
         state.moveTab(moving.id, from: p1.id, to: p2.id, destPath: p2.path, toIndex: 1)
 
         #expect(dest.tabs.map(\.id) == [d0, moving.id, d1])
         #expect(dest.activeTabID == moving.id)
-        #expect(state.workspaces[p1.id]?.tabs.contains { $0.id == moving.id } == false)
+        #expect(state.liveTabs[p1.id]?.tabs.contains { $0.id == moving.id } == false)
     }
 
     @Test
@@ -2605,7 +2605,7 @@ struct AppStateTests {
         let storeURL = dir.appendingPathComponent("workspaces.json")
         let state = makeAppState(store: WorkspaceStore(fileURL: storeURL))
         let p = seedProject(state, name: "p", path: "/tmp")
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let t1 = ws.tabs[0].id
         let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
 
@@ -2622,7 +2622,7 @@ struct AppStateTests {
     func moveActiveTab_steps_one_place_and_stops_at_the_ends() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let t1 = ws.tabs[0].id
         let t2 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
         let t3 = ModelWriter.tabCreate(in: ws, projectPath: p.path).id
@@ -2650,7 +2650,7 @@ struct AppStateTests {
     func movePane_commands_swap_the_focused_pane_and_hide_without_a_neighbor() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let tab = try #require(state.workspaces[p.id]?.activeTab)
+        let tab = try #require(state.liveTabs[p.id]?.activeTab)
         let ctx = AppCommandContext(appState: state, projectStore: ProjectStore(
             fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("macterm-tests-move-\(UUID().uuidString).json")
@@ -2674,7 +2674,7 @@ struct AppStateTests {
     func requestCloseTab_with_idle_panes_closes_immediately() throws {
         let state = makeAppState()
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
@@ -2696,7 +2696,7 @@ struct AppStateTests {
         #expect(state.pendingDialog?.kind == .removeProject(p.id))
         state.confirmPendingDialog()
         #expect(store.row(p.id) == nil)
-        #expect(state.workspaces[p.id] == nil)
+        #expect(state.liveTabs[p.id] == nil)
     }
 
     @Test
@@ -2705,7 +2705,7 @@ struct AppStateTests {
         // Every pane reads busy, so the close stages instead of running.
         state.paneNeedsConfirmClose = { _ in true }
         let p = seedProject(state)
-        let ws = try #require(state.workspaces[p.id])
+        let ws = try #require(state.liveTabs[p.id])
         let tab = try #require(ws.activeTab)
         _ = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
 
@@ -2748,7 +2748,7 @@ struct AppStateTests {
 
             let state = makeAppState()
             let project = seedProject(state)
-            let workspace = try #require(state.workspaces[project.id])
+            let workspace = try #require(state.liveTabs[project.id])
             for _ in 0 ..< 5 {
                 state.createTab(projectID: project.id, projects: [project])
             }
@@ -2773,7 +2773,7 @@ struct AppStateTests {
 
         let state = makeAppState()
         let project = seedProject(state)
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)
@@ -2805,7 +2805,7 @@ struct AppStateTests {
 
         let state = makeAppState()
         let project = seedProject(state)
-        let ws = try #require(state.workspaces[project.id])
+        let ws = try #require(state.liveTabs[project.id])
         let first = try #require(ws.activeTab?.focusedPane)
         state.createTab(projectID: project.id, projects: [project])
         let second = try #require(ws.activeTab?.focusedPane)

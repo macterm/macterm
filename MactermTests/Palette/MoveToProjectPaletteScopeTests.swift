@@ -151,7 +151,7 @@ struct MoveToProjectPaletteScopeTests {
         let tab = try makeTab(f, in: f.moving)
         f.state.pinTab(tab, fromProject: f.moving.id)
         #expect(f.state.moveNode(.tab(projectID: PinnedTabs.workspaceID, tabID: tab), to: f.api, store: f.store, in: nil))
-        #expect(f.state.workspaces[f.api.id]?.tabs.contains { $0.id == tab } == true)
+        #expect(f.state.liveTabs[f.api.id]?.tabs.contains { $0.id == tab } == true)
         #expect(f.state.pinnedRecord(tab) == nil)
     }
 
@@ -168,8 +168,8 @@ struct MoveToProjectPaletteScopeTests {
         let tab = try makeTab(f, in: f.moving)
         let window = WindowState()
         #expect(f.state.moveNode(.tab(projectID: f.moving.id, tabID: tab), to: f.api, store: f.store, in: window))
-        #expect(f.state.workspaces[f.api.id]?.tabs.contains { $0.id == tab } == true)
-        #expect(f.state.workspaces[f.moving.id]?.tabs.contains { $0.id == tab } != true)
+        #expect(f.state.liveTabs[f.api.id]?.tabs.contains { $0.id == tab } == true)
+        #expect(f.state.liveTabs[f.moving.id]?.tabs.contains { $0.id == tab } != true)
         #expect(window.expandedRows.isSuperset(of: [f.api.id, f.work.id]))
         #expect(!f.state.moveNode(.tab(projectID: f.api.id, tabID: tab), to: f.api, store: f.store, in: window), "not into its own project")
     }

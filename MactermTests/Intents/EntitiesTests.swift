@@ -81,7 +81,7 @@ struct EntitiesTests {
         // Pinning is what brings the sentinel workspace into being; tab and
         // pane actions work there like anywhere else, so it has to be
         // addressable.
-        let tab = try #require(appState.workspaces[projectStore.projects[0].id]?.tabs.first)
+        let tab = try #require(appState.liveTabs[projectStore.projects[0].id]?.tabs.first)
         appState.pinTab(tab.id, fromProject: projectStore.projects[0].id)
 
         let listed = try await MactermProjectQuery().allEntities()
@@ -103,8 +103,8 @@ struct EntitiesTests {
         // picker between openings.
         #expect(listed.count == 2)
         #expect(listed.map(\.project) == ["api", "web"])
-        #expect(appState.workspaces[api.id]?.tabs.count == 1)
-        #expect(appState.workspaces[web.id]?.tabs.count == 1)
+        #expect(appState.liveTabs[api.id]?.tabs.count == 1)
+        #expect(appState.liveTabs[web.id]?.tabs.count == 1)
     }
 
     @Test
@@ -112,7 +112,7 @@ struct EntitiesTests {
         let (appState, projectStore) = makeHost()
         _ = seedProject(appState, projectStore, name: "api")
         let web = seedProject(appState, projectStore, name: "web")
-        let tab = try #require(appState.workspaces[web.id]?.tabs.first)
+        let tab = try #require(appState.liveTabs[web.id]?.tabs.first)
 
         let resolved = try IntentTargets.tab(tab.id, in: AppCommandContext(
             appState: appState,
@@ -135,7 +135,7 @@ struct EntitiesTests {
 
         #expect(listed.count == 2)
         #expect(listed.first?.project == "api")
-        #expect(listed.first?.id == appState.workspaces[api.id]?.tabs.first?
+        #expect(listed.first?.id == appState.liveTabs[api.id]?.tabs.first?
             .splitRoot.allPanes().first?.sessionName)
     }
 
@@ -143,7 +143,7 @@ struct EntitiesTests {
     func a_pane_matches_on_its_session_name_as_well_as_its_title() async throws {
         let (appState, projectStore) = makeHost()
         let api = seedProject(appState, projectStore, name: "api")
-        let pane = try #require(appState.workspaces[api.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[api.id]?.tabs.first?.splitRoot.allPanes().first)
 
         // A script already holding `$MACTERM_SESSION` should be able to paste
         // it into a Shortcuts field.
@@ -156,7 +156,7 @@ struct EntitiesTests {
     func a_pane_resolves_by_session_name_and_an_unknown_one_is_empty() async throws {
         let (appState, projectStore) = makeHost()
         let api = seedProject(appState, projectStore, name: "api")
-        let pane = try #require(appState.workspaces[api.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[api.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let found = try await MactermPaneQuery().entities(for: [pane.sessionName])
         let missing = try await MactermPaneQuery().entities(for: ["macterm-gone-dead"])

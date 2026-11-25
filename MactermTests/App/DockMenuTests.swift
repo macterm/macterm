@@ -133,13 +133,13 @@ struct DockMenuTests {
         let delegate = makeDelegate(appState: state, projectStore: store)
         var windowRequests = 0
         delegate.openInitialWindow = { windowRequests += 1 }
-        let before = try #require(state.workspaces[project.id]?.tabs.count)
+        let before = try #require(state.liveTabs[project.id]?.tabs.count)
 
         delegate.performDockMenuCommand(.newTab)
 
         // With no window at all (#241), the pick asks for one — the tab it
         // makes has to render somewhere — and still creates the tab.
-        let after = state.workspaces[project.id]?.tabs.count
+        let after = state.liveTabs[project.id]?.tabs.count
         #expect(windowRequests == 1)
         #expect(after == before + 1)
     }

@@ -122,7 +122,7 @@ struct BellBadgeAppStateTests {
     }
 
     private func ringingPane(_ state: AppState, _ project: Project) throws -> Pane {
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(MactermProtocol.Attention(bell: true))
         return pane
     }
@@ -143,9 +143,9 @@ struct BellBadgeAppStateTests {
     @Test
     func a_bell_in_a_background_tab_badges_and_clears_when_that_tab_is_selected() throws {
         let (state, recorder, project) = makeAppState(appActive: true)
-        let background = try #require(state.workspaces[project.id]?.activeTab)
+        let background = try #require(state.liveTabs[project.id]?.activeTab)
         state.createTab(projectID: project.id, projects: [project])
-        let foreground = try #require(state.workspaces[project.id]?.activeTab)
+        let foreground = try #require(state.liveTabs[project.id]?.activeTab)
         #expect(foreground.id != background.id)
 
         let pane = try #require(background.focusedPane)

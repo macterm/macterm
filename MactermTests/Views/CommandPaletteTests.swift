@@ -180,7 +180,7 @@ struct CommandPaletteTests {
     func tab_rename_from_a_palette_row_by_return_selects_the_name() async throws {
         let h = try await makeHarness()
         defer { h.close() }
-        let name = try #require(h.state.workspaces[h.project.id]?.activeTab?.sidebarTitle)
+        let name = try #require(h.state.liveTabs[h.project.id]?.activeTab?.sidebarTitle)
         try await type("rename current tab", in: h)
         pressReturn(in: h)
         await expectSelected(name, on: .renameTab, in: h)
@@ -192,7 +192,7 @@ struct CommandPaletteTests {
     func tab_rename_from_a_palette_row_by_click_selects_the_name() async throws {
         let h = try await makeHarness()
         defer { h.close() }
-        let name = try #require(h.state.workspaces[h.project.id]?.activeTab?.sidebarTitle)
+        let name = try #require(h.state.liveTabs[h.project.id]?.activeTab?.sidebarTitle)
         try await type("rename current tab", in: h)
         try clickFirstRow(in: h)
         await expectSelected(name, on: .renameTab, in: h)
