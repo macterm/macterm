@@ -41,6 +41,21 @@ struct DirectorySourceTests {
         #expect(!PaletteQuery(raw: "apply layout").looksLikePath)
     }
 
+    // MARK: - The folder row (`PathRow`)
+
+    @Test
+    func a_folder_row_has_the_folder_name_and_open_as_new_project_with_the_full_path() throws {
+        let (ctx, _, _) = makeContext()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-dir-row-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("api"), withIntermediateDirectories: true)
+        let items = DirectorySource().items(query: dir.path + "/a", context: ctx)
+        let row = try #require(items.first)
+        #expect(row.title == "api")
+        #expect(row.subtitle == "Open as new project: \(dir.path)/api", "the text of the root palette's row is the same as before")
+        #expect(row.subtitleIsPath)
+    }
+
     // MARK: - Remote items
 
     @Test

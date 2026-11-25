@@ -58,7 +58,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case explainOutput
     case autofillPassword
     // Projects
-    case openProject
+    case newProject
     case newRemoteProject
     case renameProject
     case removeProject
@@ -93,9 +93,19 @@ enum AppCommand: String, CaseIterable, Identifiable {
     var englishTitle: String { Self.englishTitles[self] ?? rawValue }
 
     /// What a search matches besides `title`: the English title, when the
-    /// shown title is a translation.
+    /// shown title is a translation, and the earlier English names of a
+    /// renamed command.
     var searchAliases: [String] {
-        englishTitle == title ? [] : [englishTitle]
+        (englishTitle == title ? [] : [englishTitle]) + formerTitles
+    }
+
+    /// The English names that a command had before, so that a search for
+    /// them still finds it.
+    private var formerTitles: [String] {
+        switch self {
+        case .newProject: ["Open Project", "Add Project"]
+        default: []
+        }
     }
 
     /// Resolved one time: the English text never changes while the app runs,
@@ -149,7 +159,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .explainOutput: "Explain Output"
         case .autofillPassword: "Autofill Password"
         case .passwordManager: "Password Manager"
-        case .openProject: "Open Project"
+        case .newProject: "New Project"
         case .newRemoteProject: "New Remote Project"
         case .renameProject: "Rename Current Project"
         case .removeProject: "Remove Current Project"
@@ -222,7 +232,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
              .restartSession,
              .explainOutput,
              .autofillPassword: .panes
-        case .openProject,
+        case .newProject,
              .newRemoteProject,
              .renameProject,
              .removeProject,
@@ -283,7 +293,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .movePaneRight: .movePaneRight
         case .movePaneUp: .movePaneUp
         case .movePaneDown: .movePaneDown
-        case .openProject: .openProject
+        case .newProject: .openProject
         case .nextProject: .nextProject
         case .previousProject: .previousProject
         case .toggleSidebar: .toggleSidebar
@@ -326,6 +336,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         switch self {
         case .passwordManager: .passwords
         case .files: .files
+        case .newProject: .input(.newProject)
         default: nil
         }
     }

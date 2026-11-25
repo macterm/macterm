@@ -15,11 +15,11 @@ struct InputPaletteScopeTests {
     private func makeInput(log: Log, completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] }) -> PaletteInput {
         PaletteInput(
             id: "test.folder-name",
-            pill: PalettePill(title: "New Folder", icon: "folder.badge.plus"),
+            title: "New Folder",
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
-        ) { text in
+        ) { text, _ in
             let name = text.trimmingCharacters(in: .whitespaces)
             if name.isEmpty { return .nothing }
             if name.contains("/") { return .notice("A name cannot contain a slash.") }
@@ -57,7 +57,8 @@ struct InputPaletteScopeTests {
         let input = makeInput(log: Log())
         let frame = PaletteFrame(.input(input))
         let scope = try #require(frame.scope as? InputPaletteScope)
-        #expect(frame.pill == input.pill)
+        #expect(frame.pill == PalettePill(title: "New Folder"))
+        #expect(frame.pill.icon == nil, "an input screen's pill has no icon")
         #expect(scope.placeholder == "Folder name")
         #expect(scope.initialQuery == "untitled")
         #expect(PaletteScopeID.input(input).command == nil)
@@ -103,9 +104,92 @@ struct InputPaletteScopeTests {
         #expect(rows(scope, "ab").count == 1)
         #expect(scope.failure == nil, "an edit clears it")
 
-        #expect(rows(scope, "").isEmpty, "an empty field has no row")
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.cancelItemID], "an empty field has only the Cancel row")
         #expect(scope.failure == nil, "and no notice")
         #expect(log.committed.isEmpty)
+    }
+
+    @Test
+    func an_empty_field_has_a_cancel_row_last_that_leaves_the_screen() throws {
+        let log = Log()
+        let scope = InputPaletteScope(input: makeInput(log: log) { _ in
+            [PaletteCompletion(title: "Select in Finder", value: "~/")]
+        })
+        let items = rows(scope, "")
+        #expect(items.map(\.title) == ["Select in Finder", "Cancel"])
+        let cancel = try #require(items.last)
+        #expect(!scope.isAction(cancel))
+        #expect(scope.completion(for: cancel) == nil)
+        #expect(scope.restingItemID == InputPaletteScope.cancelItemID, "with no action row, Return on an empty field cancels")
+        #expect(scope.press(cancel) == .cancelled)
+        #expect(scope.press(items[0]) == .fill("~/"), "another selected row is not the Cancel row")
+        #expect(log.committed.isEmpty)
+
+        let typed = rows(scope, "notes")
+        #expect(!typed.contains { $0.id == InputPaletteScope.cancelItemID }, "text hides the Cancel row")
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "the action row is the resting row")
+        #expect(scope.press(cancel) != .cancelled, "a stale Cancel row does nothing once there is text")
+
+        #expect(rows(scope, "a/b").allSatisfy { $0.id != InputPaletteScope.cancelItemID })
+        #expect(scope.restingItemID == nil, "no row rests for a value that is not valid")
+    }
+
+    @Test
+    func a_choice_row_is_the_action_and_tab_fills_its_value() throws {
+        var ran: [String] = []
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.choices",
+            title: "Pick",
+            prompt: "Pick",
+            choices: { text, _ in
+                (text == "*" ? ["alpha", "beta"] : []).map { name in
+                    PaletteInputChoice(item: PaletteItem(id: "pick:\(name)", title: name) { ran.append(name) }, value: name + "/")
+                }
+            },
+            check: { _, _ in .nothing }
+        ))
+        let listed = rows(scope, "*")
+        #expect(listed.map(\.title) == ["alpha", "beta"])
+        #expect(scope.restingItemID == "pick:alpha", "the selection rests on the first choice")
+        let beta = try #require(listed.last)
+        #expect(scope.isChoice(beta))
+        #expect(scope.completion(for: beta) == "beta/", "Tab fills the value")
+        #expect(scope.press(beta) == .closed)
+        #expect(ran == ["beta"], "Return or a click runs the selected choice only")
+
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.cancelItemID], "no choice: Cancel rests")
+        #expect(scope.restingItemID == InputPaletteScope.cancelItemID)
+    }
+
+    @Test
+    func tab_skips_a_value_that_the_field_has_and_an_action_row_rests_before_a_choice() {
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.tab",
+            title: "Pick",
+            prompt: "Pick",
+            choices: { _, _ in
+                ["a/", "a/b/"].map { PaletteInputChoice(item: PaletteItem(id: "pick:\($0)", title: $0) {}, value: $0) }
+            },
+            check: { _, _ in .action(PaletteInputAction(title: "Use") { .done }) }
+        ))
+        let listed = rows(scope, "a/")
+        #expect(listed.first?.id == InputPaletteScope.actionItemID, "the action row comes first")
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "and the selection rests on it")
+        #expect(!listed.contains { $0.id == InputPaletteScope.cancelItemID }, "text hides Cancel")
+        #expect(scope.tabText(selected: listed[1], rows: listed) == "a/b/", "the field has a/, so Tab takes the next value")
+        #expect(scope.tabText(selected: listed[2], rows: listed) == "a/b/")
+    }
+
+    @Test
+    func an_empty_field_with_an_action_row_rests_on_the_action_row() {
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.empty-action",
+            title: "Here",
+            prompt: "Folder",
+            check: { _, _ in .action(PaletteInputAction(title: "Current Pane's Directory") { .done }) }
+        ))
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.actionItemID, InputPaletteScope.cancelItemID])
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "Cancel is selected only when no other row is")
     }
 
     @Test
@@ -153,9 +237,9 @@ struct InputPaletteScopeTests {
         try Data().write(to: file)
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.folder",
-            pill: PalettePill(title: "Folder", icon: "folder"),
+            title: "Folder",
             prompt: "Folder"
-        ) { text in
+        ) { text, _ in
             PaletteInput.folderCheck(text) { path in PaletteInputAction(title: "Change to \"\(path)\"") { .done } }
         })
 
@@ -183,12 +267,30 @@ struct InputPaletteScopeTests {
                 withIntermediateDirectories: true
             )
         }
-        let completions = PaletteInput.pathCompletions(root.path + "/s")
+        let completions = PaletteInput.pathCompletions(root.path + "/s", action: .changeTo)
         #expect(completions == [
-            PaletteCompletion(title: "scripts", value: root.path + "/scripts/"),
-            PaletteCompletion(title: "src", value: root.path + "/src/"),
+            PaletteCompletion(title: "scripts", value: root.path + "/scripts/", subtitle: "Change to: \(root.path)/scripts"),
+            PaletteCompletion(title: "src", value: root.path + "/src/", subtitle: "Change to: \(root.path)/src"),
         ])
-        #expect(PaletteInput.pathCompletions("devbox:~/dev").isEmpty, "a remote path gets no completion")
+        #expect(
+            PaletteInput.pathCompletions(root.path + "/s", action: .openAsNewProject).first?.subtitle
+                == "Open as new project: \(root.path)/scripts",
+            "the screen gives the words before the path"
+        )
+        #expect(PaletteInput.pathCompletions("devbox:~/dev", action: .changeTo).isEmpty, "a remote path gets no completion")
+
+        // The screen draws them as path rows: the subtitle is cut in the middle.
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.path",
+            title: "Folder",
+            prompt: "Folder",
+            completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
+            check: { _, _ in .nothing }
+        ))
+        let row = try #require(rows(scope, root.path + "/s").first)
+        #expect(row.title == "scripts")
+        #expect(row.subtitle == "Change to: \(root.path)/scripts")
+        #expect(row.subtitleIsPath)
     }
 
     @Test

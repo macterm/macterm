@@ -404,8 +404,8 @@ struct PasswordVaultTests {
 
     @Test
     func a_host_entry_names_its_host() {
-        #expect(PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@build:22").withHost("sudo") == "sudo (me@build:22)")
-        #expect(PasswordEntryID(command: "sudo", prompt: "Password:").withHost("sudo") == "sudo")
+        #expect(PasswordEntryID(command: "sudo", prompt: "Password:", host: "me@build:22").title == "sudo (me@build:22)")
+        #expect(PasswordEntryID(command: "sudo", prompt: "Password:").title == "sudo")
     }
 }
 

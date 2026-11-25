@@ -10,7 +10,7 @@ struct AppCommandMenuItem: View {
     let appState: AppState
     let projectStore: ProjectStore
     /// Optional title override. Defaults to `command.title`, but the menu
-    /// bar can name an item for its menu (e.g. "Open Project…" with an
+    /// bar can name an item for its menu (e.g. "New Project…" with an
     /// ellipsis). A literal at the call site is localizable.
     var titleOverride: LocalizedStringResource?
 

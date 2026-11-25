@@ -160,15 +160,18 @@ private struct SavedPasswordRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: entry.id.command == nil ? "key.horizontal" : "terminal")
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: entry.id.withHost(entry.id.displayCommand ?? String(localized: "Any command")))
-                    .font(.body.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(verbatim: entry.id.displayCommand ?? String(localized: "Any command"))
+                        .font(.body.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let host = entry.id.host {
+                        HostPill(host: host)
+                            .frame(maxWidth: 220, alignment: .leading)
+                            .layoutPriority(1)
+                    }
+                }
                 Text(verbatim: entry.id.isOnDemandOnly ? String(localized: "Filled from the command palette only") : entry.id.prompt)
                     .font(entry.id.isOnDemandOnly ? .caption : .caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -202,5 +205,28 @@ private struct SavedPasswordRow: View {
         Button("Copy Password") { onCopy() }
         Divider()
         Button("Remove…", role: .destructive) { onRemove() }
+    }
+}
+
+/// The host of a host's entry (`PasswordEntryID.host`), apart from the
+/// command. The row gives it its width first, up to a limit, so a long host
+/// does not hide the command. System styles, not `MactermTheme`: the Settings
+/// window follows the system appearance.
+private struct HostPill: View {
+    let host: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "network")
+            Text(verbatim: host)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(.quaternary, in: Capsule())
+        .help(host)
     }
 }
