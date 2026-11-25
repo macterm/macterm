@@ -151,6 +151,35 @@
   {
     "arguments" : [
       "project",
+      "create",
+      "\/tmp\/api",
+      "--parent",
+      "Work"
+    ],
+    "exit" : 0,
+    "requests" : [
+      {
+        "command" : "status",
+        "id" : "-",
+        "v" : 1
+      },
+      {
+        "args" : {
+          "parent" : "Work",
+          "path" : "\/tmp\/api",
+          "select" : false
+        },
+        "command" : "project.create",
+        "id" : "-",
+        "v" : 3
+      }
+    ],
+    "stderr" : "",
+    "stdout" : "project:3     api  Work  1 tab  \/tmp\/api\n"
+  },
+  {
+    "arguments" : [
+      "project",
       "select",
       "api"
     ],
@@ -295,7 +324,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -322,6 +351,25 @@
   {
     "arguments" : [
       "tab",
+      "list"
+    ],
+    "exit" : 0,
+    "requests" : [
+      {
+        "args" : {
+
+        },
+        "command" : "tab.list",
+        "id" : "-",
+        "v" : 1
+      }
+    ],
+    "stderr" : "",
+    "stdout" : "tab:1  *  zsh  api  1 pane\n"
+  },
+  {
+    "arguments" : [
+      "tab",
       "new",
       "--project",
       "api",
@@ -341,7 +389,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -366,7 +414,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -386,7 +434,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -409,7 +457,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -431,7 +479,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [
@@ -453,7 +501,87 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
+  },
+  {
+    "arguments" : [
+      "tab",
+      "move",
+      "2",
+      "--to-project",
+      "web"
+    ],
+    "exit" : 0,
+    "requests" : [
+      {
+        "command" : "status",
+        "id" : "-",
+        "v" : 1
+      },
+      {
+        "args" : {
+          "tab" : "2",
+          "toProject" : "web"
+        },
+        "command" : "tab.move",
+        "id" : "-",
+        "v" : 3
+      }
+    ],
+    "stderr" : "",
+    "stdout" : "tab:3  *  build  web  3 panes\n"
+  },
+  {
+    "arguments" : [
+      "tab",
+      "move",
+      "2",
+      "1",
+      "--to-project",
+      "web",
+      "--project",
+      "api"
+    ],
+    "exit" : 0,
+    "requests" : [
+      {
+        "command" : "status",
+        "id" : "-",
+        "v" : 1
+      },
+      {
+        "args" : {
+          "project" : "api",
+          "slot" : 1,
+          "tab" : "2",
+          "toProject" : "web"
+        },
+        "command" : "tab.move",
+        "id" : "-",
+        "v" : 3
+      }
+    ],
+    "stderr" : "",
+    "stdout" : "tab:3  *  build  web  3 panes\n"
+  },
+  {
+    "arguments" : [
+      "tab",
+      "move",
+      "2",
+      "--to-project",
+      "web"
+    ],
+    "exit" : 1,
+    "requests" : [
+      {
+        "command" : "status",
+        "id" : "-",
+        "v" : 1
+      }
+    ],
+    "stderr" : "macterm: Macterm speaks control protocol v2, but this command needs v3. Update Macterm.\n",
+    "stdout" : ""
   },
   {
     "arguments" : [
@@ -496,6 +624,28 @@
       }
     ],
     "stderr" : "macterm: no tab 9\n",
+    "stdout" : ""
+  },
+  {
+    "arguments" : [
+      "tab",
+      "remove",
+      "2",
+      "--force"
+    ],
+    "exit" : 0,
+    "requests" : [
+      {
+        "args" : {
+          "force" : true,
+          "tab" : "2"
+        },
+        "command" : "tab.close",
+        "id" : "-",
+        "v" : 1
+      }
+    ],
+    "stderr" : "",
     "stdout" : ""
   },
   {
@@ -1635,7 +1785,7 @@
       }
     ],
     "stderr" : "",
-    "stdout" : "tab:1  *  zsh    1 pane\ntab:2     build  3 panes\n"
+    "stdout" : "tab:1  *  zsh    -  1 pane\ntab:2     build  -  3 panes\n"
   },
   {
     "arguments" : [

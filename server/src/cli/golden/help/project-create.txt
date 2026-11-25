@@ -4,7 +4,7 @@ new project.
 The folder must exist. For a remote spec, Macterm connects to the host to check
 the folder, as a new pane does. It can ask for the login.
 
-USAGE: macterm project create <path> [--name <name>] [--select] [--skip-folder-check] [--socket <socket>] [--json]
+USAGE: macterm project create <path> [--name <name>] [--parent <parent>] [--select] [--skip-folder-check] [--socket <socket>] [--json]
 
 ARGUMENTS:
   <path>                  Project directory (absolute or ~-prefixed), or a
@@ -13,6 +13,8 @@ ARGUMENTS:
 OPTIONS:
   --name <name>           Display name, with no slash. The default is the name
                           of the directory.
+  --parent <parent>       Project to put the new project in (name, UUID, or
+                          index). The default is the top level.
   --select                Select the project too.
   --skip-folder-check     [debug] Do not check the remote directory.
   --socket <socket>       Control socket path. It overrides discovery.

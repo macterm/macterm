@@ -1,4 +1,4 @@
-OVERVIEW: List, create, select, rename, and remove projects.
+OVERVIEW: List, create, select, rename, move, and remove projects.
 
 USAGE: macterm project <subcommand>
 
