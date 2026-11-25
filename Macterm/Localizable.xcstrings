@@ -1148,6 +1148,22 @@
         }
       }
     },
+    "Add a project from a folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더에서 프로젝트 추가"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从文件夹添加项目"
+          }
+        }
+      }
+    },
     "Add a widget at the center of the desktop" : {
       "localizations" : {
         "ko" : {
@@ -5830,6 +5846,22 @@
         }
       }
     },
+    "New project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로운 프로젝트"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建项目"
+          }
+        }
+      }
+    },
     "New scratch tab" : {
       "localizations" : {
         "ko" : {
@@ -6779,38 +6811,6 @@
         }
       }
     },
-    "Open Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目"
-          }
-        }
-      }
-    },
-    "Open Project…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目…"
-          }
-        }
-      }
-    },
     "Open System Settings…" : {
       "localizations" : {
         "ko" : {
@@ -6823,22 +6823,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开系统设置…"
-          }
-        }
-      }
-    },
-    "Open a project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开项目"
           }
         }
       }
@@ -6871,22 +6855,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先在项目中打开一个终端。"
-          }
-        }
-      }
-    },
-    "Open another project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "다른 프로젝트 열기"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开另一个项目"
           }
         }
       }
@@ -9368,6 +9336,22 @@
         }
       }
     },
+    "Select in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder에서 선택"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“访达”中选择"
+          }
+        }
+      }
+    },
     "Send ${key} to ${pane}" : {
       "localizations" : {
         "ko" : {
@@ -9701,6 +9685,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示 AI 智能体图标"
+          }
+        }
+      }
+    },
+    "Show Project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 표시"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示项目"
           }
         }
       }
@@ -11868,6 +11868,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在窗格的 shell 中输入命令。"
+          }
+        }
+      }
+    },
+    "Type a folder path, or select one in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 경로를 입력하거나 Finder에서 선택하십시오"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入文件夹路径，或在“访达”中选择一个"
           }
         }
       }

@@ -119,7 +119,7 @@ struct MactermApp: App {
                 }
                 Divider()
                 AppCommandMenuItem(command: .newTab, appState: appState, projectStore: projectStore, titleOverride: "New Tab")
-                AppCommandMenuItem(command: .openProject, appState: appState, projectStore: projectStore, titleOverride: "Open Project…")
+                AppCommandMenuItem(command: .newProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
             }
             CommandGroup(replacing: .toolbar) {
                 ToolbarVisibilityMenuItem(appState: appState, projectStore: projectStore)
@@ -214,7 +214,7 @@ struct MactermApp: App {
                 AppCommandMenuItem(command: .recentTab, appState: appState, projectStore: projectStore, titleOverride: "Recent Tab")
             }
             CommandMenu("Project") {
-                AppCommandMenuItem(command: .openProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
+                AppCommandMenuItem(command: .newProject, appState: appState, projectStore: projectStore, titleOverride: "New Project…")
                 AppCommandMenuItem(
                     command: .renameProject,
                     appState: appState,

@@ -21,6 +21,9 @@ import Foundation
 /// refuses when it runs keeps the screen and shows the reason, until the
 /// text changes.
 ///
+/// The pill of an input screen is its `title` alone, with no icon (Ethan,
+/// 0561).
+///
 /// While the field is empty, a Cancel row comes last. Return on it leaves
 /// the screen as Escape does. The selection rests on it when there is no
 /// action row, so Return on an empty field does no action by chance.
@@ -30,10 +33,14 @@ import Foundation
 /// puts that thing's id in its own, so that two targets are two screens.
 struct PaletteInput: Hashable {
     let id: String
-    let pill: PalettePill
+    /// The pill's text.
+    let title: String
     /// The field's placeholder: what to type.
     let prompt: String
     let initialValue: String
+    /// What the screen is for, starting with a verb: the subtitle of the
+    /// palette row that opens it.
+    let summary: String
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
     /// The rows that are actions themselves, best first: Return or a click
@@ -43,26 +50,32 @@ struct PaletteInput: Hashable {
     let choices: @MainActor (String, PaletteContext) -> [PaletteInputChoice]
     /// What the text in the field gives: the action row when the value is
     /// valid, the notice when it is not, or nothing (an empty field, or a
-    /// text whose rows are `choices`).
-    let check: @MainActor (String) -> PaletteInputCheck
+    /// text whose rows are `choices`). It
+    /// gets the palette's context, so that an action can reach the app and
+    /// the projects.
+    let check: @MainActor (String, PaletteContext) -> PaletteInputCheck
 
     init(
         id: String,
-        pill: PalettePill,
+        title: String,
         prompt: String,
         initialValue: String = "",
+        summary: String = "",
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
         choices: @escaping @MainActor (String, PaletteContext) -> [PaletteInputChoice] = { _, _ in [] },
-        check: @escaping @MainActor (String) -> PaletteInputCheck
+        check: @escaping @MainActor (String, PaletteContext) -> PaletteInputCheck
     ) {
         self.id = id
-        self.pill = pill
+        self.title = title
         self.prompt = prompt
         self.initialValue = initialValue
+        self.summary = summary
         self.completions = completions
         self.choices = choices
         self.check = check
     }
+
+    var pill: PalettePill { PalettePill(title: title) }
 
     static func == (lhs: PaletteInput, rhs: PaletteInput) -> Bool {
         lhs.id == rhs.id
@@ -200,7 +213,7 @@ final class InputPaletteScope: PaletteScope {
         if let refusal, refusal.text != text { self.refusal = nil }
         action = nil
         var notice: String?
-        switch input.check(text) {
+        switch input.check(text, context) {
         case let .action(row): action = row
         case let .notice(text): notice = text
         case .nothing: break

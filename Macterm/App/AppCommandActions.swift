@@ -282,14 +282,14 @@ extension AppCommand {
                   let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.explainOutput() }
-        case .openProject:
-            return { _ = ctx.appState.openProject(store: ctx.projectStore) }
+        case .newProject:
+            return { ctx.appState.toggleCommandPalette(scope: .input(.newProject)) }
         // The tree of projects and tabs (design 013). Move to Project acts
         // on the node that the key window shows; the others act on the
         // active project, as the items of its sidebar menu do.
         case .newProjectInside:
             guard let current else { return nil }
-            return { ctx.appState.openProject(inside: current, store: ctx.projectStore, in: ctx.appState.keyWindow) }
+            return { ctx.appState.newProject(inside: current, store: ctx.projectStore, in: ctx.appState.keyWindow) }
         case .moveToProject:
             guard let scope = paletteScope(in: ctx) else { return nil }
             return { ctx.appState.toggleCommandPalette(scope: scope) }
