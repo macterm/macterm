@@ -290,12 +290,9 @@ struct CommandPalettePanel: View {
                                 ForEach(section.items) { item in
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
-                                        // The index of the row now, not at the
-                                        // build of the row: SwiftUI can keep the
-                                        // action of a row whose item did not
-                                        // change while the list around it did,
-                                        // and a kept index named another row.
-                                        guard let index = flatItems.firstIndex(where: { $0.id == item.id }) else { return }
+                                        // Read the index at the click. SwiftUI can keep the
+                                        // action of a row whose item did not change.
+                                        guard let index = flatIndexByID[item.id] else { return }
                                         selectedIndex = index
                                         if let inputScope {
                                             runInputRow(inputScope)
@@ -543,19 +540,21 @@ struct CommandPalettePanel: View {
         }
     }
 
-    /// Select `text` in the palette field, so that a keystroke replaces it:
-    /// the kept query of a palette that opens, and the value of an input
-    /// screen that opens.
+    /// Select `text` in the palette field, so that a keystroke replaces it.
+    /// The palette uses it for a kept query when it opens, and for the value
+    /// of an input screen when the screen opens.
     ///
-    /// The editor is the first responder of the palette's window. SwiftUI's
-    /// `TextField` edits with a field editor of its own, so the window's
-    /// shared field editor (`fieldEditor(_:for:)`) is not it, and a select
-    /// there does nothing (measured in `CommandPaletteSelectionTests`). A
-    /// field that takes focus selects its text by itself, but a screen
-    /// entered from a palette row changes the text of a field that already
-    /// has focus. The select waits until the field holds `text`, 50 ms at
-    /// most, and does nothing when the user changed the
-    /// query in the meantime.
+    /// The select uses the first responder of the palette's window. SwiftUI's
+    /// `TextField` has a field editor of its own. The window's shared field
+    /// editor (`fieldEditor(_:for:)`) is not that editor, so a select there
+    /// does nothing (measured in `CommandPaletteTests`). A field that takes
+    /// focus selects its text itself. A screen that opens from a palette row
+    /// changes the text of a field that already has focus, so that field
+    /// needs this select.
+    ///
+    /// The field holds the new text 10 ms later in the tests. The select
+    /// tries again every 10 ms, 5 times at most. It does nothing when the
+    /// user changed the query.
     private func selectFieldText(once text: String, attempts: Int = 5) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
             guard !text.isEmpty, query == text else { return }

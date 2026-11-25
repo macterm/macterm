@@ -5,12 +5,12 @@ import Testing
 
 /// The value of an input screen is selected when the screen opens, on every
 /// way in, so that a typed name replaces it (ui-review 0600 of PR 957). The
-/// palette runs in a real window here, off screen: the selection is a fact
-/// of the AppKit field editor, and the bug was in the order of SwiftUI's
-/// write of the field and the select.
+/// palette runs in a real window that is not shown: the selection is a fact
+/// of the AppKit field editor. SwiftUI's `TextField` has a field editor of
+/// its own, and the old select went to the window's shared one.
 @MainActor
 @Suite(.serialized)
-struct CommandPaletteSelectionTests {
+struct CommandPaletteTests {
     @MainActor
     private struct Harness {
         let state: AppState
@@ -18,6 +18,14 @@ struct CommandPaletteSelectionTests {
         let project: Project
         let windowState: WindowState
         let window: NSWindow
+        let files: [URL]
+
+        func close() {
+            window.close()
+            for file in files {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
 
         var editor: NSTextView? {
             (window.firstResponder as? NSTextView).flatMap { $0.isFieldEditor ? $0 : nil }
@@ -53,7 +61,7 @@ struct CommandPaletteSelectionTests {
         state.selectProject(project)
         let window = NSWindow(
             contentRect: NSRect(x: -10000, y: -10000, width: 600, height: 700),
-            styleMask: [.titled],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -70,8 +78,15 @@ struct CommandPaletteSelectionTests {
                 .environment(windowState)
                 .environment(store)
         )
-        window.makeKeyAndOrderFront(nil)
-        let harness = Harness(state: state, store: store, project: project, windowState: windowState, window: window)
+        // Off every screen and clear: AppKit keeps a borderless window where
+        // it is put. A click needs the window ordered in.
+        window.alphaValue = 0
+        window.orderFrontRegardless()
+        window.makeKey()
+        let harness = Harness(
+            state: state, store: store, project: project, windowState: windowState, window: window,
+            files: [tmp, storeTmp, filesDir]
+        )
         await settle { harness.editor != nil }
         _ = try #require(harness.editor, "the field takes focus: \(harness.report)")
         return harness
@@ -114,7 +129,9 @@ struct CommandPaletteSelectionTests {
         )
         h.window.contentView?.layoutSubtreeIfNeeded()
         let frame = list.accessibilityFrame()
-        let point = h.window.convertPoint(fromScreen: NSPoint(x: frame.minX + 60, y: frame.maxY - 6 - 12))
+        let point = h.window.convertPoint(
+            fromScreen: NSPoint(x: frame.minX + 60, y: frame.maxY - PaletteRowInsets.highlight - 12)
+        )
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -138,7 +155,7 @@ struct CommandPaletteSelectionTests {
     @Test
     func project_rename_from_a_palette_row_by_return_selects_the_name() async throws {
         let h = try await makeHarness()
-        defer { h.window.close() }
+        defer { h.close() }
         try await type("rename current project", in: h)
         pressReturn(in: h)
         await expectSelected("admin", on: .renameProject, in: h)
@@ -147,7 +164,7 @@ struct CommandPaletteSelectionTests {
     @Test
     func project_rename_from_a_palette_row_by_click_selects_the_name() async throws {
         let h = try await makeHarness()
-        defer { h.window.close() }
+        defer { h.close() }
         try await type("rename current project", in: h)
         try clickFirstRow(in: h)
         await expectSelected("admin", on: .renameProject, in: h)
@@ -156,7 +173,7 @@ struct CommandPaletteSelectionTests {
     @Test
     func tab_rename_from_a_palette_row_by_return_selects_the_name() async throws {
         let h = try await makeHarness()
-        defer { h.window.close() }
+        defer { h.close() }
         let name = try #require(h.state.workspaces[h.project.id]?.activeTab?.sidebarTitle)
         try await type("rename current tab", in: h)
         pressReturn(in: h)
@@ -168,19 +185,20 @@ struct CommandPaletteSelectionTests {
     @Test
     func tab_rename_from_a_palette_row_by_click_selects_the_name() async throws {
         let h = try await makeHarness()
-        defer { h.window.close() }
+        defer { h.close() }
         let name = try #require(h.state.workspaces[h.project.id]?.activeTab?.sidebarTitle)
         try await type("rename current tab", in: h)
         try clickFirstRow(in: h)
         await expectSelected(name, on: .renameTab, in: h)
     }
 
-    /// The keybind and the menu item run the command's action: with the
-    /// palette up, the screen replaces the one showing.
+    /// The keybind and the menu item run the command's action (this test
+    /// calls it directly). With the palette up, the screen replaces the one
+    /// that shows.
     @Test
-    func rename_by_its_keybind_with_the_palette_up_selects_the_name() async throws {
+    func rename_by_its_command_with_the_palette_up_selects_the_name() async throws {
         let h = try await makeHarness()
-        defer { h.window.close() }
+        defer { h.close() }
         try await type("something", in: h)
         let action = try #require(AppCommand.renameProject.action(in: AppCommandContext(appState: h.state, projectStore: h.store)))
         action()
@@ -189,11 +207,11 @@ struct CommandPaletteSelectionTests {
 
     /// With the palette closed, the keybind opens it on the screen.
     @Test
-    func rename_by_its_keybind_with_the_palette_closed_selects_the_name() async throws {
+    func rename_by_its_command_with_the_palette_closed_selects_the_name() async throws {
         let h = try await makeHarness { state, store in
             AppCommand.renameProject.inputScope(in: AppCommandContext(appState: state, projectStore: store))
         }
-        defer { h.window.close() }
+        defer { h.close() }
         await expectSelected("admin", on: .renameProject, in: h)
     }
 }
