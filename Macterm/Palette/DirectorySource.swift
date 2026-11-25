@@ -160,10 +160,7 @@ struct DirectorySource: PaletteSource {
             category: Self.category,
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.findOrCreate(
-                name: name,
-                path: fullPath
-            )
+            guard let project = projectStore.findOrCreate(name: name, path: fullPath) else { return }
             appState.selectProject(project)
         }
     }
@@ -187,7 +184,7 @@ struct DirectorySource: PaletteSource {
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
             guard ProjectPath.isRemote(fullPath) else {
-                appState.selectProject(projectStore.create(name: name, path: fullPath))
+                if let project = projectStore.create(name: name, path: fullPath) { appState.selectProject(project) }
                 return
             }
             Self.addRemote(fullPath, appState: appState)

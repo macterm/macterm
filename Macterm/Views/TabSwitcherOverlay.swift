@@ -37,9 +37,9 @@ struct TabSwitcherOverlay: View {
     private var appState
 
     var body: some View {
-        if let workspace = activeWorkspace, appState.tabCycleTabIDs.count > 1 {
+        if let projectID = appState.activeProjectID, appState.tabCycleTabIDs.count > 1 {
             TabSwitcherStrip(
-                entries: tabs(in: workspace),
+                entries: tabs(in: appState.model.tabs(of: projectID)),
                 selection: appState.tabCycleSelection,
                 paneAspect: appState.paneContainerAspect,
                 onHover: { appState.focusTabCycle(at: $0) },
@@ -58,19 +58,14 @@ struct TabSwitcherOverlay: View {
         }
     }
 
-    private var activeWorkspace: Workspace? {
-        guard let pid = appState.activeProjectID else { return nil }
-        return appState.workspaces[pid]
-    }
-
     /// The cycle order resolved to live tabs, dropping any that closed
     /// mid-gesture so the strip can't render a hole. Each entry carries the
-    /// tab's own 1-based position in the workspace too, because the numbered
+    /// tab's own 1-based position in the project too, because the numbered
     /// icon variants show that number — not the tab's place in the cycle.
-    private func tabs(in workspace: Workspace) -> [TabSwitcherEntry] {
+    private func tabs(in projectTabs: [TerminalTab]) -> [TabSwitcherEntry] {
         appState.tabCycleTabIDs.enumerated().compactMap { index, id in
-            guard let position = workspace.tabs.firstIndex(where: { $0.id == id }) else { return nil }
-            return TabSwitcherEntry(index: index, number: position + 1, tab: workspace.tabs[position])
+            guard let position = projectTabs.firstIndex(where: { $0.id == id }) else { return nil }
+            return TabSwitcherEntry(index: index, number: position + 1, tab: projectTabs[position])
         }
     }
 }

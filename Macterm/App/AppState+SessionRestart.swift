@@ -19,22 +19,22 @@ extension AppState {
         !outdatedSessions.isEmpty && !outdatedPanes(in: tab).isEmpty
     }
 
-    /// Whether the pane shows the badge: its session runs an older build,
-    /// and it is a pane of a project tab (the quick terminal and the desktop
-    /// widgets have no tab to restart in).
+    /// Whether the pane shows the badge: its session runs an older build.
+    /// One rule over the panes of every project of the model, so a pane of
+    /// the quick terminal or of a desktop widget shows it as a pane of a
+    /// project tab does (Ethan, feedback 2026-11-23).
     func showsOutdatedSessionBadge(_ pane: Pane) -> Bool {
         guard !pane.isRemote,
               outdatedSessions.contains(pane.sessionName),
-              let tab = workspaces[pane.projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: pane.id) })
+              let tab = model.locate(pane: pane.id)?.tab
         else { return false }
         return !outdatedPanes(in: tab).isEmpty
     }
 
     /// The badge's click: restart this pane's session.
     func requestRestartSession(of pane: Pane) {
-        guard let tab = workspaces[pane.projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: pane.id) })
-        else { return }
-        requestRestartSessions(tabID: tab.id, projectID: pane.projectID, paneID: pane.id)
+        guard let (projectID, tab) = model.locate(pane: pane.id) else { return }
+        requestRestartSessions(tabID: tab.id, projectID: projectID, paneID: pane.id)
     }
 
     /// The older panes that a restart covers: all of the tab, or one pane.
@@ -47,7 +47,7 @@ extension AppState {
     /// Restart the older sessions of a tab. A busy pane (a program in front)
     /// asks first: the restart ends that program.
     func requestRestartSessions(tabID: UUID, projectID: UUID, paneID: UUID? = nil) {
-        guard let tab = workspaces[projectID]?.tabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = model.tabs(of: projectID).first(where: { $0.id == tabID }) else { return }
         let panes = panesToRestart(in: tab, paneID: paneID)
         guard !panes.isEmpty else { return }
         guard panes.contains(where: paneNeedsConfirmClose) else {
@@ -64,30 +64,26 @@ extension AppState {
     }
 
     /// Replace each older pane of the tab with a new pane in the folder
-    /// where the old shell is. The tab keeps its shape, focus and zoom. The
-    /// old session ends with its shell.
+    /// where the old shell is (`pane.replace`). The tab keeps its shape,
+    /// focus and zoom. The old pane leaves the model, and the server ends
+    /// its session with its shell.
     func restartSessions(tabID: UUID, projectID: UUID, paneID: UUID? = nil) {
-        guard let tab = workspaces[projectID]?.tabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = model.tabs(of: projectID).first(where: { $0.id == tabID }) else { return }
         let olds = panesToRestart(in: tab, paneID: paneID)
         guard !olds.isEmpty else { return }
-        var replacements: [UUID: Pane] = [:]
+        logger.info("restarting \(olds.count, privacy: .public) older session(s)")
+        var fresh: [Pane] = []
         for old in olds {
-            replacements[old.id] = Pane(
+            let pane = Pane(
                 projectPath: old.liveLocalWorkingDirectory() ?? old.projectPath,
                 projectID: old.projectID,
                 sessionSlug: old.sessionSlug
             )
-        }
-        ModelWriter.paneReplace(tab, replacements)
-        logger.info("restarting \(olds.count, privacy: .public) older session(s)")
-        for old in olds {
-            SurfaceRegistry.shared.destroySurfaces(of: old)
+            guard writer.paneReplace(old.id, with: pane) else { continue }
             outdatedSessions.remove(old.sessionName)
+            fresh.append(pane)
         }
-        for name in Set(olds.map(\.sessionName)) {
-            olds.first { $0.sessionName == name }?.killPersistentSession(using: sessionClient)
-        }
-        for pane in replacements.values {
+        for pane in fresh {
             warmIfUnrendered(pane, in: tab)
         }
         persistState()

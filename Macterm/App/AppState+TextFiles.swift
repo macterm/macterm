@@ -74,11 +74,12 @@ extension AppState {
             env: env
         )
         else { return nil }
-        return workspaces[projectID]?.tabs.first { $0.id == tabID }?.focusedPaneID
+        return model.tab(tabID)?.focusedPaneID
     }
 
-    /// Where an editor opened from `pane` lands: the pane in a workspace, or
-    /// a quick terminal pane. nil for a pane in neither: a desktop widget's.
+    /// Where an editor opened from `pane` lands: the pane in a project of a
+    /// window, or a quick terminal pane. nil for a pane in neither: a
+    /// desktop widget's.
     private enum EditorAnchor {
         case workspace(projectID: UUID, pane: Pane)
         case quickTerminal(Pane)
@@ -92,15 +93,11 @@ extension AppState {
     }
 
     private func editorAnchor(for pane: Pane) -> EditorAnchor? {
-        let projectID = pane.projectID
-        if workspaces[projectID]?.tabs.contains(where: { $0.splitRoot.findPane(id: pane.id) != nil }) == true {
-            return .workspace(projectID: projectID, pane: pane)
-        }
-        let quickTerminal = QuickTerminalService.shared.splitState
-        if let quickPane = quickTerminal.tab.splitRoot.findPane(id: pane.id) {
-            return .quickTerminal(quickPane)
-        }
-        return nil
+        guard let (projectID, tab) = model.locate(pane: pane.id), let project = model.project(projectID),
+              let found = tab.splitRoot.findPane(id: pane.id)
+        else { return nil }
+        if project.isSelectable { return .workspace(projectID: projectID, pane: found) }
+        return project.alias == QuickTerminalService.alias ? .quickTerminal(found) : nil
     }
 
     /// Returns false when `anchor` is nil — nowhere to put the editor.
@@ -122,7 +119,7 @@ extension AppState {
             // A pinned tab's editor always splits: a tab born pinned is
             // pinned for good, and quitting the editor would leave it behind
             // as a dimmed, unloaded row.
-            if placement == .tab, projectID != PinnedTabs.workspaceID {
+            if placement == .tab, projectID != pinnedProjectID {
                 return createTab(projectID: projectID, projects: projects, command: command, env: env) != nil
             }
             let projectDirectory = configuredProjectDirectory(projectID: projectID, projects: projects)

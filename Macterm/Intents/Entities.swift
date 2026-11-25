@@ -57,13 +57,10 @@ struct MactermProjectQuery: EntityStringQuery, EnumerableEntityQuery {
     @MainActor
     private func all() async throws -> [MactermProjectEntity] {
         let ctx = try await MactermIntentHost.shared.context()
-        // The pinned and the scratch workspaces are offered only once they
-        // exist — before that there is nothing to address in them.
-        let pinned = ctx.appState.workspaces[PinnedTabs.workspaceID] != nil
-            ? [MactermProjectEntity(PinnedTabs.project)]
-            : []
-        let scratch = ctx.appState.hasScratchTabs ? [MactermProjectEntity(ScratchTabs.project)] : []
-        return pinned + ctx.projectStore.projects.map(MactermProjectEntity.init) + scratch
+        // The Shortcuts rule of design/010 §11, §2: a project that a window
+        // can show, of the tree or with a tab. Pinned and Scratch Tabs are
+        // offered once they hold something to address.
+        return IntentTargets.orderedProjectIDs(in: ctx).compactMap(ctx.appState.model.project).map(MactermProjectEntity.init)
     }
 
     @MainActor
@@ -211,12 +208,13 @@ extension MactermPaneEntity {
     /// `Transferable`, because the system would read the text without the
     /// `macos-shortcuts` gate, and terminal text can hold secrets. Get Pane
     /// Contents stays the one way to read it.
+    /// `addressable` is false for a pane that the pane entities cannot name:
+    /// a pane of the quick terminal or of a desktop widget, whose host is
+    /// not a window.
     @MainActor
-    static func annotate(_ view: NSView, for pane: Pane) {
+    static func annotate(_ view: NSView, for pane: Pane, addressable: Bool) {
         guard #available(macOS 15.4, *) else { return }
-        view.appEntityIdentifier = IntentTargets.isAddressablePane(projectID: pane.projectID)
-            ? identifier(forSession: pane.sessionName)
-            : nil
+        view.appEntityIdentifier = addressable ? identifier(forSession: pane.sessionName) : nil
     }
 }
 

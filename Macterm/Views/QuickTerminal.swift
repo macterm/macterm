@@ -643,6 +643,7 @@ private struct QuickTerminalView: View {
             )
         )
         .environment(\.paneHost, .quickTerminal)
+        .environment(\.modelWriter, state.app?.writer)
         // Grab-handle drags share the workspace drop grammar (whole-edge,
         // divider, local). The context carries no tab handler: the quick
         // terminal is one tab outside every workspace and adopts no others.

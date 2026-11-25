@@ -52,19 +52,19 @@ final class TabCycler {
     /// Whether a cycle is currently re-sampling its cards.
     var isLivePreviewing: Bool { livePreviewTimer != nil }
 
-    /// Start a cycle over `recency` (the workspace's tabs, most recent first)
+    /// Start a cycle over `recency` (the project's tabs, most recent first)
     /// unless one is in flight. The limit bounds the cycle whether or not the
     /// switcher shows it: the cards and the keyboard walk one list, so a limit
     /// that only applied with the overlay on would make a tab's reachability
     /// depend on a display preference.
-    func startIfNeeded(recency: [UUID], in ws: Workspace, livePaneIDs: () -> Set<UUID>) {
+    func startIfNeeded(recency: [UUID], tabs: [TerminalTab], livePaneIDs: () -> Set<UUID>) {
         guard order.isEmpty else { return }
         let candidateLimit = Preferences.shared.recentTabCandidates
         order = candidateLimit == Preferences.unlimitedRecentTabCandidates
             ? recency
             : Array(recency.prefix(candidateLimit))
         index = 0
-        preparePreviews(in: ws, livePaneIDs: livePaneIDs)
+        preparePreviews(tabs: tabs, livePaneIDs: livePaneIDs)
     }
 
     /// Move the gesture to the next tab. False when there is nothing to move
@@ -98,9 +98,9 @@ final class TabCycler {
     /// from the visible tab (the only one with a measurable on-screen region),
     /// forget panes that have closed, and start sampling. Skipped entirely
     /// when the overlay is off, so the default cycling path costs nothing.
-    private func preparePreviews(in ws: Workspace, livePaneIDs: () -> Set<UUID>) {
+    private func preparePreviews(tabs: [TerminalTab], livePaneIDs: () -> Set<UUID>) {
         guard Preferences.shared.showTabSwitcherOverlay else { return }
-        if let tab = ws.activeTab, let aspect = PanePreviewCapture.containerAspect(of: tab) {
+        if let tab = order.first.flatMap({ id in tabs.first { $0.id == id } }), let aspect = PanePreviewCapture.containerAspect(of: tab) {
             paneContainerAspect = aspect
         }
         // Drop previews of panes that have closed. Checked across every
@@ -108,7 +108,7 @@ final class TabCycler {
         // and a pane in another project is still alive.
         let live = livePaneIDs()
         panePreviews = panePreviews.filter { live.contains($0.key) }
-        beginLivePreviews(in: ws)
+        beginLivePreviews(tabs: tabs)
     }
 
     /// Keep the cards current for as long as the gesture lasts: wake the
@@ -122,9 +122,9 @@ final class TabCycler {
     /// visible tab, whose frame exists right now; the woken renderers draw
     /// asynchronously and are picked up by the first tick, under the overlay's
     /// fade-in. Undone by `endLivePreviews`.
-    private func beginLivePreviews(in ws: Workspace) {
+    private func beginLivePreviews(tabs: [TerminalTab]) {
         endLivePreviews()
-        let cycleTabs = order.compactMap { id in ws.tabs.first { $0.id == id } }
+        let cycleTabs = order.compactMap { id in tabs.first { $0.id == id } }
         livePreviewPanes = cycleTabs.flatMap { $0.splitRoot.allPanes() }
         for pane in livePreviewPanes {
             SurfaceRegistry.shared.view(of: pane)?.rendersForPreview = true

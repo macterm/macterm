@@ -127,6 +127,8 @@ struct SplitLeafView: View {
     let onZoomRequest: () -> Void
     let paneDrop: PaneDropContext?
 
+    @Environment(\.modelWriter)
+    private var writer
     @Environment(\.paneHost)
     private var host
 
@@ -255,7 +257,7 @@ struct SplitDividerView<First: View, Second: View>: View {
                         resizedValue: { start, delta in
                             SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: total)
                         },
-                        onResize: { ModelWriter.splitRatio(branch, ratio: $0) }
+                        onResize: { writer?.splitRatio(branch.id, ratio: $0) }
                     )
                     .frame(
                         width: h ? SplitDividerMetrics.bandThickness : nil,

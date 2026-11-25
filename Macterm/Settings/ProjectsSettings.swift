@@ -239,7 +239,7 @@ struct ProjectsSettings: View {
     private func createProject(from layout: ProjectFileStore.Listing) {
         guard folderCheck == nil, let path = layout.declaredPath else { return }
         guard ProjectPath.isRemote(path) else {
-            appState.selectProject(Self.addProject(from: layout, path: path, in: projectStore))
+            if let project = Self.addProject(from: layout, path: path, in: projectStore) { appState.selectProject(project) }
             return
         }
         checkingLayout = layout.id
@@ -279,7 +279,8 @@ struct ProjectsSettings: View {
         guard let path = layout.declaredPath else { return .noPath }
         if let line = await refusal(path) { return .refused(line) }
         guard !Task.isCancelled else { return .cancelled }
-        return .created(addProject(from: layout, path: path, in: store))
+        guard let project = addProject(from: layout, path: path, in: store) else { return .refused(String(localized: "Macterm could not add the project.")) }
+        return .created(project)
     }
 
     private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project? {
@@ -379,7 +380,7 @@ private struct ProjectRow: View {
                     appState.noteLayoutFilesChanged()
                 }
                 // A layout file matches a project by its folder.
-                .disabled(appState.workspaces[project.id] == nil || !project.hasFolder)
+                .disabled(!project.hasFolder)
 
                 // A project from a dev build's group row has no folder
                 // (design 013 §1): its shells start in the home folder

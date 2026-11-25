@@ -164,7 +164,7 @@ struct GetMactermProjectMemoryIntent: AppIntent {
             throw MactermIntentError.unavailable(String(localized: "Project Insights is off. Turn it on in Settings → Intelligence."))
         }
         let target = try IntentTargets.project(project.id, in: ctx)
-        guard ProjectMemory.covers(target.id) else {
+        guard ProjectMemory.covers(target) else {
             throw MactermIntentError.unavailable(String(localized: "\(target.name) is not a project, so it has no insights."))
         }
         let memory = MactermIntentHost.shared.projectMemory()

@@ -1019,7 +1019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let panes = candidates.map(\.pane)
-        let busy = await Set((appState?.panesThatNeedConfirmClose(panes) ?? panes.filter(\.needsConfirmClose)).map(\.id))
+        let busy = await Set(appState.panesThatNeedConfirmClose(panes).map(\.id))
         return candidates.filter { busy.contains($0.pane.id) }.map {
             RunningProcessRow(projectName: $0.projectName, processName: $0.pane.processTitle)
         }

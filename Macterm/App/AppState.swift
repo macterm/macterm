@@ -1038,7 +1038,7 @@ final class AppState {
 
     /// The v1 snapshot, `workspaces_v3.json`: read once by the import
     /// (design/010 §8), never written.
-    private let workspaceStore: WorkspaceStore
+    let workspaceStore: WorkspaceStore
     /// `gui-state.json`: what only a window needs (design/010 §2).
     @ObservationIgnored
     let guiStateStore: GUIStateStore
@@ -1653,6 +1653,18 @@ final class AppState {
             recordProjectVisit(project.id)
             // The window now selects a tab of this project.
             settleWindowSelections()
+        }
+    }
+
+    /// Show any project that a window can select: the pinned project shows
+    /// its records, loaded or not (`selectPinnedProject`); every other
+    /// project is a plain selection. Intents use it (design/010 §11).
+    func select(project: Project) {
+        guard project.isSelectable else { return }
+        if project.sidebar == .top {
+            selectPinnedProject()
+        } else {
+            selectProject(project)
         }
     }
 
