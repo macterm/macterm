@@ -60,7 +60,7 @@ final class ProjectStore {
     /// A directory is not an identity: two projects may share a `path` and
     /// keep wholly independent workspaces (keyed on `Project.id`) and zmx
     /// sessions (named with per-pane entropy). This is the entry point for
-    /// user-initiated creation (folder picker, remote sheet, `project create`).
+    /// user-initiated creation (folder picker, New Remote Project, `project create`).
     ///
     /// A name that `Project.nameRefusal` refuses is stored changed (see
     /// `allowedName`). Most callers pass the folder's own name — the
@@ -118,6 +118,24 @@ final class ProjectStore {
         rows[index].sortOrder = children(of: parent).count
         rows[index].parent = parent
         if saving { changed() }
+        return true
+    }
+
+    /// Move a project into the project `parent` (nil: the top level), at
+    /// the drop slot `offset` among the rows of `parent`. The offset counts
+    /// the rows before the move, with the project itself. Returns false where
+    /// `move(_:into:)` does.
+    @discardableResult
+    func move(_ id: UUID, into parent: UUID?, at offset: Int) -> Bool {
+        var siblings = children(of: parent).map(\.id)
+        var slot = min(max(offset, 0), siblings.count)
+        if let current = siblings.firstIndex(of: id) {
+            siblings.remove(at: current)
+            if current < slot { slot -= 1 }
+        }
+        guard move(id, into: parent, saving: false) else { return false }
+        siblings.insert(id, at: slot)
+        reorder(parent: parent, ids: siblings)
         return true
     }
 
