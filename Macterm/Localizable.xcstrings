@@ -4878,6 +4878,22 @@
         }
       }
     },
+    "Listing folders…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 목록을 읽는 중…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在列出文件夹…"
+          }
+        }
+      }
+    },
     "Load Ghostty's default config files" : {
       "localizations" : {
         "ko" : {
