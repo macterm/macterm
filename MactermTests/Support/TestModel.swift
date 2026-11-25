@@ -91,7 +91,7 @@ enum TestModel {
         quickTerminal: QuickTerminalSplitState? = nil
     ) -> AppState {
         let dir = folder("state")
-        return AppState(
+        let state = AppState(
             modelConnection: connection(),
             workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: dir.appending(path: "workspaces_v3.json")),
             guiStateStore: guiStateStore ?? GUIStateStore(fileURL: dir.appending(path: "gui-state.json")),
@@ -99,6 +99,10 @@ enum TestModel {
             quickTerminal: quickTerminal ?? QuickTerminalSplitState(),
             legacyPanelVisible: { false }
         )
+        // A test makes no real ghostty surface: a background pane's warm is
+        // a no-op unless the test records it.
+        state.incubatePane = { _ in }
+        return state
     }
 
     /// The project store of `state`'s model.
