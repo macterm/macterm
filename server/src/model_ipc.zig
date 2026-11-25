@@ -170,6 +170,7 @@ pub fn replySubscribe(s: *Server, peer: u64, re: u64) void {
 // ── Requests ────────────────────────────────────────────────────────────────
 
 pub fn isWrite(comptime M: type) bool {
+    @setEvalBranchQuota(10_000);
     inline for (m.model_writes) |W| if (W == M) return true;
     return false;
 }

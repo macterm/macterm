@@ -331,6 +331,43 @@ assert "pane.removed" not in [e["e"] for e in c.events()]
 PY
 }
 
+@test "model: swap, replace, folders, a new tree and an even tab" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
+split = lambda sid, d, r, a, b: {"t": "split", "a": {"id": sid, "dir": d, "ratio": r, "first": a, "second": b}}
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("tab.create", project="p1", id="t1", root=split("s1", "horizontal", 0.3, pane("a"), pane("b")))
+
+def tab():
+    m = c.call("state.subscribe")["model"]
+    return next(p for p in m["projects"] if p["id"] == "p1")["tabs"][0]
+
+c.call("pane.swap", id="a", other="b")
+root = tab()["root"]
+assert [root["a"]["first"]["a"]["id"], root["a"]["second"]["a"]["id"]] == ["b", "a"], root
+
+res = c.call("pane.replace", id="a", new={"id": "n", "session": "macterm-x-n"})
+assert [p["id"] for p in res["panes"]] == ["a"], res
+assert tab()["root"]["a"]["second"]["a"]["id"] == "n"
+
+c.call("pane.set", id="n", cwd="/tmp/one/src")
+assert tab()["root"]["a"]["second"]["a"]["cwd"] == "/tmp/one/src"
+
+c.call("tab.rebalance", id="t1")
+assert tab()["root"]["a"]["ratio"] == 0.5
+
+res = c.call("tab.layout", id="t1", root=split("s9", "vertical", 0.5, pane("n"), pane("z")), focused="z")
+assert [p["id"] for p in res["panes"]] == ["b"], res
+t = tab()
+assert t["focused"] == "z" and t["root"]["a"]["id"] == "s9", t
+bad = c.request("pane.swap", id="n", other="nope")
+assert bad["err"]["code"] == "invalid_args", bad
+PY
+}
+
 @test "model: the capability fields of a project refuse what they do not allow" {
   "$ZMX" server
   python3 - <<'PY'
