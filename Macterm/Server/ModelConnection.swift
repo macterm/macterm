@@ -49,9 +49,11 @@ final class ModelConnection {
         self.mirror = mirror
     }
 
-    /// The bundled server, with the model's folder (design/010 §2).
+    /// The bundled server, with the model's folder (design/010 §2). The
+    /// unit-test host has none: it starts no server, and a test runs a
+    /// server of its own (`TestModel`).
     static func bundled() -> ModelConnection {
-        ModelConnection(server: LocalServer.bundled)
+        ModelConnection(server: SessionClient.liveBypass == .unitTestHost ? nil : LocalServer.bundled)
     }
 
     var isConnected: Bool {
@@ -194,7 +196,7 @@ final class ModelConnection {
     private var reconnectTask: Task<Void, Never>?
 
     private func scheduleReconnect() {
-        guard reconnectTask == nil, !connecting, !isClosed else { return }
+        guard reconnectTask == nil, !connecting, !isClosed, server != nil else { return }
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard let self else { return }
@@ -225,7 +227,10 @@ private final class BatchQueue: @unchecked Sendable {
     /// The oldest item, or nil when the queue is empty. An item of `nil`
     /// (the end of the connection) comes as `.some(nil)`.
     func takeFirst() -> ServerEventBatch?? {
-        lock.withLock { items.isEmpty ? nil : items.removeFirst() }
+        lock.withLock {
+            guard !items.isEmpty else { return .none }
+            return .some(items.removeFirst())
+        }
     }
 }
 
