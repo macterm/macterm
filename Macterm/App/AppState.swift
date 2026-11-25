@@ -856,21 +856,6 @@ final class AppState {
         keyOrFirstWindow?.passwordEditor = request
     }
 
-    /// Presents the "New Remote Project" sheet (#104) — set by the palette
-    /// command, the sidebar's New Project menu and Settings → Projects,
-    /// consumed by `MainWindow`.
-    var isNewRemoteProjectSheetPresented: Bool {
-        get { keyOrFirstWindow?.isNewRemoteProjectSheetPresented ?? false }
-        set { keyOrFirstWindow?.isNewRemoteProjectSheetPresented = newValue }
-    }
-
-    /// Presents the sheet with a host and a folder that the palette parsed
-    /// (0358): the sheet checks the folder at once.
-    func presentNewRemoteProject(_ draft: NewRemoteProjectDraft) {
-        keyOrFirstWindow?.newRemoteProjectDraft = draft
-        keyOrFirstWindow?.isNewRemoteProjectSheetPresented = true
-    }
-
     private var windowPersistTask: Task<Void, Never>?
 
     /// Persist the window list after it changes.

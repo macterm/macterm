@@ -204,6 +204,22 @@
         }
       }
     },
+    "%@ is not a host name." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 호스트 이름이 아닙니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是主机名。"
+          }
+        }
+      }
+    },
     "%@ is not a project, so it has no insights." : {
       "localizations" : {
         "ko" : {
@@ -1112,6 +1128,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将文件夹添加为项目并选择它。"
+          }
+        }
+      }
+    },
+    "Add a folder on an ssh host as a project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 호스트의 폴더를 프로젝트로 추가"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 SSH 主机上的文件夹添加为项目"
           }
         }
       }
@@ -2263,6 +2295,22 @@
         }
       }
     },
+    "Checking the folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 폴더를 확인하는 중"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 %@ 上的文件夹"
+          }
+        }
+      }
+    },
     "Choose Files…" : {
       "localizations" : {
         "ko" : {
@@ -3091,22 +3139,6 @@
         }
       }
     },
-    "Directory" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "디렉토리"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目录"
-          }
-        }
-      }
-    },
     "Don't Allow" : {
       "comment" : "Button of the Shortcuts permission alert",
       "localizations" : {
@@ -3760,6 +3792,22 @@
         }
       }
     },
+    "Folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 폴더"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上的文件夹"
+          }
+        }
+      }
+    },
     "Foreground Process" : {
       "localizations" : {
         "ko" : {
@@ -4112,22 +4160,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐藏工具栏"
-          }
-        }
-      }
-    },
-    "Host" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "호스트"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主机"
           }
         }
       }
@@ -6538,6 +6570,22 @@
         }
       }
     },
+    "Not in ~/.ssh/config" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.ssh/config에 없음"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不在 ~/.ssh/config 中"
+          }
+        }
+      }
+    },
     "Not running. Select it to restore it from its saved layout." : {
       "localizations" : {
         "ko" : {
@@ -7439,22 +7487,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "固定的标签页布局文件有问题"
-          }
-        }
-      }
-    },
-    "Port, identity, and ControlMaster come from ~/.ssh/config." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "포트, 신원, ControlMaster는 ~/.ssh/config에서 가져옵니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "端口、身份和 ControlMaster 来自 ~/.ssh/config。"
           }
         }
       }
@@ -9220,6 +9252,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按名称或路径搜索文件..."
+          }
+        }
+      }
+    },
+    "Search hosts or type user@host..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트 검색 또는 user@host 입력..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索主机或输入 user@host..."
           }
         }
       }
@@ -12699,22 +12747,6 @@
         }
       }
     },
-    "[user@]host or ssh alias" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[user@]host 또는 ssh 별칭"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[user@]host 或 ssh 别名"
-          }
-        }
-      }
-    },
     "autofill the password for “%@”" : {
       "comment" : "Touch ID reason. macOS shows it after “Macterm is trying to”.",
       "localizations" : {
@@ -12865,6 +12897,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加"
+          }
+        }
+      }
+    },
+    "palette.remoteFolder.action" : {
+      "comment" : "Command palette, New Remote Project: the action row that adds the typed folder of the host",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "New Project \"%@\""
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로운 프로젝트 \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建项目“%@”"
+          }
+        }
+      }
+    },
+    "palette.remoteHosts.header" : {
+      "comment" : "Command palette, New Remote Project: the heading of the hosts of ~/.ssh/config",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "SSH Config"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 설정"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 配置"
           }
         }
       }

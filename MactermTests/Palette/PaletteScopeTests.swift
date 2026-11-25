@@ -78,7 +78,9 @@ struct PaletteScopeTests {
             #expect(frame.scope.loading == nil)
             #expect(frame.scope.failure == nil)
             #expect(frame.pill == id.pill)
+            #expect(id.pill.icon != nil, "only an input screen's pill has no icon")
         }
+        #expect(PaletteScopeID.remoteHosts.pill.icon != nil)
         // Passwords reads live state, so activating it loads nothing; Files
         // indexes, and with no local project says so.
         let passwords = PaletteFrame(.passwords)
