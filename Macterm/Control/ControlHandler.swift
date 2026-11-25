@@ -179,7 +179,7 @@ final class ControlHandler {
     }
 
     private func tabList(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         return ControlData(tabs: tabInfos(in: workspace))
     }
 
@@ -226,8 +226,7 @@ final class ControlHandler {
     /// What the window's titlebar and the macOS Window menu show for it.
     private func windowProjectName(_ projectID: UUID?) -> String? {
         guard let projectID else { return nil }
-        if let synthetic = Project.synthetic(for: projectID) { return synthetic.name }
-        return projectStore.projects.first { $0.id == projectID }?.name
+        return appState.model.project(projectID)?.name
     }
 
     /// Resolve `--window` to a specific window, or nil for "the key one".
@@ -416,7 +415,7 @@ final class ControlHandler {
     }
 
     private func paneList(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let tabs: [(Int, TerminalTab)]
         if args.tab != nil {
             let (index, tab) = try resolveTab(args, in: workspace)
@@ -434,7 +433,7 @@ final class ControlHandler {
     /// surface: a never-shown pane has no dimensions to report, so it's the
     /// same `no_surface` contract `pane.run` uses.
     private func paneInspect(_ args: ControlArgs) async throws -> ControlData {
-        let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
+        let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveProjectTabs(args).1).pane
         let needsConfirmQuit = await !appState.panesThatNeedConfirmClose([pane]).isEmpty
         guard let view = SurfaceRegistry.shared.view(of: pane), let size = view.surfaceSize else {
             throw ControlError(
@@ -481,7 +480,7 @@ final class ControlHandler {
     /// Dump a pane's terminal cell text (#165): the viewport by default, or the
     /// full scrollback with `scrollback: true`. Needs a live surface.
     private func paneDump(_ args: ControlArgs) throws -> ControlData {
-        let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveWorkspace(args).1).pane
+        let pane = try widgetTarget(args)?.pane ?? resolvePane(args, in: resolveProjectTabs(args).1).pane
         let scrollback = args.scrollback == true
         guard let view = SurfaceRegistry.shared.view(of: pane), let text = view.readText(scrollback: scrollback) else {
             throw ControlError(
@@ -606,11 +605,14 @@ final class ControlHandler {
         if let parent, projectStore.row(parent.id) == nil {
             throw ControlError(code: .notFound, message: "project \"\(parent.name)\" was removed")
         }
-        let project = projectStore.create(
+        guard let project = projectStore.create(
             name: name ?? (canonical as NSString).lastPathComponent,
             path: canonical,
             parent: parent?.id
         )
+        else {
+            throw ControlError(code: .internalError, message: "the server refused the project")
+        }
         if args.select == true {
             // The same selection path the sidebar runs.
             appState.selectProject(project)
@@ -623,13 +625,15 @@ final class ControlHandler {
             throw ControlError(code: .badRequest, message: "project.select requires a project selector")
         }
         let project = try resolveProject(args.project)
-        if project.id == PinnedTabs.workspaceID {
-            // The synthetic project must not go through `selectProject`, which
-            // would treat it as a project rooted at the home directory; it has
+        guard project.isSelectable else {
+            throw ControlError(code: .badRequest, message: "no window shows \(project.name)")
+        }
+        if project.sidebar == .top {
+            // The pinned project shows its records, loaded or not: it has
             // its own selection path.
             appState.selectPinnedProject()
-        } else if project.id == ScratchTabs.workspaceID {
-            try appState.selectScratchTabs(in: resolveWindow(args))
+        } else if !project.isTreeProject {
+            try appState.selectProject(project, in: resolveWindow(args))
         } else {
             // `--window` targets a specific one; without it the key window,
             // which is what a person at the keyboard means.
@@ -664,17 +668,16 @@ final class ControlHandler {
         let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw Self.emptyNameError }
         let project = try resolveProject(selector)
-        // Unreachable through the app (a sentinel is not a `ProjectStore`
-        // row, so no sidebar row edits it) — but `resolveProject` accepts
-        // `pinned` and `scratch`, so the CLI is the one way in and has to say
-        // no here.
-        if Project.isSynthetic(project.id) {
+        // Unreachable through the app (no sidebar row edits the name of a
+        // hidden project) — but `resolveProject` accepts `pinned` and
+        // `scratch`, so the CLI is the one way in and has to say no here.
+        if !project.isTreeProject {
             throw ControlError(code: .badRequest, message: "the \(project.name) section cannot be renamed")
         }
-        // `resolveProject` matches a sentinel's display name BEFORE any user
+        // `resolveProject` matches an alias's display name BEFORE any user
         // project's, so a project renamed to it becomes unreachable by name
         // (UUID and index still work, but `--project Pinned` would silently
-        // target the pinned workspace instead). Refuse rather than strand it.
+        // target the pinned tabs instead). Refuse rather than strand it.
         try Self.checkName(trimmed)
         projectStore.rename(id: project.id, to: trimmed)
         guard let updated = projectStore.projects.first(where: { $0.id == project.id }) else {
@@ -722,9 +725,9 @@ final class ControlHandler {
             )
         }
         var project = try resolveProject(selector)
-        // See `projectRename` — a sentinel is reachable only through this
-        // selector, and tearing its workspace down is never valid.
-        if Project.isSynthetic(project.id) {
+        // See `projectRename` — a hidden project is reachable only through
+        // this selector, and its removal is never valid.
+        if !project.removable || !project.isTreeProject {
             throw ControlError(code: .badRequest, message: "the \(project.name) section cannot be removed")
         }
 
@@ -752,7 +755,7 @@ final class ControlHandler {
     // MARK: - Tab mutations
 
     private func tabNew(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         guard let tabID = appState.createTab(
             projectID: project.id,
             projects: projectStore.projects,
@@ -770,7 +773,7 @@ final class ControlHandler {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.select requires a tab selector")
         }
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let (index, tab) = try resolveTab(args, in: workspace)
         // `--window` selects in that window's own tab record (#345); without
         // it, the workspace's active tab — the key window's.
@@ -786,8 +789,7 @@ final class ControlHandler {
     /// both. The move to a project is Move to Project of the sidebar
     /// (`AppState.moveNode`): the tab goes to the end of the tabs of that
     /// project, and that project becomes active, as in the app. A
-    /// destination that is the tab's own project is a plain reorder. A group
-    /// (a project with no folder) is not a destination.
+    /// destination that is the tab's own project is a plain reorder.
     ///
     /// `slot` is the tab's FINAL 1-based position in the project that holds
     /// it at the end: `tab move tab:4 2` makes it second. `Workspace.moveTab`
@@ -801,16 +803,13 @@ final class ControlHandler {
         guard args.slot != nil || args.toProject != nil else {
             throw ControlError(code: .badRequest, message: "tab.move requires a destination slot or project")
         }
-        var (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let (_, tab) = try resolveTab(args, in: workspace)
         let destination = try args.toProject.map { try resolveTreeProject($0, role: "destination") }
+        var holder = (project, workspace)
         if let destination, destination.id != project.id {
-            // A project with no folder is a group, which holds no tabs
-            // (`tab list` refuses it in the same way).
-            guard let target = appState.workspaces[destination.id] else {
-                throw ControlError(code: .notFound, message: "project \"\(destination.name)\" has no tabs")
-            }
             // Check the slot before the move, so that a bad slot moves nothing.
+            let target = tabs(of: destination)
             if let slot = args.slot { try Self.checkSlot(slot, count: target.tabs.count + 1) }
             appState.moveNode(
                 .tab(projectID: project.id, tabID: tab.id),
@@ -818,22 +817,20 @@ final class ControlHandler {
                 store: projectStore,
                 in: appState.keyWindow
             )
-            guard let moved = appState.workspaces[destination.id] else {
-                throw ControlError(code: .internalError, message: "tab move failed")
-            }
-            (project, workspace) = (destination, moved)
+            holder = (destination, target)
         } else if args.slot == nil {
             throw ControlError(code: .badRequest, message: "the tab is already in \"\(project.name)\"")
         }
-        guard let fromIndex = workspace.tabs.firstIndex(where: { $0.id == tab.id }).map({ $0 + 1 }) else {
-            throw ControlError(code: .internalError, message: "tab move failed")
+        let (owner, ownerTabs) = holder
+        guard let fromIndex = ownerTabs.tabs.firstIndex(where: { $0.id == tab.id }).map({ $0 + 1 }) else {
+            throw ControlError(code: .internalError, message: "the server refused the move")
         }
         guard let slot = args.slot else {
-            return ControlData(tabs: [tabInfo(tab, index: fromIndex, in: workspace)])
+            return ControlData(tabs: [tabInfo(tab, index: fromIndex, in: ownerTabs)])
         }
-        try Self.checkSlot(slot, count: workspace.tabs.count)
-        appState.reorderTab(tab.id, inProject: project.id, toIndex: slot > fromIndex ? slot : slot - 1)
-        return ControlData(tabs: [tabInfo(tab, index: slot, in: workspace)])
+        try Self.checkSlot(slot, count: ownerTabs.tabs.count)
+        appState.reorderTab(tab.id, inProject: owner.id, toIndex: slot > fromIndex ? slot : slot - 1)
+        return ControlData(tabs: [tabInfo(tab, index: slot, in: ownerTabs)])
     }
 
     /// Reject out-of-range slots up front so the caller isn't silently
@@ -876,11 +873,11 @@ final class ControlHandler {
             )
         }
 
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let (index, tab) = try resolveTab(args, in: workspace)
 
-        ModelWriter.tabSet(tab, title: newTitle)
-        appState.saveWorkspaces()
+        appState.writer.tabSet(tab.id, title: newTitle)
+        appState.persistState()
 
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
     }
@@ -889,7 +886,7 @@ final class ControlHandler {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.close requires a tab selector")
         }
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let (_, tab) = try resolveTab(args, in: workspace)
         // Closing kills the panes' zmx sessions. (For a PINNED tab, close is
         // an unload: sessions end but the record and its pinned.yaml entry
@@ -934,7 +931,7 @@ final class ControlHandler {
     }
 
     private func paneSplit(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         let placement = try splitPlacement(args, relativeTo: target.pane)
         guard let newID = appState.splitPane(
@@ -953,7 +950,7 @@ final class ControlHandler {
     }
 
     private func paneFocus(_ args: ControlArgs) throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         // With a direction the resolved pane is the ORIGIN, not the
         // destination: move to its nearest neighbour that way. Same
@@ -989,7 +986,7 @@ final class ControlHandler {
     }
 
     private func paneClose(_ args: ControlArgs) async throws -> ControlData {
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         guard args.pane != nil || args.session != nil else {
             throw ControlError(code: .badRequest, message: "pane.close requires a pane or session selector")
         }
@@ -1029,7 +1026,7 @@ final class ControlHandler {
             guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else { throw Self.widgetNotLive }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
         }
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         if SurfaceRegistry.shared.preferredSurface(of: target.pane).isReadOnly { throw Self.paneReadOnly }
         guard let view = SurfaceRegistry.shared.view(of: target.pane), view.sendText(text) else {
@@ -1079,7 +1076,7 @@ final class ControlHandler {
             }
             return ControlData(widgets: [widgetInfo(index: target.index, widget: target.widget)])
         }
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         try refuseIfReadOnly(target.pane)
         guard let view = SurfaceRegistry.shared.view(of: target.pane),
@@ -1098,10 +1095,10 @@ final class ControlHandler {
     /// the Cmd+Shift+Enter keybind drives. Purely a layout-state change, so it
     /// needs no live surface; the pane just has to exist.
     private func paneZoom(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
-        ModelWriter.paneZoom(target.tab, toggling: target.pane.id)
-        appState.saveWorkspaces()
+        appState.writer.paneZoom(tab: target.tab.id, pane: target.tab.zoomedPaneID == target.pane.id ? nil : target.pane.id)
+        appState.persistState()
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1127,16 +1124,17 @@ final class ControlHandler {
         guard ratio >= 0.15, ratio <= 0.85 else {
             throw ControlError(code: .badRequest, message: "ratio must be between 0.15 and 0.85")
         }
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
-        guard ModelWriter.splitRatio(target.tab, paneID: target.pane.id, axis: axis, ratio: CGFloat(ratio)) else {
+        guard let branch = target.tab.splitRoot.nearestBranch(of: target.pane.id, axis: axis) else {
             throw ControlError(
                 code: .notFound,
                 message: "no \(axis.rawValue) split around that pane to resize",
                 action: "the pane must be inside a split on that axis"
             )
         }
-        appState.saveWorkspaces()
+        appState.writer.splitRatio(branch.id, ratio: CGFloat(ratio))
+        appState.persistState()
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1150,7 +1148,7 @@ final class ControlHandler {
         guard let cols = args.cols, let rows = args.rows, cols >= 1, rows >= 1 else {
             throw ControlError(code: .badRequest, message: "pane.resize requires cols and rows ≥ 1")
         }
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         guard let view = SurfaceRegistry.shared.view(of: target.pane), view.debugResizeSurface(cols: cols, rows: rows) else {
             throw ControlError(
@@ -1167,7 +1165,7 @@ final class ControlHandler {
     /// nobody at the keyboard. Reports phase, prompt, command and which bubble
     /// is up — never a password. A pane with no surface yet is simply `idle`.
     private func panePassword(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         let monitor = PasswordPromptMonitor.shared
         if let answer = args.answer {
@@ -1246,7 +1244,7 @@ final class ControlHandler {
     /// goes through the same gate as a real key) and read the selection back
     /// instead of the clipboard.
     private func paneCopyMode(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         guard let view = SurfaceRegistry.shared.view(of: target.pane) else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
@@ -1276,7 +1274,7 @@ final class ControlHandler {
     /// no keyboard. libghostty reports the change asynchronously: read it
     /// back with `pane inspect`.
     private func paneReadOnly(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
@@ -1289,7 +1287,7 @@ final class ControlHandler {
     /// selection or last command as the command does; `close` closes the
     /// popover. The reply streams in after the verb returns: poll it.
     private func paneExplain(_ args: ControlArgs) throws -> ControlData {
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         guard let view = SurfaceRegistry.shared.view(of: target.pane), view.surface != nil else {
             throw ControlError(code: .noSurface, message: "that pane has no surface")
@@ -1329,7 +1327,7 @@ final class ControlHandler {
         default:
             throw ControlError(code: .badRequest, message: "pane.move requires a zone: left, right, top, or bottom")
         }
-        let (_, workspace) = try resolveWorkspace(args)
+        let (_, workspace) = try resolveProjectTabs(args)
         let source = try resolvePane(args, in: workspace)
         let target: TabDropResolution.Target
         if let destSelector = args.dest, !destSelector.isEmpty {
@@ -1344,13 +1342,13 @@ final class ControlHandler {
         } else {
             target = .rootEdge(zone)
         }
-        guard ModelWriter.paneMove(source.tab, paneID: source.pane.id, to: target) else {
+        guard appState.writer.paneMove(source.pane.id, in: source.tab, projectID: workspace.id, to: target) else {
             throw ControlError(
                 code: .badRequest,
                 message: "move failed: the target is the pane itself, or the pane is the only pane of the tab"
             )
         }
-        appState.saveWorkspaces()
+        appState.persistState()
         return ControlData(panes: [paneInfo(source.pane, in: source.tab, workspace: workspace)])
     }
 
@@ -1368,7 +1366,7 @@ final class ControlHandler {
         default:
             throw ControlError(code: .badRequest, message: "tab.merge requires a zone: left, right, top, or bottom")
         }
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let (_, sourceTab) = try resolveTab(args, in: workspace)
         let target: TabDropResolution.Target
         if let destSelector = args.dest, !destSelector.isEmpty {
@@ -1397,7 +1395,7 @@ final class ControlHandler {
         guard rows * cols <= cellCap else {
             throw ControlError(code: .badRequest, message: "grid caps at \(cellCap) cells")
         }
-        let (project, workspace) = try resolveWorkspace(args)
+        let (project, workspace) = try resolveProjectTabs(args)
         let target = try resolvePane(args, in: workspace)
         let created = appState.makeGrid(
             target.pane.id,
@@ -1482,18 +1480,11 @@ final class ControlHandler {
     /// then pick up), and `layout apply --force` would swap the pinned
     /// workspace's tabs out from under the records.
     private func rejectSynthetic(_ project: Project, verb: String) throws {
-        guard Project.isSynthetic(project.id) else { return }
-        if project.id == PinnedTabs.workspaceID {
-            throw ControlError(
-                code: .badRequest,
-                message: "\(verb) does not apply to the pinned workspace. Macterm manages its layout by itself",
-                action: "edit ~/.config/macterm/pinned.yaml instead"
-            )
-        }
+        guard !project.hasFolder else { return }
         throw ControlError(
             code: .badRequest,
-            message: "\(verb) does not apply to the scratch tabs. They have no layout file",
-            action: "pass --project with a project"
+            message: "\(verb) does not apply to \(project.name). It has no folder and no layout file",
+            action: "pass --project with a project that has a folder"
         )
     }
 
@@ -1507,41 +1498,34 @@ final class ControlHandler {
     /// same way, answered `not_found` for as long as the user was looking at
     /// another project, which is exactly when a script or agent in a
     /// background pane is still working.
-    private func resolveWorkspace(_ args: ControlArgs) throws -> (Project, Workspace) {
+    private func resolveProjectTabs(_ args: ControlArgs) throws -> (Project, ProjectTabs) {
         if args.project == nil, let session = args.session, !session.isEmpty {
-            return try workspace(holding: session)
+            return try projectTabs(holding: session)
         }
         let project = try resolveProject(args.project)
-        // The scratch workspace exists on demand (#665): `tab new --project
-        // scratch` is how a script makes the first scratch tab, and there is no
-        // row to select first. Empty, it draws nothing in the sidebar.
-        if project.id == ScratchTabs.workspaceID { appState.ensureScratchWorkspace() }
-        guard let workspace = appState.workspaces[project.id] else {
-            throw ControlError(
-                code: .notFound,
-                message: "project \"\(project.name)\" has no tabs"
-            )
-        }
-        return (project, workspace)
+        return (project, tabs(of: project))
     }
 
-    /// The project whose workspace has a pane on `session`. The active project
-    /// is asked first, so a session it holds resolves exactly as it did before
-    /// sessions were looked up everywhere; then the rest in sidebar order, and
-    /// the pinned workspace last.
-    private func workspace(holding session: String) throws -> (Project, Workspace) {
-        let candidates = [appState.activeProjectID].compactMap(\.self)
-            + projectStore.projects.map(\.id)
-            + [PinnedTabs.workspaceID, ScratchTabs.workspaceID]
+    /// The tabs of a project, as the selectors read them.
+    private func tabs(of project: Project) -> ProjectTabs {
+        ProjectTabs(id: project.id, model: appState.model)
+    }
+
+    /// The project that has a pane on `session`. The active project is
+    /// asked first, so a session it holds resolves exactly as it did before
+    /// sessions were looked up everywhere; then the rest in the order of the
+    /// model: every project, the hidden ones too (design/010 §11, `--session`
+    /// reaches any pane).
+    private func projectTabs(holding session: String) throws -> (Project, ProjectTabs) {
+        let model = appState.model
+        let candidates = [appState.activeProjectID].compactMap(\.self) + model.projects.map(\.id)
         for projectID in candidates {
-            guard let workspace = appState.workspaces[projectID],
-                  workspace.tabs.contains(where: { tab in
+            guard let project = model.project(projectID),
+                  model.tabs(of: projectID).contains(where: { tab in
                       tab.splitRoot.allPanes().contains { $0.sessionName == session }
                   })
             else { continue }
-            let project = Project.synthetic(for: projectID)
-                ?? projectStore.projects.first { $0.id == projectID }
-            if let project { return (project, workspace) }
+            return (project, tabs(of: project))
         }
         throw ControlError(
             code: .notFound,
@@ -1551,13 +1535,12 @@ final class ControlHandler {
     }
 
     /// A project of the tree that a node can go in: `project create
-    /// --parent` and `tab move --to-project`. The pinned and the scratch
-    /// workspaces are not projects of the tree, so they are refused, as the
-    /// list of Move to Project leaves them out (design 013 §2.3). Pin a tab
-    /// in the app.
+    /// --parent` and `tab move --to-project`. The pinned, the scratch and
+    /// the quick terminal's projects are hidden, so they are refused, as the
+    /// list of Move to Project leaves them out (design 013 §2.3).
     private func resolveTreeProject(_ selector: String, role: String) throws -> Project {
         let project = try resolveProject(selector)
-        guard !Project.isSynthetic(project.id) else {
+        guard project.isTreeProject else {
             throw ControlError(
                 code: .badRequest,
                 message: "\(project.name) is not a project of the tree, so it cannot be the \(role)",
@@ -1567,15 +1550,13 @@ final class ControlHandler {
         return project
     }
 
+    /// A project by its selector: a UUID, an alias (`pinned`, `scratch`,
+    /// `quick`), or a project of the tree by name or 1-based index
+    /// (design/010 §11, §3). No selector is the active project.
     private func resolveProject(_ selector: String?) throws -> Project {
+        let model = appState.model
         guard let selector, !selector.isEmpty else {
-            // The pinned and the scratch workspaces resolve through their
-            // synthetic projects so tab/pane verbs keep working while one is
-            // active.
-            if let active = appState.activeProjectID, let synthetic = Project.synthetic(for: active) {
-                return synthetic
-            }
-            guard let active = projectStore.projects.first(where: { $0.id == appState.activeProjectID }) else {
+            guard let active = appState.activeProjectID.flatMap(model.project) else {
                 throw ControlError(
                     code: .notFound,
                     message: "no active project",
@@ -1584,26 +1565,27 @@ final class ControlHandler {
             }
             return active
         }
-        // `--project pinned` (or the sentinel UUID) targets the pinned
-        // workspace. Checked before the name lookup so a user project that
-        // happens to be named "pinned" is still reachable by UUID/index.
-        // Every naming path refuses or suffixes that name
-        // (`PinnedTabs.reservesName`, a superset of this test), so only a
-        // project named before that rule can be in this position.
-        if selector.lowercased() == PinnedTabs.displayName.lowercased()
-            || selector == PinnedTabs.workspaceID.uuidString
-        {
-            return PinnedTabs.project
+        // An alias, or the display name of the pinned or the scratch tabs.
+        // Checked before the name lookup so a user project that happens to
+        // be named "pinned" is still reachable by UUID/index. Every naming
+        // path refuses or suffixes those names (`Project.nameRefusal`), so
+        // only a project named before that rule can be in this position.
+        let folded = selector.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let byAlias = model.project(alias: folded) { return byAlias }
+        if PinnedTabs.reservesName(selector) {
+            if let id = appState.ensurePinnedProject(), let pinned = model.project(id) { return pinned }
         }
-        // `--project scratch` (or `"Scratch Tabs"`, or the sentinel UUID) targets
-        // the scratch workspace (#665), by the same rule.
-        if ScratchTabs.reservesName(selector) || selector == ScratchTabs.workspaceID.uuidString {
-            return ScratchTabs.project
+        if ScratchTabs.reservesName(selector) {
+            // The scratch project exists on demand (#665): `tab new --project
+            // scratch` is how a script makes the first scratch tab, and there
+            // is no row to select first. Empty, it draws nothing in the
+            // sidebar.
+            if let id = appState.ensureScratchProject(), let scratch = model.project(id) { return scratch }
         }
-        let projects = projectStore.projects
-        if let id = UUID(uuidString: selector), let match = projects.first(where: { $0.id == id }) {
+        if let id = UUID(uuidString: selector), let match = model.project(id) {
             return match
         }
+        let projects = projectStore.projects
         if let index = parseIndex(selector, prefix: "project"), projects.indices.contains(index - 1) {
             return projects[index - 1]
         }
@@ -1627,12 +1609,12 @@ final class ControlHandler {
 
     /// Resolve the tab selector (1-based index, `tab:N` ref, UUID, or exact
     /// title) within a workspace.
-    private func resolveTab(_ args: ControlArgs, in workspace: Workspace) throws -> (Int, TerminalTab) {
+    private func resolveTab(_ args: ControlArgs, in workspace: ProjectTabs) throws -> (Int, TerminalTab) {
         guard let selector = args.tab, !selector.isEmpty else {
             guard let active = workspace.activeTab,
                   let index = workspace.tabs.firstIndex(where: { $0.id == active.id })
             else {
-                throw ControlError(code: .notFound, message: "the workspace has no active tab")
+                throw ControlError(code: .notFound, message: "the project has no active tab")
             }
             return (index + 1, active)
         }
@@ -1677,7 +1659,7 @@ final class ControlHandler {
     /// within the resolved tab), else the focused pane of the active tab.
     /// `session` and `pane` together conflict — an explicit error, never a
     /// silent winner.
-    private func resolvePane(_ args: ControlArgs, in workspace: Workspace) throws -> (tab: TerminalTab, pane: Pane) {
+    private func resolvePane(_ args: ControlArgs, in workspace: ProjectTabs) throws -> (tab: TerminalTab, pane: Pane) {
         if args.session != nil, args.pane != nil {
             throw ControlError(code: .badRequest, message: "pass either --session or --pane, not both")
         }
@@ -1741,14 +1723,14 @@ final class ControlHandler {
             name: project.name,
             path: project.path,
             active: project.id == appState.activeProjectID,
-            tabCount: appState.workspaces[project.id]?.tabs.count,
+            tabCount: appState.model.tabs(of: project.id).count,
             parent: parent?.name ?? "",
             parentID: parent?.id.uuidString ?? ""
         )
     }
 
-    private func tabInfo(_ tab: TerminalTab, index: Int, in workspace: Workspace) -> ControlTabInfo {
-        let project = projectStore.row(workspace.id) ?? Project.synthetic(for: workspace.id)
+    private func tabInfo(_ tab: TerminalTab, index: Int, in workspace: ProjectTabs) -> ControlTabInfo {
+        let project = appState.model.project(workspace.id)
         return ControlTabInfo(
             index: index,
             id: tab.id.uuidString,
@@ -1760,13 +1742,13 @@ final class ControlHandler {
         )
     }
 
-    private func tabInfos(in workspace: Workspace) -> [ControlTabInfo] {
+    private func tabInfos(in workspace: ProjectTabs) -> [ControlTabInfo] {
         zip(1..., workspace.tabs).map { index, tab in
             tabInfo(tab, index: index, in: workspace)
         }
     }
 
-    private func paneInfo(_ pane: Pane, in tab: TerminalTab, workspace: Workspace) -> ControlPaneInfo {
+    private func paneInfo(_ pane: Pane, in tab: TerminalTab, workspace: ProjectTabs) -> ControlPaneInfo {
         let panes = tab.splitRoot.allPanes()
         let paneIndex = (panes.firstIndex(where: { $0.id == pane.id }) ?? 0) + 1
         let tabIndex = (workspace.tabs.firstIndex(where: { $0.id == tab.id }) ?? 0) + 1
@@ -1887,4 +1869,21 @@ extension ControlHandler {
         return ControlData()
     }
     #endif
+}
+
+/// The tabs of one project, as the selectors of the CLI read them: a live
+/// view of the mirror (`ModelMirror`), never a store or a copy. A verb that
+/// changes the model and then reports reads the change.
+@MainActor
+private struct ProjectTabs {
+    let id: UUID
+    let model: ModelMirror
+
+    var tabs: [TerminalTab] { model.tabs(of: id) }
+    var activeTabID: UUID? { model.activeTabID(of: id) }
+
+    var activeTab: TerminalTab? {
+        guard let activeTabID else { return nil }
+        return tabs.first { $0.id == activeTabID }
+    }
 }

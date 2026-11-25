@@ -131,7 +131,7 @@ final class FinderServiceProvider: NSObject {
             guard let appState, let projectStore else { return }
             logger.info("openTextFiles: \(files.count, privacy: .public) files")
             for file in files {
-                let project = TextFileProject.project(
+                guard let project = TextFileProject.project(
                     for: file,
                     in: projectStore.projects,
                     activeProjectID: appState.activeProjectID
@@ -139,6 +139,7 @@ final class FinderServiceProvider: NSObject {
                     let folder = (file as NSString).deletingLastPathComponent
                     return projectStore.create(name: (folder as NSString).lastPathComponent, path: folder)
                 }()
+                else { continue }
                 appState.selectProject(project)
                 appState.openTextFile(file, line: line, inProject: project.id, projects: projectStore.projects)
             }

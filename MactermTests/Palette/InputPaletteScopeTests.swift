@@ -36,20 +36,16 @@ struct InputPaletteScopeTests {
     }
 
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
         let filesDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
+        return TestModel.appState(
             projectFiles: ProjectFileStore(directoryURL: filesDir)
         )
     }
 
     private func makeContext() -> PaletteContext {
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        return PaletteContext(appState: makeAppState(), projectStore: ProjectStore(fileURL: storeTmp))
+        let state = makeAppState()
+        return PaletteContext(appState: state, projectStore: TestModel.projectStore(state))
     }
 
     @Test

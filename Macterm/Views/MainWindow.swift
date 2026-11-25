@@ -180,7 +180,7 @@ struct MainWindow: View {
             // the trailing side. It covers the panes; it never resizes them.
             .overlay(alignment: .trailing) {
                 if #available(macOS 26.0, *), ProjectMemory.showsPanel(in: windowState),
-                   let project = activeProject, ProjectMemory.covers(project.id)
+                   let project = activeProject, ProjectMemory.covers(project)
                 {
                     ProjectMemoryPanel(project: project)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -334,6 +334,14 @@ struct MainWindow: View {
             cancelSidebarWidthHandoff()
         }
         .task {
+            guard !appState.hasRestoredSelection else { return }
+            // The model is on the server: the restore reads it, so the
+            // restore waits for the model. The unit-test host runs no server.
+            if SessionClient.liveBypass != .unitTestHost, !appState.modelConnection.isConnected {
+                await appState.modelConnection.connectUntilReady { [appState] in
+                    appState.presentToast(String(localized: "The session server is not available. Macterm tries again."))
+                }
+            }
             guard !appState.hasRestoredSelection else { return }
             appState.restoreSelection(projects: projectStore.projects)
             // After the restore, never before: "is this a fresh install?" is
@@ -864,14 +872,11 @@ struct MainWindow: View {
         // mirrors whichever window is KEY, so a background window would redraw
         // itself as whatever the frontmost one is showing (#345).
         guard let pid = windowState.activeProjectID else { return nil }
-        // The pinned and the scratch workspaces have no ProjectStore row; render
-        // them through their synthetic projects.
-        if let synthetic = Project.synthetic(for: pid) { return synthetic }
-        return projectStore.projects.first { $0.id == pid }
+        return appState.model.project(pid)
     }
 
     private var activeProjectWithWorkspace: Project? {
-        guard let project = activeProject, appState.workspaces[project.id] != nil else { return nil }
+        guard let project = activeProject else { return nil }
         return project
     }
 
@@ -884,9 +889,8 @@ struct MainWindow: View {
 
     private var activeTabTitle: String {
         guard let project = activeProject else { return "" }
-        // A sentinel workspace has no project directory worth advertising.
-        if Project.isSynthetic(project.id) { return "" }
-        return project.path
+        // A project with no folder has no directory worth advertising.
+        return project.hasFolder ? project.path : ""
     }
 }
 
@@ -1010,9 +1014,9 @@ struct EmptyProjectView: View {
                 Text(project.name)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(MactermTheme.fg)
-                // A sentinel workspace (the scratch tabs) has no project
-                // directory to show, as the window's subtitle has none.
-                Text(Project.isSynthetic(project.id) ? "" : project.path)
+                // A project with no folder (Scratch Tabs) has no directory to
+                // show, as the window's subtitle has none.
+                Text(project.hasFolder ? project.path : "")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(MactermTheme.fgMuted)
                     .textSelection(.enabled)
@@ -1116,10 +1120,11 @@ struct WorkspaceView: View {
             onAdaptiveBackgroundChange: { paneID, color in
                 appState.setAdaptiveBackgroundColor(color, paneID: paneID, projectID: project.id, windowID: windowState.id)
             },
-            onToggleZoom: { paneID in ModelWriter.paneZoom(tab, toggling: paneID) },
+            onToggleZoom: { paneID in appState.writer.paneZoom(tab: tab.id, pane: tab.zoomedPaneID == paneID ? nil : paneID) },
             paneDrop: dropContext(for: tab, renderedNode: renderedNode)
         )
         .environment(\.paneHost, .window(windowState.id))
+        .environment(\.modelWriter, appState.writer)
         // Pane grab-handle drags and sidebar tab drags are both captured
         // per leaf (see LeafDropDelegate for why there is no whole-area
         // target), sharing one resolution rendered here (#227). Uses
@@ -1163,8 +1168,10 @@ struct WorkspaceView: View {
             draggedPaneID: draggedPaneID,
             renderedTabID: tab.id,
             onMovePane: { paneID, target in
-                if ModelWriter.paneMove(tab, paneID: paneID, to: target) {
-                    appState.saveWorkspaces()
+                if let projectID = appState.model.projectID(ofTab: tab.id),
+                   appState.writer.paneMove(paneID, in: tab, projectID: projectID, to: target)
+                {
+                    appState.persistState()
                 }
             },
             onMergeTab: { movable, target in

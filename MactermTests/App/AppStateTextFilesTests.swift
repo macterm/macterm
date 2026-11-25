@@ -7,11 +7,7 @@ import Testing
 @MainActor
 struct AppStateTextFilesTests {
     private func makeAppState(placement: TextFilePlacement) -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
+        let state = TestModel.appState()
         state.textFilePlacement = { placement }
         state.opensTextFileHere = { _ in true }
         return state
@@ -28,9 +24,7 @@ struct AppStateTextFilesTests {
     }
 
     private func seedProject(_ state: AppState, path: String) -> Project {
-        let project = Project(name: "proj", path: path, sortOrder: 0)
-        state.selectProject(project)
-        return project
+        TestModel.project(state, name: "proj", path: path)
     }
 
     // MARK: - Clicked links
@@ -41,7 +35,7 @@ struct AppStateTextFilesTests {
         defer { try? FileManager.default.removeItem(atPath: root) }
         let state = makeAppState(placement: .split)
         let project = seedProject(state, path: root)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let clicked = try #require(tab.focusedPane)
         SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
@@ -64,7 +58,7 @@ struct AppStateTextFilesTests {
         defer { try? FileManager.default.removeItem(atPath: root) }
         let state = makeAppState(placement: .tab)
         let project = seedProject(state, path: root)
-        let workspace = try #require(state.workspaces[project.id])
+        let workspace = try #require(state.liveTabs[project.id])
         let clicked = try #require(workspace.activeTab?.focusedPane)
         SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
@@ -83,7 +77,7 @@ struct AppStateTextFilesTests {
         defer { try? FileManager.default.removeItem(atPath: root) }
         let state = makeAppState(placement: .split)
         let project = seedProject(state, path: root)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let clicked = try #require(tab.focusedPane)
         SurfaceRegistry.shared.ensureView(of: clicked).currentPwd = root
 
@@ -98,7 +92,7 @@ struct AppStateTextFilesTests {
     func a_click_in_a_remote_pane_is_left_to_the_system_opener() throws {
         let state = makeAppState(placement: .split)
         let project = seedProject(state, path: "me@host:/srv/app")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let clicked = try #require(tab.focusedPane)
 
         // The file is on the host; nothing local can open it.
@@ -112,7 +106,7 @@ struct AppStateTextFilesTests {
     func a_file_from_finder_splits_the_projects_focused_pane() throws {
         let state = makeAppState(placement: .split)
         let project = seedProject(state, path: "/proj")
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let before = try #require(tab.focusedPaneID)
 
         let newID = try #require(state.openTextFile("/proj/README.md", line: nil, inProject: project.id, projects: [project]))
@@ -127,7 +121,7 @@ struct AppStateTextFilesTests {
     func a_file_from_finder_gets_its_own_tab_under_the_tab_placement() throws {
         let state = makeAppState(placement: .tab)
         let project = seedProject(state, path: "/proj")
-        let workspace = try #require(state.workspaces[project.id])
+        let workspace = try #require(state.liveTabs[project.id])
 
         let newID = try #require(state.openTextFile("/proj/a.go", line: 9, inProject: project.id, projects: [project]))
 

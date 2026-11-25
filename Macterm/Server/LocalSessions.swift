@@ -19,16 +19,6 @@ actor LocalSessions: ServerEndpoint {
     private let server: LocalServer?
     private var connection: ServerConnection?
     private var connecting: Task<ServerConnection, Error>?
-    /// Where the model's batches go (`ModelShadow`), nil when nothing reads
-    /// them.
-    private var modelFeed: (@MainActor (ModelFeed) -> Void)?
-
-    /// What `setModelFeed`'s reader gets, in the order of the connection.
-    enum ModelFeed {
-        /// A new connection, maybe to a new server: subscribe again.
-        case connected
-        case batch(ServerEventBatch)
-    }
 
     /// A pane's connect tries this many times, `connectWait` apart, before
     /// the pane is gone: a server that an update replaced, or one that
@@ -61,24 +51,6 @@ actor LocalSessions: ServerEndpoint {
         } catch {
             logger.warning("session kill \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         }
-    }
-
-    /// Sends each batch of model events to `feed`, and `.connected` at each
-    /// new connection, the current one included.
-    func setModelFeed(_ feed: @escaping @MainActor (ModelFeed) -> Void) async {
-        modelFeed = feed
-        if let connection, connection.isOpen { await feed(.connected) }
-    }
-
-    /// The server's state and this connection's place in its batches.
-    func subscribe() async throws -> MactermProtocol.StateSubscribe.Result {
-        try await call(MactermProtocol.StateSubscribe.self, .init())
-    }
-
-    /// Puts `model` in place of the server's model (the shadow stage,
-    /// design/010 §9 step 3).
-    func replaceModel(_ model: MactermProtocol.ModelData) async throws {
-        _ = try await call(MactermProtocol.ModelReplace.self, .init(model: model))
     }
 
     /// Connects now, so that the first pane does not wait for it.
@@ -166,23 +138,17 @@ actor LocalSessions: ServerEndpoint {
         return connection
     }
 
-    private func feedModel(_ item: ModelFeed) async {
-        guard let modelFeed else { return }
-        await modelFeed(item)
-    }
-
     private func drop(_ old: ServerConnection) {
         guard connection === old else { return }
         old.close()
         connection = nil
     }
 
+    /// The model has a connection of its own (`ModelConnection`): this one
+    /// only follows the end of the connection.
     private func watch(_ connection: ServerConnection) {
         Task { [weak self] in
-            await self?.feedModel(.connected)
-            for await batch in connection.events where batch.events.contains(where: \.isModel) {
-                await self?.feedModel(.batch(batch))
-            }
+            for await _ in connection.events {}
             await self?.drop(connection)
         }
     }

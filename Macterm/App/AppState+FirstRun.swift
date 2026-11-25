@@ -22,7 +22,7 @@ extension AppState {
             alreadySeeded: Preferences.shared.hasSeededFirstRun,
             projectCount: projectStore.projects.count,
             pinnedRecordCount: pinnedRecords.count,
-            workspaceCount: workspaces.count,
+            workspaceCount: model.projects.count(where: { $0.isSelectable && !model.tabs(of: $0.id).isEmpty }),
             snapshotLoadFailed: snapshotLoadFailed,
             isHarnessRun: BenchmarkControl.isEnabled
         )
@@ -41,7 +41,7 @@ extension AppState {
         // retried on the next launch on top of what it did manage to create.
         Preferences.shared.hasSeededFirstRun = true
 
-        let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath)
+        guard let project = projectStore.create(name: FirstRunSeed.projectName, path: FirstRunSeed.projectPath) else { return false }
         // The project's first tab is a plain shell with no `run:`, the same
         // tab that every added project gets. `projectAdded` does nothing when
         // the `onAdd` hook of the store already gave the tab.
@@ -51,7 +51,7 @@ extension AppState {
         // state a relaunch restores from a declaration-only `pinned.yaml`
         // entry — so `materializeRestoredPinnedTabs` builds and warms it
         // through the one path that already knows how.
-        ensurePinnedWorkspace()
+        ensurePinnedProject()
         pinnedRecords.append(PinnedTabRecord(
             id: UUID(),
             declaration: FirstRunSeed.pinnedDeclaration,
@@ -63,7 +63,7 @@ extension AppState {
         // `pinned.yaml`. The project tab is the one on screen; the pinned row
         // sits above it with its tutorial already printed.
         selectProject(project)
-        saveWorkspaces()
+        persistState()
         Task { await materializeRestoredPinnedTabs() }
         return true
     }

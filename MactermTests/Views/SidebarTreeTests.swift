@@ -5,8 +5,9 @@ import Testing
 @MainActor
 struct SidebarTreeTests {
     private func makeStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-sidebar-tree-tests-\(UUID().uuidString).json"))
+        let store = ProjectStore(writer: ModelWriter(connection: TestModel.connection()))
+        store.autoAssignsColors = { false }
+        return store
     }
 
     /// Top level: `a`, `g` (holds `b` and `inner`, which holds `c`), `d`.
@@ -24,12 +25,16 @@ struct SidebarTreeTests {
 
     private func makeFixture() -> Fixture {
         let store = makeStore()
-        let a = store.create(name: "a", path: "/tmp/a")
-        let g = store.add(Project(name: "g", path: ""))
-        let b = store.add(Project(name: "b", path: "/tmp/b", parent: g.id))
-        let inner = store.add(Project(name: "inner", path: "/tmp/inner", parent: g.id))
-        let c = store.add(Project(name: "c", path: "/tmp/c", parent: inner.id))
-        let d = store.create(name: "d", path: "/tmp/d")
+        func stored(_ project: Project?) -> Project {
+            guard let project else { preconditionFailure("the test server refused the project") }
+            return project
+        }
+        let a = stored(store.create(name: "a", path: "/tmp/a"))
+        let g = stored(store.add(Project(name: "g", path: "")))
+        let b = stored(store.add(Project(name: "b", path: "/tmp/b", parent: g.id)))
+        let inner = stored(store.add(Project(name: "inner", path: "/tmp/inner", parent: g.id)))
+        let c = stored(store.add(Project(name: "c", path: "/tmp/c", parent: inner.id)))
+        let d = stored(store.create(name: "d", path: "/tmp/d"))
         return Fixture(store: store, a: a, g: g, b: b, inner: inner, c: c, d: d)
     }
 

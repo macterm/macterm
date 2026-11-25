@@ -6,18 +6,10 @@ import Testing
 @MainActor
 struct ControlHandlerWidgetTests {
     private func makeHandler() -> (ControlHandler, AppState) {
-        let tmp = FileManager.default.temporaryDirectory
-        let appState = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("macterm-widget-control-\(UUID().uuidString).json")),
-            projectFiles: ProjectFileStore(directoryURL: tmp.appendingPathComponent(
-                "macterm-widget-control-projects-\(UUID().uuidString)",
-                isDirectory: true
-            )),
-            quickTerminal: QuickTerminalSplitState()
-        )
+        let appState = TestModel.appState()
         appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
         appState.nativeDesktopWidgetFrames = { [] }
-        let store = ProjectStore(fileURL: tmp.appendingPathComponent("macterm-widget-control-store-\(UUID().uuidString).json"))
+        let store = TestModel.projectStore(appState)
         return (ControlHandler(appState: appState, projectStore: store), appState)
     }
 

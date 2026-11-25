@@ -4,47 +4,19 @@ import Testing
 
 @MainActor
 struct AppStateSessionRestartTests {
-    private actor Killed {
-        private(set) var names: Set<String> = []
-        func append(_ name: String) {
-            names.insert(name)
-        }
-
-        func settle(expecting count: Int) async {
-            for _ in 0 ..< 200 where names.count < count {
-                try? await Task.sleep(for: .milliseconds(5))
-            }
-        }
+    private func makeState() -> AppState {
+        TestModel.appState()
     }
 
-    private func makeState(killed: Killed? = nil) -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let files = ProjectFileStore(directoryURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true))
-        let state = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
-        if let killed {
-            state.sessionClient = SessionClient(
-                runsSessions: { false },
-                isBundled: { true },
-                killSession: { await killed.append($0) },
-                killRemoteSession: { _, _ in },
-                listSessions: { [] },
-                endV1Sessions: { _ in true }
-            )
-        }
-        return state
-    }
-
-    private func command(_ state: AppState, _ projectStore: ProjectStore = ProjectStore()) -> (@MainActor () -> Void)? {
-        AppCommand.restartSession.action(in: AppCommandContext(appState: state, projectStore: projectStore))
+    private func command(_ state: AppState) -> (@MainActor () -> Void)? {
+        AppCommand.restartSession.action(in: AppCommandContext(appState: state, projectStore: TestModel.projectStore(state)))
     }
 
     @Test
     func the_badge_shows_only_for_a_tab_with_an_older_session() throws {
         let state = makeState()
-        state.selectProject(Project(name: "p", path: "/tmp", sortOrder: 0))
-        let tab = try #require(state.workspaces.values.first?.activeTab)
+        let project = TestModel.project(state, name: "p")
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         #expect(!state.tabRunsOlderSession(tab))
         state.outdatedSessions = ["another-session"]
         #expect(!state.tabRunsOlderSession(tab))
@@ -55,28 +27,24 @@ struct AppStateSessionRestartTests {
     @Test
     func the_command_is_available_only_with_an_older_session_in_the_active_tab() throws {
         let state = makeState()
-        let projectStore = ProjectStore()
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
-        #expect(command(state, projectStore) == nil)
-        let pane = try #require(state.workspaces[project.id]?.activeTab?.splitRoot.allPanes().first)
+        let project = TestModel.project(state, name: "p")
+        #expect(command(state) == nil)
+        let pane = try #require(state.liveTabs[project.id]?.activeTab?.splitRoot.allPanes().first)
         state.outdatedSessions = [pane.sessionName]
-        #expect(command(state, projectStore) != nil)
+        #expect(command(state) != nil)
     }
 
     @Test
-    func a_restart_replaces_only_the_older_panes_and_ends_their_sessions() async throws {
-        let killed = Killed()
-        let state = makeState(killed: killed)
+    func a_restart_replaces_only_the_older_panes() throws {
+        let state = makeState()
         state.paneNeedsConfirmClose = { _ in false }
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
+        let project = TestModel.project(state, name: "p")
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let panes = tab.splitRoot.allPanes()
         #expect(panes.count == 2)
         let old = panes[0], kept = panes[1]
-        ModelWriter.paneFocus(tab, paneID: old.id)
+        state.writer.paneFocus(old.id)
         state.outdatedSessions = [old.sessionName]
 
         state.requestRestartSessions(tabID: tab.id, projectID: project.id)
@@ -89,8 +57,8 @@ struct AppStateSessionRestartTests {
         #expect(tab.focusedPaneID != old.id)
         #expect(tab.focusedPaneID.map { id in after.contains { $0.id == id } } == true)
         #expect(state.outdatedSessions.isEmpty)
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [old.sessionName])
+        // The old pane left the model: the server ends its session.
+        #expect(state.model.pane(old.id) == nil)
         #expect(state.pendingDialog == nil)
     }
 
@@ -98,9 +66,8 @@ struct AppStateSessionRestartTests {
     func a_busy_pane_asks_before_the_restart() throws {
         let state = makeState()
         state.paneNeedsConfirmClose = { _ in true }
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let project = TestModel.project(state, name: "p")
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let old = try #require(tab.splitRoot.allPanes().first)
         state.outdatedSessions = [old.sessionName]
 
@@ -116,9 +83,8 @@ struct AppStateSessionRestartTests {
     @Test
     func a_pane_shows_the_badge_only_while_its_session_is_older() throws {
         let state = makeState()
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let project = TestModel.project(state, name: "p")
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let pane = try #require(tab.splitRoot.allPanes().first)
         #expect(!state.showsOutdatedSessionBadge(pane))
         state.outdatedSessions = [pane.sessionName]
@@ -127,15 +93,32 @@ struct AppStateSessionRestartTests {
         #expect(!state.showsOutdatedSessionBadge(pane))
     }
 
+    /// One rule over the panes of every project of the model: a pane of the
+    /// quick terminal and a pane of a desktop widget show the Outdated pill
+    /// as a pane of a project tab does.
     @Test
-    func the_badge_click_restarts_only_that_pane() async throws {
-        let killed = Killed()
-        let state = makeState(killed: killed)
+    func a_quick_terminal_pane_and_a_widget_pane_of_an_older_build_show_the_badge() throws {
+        let state = makeState()
+        let quickTab = try #require(state.quickTerminal.ensureTab())
+        let quickPane = try #require(quickTab.splitRoot.allPanes().first)
+        let widget = state.createDesktopWidget()
+        let widgetPane = try #require(widget.tab?.splitRoot.allPanes().first)
+        #expect(!state.showsOutdatedSessionBadge(quickPane))
+        #expect(!state.showsOutdatedSessionBadge(widgetPane))
+
+        state.outdatedSessions = [quickPane.sessionName, widgetPane.sessionName]
+
+        #expect(state.showsOutdatedSessionBadge(quickPane))
+        #expect(state.showsOutdatedSessionBadge(widgetPane))
+    }
+
+    @Test
+    func the_badge_click_restarts_only_that_pane() throws {
+        let state = makeState()
         state.paneNeedsConfirmClose = { _ in false }
-        let project = Project(name: "p", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
+        let project = TestModel.project(state, name: "p")
         state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
-        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
         let panes = tab.splitRoot.allPanes()
         state.outdatedSessions = Set(panes.map(\.sessionName))
 
@@ -144,7 +127,7 @@ struct AppStateSessionRestartTests {
         let after = tab.splitRoot.allPanes()
         #expect(!after.contains { $0.id == panes[0].id })
         #expect(after.contains { $0.id == panes[1].id })
-        await killed.settle(expecting: 1)
-        #expect(await killed.names == [panes[0].sessionName])
+        #expect(state.model.pane(panes[0].id) == nil)
+        #expect(state.outdatedSessions == [panes[1].sessionName])
     }
 }

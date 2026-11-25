@@ -279,7 +279,8 @@ final class RemoteHostsPaletteScope: PaletteScope {
         // A name that nobody typed: `ProjectStore.create` changes a reserved
         // one (`Pinned 2`), as for a local folder.
         let name = ProjectPath.remoteDisplayName(host: host, directory: folder)
-        appState.selectProject(projectStore.create(name: name, path: path))
+        // A refused request shows its own toast (`ModelWriter.onError`).
+        if let project = projectStore.create(name: name, path: path) { appState.selectProject(project) }
         return .done
     }
 }

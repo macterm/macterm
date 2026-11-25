@@ -14,17 +14,8 @@ struct RemoteHostsPaletteScopeTests {
     ]
 
     private func makeContext() -> (PaletteContext, AppState, ProjectStore) {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let storeTmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let filesDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: filesDir)
-        )
-        let store = ProjectStore(fileURL: storeTmp)
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
         return (PaletteContext(appState: state, projectStore: store), state, store)
     }
 

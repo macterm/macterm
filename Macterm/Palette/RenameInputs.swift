@@ -16,7 +16,7 @@ extension PaletteInput {
     /// - A tab that closed has no row.
     @MainActor
     static func renameTab(_ tabID: UUID, in workspaceID: UUID, appState: AppState) -> PaletteInput? {
-        let find = { appState.workspaces[workspaceID]?.tabs.first(where: { $0.id == tabID }) }
+        let find = { appState.model.tabs(of: workspaceID).first(where: { $0.id == tabID }) }
         guard let tab = find() else { return nil }
         return PaletteInput(
             id: "rename-tab:\(tabID.uuidString)",

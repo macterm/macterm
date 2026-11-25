@@ -9,16 +9,15 @@ import Testing
 @MainActor
 struct DockMenuTests {
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
+        TestModel.appState()
     }
 
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-dock-\(UUID().uuidString).json"))
+    /// The project store of `state`'s model. As in the app, each project
+    /// that it adds gets its first tab.
+    private func makeProjectStore(_ state: AppState) -> ProjectStore {
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        return store
     }
 
     /// A delegate the way `MainWindow.onAppear` leaves it: state objects
@@ -38,7 +37,7 @@ struct DockMenuTests {
     @Test
     func the_menu_is_built_from_app_commands_in_declaration_order() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         let delegate = makeDelegate(appState: state, projectStore: store)
 
         let menu = try #require(delegate.applicationDockMenu(NSApp))
@@ -84,7 +83,7 @@ struct DockMenuTests {
     @Test
     func an_item_is_enabled_exactly_when_its_command_applies() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let delegate = makeDelegate(appState: state, projectStore: store)
 
@@ -94,7 +93,7 @@ struct DockMenuTests {
         #expect(!withoutProject.autoenablesItems)
         #expect(enabledWithout == [true, false, true, true])
 
-        let project = store.create(name: "proj", path: "/tmp/proj")
+        let project = try #require(store.create(name: "proj", path: "/tmp/proj"))
         state.selectProject(project)
 
         // Rebuilt on the next right-click, it reads the new state.
@@ -108,7 +107,7 @@ struct DockMenuTests {
     @Test
     func picking_new_window_runs_app_commands_own_action() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         let delegate = makeDelegate(appState: state, projectStore: store)
         var opened = 0
         state.openNewWindow = { opened += 1 }
@@ -126,20 +125,20 @@ struct DockMenuTests {
     @Test
     func picking_new_tab_fronts_a_terminal_window_and_then_creates_the_tab() throws {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
-        let project = store.create(name: "proj", path: "/tmp/proj")
+        let project = try #require(store.create(name: "proj", path: "/tmp/proj"))
         state.selectProject(project)
         let delegate = makeDelegate(appState: state, projectStore: store)
         var windowRequests = 0
         delegate.openInitialWindow = { windowRequests += 1 }
-        let before = try #require(state.workspaces[project.id]?.tabs.count)
+        let before = try #require(state.liveTabs[project.id]?.tabs.count)
 
         delegate.performDockMenuCommand(.newTab)
 
         // With no window at all (#241), the pick asks for one — the tab it
         // makes has to render somewhere — and still creates the tab.
-        let after = state.workspaces[project.id]?.tabs.count
+        let after = state.liveTabs[project.id]?.tabs.count
         #expect(windowRequests == 1)
         #expect(after == before + 1)
     }
@@ -147,14 +146,14 @@ struct DockMenuTests {
     @Test
     func a_command_that_stopped_applying_is_a_no_op() {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         let delegate = makeDelegate(appState: state, projectStore: store)
 
         // No project: New Tab's action is nil. Must not trap, must not touch
-        // the workspaces.
+        // the model.
         delegate.performDockMenuCommand(.newTab)
 
-        #expect(state.workspaces.isEmpty)
+        #expect(state.model.allTabs.isEmpty)
     }
 
     // MARK: - Preparation

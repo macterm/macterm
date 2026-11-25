@@ -41,7 +41,7 @@ extension AppState {
     /// design issue 0608 decides a move of more than one node.
     func moveToProjectNode(store: ProjectStore) -> SidebarItem? {
         guard let projectID = activeProjectID else { return nil }
-        let tab = keyWindow.map { selectedTab(for: projectID, in: $0) } ?? workspaces[projectID]?.activeTab
+        let tab = keyWindow.map { selectedTab(for: projectID, in: $0) } ?? model.activeTab(of: projectID)
         if let tab { return .tab(projectID: projectID, tabID: tab.id) }
         return store.row(projectID) != nil ? .project(projectID) : nil
     }
