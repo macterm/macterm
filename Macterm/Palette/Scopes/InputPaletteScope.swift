@@ -198,7 +198,8 @@ final class InputPaletteScope: PaletteScope {
     var isFirstShow = true
     /// The check of an action in flight (`PaletteInputAction.check`).
     private var checkTask: Task<Void, Never>?
-    private(set) var loading: PaletteLoading?
+    /// The line of an action's check in flight (`PaletteInputAction.check`).
+    private var checkLoading: PaletteLoading?
     /// An action ran after its check: the panel closes the palette at its
     /// next redraw (`takeCloseRequest`).
     private var closeRequested = false
@@ -216,20 +217,12 @@ final class InputPaletteScope: PaletteScope {
         text = input.initialValue
     }
 
-    func activate(context _: PaletteContext, onChange: @escaping @MainActor () -> Void) {
-        input.hostFolders?.onChange = onChange
-    }
-
-    func deactivate() {
-        input.hostFolders?.cancel()
-        input.hostFolders?.onChange = nil
-    }
-
-    /// A host listing in flight shows the spinner in the field. The panel
-    /// reads it after `sections`, which is where a request starts, and the
-    /// lister's `onChange` redraws when the request ends.
+    /// An action's check in flight, or a host listing in flight, shows the
+    /// spinner in the field. The panel reads it after `sections`, which is
+    /// where a listing starts, and `onChange` redraws when either ends.
     var loading: PaletteLoading? {
-        input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders…")) : nil
+        if let checkLoading { return checkLoading }
+        return input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders…")) : nil
     }
 
     var placeholder: String { input.prompt }
@@ -237,17 +230,20 @@ final class InputPaletteScope: PaletteScope {
 
     func activate(context _: PaletteContext, onChange: @escaping @MainActor () -> Void) {
         self.onChange = onChange
+        input.hostFolders?.onChange = onChange
     }
 
     func deactivate() {
         cancelCheck()
+        input.hostFolders?.cancel()
+        input.hostFolders?.onChange = nil
     }
 
     private func cancelCheck() {
         checkTask?.cancel()
         checkTask = nil
         checkedText = nil
-        loading = nil
+        checkLoading = nil
     }
 
     /// True once, after an action ran when its check said yes: the palette
@@ -363,7 +359,7 @@ final class InputPaletteScope: PaletteScope {
     private func startCheck(_ check: (message: String, answer: @MainActor () async -> String?), of action: PaletteInputAction) {
         let checkedText = text
         self.checkedText = checkedText
-        loading = PaletteLoading(message: check.message)
+        checkLoading = PaletteLoading(message: check.message)
         refusal = nil
         failure = nil
         checkTask = Task { [weak self] in
@@ -371,7 +367,7 @@ final class InputPaletteScope: PaletteScope {
             guard let self, !Task.isCancelled, self.checkedText == checkedText else { return }
             checkTask = nil
             self.checkedText = nil
-            loading = nil
+            checkLoading = nil
             if let reason {
                 refusal = (checkedText, reason)
                 failure = PaletteFailure(title: reason, retryable: false)
