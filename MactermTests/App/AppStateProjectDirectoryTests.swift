@@ -88,12 +88,16 @@ struct AppStateProjectDirectoryTests {
         let input = try #require(made)
         #expect(input.initialValue.isEmpty)
         #expect(action(input, "") == nil, "no pane folder: only the typed field")
-        #expect(input.completions(root + "/").map(\.title) == ["sub"])
-        #expect(input.completions(root + "/").first?.subtitle?.hasPrefix("Change to: ") == true, "a folder row says what it does")
-        let row = try #require(action(input, root + "/sub/"))
-        #expect(row.title == "Change to \"\(root)/sub/\"", "one action row names the typed path")
-        #expect(row.subtitle == nil)
-        #expect(row.run() == .done)
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let rows = input.choices(root + "/", context)
+        let rootName = (root as NSString).lastPathComponent
+        #expect(rows.map(\.item.title) == [rootName, "sub"], "the typed folder, then its folders, as in the root palette")
+        #expect(rows[1].item.subtitle?.hasPrefix("Change to: ") == true, "a folder row says what it does")
+        #expect(rows[1].item.subtitleIsPath)
+        #expect(rows[1].value == root + "/sub/", "Tab goes into the folder")
+        #expect(action(input, root + "/") == nil, "no Change to row: a folder row is the action")
+        #expect(notice(input, root + "/") == nil)
+        rows[1].item.action()
         #expect(path(of: fixture) == root + "/sub")
     }
 
@@ -109,6 +113,7 @@ struct AppStateProjectDirectoryTests {
         let input = try #require(made)
         #expect(notice(input, root + "/missing") == "Path \(root)/missing doesn't exist")
         #expect(action(input, root + "/missing") == nil, "no action row for a bad path")
+        #expect(notice(input, root + "/su") == nil, "no notice while a folder row matches the typed text")
         #expect(notice(input, "relative/path") == "Path relative/path doesn't exist")
         let missingUnderHome = "~/macterm-no-such-folder-\(UUID().uuidString)"
         #expect(notice(input, missingUnderHome) == "Path \(missingUnderHome) doesn't exist", "the notice keeps ~")
@@ -125,7 +130,7 @@ struct AppStateProjectDirectoryTests {
     }
 
     @Test
-    func return_runs_only_the_action_row() throws {
+    func return_runs_a_folder_row_and_tab_fills_it() throws {
         let root = try makeFolder()
         let fixture = makeFixture(path: "/tmp")
         let made = fixture.state.changeProjectDirectoryInput(
@@ -135,14 +140,15 @@ struct AppStateProjectDirectoryTests {
         )
         let scope = try InputPaletteScope(input: #require(made))
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
-        let typed = root + "/"
+        let typed = root + "/s"
         let items = scope.sections(for: PaletteQuery(raw: typed), context: context).flatMap(\.items)
-        #expect(items.map(\.title) == ["Change to \"\(typed)\"", "sub"])
+        #expect(items.map(\.title) == ["sub"])
+        #expect(scope.restingItemID == items[0].id, "the selection rests on the first folder row")
         #expect(scope.press(nil) == .nothing, "no selected row: Return does nothing")
-        #expect(scope.press(items[1]) == .fill(root + "/sub/"), "a completion goes into the field")
+        #expect(scope.tabText(selected: items[0], rows: items) == root + "/sub/", "Tab puts the folder in the field")
         #expect(path(of: fixture) == "/tmp")
         #expect(scope.press(items[0]) == .closed)
-        #expect(path(of: fixture) == root)
+        #expect(path(of: fixture) == root + "/sub")
     }
 
     @Test

@@ -11,9 +11,11 @@ extension AppState {
     }
 
     /// The palette screen of Change Project Directory for `project`. A
-    /// typed path that is a folder gives one action row,
-    /// `Change to "<path>"`, and the rows under it complete the path. At an
-    /// empty field the action row is "Current Pane's Directory", with the
+    /// typed path lists the folders that it names and completes to, as
+    /// the root palette does (`changeProjectDirectoryChoices`): Return on
+    /// one sets the project's folder, and Tab goes into it. The notice of
+    /// `PathProblem` shows only when no folder row is there. At an empty
+    /// field the action row is "Current Pane's Directory", with the
     /// pane's folder as its subtitle (`paneDirectoryOffer`). The screen
     /// reads the pane's folder through `paneDirectory`
     /// (`currentPaneDirectory` by default) when it shows, not when the
@@ -31,7 +33,9 @@ extension AppState {
             id: "changeProjectDirectory:\(projectID.uuidString)",
             pill: Self.changeProjectDirectoryPill,
             prompt: String(localized: "Type a folder path"),
-            completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
+            choices: { [self] text, _ in
+                changeProjectDirectoryChoices(for: text, projectID: projectID, projectStore: projectStore)
+            },
             check: { [self] text in
                 if text.trimmingCharacters(in: .whitespaces).isEmpty {
                     guard let paneDirectory = Self.paneDirectoryOffer(readPaneDirectory(), for: project) else {
@@ -43,14 +47,39 @@ extension AppState {
                         run: { [self] in setProjectDirectory(projectID, to: paneDirectory, projectStore: projectStore) }
                     ))
                 }
-                return PaletteInput.folderCheck(text) { path in
-                    PaletteInputAction(
-                        title: String(localized: "Change to \"\(path)\""),
-                        run: { [self] in setProjectDirectory(projectID, to: path, projectStore: projectStore) }
-                    )
+                let path = text.trimmingCharacters(in: .whitespaces)
+                if !changeProjectDirectoryChoices(for: path, projectID: projectID, projectStore: projectStore).isEmpty {
+                    return .nothing
                 }
+                return PathProblem.local(atPath: path).map { .notice($0.notice(for: path)) } ?? .nothing
             }
         )
+    }
+
+    /// The folder rows of a typed path (`PathCompleter`): the folder that
+    /// it names, then the folders that it completes to. Each row is the
+    /// action: it sets the folder of the project. Tab puts its path in the
+    /// field (`PathCompleter.fieldText`).
+    func changeProjectDirectoryChoices(
+        for text: String,
+        projectID: UUID,
+        projectStore: ProjectStore
+    ) -> [PaletteInputChoice] {
+        let typed = text.trimmingCharacters(in: .whitespaces)
+        guard !typed.isEmpty, let completion = PathCompleter.complete(typed) else { return [] }
+        let folders = (completion.exactMatch.map { [$0] } ?? []) + completion.children
+        return folders.map { folder in
+            PaletteInputChoice(
+                item: PaletteItem(
+                    id: "changeTo:\(folder)",
+                    title: PathRow.title(for: folder),
+                    subtitle: PathRow.Action.changeTo.subtitle(for: folder),
+                    subtitleIsPath: true,
+                    action: { [self] in _ = setProjectDirectory(projectID, to: folder, projectStore: projectStore) }
+                ),
+                value: PathCompleter.fieldText(for: folder, typed: typed)
+            )
+        }
     }
 
     /// The folder of the focused pane, when the key window shows a tab of
