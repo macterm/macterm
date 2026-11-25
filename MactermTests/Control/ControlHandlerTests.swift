@@ -418,6 +418,10 @@ struct ControlHandlerTests {
             return await handler.handle(request("project.create", args: args))
         }
 
+        for selector in ["project:1", parent.id.uuidString] {
+            let created = await create(parent: selector)
+            #expect(created.data?.projects?.first?.parentID == parent.id.uuidString, "\(selector)")
+        }
         let created = await create(parent: "Work")
         #expect(created.ok, "\(String(describing: created.error))")
         let info = try #require(created.data?.projects?.first)
@@ -428,7 +432,7 @@ struct ControlHandlerTests {
         for selector in ["ghost", "pinned", "scratch"] {
             #expect(await !create(parent: selector).ok, "\(selector)")
         }
-        #expect(projectStore.projects.count == 2)
+        #expect(projectStore.projects.count == 4)
     }
 
     @Test
@@ -1195,6 +1199,35 @@ struct ControlHandlerTests {
         #expect(to.tabs.map(\.id) == before)
     }
 
+    /// The destination takes every project selector. Its own project with a
+    /// slot is a plain reorder.
+    @Test
+    func tab_move_to_project_takes_a_uuid_or_an_index_and_its_own_project_reorders() async throws {
+        let (handler, appState, projectStore) = makeHandler()
+        let source = seedProject(appState, projectStore, name: "api")
+        appState.createTab(projectID: source.id, projectPath: source.path)
+        let destination = seedProject(appState, projectStore, name: "web", select: false)
+        let from = try #require(appState.workspaces[source.id])
+        let to = try #require(appState.workspaces[destination.id])
+        let ids = from.tabs.map(\.id)
+
+        func move(_ tab: String, in project: String, to target: String, slot: Int? = nil) async -> ControlResponse {
+            var args = ControlArgs(project: project, tab: tab, slot: slot)
+            args.toProject = target
+            return await handler.handle(request("tab.move", args: args))
+        }
+        let byIndex = await move("tab:2", in: "api", to: "project:2")
+        #expect(byIndex.ok, "\(String(describing: byIndex.error))")
+        #expect(to.tabs.last?.id == ids[1])
+        let byID = await move("tab:2", in: "web", to: source.id.uuidString)
+        #expect(byID.ok, "\(String(describing: byID.error))")
+        #expect(from.tabs.map(\.id) == ids)
+
+        let reorder = await move("tab:2", in: "api", to: "api", slot: 1)
+        #expect(reorder.ok, "\(String(describing: reorder.error))")
+        #expect(from.tabs.map(\.id) == [ids[1], ids[0]])
+    }
+
     /// The whole request is checked before the first change: a bad slot or
     /// destination leaves the tab where it was.
     @Test
@@ -1216,6 +1249,9 @@ struct ControlHandlerTests {
         #expect(await move(to: "web", slot: 0).error?.code == .badRequest)
         #expect(await move(to: "api").error?.code == .badRequest)
         #expect(await move(to: "ghost").error?.code == .notFound)
+        // A group (a project with no folder) holds no tabs.
+        projectStore.add(Project(name: "Work", path: "", sortOrder: projectStore.projects.count))
+        #expect(await move(to: "Work").error?.code == .notFound)
         // The pinned and the scratch tabs are not projects of the tree.
         #expect(await move(to: "pinned").error?.code == .badRequest)
         #expect(await move(to: "scratch").error?.code == .badRequest)

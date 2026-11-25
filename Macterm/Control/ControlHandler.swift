@@ -785,13 +785,15 @@ final class ControlHandler {
     /// Move a tab to another project (`toProject`), to a slot (#224), or
     /// both. The move to a project is Move to Project of the sidebar
     /// (`AppState.moveNode`): the tab goes to the end of the tabs of that
-    /// project. `slot` is then the tab's FINAL 1-based position in the tab
-    /// list of the project that holds it at the end — `tab move tab:4 2`
-    /// makes it second — which `Workspace.moveTab` doesn't speak: it takes a
-    /// drag-and-drop insertion offset in the pre-removal coordinate space,
-    /// where a drop past the origin lands one slot earlier. So a downward
-    /// move passes `slot` (final position + the removed tab's own vacated
-    /// slot) and any other passes `slot - 1` (0-based conversion only).
+    /// project, and that project becomes active, as in the app. A
+    /// destination that is the tab's own project is a plain reorder. A group
+    /// (a project with no folder) is not a destination.
+    ///
+    /// `slot` is the tab's FINAL 1-based position in the project that holds
+    /// it at the end: `tab move tab:4 2` makes it second. `Workspace.moveTab`
+    /// takes a drop offset in the pre-removal coordinate space instead, where
+    /// a drop past the origin lands one slot earlier. So a downward move
+    /// passes `slot`, and any other passes `slot - 1`.
     private func tabMove(_ args: ControlArgs) throws -> ControlData {
         guard args.tab != nil else {
             throw ControlError(code: .badRequest, message: "tab.move requires a tab selector")
@@ -801,15 +803,15 @@ final class ControlHandler {
         }
         var (project, workspace) = try resolveWorkspace(args)
         let (_, tab) = try resolveTab(args, in: workspace)
-        // Check the whole request before the first change, so that a bad
-        // slot does not leave the tab moved to the other project.
         let destination = try args.toProject.map { try resolveTreeProject($0, role: "destination") }
-        if let destination {
-            guard destination.id != project.id else {
-                throw ControlError(code: .badRequest, message: "the tab is already in \"\(destination.name)\"")
+        if let destination, destination.id != project.id {
+            // A project with no folder is a group, which holds no tabs
+            // (`tab list` refuses it in the same way).
+            guard let target = appState.workspaces[destination.id] else {
+                throw ControlError(code: .notFound, message: "project \"\(destination.name)\" has no tabs")
             }
-            let count = (appState.workspaces[destination.id]?.tabs.count ?? 0) + 1
-            if let slot = args.slot { try Self.checkSlot(slot, count: count) }
+            // Check the slot before the move, so that a bad slot moves nothing.
+            if let slot = args.slot { try Self.checkSlot(slot, count: target.tabs.count + 1) }
             appState.moveNode(
                 .tab(projectID: project.id, tabID: tab.id),
                 to: destination,
@@ -820,6 +822,8 @@ final class ControlHandler {
                 throw ControlError(code: .internalError, message: "tab move failed")
             }
             (project, workspace) = (destination, moved)
+        } else if args.slot == nil {
+            throw ControlError(code: .badRequest, message: "the tab is already in \"\(project.name)\"")
         }
         guard let fromIndex = workspace.tabs.firstIndex(where: { $0.id == tab.id }).map({ $0 + 1 }) else {
             throw ControlError(code: .internalError, message: "tab move failed")
@@ -1554,7 +1558,11 @@ final class ControlHandler {
     private func resolveTreeProject(_ selector: String, role: String) throws -> Project {
         let project = try resolveProject(selector)
         guard !Project.isSynthetic(project.id) else {
-            throw ControlError(code: .badRequest, message: "the \(project.name) section cannot be a \(role) project")
+            throw ControlError(
+                code: .badRequest,
+                message: "\(project.name) is not a project of the tree, so it cannot be the \(role)",
+                action: "pin a tab or move it to Scratch Tabs in the app"
+            )
         }
         return project
     }

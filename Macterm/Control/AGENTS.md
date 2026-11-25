@@ -12,7 +12,7 @@ The verbs:
 
 - `status`
 - `project list/create/select/rename/remove`. `project create --parent` is New Project Inside.
-- `tab list/new/select/move/rename/close/remove/merge`. `tab move --to-project` is Move to Project (`AppState.moveNode`), and the slot argument can come with it. `tab remove` is `tab close`, so that `tab` and `project` have the same verbs (design 013 §2.8). `tab list` and `project list` name a node with the same fields: `id`, `parent` and `parentID`.
+- `tab list/new/select/move/rename/close/remove/merge`. `tab move --to-project` is Move to Project (`AppState.moveNode`). `tab remove` is `tab close`. A tab and a project have the same fields that name a node: `id`, `parent` and `parentID`.
 - `pane list/inspect/dump/split/focus/close/run/key/zoom/resize-split`
 - `grid RxC`
 - `session list/info/kill`
