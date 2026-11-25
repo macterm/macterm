@@ -1,32 +1,11 @@
 import Foundation
 
 /// The folders in one folder: its path from `/`, and the names of the
-/// folders in it. A local folder reads the file system
-/// (`FolderListing.local`). A folder on a host asks the host
+/// folders in it. A folder on a host asks the host
 /// (`RemoteHosts.listFolders`).
 struct FolderListing: Equatable {
     let path: String
     let names: [String]
-
-    /// The listing of a local folder, as `PathCompleter` reads it: `~`
-    /// expands, and a link to a folder counts as a folder. nil when the
-    /// folder is not there.
-    static func local(_ directory: String) -> FolderListing? {
-        let expanded = (directory as NSString).expandingTildeInPath
-        guard expanded.hasPrefix("/") else { return nil }
-        let fm = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: expanded, isDirectory: &isDirectory), isDirectory.boolValue,
-              let names = try? fm.contentsOfDirectory(atPath: expanded)
-        else { return nil }
-        let path = expanded.count > 1 && expanded.hasSuffix("/") ? String(expanded.dropLast()) : expanded
-        let folders = names.filter { name in
-            var childIsDirectory: ObjCBool = false
-            let full = (path as NSString).appendingPathComponent(name)
-            return fm.fileExists(atPath: full, isDirectory: &childIsDirectory) && childIsDirectory.boolValue
-        }
-        return FolderListing(path: path, names: folders)
-    }
 }
 
 /// The folder rows of a typed path, from any listing of folders: the rule
@@ -107,14 +86,22 @@ enum FolderCompletion {
 @MainActor
 final class HostFolderLister {
     private let list: @MainActor (String) async -> FolderListing?
-    private var listings: [String: FolderListing?] = [:]
+    /// The listings that came, the newest last.
+    private var listings: [(folder: String, listing: FolderListing)] = []
+    /// When a request for a folder gave no answer: the lister asks again
+    /// only after `retryAfter`, so that a host that is down is not asked
+    /// at each redraw.
+    private var failed: [String: ContinuousClock.Instant] = [:]
     private var requests: [String: Task<Void, Never>] = [:]
-    /// Called when a listing comes, so that the screen draws its rows.
+    /// Called when a request ends, so that the screen draws its rows.
     var onChange: (@MainActor () -> Void)?
 
     /// The most folders whose listings stay. A screen types down one path,
-    /// so it needs few.
+    /// so it needs few. The oldest goes first.
     static let kept = 8
+    /// How long a folder with no answer waits before the lister asks again
+    /// (no connection yet, a slow host, a folder that is made later).
+    static let retryAfter: Duration = .seconds(5)
 
     /// `list` asks the host for the listing of a folder as typed
     /// (`RemoteHosts.listFolders`).
@@ -125,15 +112,23 @@ final class HostFolderLister {
     /// The listing of `folder` (as typed, with a slash at the end), or nil
     /// while it is asked or when the host gave none.
     func listing(_ folder: String) -> FolderListing? {
-        if let kept = listings[folder] { return kept }
+        if let index = listings.firstIndex(where: { $0.folder == folder }) {
+            return listings[index].listing
+        }
+        if let when = failed[folder], ContinuousClock.now - when < Self.retryAfter { return nil }
         if requests[folder] == nil {
             requests[folder] = Task { [weak self] in
                 guard let self else { return }
                 let answer = await list(folder)
                 guard !Task.isCancelled else { return }
                 requests[folder] = nil
-                if listings.count >= Self.kept { listings.removeAll() }
-                listings[folder] = .some(answer)
+                if let answer {
+                    failed[folder] = nil
+                    listings.append((folder, answer))
+                    if listings.count > Self.kept { listings.removeFirst() }
+                } else {
+                    failed[folder] = .now
+                }
                 onChange?()
             }
         }

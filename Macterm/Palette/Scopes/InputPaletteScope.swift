@@ -221,9 +221,11 @@ final class InputPaletteScope: PaletteScope {
         input.hostFolders?.onChange = nil
     }
 
-    /// A host listing in flight shows the spinner in the field.
+    /// A host listing in flight shows the spinner in the field. The panel
+    /// reads it after `sections`, which is where a request starts, and the
+    /// lister's `onChange` redraws when the request ends.
     var loading: PaletteLoading? {
-        input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders")) : nil
+        input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders…")) : nil
     }
 
     var placeholder: String { input.prompt }

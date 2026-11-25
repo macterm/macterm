@@ -210,7 +210,9 @@ enum HostCommands {
     }
 
     /// The most folder names that one listing gives (`folderListScript`).
-    static let folderListCap = 200
+    /// Large, because the field filters the names by the typed prefix
+    /// after they come: a small cap would hide a folder in a big folder.
+    static let folderListCap = 5000
 
     /// The folders in a folder on the host, for the path completion of a
     /// remote folder field (0614). The first line is the folder's path

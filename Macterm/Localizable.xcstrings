@@ -4798,18 +4798,18 @@
         }
       }
     },
-    "Listing folders" : {
+    "Listing folders…" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "폴더 목록을 읽는 중"
+            "value" : "폴더 목록을 읽는 중…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在列出文件夹"
+            "value" : "正在列出文件夹…"
           }
         }
       }

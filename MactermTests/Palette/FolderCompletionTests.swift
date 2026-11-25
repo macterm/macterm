@@ -33,7 +33,7 @@ struct FolderCompletionTests {
             let expected = local.map { completion in
                 (completion.exactMatch.map { [$0] } ?? []) + completion.children
             }
-            let rows = FolderCompletion.rows(for: typed, listing: FolderListing.local)
+            let rows = FolderCompletion.rows(for: typed, listing: localListing)
             #expect(
                 rows?.map(\.path).map(trimmed) == expected?.map(trimmed),
                 "\(typed): the same folders in the same order"
@@ -91,8 +91,24 @@ struct FolderCompletionTests {
         #expect(!lister.isListing)
         _ = lister.listing("/none/")
         try await waitUntil { changes == 2 }
-        #expect(lister.listing("/none/") == nil, "a folder with no answer is not asked again")
+        #expect(lister.listing("/none/") == nil, "no answer gives no rows")
+        #expect(!lister.isListing, "a folder with no answer waits before it is asked again")
         #expect(asked == ["~/", "/none/"])
+    }
+
+    @Test
+    func the_lister_keeps_the_newest_listings() async throws {
+        let lister = HostFolderLister { folder in FolderListing(path: "/" + folder, names: []) }
+        var changes = 0
+        lister.onChange = { changes += 1 }
+        for index in 0 ... HostFolderLister.kept {
+            _ = lister.listing("f\(index)/")
+            try await waitUntil { changes == index + 1 }
+        }
+        #expect(lister.listing("f\(HostFolderLister.kept)/") != nil, "the newest stays")
+        #expect(lister.listing("f1/") != nil, "only the oldest goes")
+        #expect(lister.listing("f0/") == nil, "the oldest went, and is asked again")
+        #expect(lister.isListing)
     }
 
     @Test
@@ -135,6 +151,23 @@ struct FolderCompletionTests {
         #expect(scope.loading == nil)
         scope.deactivate()
         #expect(lister.onChange == nil)
+    }
+
+    /// The listing of a local folder, read as `PathCompleter` reads it:
+    /// `~` expands, and a link to a folder counts as a folder.
+    private func localListing(_ directory: String) -> FolderListing? {
+        let expanded = (directory as NSString).expandingTildeInPath
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard expanded.hasPrefix("/"), fm.fileExists(atPath: expanded, isDirectory: &isDirectory), isDirectory.boolValue,
+              let names = try? fm.contentsOfDirectory(atPath: expanded)
+        else { return nil }
+        let path = trimmed(expanded)
+        let folders = names.filter { name in
+            var child: ObjCBool = false
+            return fm.fileExists(atPath: (path as NSString).appendingPathComponent(name), isDirectory: &child) && child.boolValue
+        }
+        return FolderListing(path: path, names: folders)
     }
 
     private func trimmed(_ path: String) -> String {
