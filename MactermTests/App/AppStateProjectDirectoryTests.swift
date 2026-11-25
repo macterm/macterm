@@ -99,6 +99,13 @@ struct AppStateProjectDirectoryTests {
         #expect(notice(input, root + "/") == nil)
         rows[1].item.action()
         #expect(path(of: fixture) == root + "/sub")
+
+        let home = ProjectPath.normalizedForStorage(NSHomeDirectory())
+        let homeRow = try #require(input.choices("~", context).first, "a typed ~ is its own folder row")
+        #expect(homeRow.item.subtitle == "Change to: \(home)", "the row shows the full path")
+        #expect(homeRow.value == "~/", "Tab keeps the ~ that the user typed")
+        homeRow.item.action()
+        #expect(path(of: fixture) == home)
     }
 
     @Test
@@ -122,6 +129,10 @@ struct AppStateProjectDirectoryTests {
         let file = root + "/file.txt"
         try "x".write(toFile: file, atomically: true, encoding: .utf8)
         #expect(notice(input, file) == "\(file) is not a directory", "a file has its own notice")
+        try FileManager.default.createDirectory(atPath: root + "/file.txt-old", withIntermediateDirectories: true)
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        #expect(input.choices(file, context).map(\.item.title) == ["file.txt-old"])
+        #expect(notice(input, file) == "\(file) is not a directory", "a file keeps its notice beside the folder rows")
         let store = fixture.store
         #expect(fixture.state
             .setProjectDirectory(fixture.project.id, to: file, projectStore: store) == .refused("\(file) is not a directory"))

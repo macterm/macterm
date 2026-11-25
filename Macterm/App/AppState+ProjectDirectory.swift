@@ -11,10 +11,11 @@ extension AppState {
     }
 
     /// The palette screen of Change Project Directory for `project`. A
-    /// typed path lists the folders that it names and completes to, as
-    /// the root palette does (`changeProjectDirectoryChoices`): Return on
-    /// one sets the project's folder, and Tab goes into it. The notice of
-    /// `PathProblem` shows only when no folder row is there. At an empty
+    /// typed path lists folder rows, as the root palette does
+    /// (`changeProjectDirectoryChoices`): the typed folder, then the folders
+    /// whose names start with the text. Return on a row sets the project's
+    /// folder, and Tab goes into it. The notice of `PathProblem` shows when
+    /// no row is there, and always for a file. At an empty
     /// field the action row is "Current Pane's Directory", with the
     /// pane's folder as its subtitle (`paneDirectoryOffer`). The screen
     /// reads the pane's folder through `paneDirectory`
@@ -48,10 +49,12 @@ extension AppState {
                     ))
                 }
                 let path = text.trimmingCharacters(in: .whitespaces)
+                let problem = PathProblem.local(atPath: path)
+                if let problem, problem == .notDirectory { return .notice(problem.notice(for: path)) }
                 if !changeProjectDirectoryChoices(for: path, projectID: projectID, projectStore: projectStore).isEmpty {
                     return .nothing
                 }
-                return PathProblem.local(atPath: path).map { .notice($0.notice(for: path)) } ?? .nothing
+                return problem.map { .notice($0.notice(for: path)) } ?? .nothing
             }
         )
     }

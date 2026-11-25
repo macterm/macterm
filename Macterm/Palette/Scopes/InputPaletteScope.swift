@@ -71,36 +71,6 @@ struct PaletteInput: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
-
-    /// Completions for a field that holds a local directory
-    /// (`PathCompleter`): the directories under the typed path, as the rows
-    /// of `PathRow`, with `action` as the words before the path. A remote
-    /// spec gets none.
-    @MainActor
-    static func pathCompletions(_ text: String, action: PathRow.Action) -> [PaletteCompletion] {
-        guard let completion = PathCompleter.complete(text) else { return [] }
-        return completion.children.map { child in
-            PaletteCompletion(
-                title: PathRow.title(for: child),
-                value: PathCompleter.fieldText(for: child, typed: text),
-                subtitle: action.subtitle(for: child)
-            )
-        }
-    }
-
-    /// The check of a field that holds a local folder: nothing for an
-    /// empty field, the notice of `PathProblem` for a path that is not a
-    /// folder, else the action row that `action` makes for the typed text.
-    @MainActor
-    static func folderCheck(
-        _ text: String,
-        action: (String) -> PaletteInputAction
-    ) -> PaletteInputCheck {
-        let path = text.trimmingCharacters(in: .whitespaces)
-        if path.isEmpty { return .nothing }
-        if let problem = PathProblem.local(atPath: path) { return .notice(problem.notice(for: path)) }
-        return .action(action(path))
-    }
 }
 
 /// What the text of an input field gives (`PaletteInput.check`).
@@ -129,7 +99,7 @@ enum PaletteInputPress: Equatable {
 }
 
 /// The one action row of an input screen: its title names the action and
-/// the value (`Change to "~/work/api"`). It has no icon (Ethan, 0561).
+/// the value (`Rename to "build"`). It has no icon (Ethan, 0561).
 struct PaletteInputAction {
     let title: String
     /// A path that the row shows under its title, when the title does not

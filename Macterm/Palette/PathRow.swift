@@ -1,9 +1,9 @@
 import Foundation
 
 /// The one look of a folder row in a path-completion list: the root
-/// palette's path mode (`DirectorySource`) and the path field of an input
-/// screen (`PaletteInput.pathCompletions`). The title is the folder name.
-/// The subtitle is what the row does and the full path
+/// palette's path mode (`DirectorySource`) and the folder rows of an
+/// input screen (`AppState.changeProjectDirectoryChoices`). The title is
+/// the folder name. The subtitle is what the row does and the full path
 /// (`Open as new project: /Users/me/api`), drawn on one line and cut in the
 /// middle when it is too long (`PaletteItem.subtitleIsPath`), so the end of
 /// the path stays.

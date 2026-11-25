@@ -2,8 +2,9 @@ import Foundation
 
 /// The directories that a typed local path can complete to — the one
 /// completer of the palette. Path mode of the root (`DirectorySource`) and
-/// a path field of an input screen (`PaletteInput.pathCompletions`) both
-/// read it, so a typed path completes the same way in both.
+/// the folder rows of an input screen
+/// (`AppState.changeProjectDirectoryChoices`) both read it, so a typed
+/// path completes the same way in both.
 ///
 /// `~` expands to the home directory. A typed directory lists its children;
 /// any other path lists the children of its parent whose name starts with
