@@ -204,7 +204,6 @@ struct MactermIntentsTests {
         let project = seedProject(appState, projectStore)
         let entity = MactermProjectEntity(project)
         appState.removeProject(project.id)
-        projectStore.removeWithDescendants(project.id)
 
         let intent = FocusMactermProjectIntent()
         intent.project = entity
@@ -286,7 +285,7 @@ struct MactermIntentsTests {
 
         let project = try #require(projectStore.create(name: "api", path: "/tmp"))
         projectStore.rename(id: project.id, to: "backend")
-        projectStore.removeWithDescendants(project.id)
+        appState.removeProject(project.id, store: projectStore)
 
         #expect(saved == [["api"], ["backend"], []])
     }

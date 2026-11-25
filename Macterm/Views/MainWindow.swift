@@ -347,9 +347,11 @@ struct MainWindow: View {
         .task {
             guard !appState.hasRestoredSelection else { return }
             // The model is on the server: the restore reads it, so the
-            // connection comes first. The unit-test host runs no server.
+            // restore waits for the model. The unit-test host runs no server.
             if SessionClient.liveBypass != .unitTestHost, !appState.modelConnection.isConnected {
-                await appState.modelConnection.connect()
+                await appState.modelConnection.connectUntilReady { [appState] in
+                    appState.presentToast(String(localized: "The session server is not available. Macterm tries again."))
+                }
             }
             guard !appState.hasRestoredSelection else { return }
             appState.restoreSelection(projects: projectStore.projects)

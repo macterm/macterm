@@ -34,6 +34,13 @@ extension AppState {
     /// The live pinned tabs, in order.
     var pinnedTabs: [TerminalTab] { pinnedProjectID.map { model.tabs(of: $0) } ?? [] }
 
+    /// Whether the rows of `projectID` are the pinned records (`sidebar:
+    /// top`): its keyboard order and its Cmd+digit slots count the records,
+    /// and a tab born there would be pinned.
+    func showsPinnedRecords(_ projectID: UUID) -> Bool {
+        model.project(projectID)?.sidebar == .top
+    }
+
     func isPinnedTabLoaded(_ id: UUID) -> Bool {
         pinnedTabs.contains { $0.id == id }
     }

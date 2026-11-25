@@ -203,6 +203,9 @@ final class ModelMirror {
     /// each (`pane.removed`). The app destroys their surfaces and ends a
     /// remote pane's session.
     @ObservationIgnored var onPanesRemoved: (([Pane], [MactermProtocol.PaneRemoved]) -> Void)?
+    /// The project list changed: made, removed, renamed, moved, by any
+    /// client. `ProjectStore` passes it to its `onSave` (the Spotlight index).
+    @ObservationIgnored var onProjectsChanged: (() -> Void)?
     /// A project's active tab changed. The key window's own tab record
     /// follows it (`AppState`).
     @ObservationIgnored var onActiveTabChanged: ((UUID) -> Void)?
@@ -497,7 +500,8 @@ final class ModelMirror {
     private func project(animatedTabs: Set<String>, removed: [MactermProtocol.PaneRemoved]) {
         let model = data ?? .init()
         let newProjects = model.projects.map { Project(model: $0, id: uuid($0.id), parent: $0.parent.map(uuid)) }
-        if newProjects != projects { projects = newProjects }
+        let projectsChanged = newProjects != projects
+        if projectsChanged { projects = newProjects }
 
         var seenPanes: Set<UUID> = []
         var newTabsByProject: [UUID: [TerminalTab]] = [:]
@@ -535,6 +539,7 @@ final class ModelMirror {
             registered[id] = nil
         }
         if !gone.isEmpty || !removed.isEmpty { onPanesRemoved?(gone, removed) }
+        if projectsChanged { onProjectsChanged?() }
 
         // Tab history and the active-tab funnel.
         for (projectID, active) in newActive where oldActive[projectID] != active && !peeking {

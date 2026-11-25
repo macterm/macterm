@@ -93,12 +93,13 @@ extension AppState {
     /// Unconditional — the confirmation for a busy pane belongs to the
     /// caller (`desktopWidgetNeedsConfirmRemove`), as with every close verb.
     func removeDesktopWidget(id: UUID) {
-        guard let index = desktopWidgets.firstIndex(where: { $0.id == id }) else { return }
-        let widget = desktopWidgets.remove(at: index)
+        guard desktopWidgets.contains(where: { $0.id == id }) else { return }
+        // The widget's project goes, and the server ends its session. A
+        // widget whose project the server keeps stays on the desktop.
+        if model.project(id) != nil, !writer.projectRemove(id) { return }
+        desktopWidgets.removeAll { $0.id == id }
         if editingDesktopWidgetID == id { editingDesktopWidgetID = nil }
         unlistedDesktopWidgetIDs.remove(id)
-        // The widget's project goes, and the server ends its session.
-        writer.projectRemove(widget.id)
         logger.info("removed desktop widget \(id.uuidString, privacy: .public)")
         desktopWidgetsDidChange()
     }

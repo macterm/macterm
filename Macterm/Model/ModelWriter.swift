@@ -19,8 +19,9 @@ private let logger = Logger(subsystem: appBundleID, category: "ModelWriter")
 @MainActor
 final class ModelWriter {
     let connection: ModelConnection
-    /// Shows why a request failed. `AppState` sets it to a toast.
-    var onError: (String) -> Void = { _ in }
+    /// Shows that a request failed, with the reason the app can say (nil for
+    /// a refusal of the server). `AppState` sets it to a toast.
+    var onError: (String?) -> Void = { _ in }
 
     init(connection: ModelConnection) {
         self.connection = connection
@@ -46,14 +47,17 @@ final class ModelWriter {
         do {
             return try connection.send(method, args, animated: animated)
         } catch let error as ModelRequestError {
-            mirror.unregister(panes.map(\.id))
             switch error {
             case .unavailable:
+                // No reply is not a refusal: a late reply can still apply
+                // the change, and its batch then finds the panes registered.
                 logger.error("\(M.name, privacy: .public): no server")
                 onError(String(localized: "The session server is not available. Macterm tries again."))
             case let .refused(_, message):
+                // The server's text is English: it goes to the log only.
+                mirror.unregister(panes.map(\.id))
                 logger.error("\(M.name, privacy: .public) refused: \(message, privacy: .public)")
-                onError(message)
+                onError(nil)
             }
             return nil
         } catch {
@@ -336,6 +340,22 @@ final class ModelWriter {
             guard paneSeparate(id, newTab: parked, in: projectID) else { return false }
             return tabMerge(parked, into: tab.id, at: target)
         }
+    }
+
+    /// `pane.grid`: `target` becomes the top-left cell of a grid of equal
+    /// cells, with `new` in the order of the cells (the column of row heads
+    /// first, then each row left to right). One change, all or nothing.
+    @discardableResult
+    func paneGrid(tab: UUID, target: UUID, rows: Int, columns: Int, new panes: [Pane]) -> Bool {
+        let args = MactermProtocol.PaneGrid.Args(
+            tab: w(tab),
+            target: w(target),
+            rows: UInt32(rows),
+            columns: UInt32(columns),
+            new: panes.map(value(of:)),
+            splitIds: panes.map { _ in w(UUID()) }
+        )
+        return send(MactermProtocol.PaneGrid.self, args, registering: panes) != nil
     }
 
     /// `pane.swap`: Move Pane.

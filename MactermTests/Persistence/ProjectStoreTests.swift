@@ -193,10 +193,11 @@ struct ProjectStoreTests {
 
     @Test
     func remove_drops_the_project() throws {
-        let store = makeStore()
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
         let a = try #require(store.add(Project(name: "a", path: "/tmp/a", sortOrder: 0)))
         let b = try #require(store.add(Project(name: "b", path: "/tmp/b", sortOrder: 1)))
-        store.removeWithDescendants(a.id)
+        state.removeProject(a.id, store: store)
         #expect(store.projects.map(\.id) == [b.id])
     }
 
@@ -507,14 +508,15 @@ struct ProjectStoreTests {
 
     @Test
     func remove_with_descendants_removes_every_project_inside() throws {
-        let store = makeStore()
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
         let parent = try #require(store.add(Project(name: "p", path: "/tmp/p")))
         let a = try #require(store.add(Project(name: "a", path: "/tmp/a", parent: parent.id)))
         let inner = try #require(store.add(Project(name: "inner", path: "", parent: parent.id)))
         let b = try #require(store.add(Project(name: "b", path: "/tmp/b", parent: inner.id)))
         let c = try #require(store.add(Project(name: "c", path: "/tmp/c")))
         #expect(store.descendants(of: parent.id).map(\.id) == [a.id, inner.id, b.id])
-        store.removeWithDescendants(parent.id)
+        state.removeProject(parent.id, store: store)
         #expect(store.projects.map(\.id) == [c.id])
         #expect(store.row(inner.id) == nil)
     }

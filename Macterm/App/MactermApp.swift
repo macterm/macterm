@@ -1008,10 +1008,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var candidates: [(projectName: String, pane: Pane)] = []
         guard let appState else { return [] }
         for project in appState.model.projects {
-            let projectName: String = switch project.alias {
-            case QuickTerminalService.alias: String(localized: "Quick Terminal")
-            case nil where project.sidebar == .none: String(localized: "Desktop Widget")
-            default: project.name
+            let projectName = if project.alias == QuickTerminalService.alias {
+                String(localized: "Quick Terminal")
+            } else if appState.desktopWidget(id: project.id) != nil {
+                String(localized: "Desktop Widget")
+            } else {
+                project.name
             }
             for tab in appState.model.tabs(of: project.id) {
                 candidates += tab.splitRoot.allPanes().map { (projectName, $0) }

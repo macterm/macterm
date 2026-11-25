@@ -86,6 +86,22 @@ final class ModelConnection {
         }
     }
 
+    /// Connects, and tries again each second until the mirror has the model:
+    /// the launch, whose restore reads the model. `stillWaiting` runs once,
+    /// after the first failed try, so the app can say why it waits.
+    func connectUntilReady(stillWaiting: () -> Void) async {
+        var told = false
+        while !isConnected, !isClosed {
+            await connect()
+            guard !isConnected else { return }
+            if !told {
+                told = true
+                stillWaiting()
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
     /// Connects on this thread, with no reconnect: the unit tests, whose
     /// server is their own.
     func connectNow() throws {
@@ -156,8 +172,10 @@ final class ModelConnection {
 
     /// Applies the batches that came, in order. A nil is the end of the
     /// connection.
+    /// One item at a time: a request that a callback of the mirror sends
+    /// drains the items after this one, in order, before it returns.
     private func drain(animated: Bool = false) {
-        for item in queue.takeAll() {
+        while let item = queue.takeFirst() {
             if let batch = item {
                 mirror.apply(batch, animated: animated && batch.cause != nil)
             } else {
@@ -204,11 +222,10 @@ private final class BatchQueue: @unchecked Sendable {
         lock.withLock { items.append(batch) }
     }
 
-    func takeAll() -> [ServerEventBatch?] {
-        lock.withLock {
-            defer { items = [] }
-            return items
-        }
+    /// The oldest item, or nil when the queue is empty. An item of `nil`
+    /// (the end of the connection) comes as `.some(nil)`.
+    func takeFirst() -> ServerEventBatch?? {
+        lock.withLock { items.isEmpty ? nil : items.removeFirst() }
     }
 }
 

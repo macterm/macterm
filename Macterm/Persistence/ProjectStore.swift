@@ -24,8 +24,9 @@ final class ProjectStore {
     /// the shared preference — swift-testing runs suites in parallel.
     @ObservationIgnored
     var autoAssignsColors: () -> Bool = { Preferences.shared.autoAssignProjectColors }
-    /// Called with the list after each change that this store sent (the
-    /// Spotlight index, `ProjectSpotlightIndex`).
+    /// Called with the list after each change of the projects of the model,
+    /// by any client, and when the model is installed (the Spotlight index,
+    /// `ProjectSpotlightIndex`).
     @ObservationIgnored
     var onSave: (([Project]) -> Void)?
     /// Called with each project that `add` stored. `AppState.projectAdded`
@@ -36,6 +37,10 @@ final class ProjectStore {
 
     init(writer: ModelWriter) {
         self.writer = writer
+        writer.mirror.onProjectsChanged = { [weak self] in
+            guard let self else { return }
+            onSave?(projects)
+        }
     }
 
     func project(matchingPath path: String) -> Project? {
@@ -85,7 +90,6 @@ final class ProjectStore {
         project.path = ProjectPath.normalizedForStorage(project.path)
         if !isPlace(project.parent) { project.parent = nil }
         guard writer.projectCreate(project), let stored = mirror.project(project.id) else { return nil }
-        changed()
         onAdd?(stored)
         return stored
     }
@@ -114,7 +118,6 @@ final class ProjectStore {
         writer.projectReorder(parent: parent, ids: children(of: parent).map(\.id).filter { $0 != id } + [id])
         let left = children(of: oldParent).map(\.id)
         if !left.isEmpty { writer.projectReorder(parent: oldParent, ids: left) }
-        changed()
         return true
     }
 
@@ -128,7 +131,6 @@ final class ProjectStore {
         order += siblings.filter { !order.contains($0) }
         guard order != siblings else { return }
         writer.projectReorder(parent: parent, ids: order)
-        changed()
     }
 
     /// The project `id`.
@@ -170,17 +172,6 @@ final class ProjectStore {
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
     }
 
-    /// Remove the project `id` and every project inside it, at any depth.
-    /// The server ends the local sessions of their panes. The deepest go
-    /// first: the server refuses a project that holds projects.
-    func removeWithDescendants(_ id: UUID) {
-        guard row(id) != nil else { return }
-        for project in ([row(id)].compactMap(\.self) + descendants(of: id)).reversed() {
-            writer.projectRemove(project.id)
-        }
-        changed()
-    }
-
     /// Whether `id` is nil (the top level) or a project of the tree: the two
     /// places a project can be.
     private func isPlace(_ id: UUID?) -> Bool {
@@ -210,7 +201,6 @@ final class ProjectStore {
         }
         guard row(id) != nil else { return }
         writer.projectSet(id, name: newName)
-        changed()
     }
 
     /// `name` changed so that `Project.nameRefusal` allows it. Each slash
@@ -238,7 +228,6 @@ final class ProjectStore {
     func setColor(id: UUID, to color: ProjectColor?) {
         guard let project = row(id), project.colorName != color?.rawValue else { return }
         writer.projectSet(id, color: color?.rawValue ?? "")
-        changed()
     }
 
     /// Point the project at another folder.
@@ -246,11 +235,6 @@ final class ProjectStore {
         let normalized = ProjectPath.normalizedForStorage(newPath)
         guard let project = row(id), project.path != normalized else { return }
         writer.projectSet(id, path: normalized)
-        changed()
-    }
-
-    private func changed() {
-        onSave?(projects)
     }
 
     private func treeOrder(under parent: UUID?) -> [Project] {

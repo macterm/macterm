@@ -162,7 +162,7 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
                 title: title,
                 subtitle: pane.displayTitle,
                 body: body,
-                userInfo: Self.userInfo(for: pane)
+                userInfo: Self.userInfo(for: pane, in: appState?.model)
             ),
             trigger: nil
         )
@@ -171,11 +171,13 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// The routing-critical `userInfo` contract, read back by `didReceive`.
-    static func userInfo(for pane: Pane) -> [AnyHashable: Any] {
+    /// A pane of the project with the alias `quick` in `model` routes to the
+    /// panel.
+    static func userInfo(for pane: Pane, in model: ModelMirror?) -> [AnyHashable: Any] {
         [
             "paneID": pane.id.uuidString,
             "projectID": pane.projectID.uuidString,
-            "isQuickTerminal": pane.projectID == QuickTerminalService.shared.splitState.projectID,
+            "isQuickTerminal": model?.project(pane.projectID)?.alias == QuickTerminalService.alias,
         ]
     }
 

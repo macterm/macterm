@@ -142,7 +142,7 @@ extension AppCommand {
         case .pinTab:
             // Pin the active tab. Not from the pinned project — its own tabs
             // are already pinned.
-            guard let projectID, projectID != ctx.appState.pinnedProjectID,
+            guard let projectID, !ctx.appState.showsPinnedRecords(projectID),
                   let tab = ctx.appState.model.activeTab(of: projectID)
             else { return nil }
             return { ctx.appState.pinTab(tab.id, fromProject: projectID) }

@@ -207,7 +207,7 @@ struct RenameInputsTests {
     func project_that_was_removed_gives_no_row() throws {
         let (state, store, project) = makeState()
         let screen = try scope(.renameProject(project.id, appState: state, store: store))
-        store.removeWithDescendants(project.id)
+        state.removeProject(project.id, store: store)
         #expect(rows(screen, "beta", state, store).isEmpty)
     }
 

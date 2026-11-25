@@ -1301,8 +1301,8 @@ final class AppState {
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         customPalettes = CustomPaletteStore(configDirectoryURL: projectFiles.configDirectoryURL, hotkeys: paletteHotkeys)
         if let quickTerminal { adoptQuickTerminal(quickTerminal) }
-        writer.onError = { [weak self] message in
-            self?.presentToast(String(localized: "The change did not apply"), subtitle: message)
+        writer.onError = { [weak self] reason in
+            self?.presentToast(String(localized: "The change did not apply"), subtitle: reason)
         }
         model.onActiveTabChanged = { [weak self] projectID in self?.projectActiveTabDidChange(projectID) }
         model.onPanesRemoved = { [weak self] panes, records in self?.panesLeftModel(panes, records: records) }
@@ -1589,9 +1589,9 @@ final class AppState {
         syncPaneFolders()
         // A closed or unloaded tab takes its bell out of the count with it.
         syncDockBadge()
-        // Before the restore, the GUI state is not known yet: a write would
-        // lose it.
-        guard hasRestoredSelection else { return }
+        // Before the restore, and with no model, the GUI state is not known:
+        // a write would lose it.
+        guard hasRestoredSelection, model.data != nil else { return }
         let snapshots: [WindowSnapshot]? = windows.isEmpty
             ? lastSavedWindows
             : windows.map { window in
@@ -2784,7 +2784,7 @@ final class AppState {
         // The pinned project cycles in RECORD order — unloaded rows
         // included, restored on landing — so the keyboard walks exactly what
         // the sidebar shows, not just the loaded subset.
-        if projectID == pinnedProjectID {
+        if showsPinnedRecords(projectID) {
             cyclePinnedTab(step: step)
             return
         }
@@ -2908,14 +2908,14 @@ final class AppState {
     /// same two sources `selectTabByIndex` selects from. It is what bounds
     /// digit accumulation, so the two must keep counting the same things.
     func selectableTabCount(projectID: UUID) -> Int {
-        if projectID == pinnedProjectID { return pinnedRecords.count }
+        if showsPinnedRecords(projectID) { return pinnedRecords.count }
         return model.tabs(of: projectID).count
     }
 
     func selectTabByIndex(_ index: Int, projectID: UUID) {
         // Cmd+digit in the pinned project counts SIDEBAR rows (records,
         // unloaded included), matching what the user sees.
-        if projectID == pinnedProjectID {
+        if showsPinnedRecords(projectID) {
             guard pinnedRecords.indices.contains(index) else { return }
             selectPinnedTab(pinnedRecords[index].id)
             return
@@ -3027,11 +3027,9 @@ final class AppState {
         return newID
     }
 
-    /// Split a pane into an equal `rows`×`columns` grid, spawning `command`
-    /// in each new pane. The column of row heads first (splitting the newest
-    /// pane each time keeps top-to-bottom order), then each row left to
-    /// right; the last split makes every cell even, and the source pane
-    /// keeps the focus. Every cell honors the new split directory
+    /// Split a pane into an equal `rows`×`columns` grid (`pane.grid`),
+    /// spawning `command` in each new pane. The source pane is the top-left
+    /// cell and keeps the focus. Every cell honors the new split directory
     /// preference, so a grid and a `Cmd+D` split off the same pane can't
     /// disagree about it. Returns the new pane IDs.
     @discardableResult
@@ -3051,39 +3049,14 @@ final class AppState {
             projectDirectory: projectDirectory,
             activePaneDirectory: source.liveLocalWorkingDirectory()
         )
-        var created: [UUID] = []
-        let total = rows * columns - 1
-        func split(_ target: UUID, _ direction: SplitDirection) -> UUID? {
-            let pane = newSplitPane(of: source, workingDirectory: newPaneDirectory, command: command)
-            let last = created.count + 1 == total
-            guard let id = writer.paneSplit(
-                tab: tab.id,
-                target: target,
-                new: pane,
-                direction: direction,
-                focus: false,
-                rebalance: last
-            )
-            else { return nil }
-            created.append(id)
-            return id
-        }
-        var rowHeads = [paneID]
-        for _ in 1 ..< rows {
-            guard let previous = rowHeads.last, let id = split(previous, .vertical) else { break }
-            rowHeads.append(id)
-        }
-        for head in rowHeads {
-            var current = head
-            for _ in 1 ..< columns {
-                guard let id = split(current, .horizontal) else { break }
-                current = id
-            }
-        }
-        writer.paneFocus(paneID)
         _ = projectID
-        if !created.isEmpty { persistState() }
-        return created
+        let panes = (1 ..< rows * columns).map { _ in
+            newSplitPane(of: source, workingDirectory: newPaneDirectory, command: command)
+        }
+        // One request: the server makes the whole grid or nothing.
+        guard writer.paneGrid(tab: tab.id, target: paneID, rows: rows, columns: columns, new: panes) else { return [] }
+        persistState()
+        return panes.map(\.id)
     }
 
     /// Split the focused pane along its longer on-screen axis (Ghostty's
@@ -3567,7 +3540,7 @@ final class AppState {
               let i = slots.firstIndex(of: current)
         else { return }
         let target = slots[(i + step + slots.count) % slots.count]
-        if target == pinnedProjectID {
+        if showsPinnedRecords(target) {
             selectPinnedProject()
         } else if let project = projects.first(where: { $0.id == target }) ?? model.project(target) {
             selectProject(project)

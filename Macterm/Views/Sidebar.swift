@@ -678,10 +678,15 @@ struct SidebarContent: View {
     }
 
     /// The project of the top section (`sidebar: top`, Pinned), whose rows
-    /// are the pinned records. A record exists only with the project.
+    /// are the pinned records. The app makes it with the first record
+    /// (`ensurePinnedProject`); before that, no row names it.
     private var pinnedID: UUID {
-        appState.model.projects.first { $0.sidebar == .top }?.id ?? UUID()
+        appState.model.projects.first { $0.sidebar == .top }?.id ?? Self.noPinnedProject
     }
+
+    /// The id of the rows of pinned records while the model has no pinned
+    /// project: one fixed value, so the rows keep their identity.
+    private static let noPinnedProject = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
     /// The project of the bottom section (`sidebar: bottom`, Scratch Tabs,
     /// #665): its tabs are flat rows below the tree.
