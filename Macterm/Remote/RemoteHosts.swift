@@ -273,7 +273,8 @@ final class RemoteHosts {
             return .unreachable
         }
         guard found == .exists else { return found }
-        // A dialog that closed adds nothing: no install question for it.
+        // A check that the palette cancelled adds nothing: no install
+        // question for it.
         guard !Task.isCancelled else { return .unreachable }
         let host = host(destination)
         await host.connectAsking()
@@ -309,17 +310,15 @@ final class RemoteHosts {
     /// The folders in `directory` on the host, for the path completion of
     /// a remote folder field (0614, `HostCommands.folderListScript`). Over
     /// the host's ssh connection, only one that is up: a keystroke never
-    /// asks for a login. `.missing` when the host says that a shell cannot
-    /// `cd` to the folder (exit 3). `.unavailable` when no connection is
-    /// up, or no clear answer came in `timeout`.
-    func listFolders(_ directory: String, destination: String, timeout: Duration = .seconds(2)) async -> HostFolderAnswer {
+    /// asks for a login. nil when no connection is up, the folder is not
+    /// there, or no answer came in `timeout`; the field then shows no rows.
+    func listFolders(_ directory: String, destination: String, timeout: Duration = .seconds(2)) async -> FolderListing? {
         guard SSHConnections.isValidDestination(destination),
               let command = HostCommands.folderListCommand(directory: directory),
-              let outcome = try? await connections.run(destination, command, login: false, timeout: timeout)
-        else { return .unavailable }
-        if outcome.status == 3 { return .missing }
-        guard let list = HostCommands.folderList(status: outcome.status, output: outcome.stdout) else { return .unavailable }
-        return .listed(FolderListing(path: list.path, names: list.names))
+              let outcome = try? await connections.run(destination, command, login: false, timeout: timeout),
+              let list = HostCommands.folderList(status: outcome.status, output: outcome.stdout)
+        else { return nil }
+        return FolderListing(path: list.path, names: list.names)
     }
 
     /// The folder of the process `pid` on the host (a session's shell), from
@@ -333,8 +332,22 @@ final class RemoteHosts {
         return HostCommands.processFolder(code: result.code, output: String(decoding: result.output.bytes, as: UTF8.self))
     }
 
+    /// What `directory` is on the host, for a remote folder field as the
+    /// user types (`HostFolderLister.check`). Over the host's ssh
+    /// connection, only one that is up, as `listFolders`: a keystroke never
+    /// asks for a login and never connects. nil when no connection is up or
+    /// no answer came in `timeout`.
+    func probeFolder(_ directory: String, destination: String, timeout: Duration = .seconds(2)) async -> FolderCheck? {
+        guard SSHConnections.isValidDestination(destination),
+              let command = HostCommands.folderCheckCommand(directory: directory),
+              let outcome = try? await connections.run(destination, command, login: false, timeout: timeout)
+        else { return nil }
+        let answer = Self.folderCheck(status: outcome.status)
+        return answer == .unreachable ? nil : answer
+    }
+
     /// `checkFolder` for the scp-style path of a new remote project in the
-    /// GUI (the sheet, the palette, Create Project of a layout file in
+    /// GUI (New Remote Project in the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the
     /// line that says why nothing is added. A path that is not a folder has
     /// the notice of a local path (`PathProblem`), with the folder as typed.

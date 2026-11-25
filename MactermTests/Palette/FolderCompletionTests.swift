@@ -79,7 +79,7 @@ struct FolderCompletionTests {
         var asked: [String] = []
         let lister = HostFolderLister { folder in
             asked.append(folder)
-            return folder == "~/" ? .listed(FolderListing(path: "/home/me", names: ["proj"])) : .unavailable
+            return folder == "~/" ? FolderListing(path: "/home/me", names: ["proj"]) : nil
         }
         var changes = 0
         lister.onChange = { changes += 1 }
@@ -93,14 +93,12 @@ struct FolderCompletionTests {
         try await waitUntil { changes == 2 }
         #expect(lister.listing("/none/") == nil, "no answer gives no rows")
         #expect(!lister.isListing, "a folder with no answer waits before it is asked again")
-        #expect(lister.hasFailed("/none/"))
-        #expect(!lister.isMissing("/none/"))
         #expect(asked == ["~/", "/none/"])
     }
 
     @Test
     func the_lister_keeps_the_newest_listings() async throws {
-        let lister = HostFolderLister { folder in .listed(FolderListing(path: "/" + folder, names: [])) }
+        let lister = HostFolderLister { folder in FolderListing(path: "/" + folder, names: []) }
         var changes = 0
         lister.onChange = { changes += 1 }
         for index in 0 ... HostFolderLister.kept {
@@ -114,35 +112,16 @@ struct FolderCompletionTests {
     }
 
     @Test
-    func a_missing_folder_is_known_and_not_asked_again() async throws {
-        var asked = 0
-        let lister = HostFolderLister { _ in
-            asked += 1
-            return .missing
-        }
-        var changes = 0
-        lister.onChange = { changes += 1 }
-        _ = lister.listing("~/typo/")
-        try await waitUntil { changes == 1 }
-        #expect(lister.isMissing("~/typo/"))
-        #expect(!lister.hasFailed("~/typo/"))
-        #expect(lister.listing("~/typo/") == nil)
-        #expect(asked == 1)
-    }
-
-    @Test
     func a_name_after_a_tilde_with_no_slash_gives_no_rows() {
         let listing = { (_: String) in FolderListing(path: "/home/me", names: ["docs"]) }
         #expect(FolderCompletion.rows(for: "~d", listing: listing) == nil, "~d names a home of another user, as locally")
-        #expect(FolderCompletion.listedFolder(for: "~d") == nil)
-        #expect(FolderCompletion.listedFolder(for: "~bob/x") == "~bob/")
         #expect(FolderCompletion.rows(for: "~bob/d", listing: listing)?.map(\.fieldText) == ["~bob/docs/"])
         #expect(PathCompleter.complete("~d") == nil)
     }
 
     @Test
     func the_pane_folder_is_asked_once() async throws {
-        let lister = HostFolderLister { _ in .unavailable }
+        let lister = HostFolderLister { _ in nil }
         var asked = 0
         var changes = 0
         lister.onChange = { changes += 1 }
@@ -161,7 +140,7 @@ struct FolderCompletionTests {
     func a_cancelled_request_tells_nothing() async throws {
         let lister = HostFolderLister { _ in
             try? await Task.sleep(for: .milliseconds(100))
-            return .listed(FolderListing(path: "/srv", names: ["a"]))
+            return FolderListing(path: "/srv", names: ["a"])
         }
         var changes = 0
         lister.onChange = { changes += 1 }
@@ -174,7 +153,7 @@ struct FolderCompletionTests {
 
     @Test
     func an_input_screen_draws_again_when_a_listing_comes() async throws {
-        let lister = HostFolderLister { _ in .listed(FolderListing(path: "/srv", names: ["a"])) }
+        let lister = HostFolderLister { _ in FolderListing(path: "/srv", names: ["a"]) }
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.host-folders",
             title: "Folder",

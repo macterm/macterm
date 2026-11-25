@@ -21,6 +21,10 @@ import Foundation
 enum PaletteScopeID: Hashable {
     case passwords
     case files
+    /// New Remote Project, step 1: the hosts of the ssh config
+    /// (`RemoteHostsPaletteScope`). The step of a command of the Projects
+    /// category, so it is not in `builtIn`.
+    case remoteHosts
     /// A screen of a custom palette (`CustomPaletteFile`): its file, node,
     /// the values exported above it and the pill naming it.
     case custom(CustomPaletteTarget)
@@ -39,6 +43,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PalettePill(title: AppCommand.passwordManager.title, icon: "key.fill")
         case .files: PalettePill(title: AppCommand.files.title, icon: "doc.text.magnifyingglass")
+        case .remoteHosts: PalettePill(title: AppCommand.newRemoteProject.title, icon: RemoteHostsPaletteScope.icon)
         case let .custom(target): target.pill
         case let .input(input): input.pill
         case .moveToProject: PalettePill(title: AppCommand.moveToProject.title, icon: "folder")
@@ -53,6 +58,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
+        case .remoteHosts: String(localized: "Add a folder on an ssh host as a project")
         case .custom,
              .moveToProject: ""
         case let .input(input): input.summary
@@ -65,6 +71,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: .passwordManager
         case .files: .files
+        case .remoteHosts: .newRemoteProject
         case .custom,
              .input: nil
         case .moveToProject: .moveToProject
@@ -76,6 +83,7 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: PasswordPaletteScope()
         case .files: FilesPaletteScope()
+        case .remoteHosts: RemoteHostsPaletteScope()
         case let .custom(target): CustomPaletteScope(target: target)
         case let .input(input): InputPaletteScope(input: input)
         case let .moveToProject(node): MoveToProjectPaletteScope(node: node)
@@ -103,15 +111,15 @@ struct PaletteLoading: Equatable {
 }
 
 /// A listing that failed — a command not found, exiting non-zero, or
-/// printing something that isn't the shape asked for. Shown as a row at
-/// the top of the results, above any rows an earlier listing left, with
-/// Retry (`PaletteScope.retry`, also ⌘R). `detail` is the reason as the
+/// printing something that isn't the shape asked for. Shown as the
+/// palette's one notice, centered, above any rows an earlier listing left,
+/// with Retry (`PaletteScope.retry`, also ⌘R). `detail` is the reason as the
 /// user can act on it: the command's stderr, or where the output stopped
 /// parsing.
 ///
 /// A failure that is not `retryable` is a refusal: an input screen's value
-/// that is not allowed (`InputPaletteScope`). It shows as one line, with no
-/// Retry, because the user acts on it by changing the text.
+/// that is not allowed (`InputPaletteScope`). It shows as the same notice,
+/// with no Retry, because the user acts on it by changing the text.
 struct PaletteFailure: Error, Equatable {
     let title: String
     let detail: String?

@@ -890,7 +890,7 @@ struct SidebarContent: View {
             // Right-click on empty space.
             Menu("New Project") {
                 Button("Local Folder…") { openNewProjectScreen() }
-                Button("Remote Machine…") { windowState.isNewRemoteProjectSheetPresented = true }
+                Button("Remote Machine…") { appState.openCommandPalette(scope: .remoteHosts) }
             }
             Button("New Scratch Tab") { appState.createScratchTab() }
         }

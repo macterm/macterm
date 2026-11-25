@@ -19,9 +19,11 @@ extension AppState {
     ///
     /// A remote project gets the same folder rows from the host's folder
     /// list (Ethan, 0610; `HostFolderLister`, `listFolders`,
-    /// `RemoteHosts.listFolders` by default), and the same notice when no
-    /// row matches. When the host gives no list (no connection up, no
-    /// answer in time), a typed folder gives one action row,
+    /// `RemoteHosts.listFolders` by default). With no row, the host says
+    /// what the path is (`probeFolder`, `RemoteHosts.probeFolder`), so a
+    /// missing path and a file get their notice, as for a local path. When
+    /// the host gives no answer (no connection up, no answer in time), a
+    /// typed folder gives one action row,
     /// `Change to "<folder>"`, and the host checks the folder when the row
     /// runs, as New Remote Project does (`folderCheck`,
     /// `RemoteHosts.checkFolder` by default).
@@ -29,7 +31,8 @@ extension AppState {
         for project: Project,
         projectStore: ProjectStore,
         paneDirectory: (@MainActor () -> String?)? = nil,
-        listFolders: (@MainActor (String, String) async -> HostFolderAnswer)? = nil,
+        listFolders: (@MainActor (String, String) async -> FolderListing?)? = nil,
+        probeFolder: (@MainActor (String, String) async -> RemoteHosts.FolderCheck?)? = nil,
         hostPaneFolder: (@MainActor () async -> String?)? = nil,
         folderCheck: (@MainActor (String, String) async -> RemoteHosts.FolderCheck)? = nil
     ) -> PaletteInput {
@@ -39,7 +42,11 @@ extension AppState {
             let destination = HostCommands.destination(user: user, host: host)
             let checkFolder = folderCheck ?? { await RemoteHosts.shared.checkFolder($0, destination: $1) }
             let list = listFolders ?? { await RemoteHosts.shared.listFolders($0, destination: $1) }
-            let lister = HostFolderLister { folder in await list(folder, destination) }
+            let probe = probeFolder ?? { await RemoteHosts.shared.probeFolder($0, destination: $1) }
+            let lister = HostFolderLister(
+                list: { folder in await list(folder, destination) },
+                probe: { path in await probe(path, destination) }
+            )
             let readHostPaneFolder = hostPaneFolder ?? { [self] in
                 await hostProcessFolder(of: project, destination: destination)
             }
@@ -63,37 +70,43 @@ extension AppState {
                     guard HostCommands.isSafeHostFolder(folder) else {
                         return .notice(PathProblem.missing.notice(for: folder))
                     }
-                    let typed = text.trimmingCharacters(in: .whitespaces)
-                    let listed = FolderCompletion.listedFolder(for: typed)
-                    // `~name` with no slash is no folder that the field
-                    // lists: only the notice, as for a local path.
-                    guard listed != nil else { return .notice(PathProblem.missing.notice(for: folder)) }
-                    switch hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) {
-                    case let rows? where rows.isEmpty:
-                        // The host listed the folders and none matches.
+                    // `~name` with no slash names another user's home, not
+                    // a folder that the field lists: only the notice, as for
+                    // a local path.
+                    if folder.hasPrefix("~"), !folder.contains("/"), folder != "~" {
                         return .notice(PathProblem.missing.notice(for: folder))
-                    case .some:
+                    }
+                    switch hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) {
+                    case let rows? where !rows.isEmpty:
                         // The folder rows are the action.
                         return .nothing
-                    case nil where listed.map(lister.isMissing) == true:
-                        // The host says that the folder is not there.
-                        return .notice(PathProblem.missing.notice(for: folder))
-                    case nil where listed.map(lister.hasFailed) != true:
-                        // The first answer is not there yet.
+                    case nil where lister.isListing:
                         return .nothing
-                    case nil:
-                        break
+                    default:
+                        // No folder row: the host listed no match, or could
+                        // not list the parent. Ask what the path is, as New
+                        // Remote Project does, so a file and a missing path
+                        // get their own notice.
+                        switch lister.check(folder) {
+                        case .missing: return .notice(PathProblem.missing.notice(for: folder))
+                        case .notDirectory: return .notice(PathProblem.notDirectory.notice(for: folder))
+                        case nil where lister.isListing: return .nothing
+                        default: break
+                        }
                     }
-                    // No list from the host: the typed folder is the action,
-                    // and the host checks it when it runs.
+                    // No answer from the host: the typed folder is the
+                    // action, and the host checks it when it runs.
+                    let message = lister.hasAnswered
+                        ? String(localized: "Checking the folder on \(destination)")
+                        : String(localized: "Connecting to \(destination)…")
                     return .action(PaletteInputAction(
                         title: String(localized: "Change to \"\(folder)\""),
-                        check: (
-                            message: String(localized: "Checking the folder on \(destination)"),
-                            answer: {
-                                await RemoteHosts.refusal(checkFolder(folder, destination), directory: folder, destination: destination)
-                            }
-                        ),
+                        check: PaletteInputCheckStep(message: message) {
+                            let answer = await checkFolder(folder, destination)
+                            guard let reason = RemoteHosts.refusal(answer, directory: folder, destination: destination) else { return nil }
+                            // Only no connection can change on a retry.
+                            return PaletteFailure(title: reason, retryable: answer == .unreachable)
+                        },
                         run: { [self] in setProjectDirectory(projectID, to: folder, projectStore: projectStore) }
                     ))
                 }

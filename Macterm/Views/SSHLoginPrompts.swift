@@ -202,8 +202,7 @@ final class SSHLoginPrompts: LoginUI {
 
     /// The window for a question's sheet: the terminal window, or the sheet
     /// that is open on it. A sheet on a window with a sheet waits until that
-    /// sheet closes, and the New Remote Project sheet stays open while its
-    /// check waits for the login and the install question (0358).
+    /// sheet closes.
     static func sheetParent() -> NSWindow? {
         terminalWindow().map(sheetParent(of:))
     }

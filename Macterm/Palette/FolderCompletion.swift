@@ -8,17 +8,6 @@ struct FolderListing: Equatable {
     let names: [String]
 }
 
-/// What a host says about a folder that the field lists
-/// (`RemoteHosts.listFolders`).
-enum HostFolderAnswer: Equatable {
-    /// The folders in it.
-    case listed(FolderListing)
-    /// A shell cannot `cd` to it: it is not there, or it is a file.
-    case missing
-    /// No connection up, or no clear answer in time.
-    case unavailable
-}
-
 /// The folder rows of a typed path, from any listing of folders: the rule
 /// of `PathCompleter`, for a source that is not the file system of this Mac
 /// (a host, 0614). The rows of a local path and a remote path therefore
@@ -47,6 +36,7 @@ enum FolderCompletion {
     ) -> [Row]? {
         guard let parts = split(typed), let parent = listing(parts.parent) else { return nil }
         let text = parts.text
+        let parentText = parts.parent
         let name = parts.name
         if name.isEmpty {
             return [Row(path: parent.path, fieldText: text)] + children(of: parent, typedFolder: text, name: "", limit: limit)
@@ -58,16 +48,7 @@ enum FolderCompletion {
             guard let folder = listing(folderText) else { return [exact] }
             return [exact] + children(of: folder, typedFolder: folderText, name: "", limit: limit)
         }
-        return children(of: parent, typedFolder: parts.parent, name: name, limit: limit)
-    }
-
-    /// The folder that `typed` lists (as typed, with a slash at the end):
-    /// the typed folder for a text that ends with a slash, else its parent.
-    /// nil for a text that is not a path from `/` or `~`, and for `~name`
-    /// with no slash, which names another user's home, not a folder in
-    /// this one.
-    static func listedFolder(for typed: String) -> String? {
-        split(typed)?.parent
+        return children(of: parent, typedFolder: parentText, name: name, limit: limit)
     }
 
     /// A typed path cut at its last slash.
@@ -80,6 +61,9 @@ enum FolderCompletion {
         let name: String
     }
 
+    /// nil for a text that is not a path from `/` or `~`, and for `~name`
+    /// with no slash, which names another user's home, not a folder in
+    /// this one: no rows, as for a local path.
     private static func split(_ typed: String) -> Parts? {
         if typed == "~" { return Parts(text: "~/", parent: "~/", name: "") }
         guard typed.hasPrefix("/") || (typed.hasPrefix("~") && typed.contains("/")) else { return nil }
@@ -113,42 +97,50 @@ enum FolderCompletion {
 /// when it comes. A request with no answer gives no rows.
 @MainActor
 final class HostFolderLister {
-    private let list: @MainActor (String) async -> HostFolderAnswer
-    /// The listings that came, the newest last. A read moves one to the end.
+    private let list: @MainActor (String) async -> FolderListing?
+    private let probe: (@MainActor (String) async -> RemoteHosts.FolderCheck?)?
+    /// The listings that came, the newest last.
     private var listings: [(folder: String, listing: FolderListing)] = []
-    /// The folders that the host says a shell cannot enter.
-    private var missing: Set<String> = []
-    /// When a request for a folder gave no clear answer: the lister asks
-    /// again only after `retryAfter`, so that a host that is down is not
-    /// asked at each redraw. The record stays while it asks again, so the
-    /// screen keeps what it shows meanwhile.
+    /// The answers of `check(_:)` that came, the newest last.
+    private var checks: [(path: String, answer: RemoteHosts.FolderCheck)] = []
+    /// Whether the host answered a request once. A screen takes it as a sign
+    /// that the connection is up; the connection can end later.
+    private(set) var hasAnswered = false
+    /// When a request for a folder gave no answer: the lister asks again
+    /// only after `retryAfter`, so that a host that is down is not asked
+    /// at each redraw.
     private var failed: [String: ContinuousClock.Instant] = [:]
     private var requests: [String: Task<Void, Never>] = [:]
     /// Called when a request ends, so that the screen draws its rows.
     var onChange: (@MainActor () -> Void)?
 
     /// The most folders whose listings stay. A screen types down one path,
-    /// so it needs few. The one read last goes last.
+    /// so it needs few. The oldest goes first.
     static let kept = 8
-    /// How long a folder with no clear answer waits before the lister asks
-    /// again (no connection yet, a slow host).
+    /// How long a folder with no answer waits before the lister asks again
+    /// (no connection yet, a slow host, a folder that is made later).
     static let retryAfter: Duration = .seconds(5)
 
-    /// `list` asks the host about a folder as typed
-    /// (`RemoteHosts.listFolders`).
-    init(list: @escaping @MainActor (String) async -> HostFolderAnswer) {
+    /// `list` asks the host for the listing of a folder as typed
+    /// (`RemoteHosts.listFolders`). `probe` asks what a path is
+    /// (`RemoteHosts.probeFolder`), for `check(_:)`.
+    init(
+        list: @escaping @MainActor (String) async -> FolderListing?,
+        probe: (@MainActor (String) async -> RemoteHosts.FolderCheck?)? = nil
+    ) {
         self.list = list
+        self.probe = probe
     }
 
     /// The listing of `folder` (as typed, with a slash at the end), or nil
     /// while it is asked or when the host gave none.
     func listing(_ folder: String) -> FolderListing? {
         if let index = listings.firstIndex(where: { $0.folder == folder }) {
+            // A read keeps the listing: the oldest unread one goes first.
             let kept = listings.remove(at: index)
             listings.append(kept)
             return kept.listing
         }
-        if missing.contains(folder) { return nil }
         if let when = failed[folder], ContinuousClock.now - when < Self.retryAfter { return nil }
         if requests[folder] == nil {
             requests[folder] = Task { [weak self] in
@@ -156,15 +148,12 @@ final class HostFolderLister {
                 let answer = await list(folder)
                 guard !Task.isCancelled else { return }
                 requests[folder] = nil
-                switch answer {
-                case let .listed(listing):
+                if let answer {
                     failed[folder] = nil
-                    listings.append((folder, listing))
+                    hasAnswered = true
+                    listings.append((folder, answer))
                     if listings.count > Self.kept { listings.removeFirst() }
-                case .missing:
-                    failed[folder] = nil
-                    missing.insert(folder)
-                case .unavailable:
+                } else {
                     failed[folder] = .now
                 }
                 onChange?()
@@ -173,16 +162,48 @@ final class HostFolderLister {
         return nil
     }
 
-    /// The host says that a shell cannot enter `folder`.
-    func isMissing(_ folder: String) -> Bool {
-        missing.contains(folder)
+    /// What the path `path` is on the host, or nil while it is asked, when
+    /// the host gave no answer, or with no `probe`. A screen asks it for a
+    /// path that its listing does not show, so that it can tell a file from
+    /// a missing path as the user types. The rules of `listing(_:)` apply.
+    /// The host is asked only after `checkDelay` with no newer path, and a
+    /// newer path stops the request of an older one: one keystroke does not
+    /// start one command on the host.
+    func check(_ path: String) -> RemoteHosts.FolderCheck? {
+        guard let probe else { return nil }
+        if let index = checks.firstIndex(where: { $0.path == path }) {
+            return checks[index].answer
+        }
+        let key = Self.checkPrefix + path
+        if let when = failed[key], ContinuousClock.now - when < Self.retryAfter { return nil }
+        for (other, request) in requests where other.hasPrefix(Self.checkPrefix) && other != key {
+            request.cancel()
+            requests[other] = nil
+        }
+        if requests[key] == nil {
+            requests[key] = Task { [weak self] in
+                try? await Task.sleep(for: Self.checkDelay)
+                guard let self, !Task.isCancelled else { return }
+                let answer = await probe(path)
+                guard !Task.isCancelled else { return }
+                requests[key] = nil
+                if let answer {
+                    failed[key] = nil
+                    hasAnswered = true
+                    checks.append((path, answer))
+                    if checks.count > Self.kept { checks.removeFirst() }
+                } else {
+                    failed[key] = .now
+                }
+                onChange?()
+            }
+        }
+        return nil
     }
 
-    /// The host gave no clear answer for `folder`, also while the lister
-    /// asks again.
-    func hasFailed(_ folder: String) -> Bool {
-        failed[folder] != nil
-    }
+    private static let checkPrefix = "check:"
+    /// How long `check(_:)` waits for the user to stop typing.
+    static let checkDelay: Duration = .milliseconds(250)
 
     /// The folder of the pane's process on the host (`paneFolder`), and
     /// when an ask gave none, so that it is asked again after `retryAfter`.

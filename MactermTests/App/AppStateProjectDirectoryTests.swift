@@ -240,7 +240,8 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { "~/other/" },
-            listFolders: { _, _ in .unavailable },
+            listFolders: { _, _ in nil },
+            probeFolder: { _, _ in nil },
             folderCheck: { folder, destination in
                 asked.append((folder, destination))
                 return answer
@@ -267,7 +268,7 @@ struct AppStateProjectDirectoryTests {
         #expect(redraws > before, "the end of a check draws the screen again")
         #expect(scope.failure?.title == "Path ~/api doesn't exist", "the host's answer is the local notice")
         let again = scope.sections(for: PaletteQuery(raw: "~/api"), context: context).flatMap(\.items)
-        #expect(again.map(\.title) == ["Change to \"~/api\""], "the row stays under the reason, for every path")
+        #expect(again.isEmpty, "while a refusal stands the row is not offered, for every path: the notice is alone")
         #expect(!scope.takeCloseRequest())
         #expect(path(of: fixture) == "me@devbox:~/proj")
 
@@ -296,7 +297,8 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
-            listFolders: { _, _ in .unavailable },
+            listFolders: { _, _ in nil },
+            probeFolder: { _, _ in nil },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -320,7 +322,8 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
-            listFolders: { _, _ in .unavailable },
+            listFolders: { _, _ in nil },
+            probeFolder: { _, _ in nil },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -353,8 +356,9 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { nil },
             listFolders: { folder, destination in
                 asked.append((folder, destination))
-                return listings[folder].map { .listed($0) } ?? .missing
+                return listings[folder]
             },
+            probeFolder: { path, _ in path.hasSuffix(".txt") ? .notDirectory : .missing },
             folderCheck: { _, _ in
                 checked += 1
                 return .exists
@@ -380,6 +384,10 @@ struct AppStateProjectDirectoryTests {
         #expect(none.isEmpty, "no Change to row: nothing matches")
         #expect(scope.failure?.title == "Path ~/zzz doesn't exist", "the notice only when nothing matches")
 
+        let file = try await settledItems(scope, "~/notes.txt", context)
+        #expect(file.isEmpty)
+        #expect(scope.failure?.title == "~/notes.txt is not a directory", "the host tells a file from a missing path")
+
         let typo = try await settledItems(scope, "~/typo/sub", context)
         #expect(typo.isEmpty, "no Change to row for a folder that the host says is not there")
         #expect(scope.failure?.title == "Path ~/typo/sub doesn't exist")
@@ -403,7 +411,8 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { reported },
-            listFolders: { _, _ in .unavailable },
+            listFolders: { _, _ in nil },
+            probeFolder: { _, _ in nil },
             hostPaneFolder: {
                 asked += 1
                 return "/srv/app"
@@ -424,7 +433,8 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { reported },
-            listFolders: { _, _ in .unavailable },
+            listFolders: { _, _ in nil },
+            probeFolder: { _, _ in nil },
             hostPaneFolder: {
                 asked += 1
                 return "/srv/app"
