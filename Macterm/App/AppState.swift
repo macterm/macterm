@@ -2126,7 +2126,7 @@ final class AppState {
     /// same verdict as `judgeClose`, without the retention of pinned tabs:
     /// the rows of the quit dialog.
     func panesThatNeedConfirmClose(_ panes: [Pane]) async -> [Pane] {
-        let plain = panes.filter(paneRunsPlainShell)
+        let plain = plainShellsToJudge(panes)
         var answers: [UUID: Bool] = [:]
         if !plain.isEmpty {
             answers = await withCheckedContinuation { continuation in
@@ -2141,7 +2141,15 @@ final class AppState {
     /// so its busy answer cannot stop the wait for the others.
     private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
         let retained = pendingPinnedSessionNames()
-        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
+        return plainShellsToJudge(closing).filter { !retained.contains($0.sessionName) }
+    }
+
+    /// The plain shells of `panes` whose host must answer. Only
+    /// `confirm-close-surface = true` asks a host: for `false` and `always`
+    /// the surface's reading is the verdict (`ConfirmCloseSurface`).
+    private func plainShellsToJudge(_ panes: [Pane]) -> [Pane] {
+        guard confirmCloseSurface().judgesPaneState else { return [] }
+        return panes.filter(paneRunsPlainShell)
     }
 
     /// Asks the host of each plain shell in `plain` whether the shell is
@@ -2195,12 +2203,17 @@ final class AppState {
     }
 
     /// The per-pane half of the verdict — `Pane.needsConfirmClose` in
-    /// production. A seam because that property short-circuits on
-    /// `hasSurface`, and no pane in a windowless test ever builds one, so
+    /// production. A seam because that property short-circuits on a
+    /// missing surface, and no pane in a windowless test ever builds one, so
     /// without it the tab- and project-level guards could only be tested
     /// against an always-idle pane.
     @ObservationIgnored
     var paneNeedsConfirmClose: (Pane) -> Bool = { $0.needsConfirmClose }
+
+    /// The user's `confirm-close-surface` (`GhosttyApp.confirmCloseSurface`),
+    /// read at each close. A seam, as `paneNeedsConfirmClose`.
+    @ObservationIgnored
+    var confirmCloseSurface: () -> ConfirmCloseSurface = { GhosttyApp.shared.confirmCloseSurface }
 
     /// Whether the pane runs a plain shell (`Pane.runsPlainShell`). A seam,
     /// as `paneNeedsConfirmClose`.

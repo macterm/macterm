@@ -1415,7 +1415,58 @@ struct ControlHandlerTests {
         appState.paneNeedsConfirmClose = { $0.id == plain.id }
         appState.paneRunsPlainShell = { $0.id == plain.id }
         appState.askPlainShellNeedsConfirmClose = { pane, _ in pane.id == plain.id ? answer : nil }
+        appState.confirmCloseSurface = { .true }
         return (handler, appState, project, tab, plain)
+    }
+
+    // MARK: - confirm-close-surface decides the CLI's busy refusal (0609)
+
+    /// The plain-shell project under `confirmClose`. The surface's reading
+    /// is libghostty's for the key: busy for `always`, idle for `false`.
+    /// The host would answer the opposite, and it must not be asked.
+    private func plainShellProject(confirmClose: ConfirmCloseSurface) throws
+        -> (handler: ControlHandler, state: AppState, project: Project, plain: Pane, asked: () -> Bool)
+    {
+        let surfaceBusy = confirmClose == .always
+        let fx = try plainShellProject(answer: !surfaceBusy)
+        var asked = false
+        fx.state.confirmCloseSurface = { confirmClose }
+        fx.state.paneNeedsConfirmClose = { _ in surfaceBusy }
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            asked = true
+            return !surfaceBusy
+        }
+        return (fx.handler, fx.state, fx.project, fx.plain, { asked })
+    }
+
+    @Test
+    func pane_close_with_confirm_close_false_closes_a_busy_pane_and_asks_no_host() async throws {
+        let fx = try plainShellProject(confirmClose: .false)
+        let response = await fx.handler.handle(request(
+            "pane.close", args: ControlArgs(pane: fx.plain.id.uuidString)
+        ))
+        #expect(response.ok)
+        #expect(!fx.asked())
+    }
+
+    @Test
+    func project_remove_with_confirm_close_false_removes_the_project() async throws {
+        let fx = try plainShellProject(confirmClose: .false)
+        let response = await fx.handler.handle(request(
+            "project.remove", args: ControlArgs(project: fx.project.name)
+        ))
+        #expect(response.ok)
+        #expect(fx.state.workspaces[fx.project.id] == nil)
+    }
+
+    @Test
+    func pane_close_with_confirm_close_always_refuses_an_idle_pane() async throws {
+        let fx = try plainShellProject(confirmClose: .always)
+        let response = await fx.handler.handle(request(
+            "pane.close", args: ControlArgs(pane: fx.plain.id.uuidString)
+        ))
+        #expect(response.error?.code == .busy)
+        #expect(!fx.asked())
     }
 
     @Test
