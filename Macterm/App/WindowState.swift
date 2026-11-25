@@ -120,6 +120,7 @@ final class WindowState: Identifiable {
     var isCommandPaletteVisible = false {
         didSet { if !isCommandPaletteVisible { paletteTarget = nil } }
     }
+
     /// The view the palette and its breadcrumb row are drawn over while the
     /// palette is up — what Capture Palette frames
     /// (`PaletteScreenshot`). Unobserved; the palette sets it as it mounts.

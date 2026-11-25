@@ -1439,8 +1439,10 @@ struct WindowStateTests {
 
         // Remove acts on the project there (design 013 §2.1), never on the
         // tab that the screen hides.
-        #expect(!state.commandTarget(store: ctx.projectStore).contains { if case .tab = $0 { true } else { false } },
-                "no hidden tab closes")
+        #expect(
+            !state.commandTarget(store: ctx.projectStore).contains { if case .tab = $0 { true } else { false } },
+            "no hidden tab closes"
+        )
         #expect(AppCommand.closePane.action(in: ctx) == nil)
         #expect(AppCommand.splitRight.action(in: ctx) == nil)
         #expect(AppCommand.newTab.action(in: ctx) != nil, "New Tab still works")

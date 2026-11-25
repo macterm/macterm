@@ -83,8 +83,10 @@ struct CommandTargetTests {
         #expect(f.state.commandTarget(store: f.store) == [.tab(projectID: f.a.id, tabID: shown.id)])
 
         f.sidebarFocused = true
-        #expect(f.state.commandTarget(store: f.store) == [.project(f.a.id), .tab(projectID: f.b.id, tabID: bTab)],
-                "the selection, in the order of the rows")
+        #expect(
+            f.state.commandTarget(store: f.store) == [.project(f.a.id), .tab(projectID: f.b.id, tabID: bTab)],
+            "the selection, in the order of the rows"
+        )
     }
 
     @Test
@@ -119,7 +121,7 @@ struct CommandTargetTests {
     // MARK: - The words
 
     @Test
-    func remove_says_close_tab_for_a_tab_and_remove_project_for_a_project() throws {
+    func remove_says_close_tab_for_a_tab_and_remove_project_for_a_project() {
         let f = Fixture()
         #expect(AppCommand.remove.title(in: f.ctx) == "Close Tab")
         f.state.showProjectScreen(f.a, in: f.window)
@@ -165,8 +167,10 @@ struct CommandTargetTests {
 
         #expect(f.state.pendingDialog?.kind == .removeSelection)
         #expect(f.state.pendingDialog?.title == "Remove the selected items?")
-        #expect(f.state.pendingDialog?.message == "The selected items contain 2 tabs and 0 nested projects.",
-                "the tab of a and the selected tab of b")
+        #expect(
+            f.state.pendingDialog?.message == "The selected items contain 2 tabs and 0 nested projects.",
+            "the tab of a and the selected tab of b"
+        )
         #expect(f.store.row(f.a.id) != nil, "nothing goes before the answer")
 
         f.state.confirmPendingDialog()

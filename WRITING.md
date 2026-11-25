@@ -33,6 +33,8 @@ Define a term only when it is Macterm-specific or when it is ambiguous. Do not d
 |---|---|
 | **project** | A folder, or a folder on a remote host. It has an entry in the sidebar. It holds tabs, and it can hold other projects ("inside" a project: New Project Inside, Move to Project). |
 | **tab** | One row under a project. It holds one or more panes. |
+| **node** | A tab or a project: a row of the tree in the sidebar. Use it in code and docs, not in GUI text. A command acts on the selected nodes, else on the node that the window shows. |
+| **Close Tab**, **Remove Project** | The two titles of the one Remove command. A tab closes: its processes end. A project is removed with its tabs and the projects inside it. A set of rows is "Close N Tabs", "Remove N Projects" or "Remove N Items". A pinned tab only closes: its row stays. |
 | **pane** | One terminal. A tab can have several panes. |
 | **split** | The division of a tab into panes. As a verb, "split a pane" makes a new pane. |
 | **session** | A shell that keeps running in the background, with its programs. Each pane has one session. Use "session" for this only. |
