@@ -985,6 +985,7 @@ private struct CommandPaletteRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(item.isEnabled ? MactermTheme.fgMuted : MactermTheme.fgDim)
                         .lineLimit(1)
+                        .truncationMode(item.subtitleIsPath && !showsAlt ? .middle : .tail)
                 }
             }
             // At least a key-cap tall, so a row with a keybind and one
