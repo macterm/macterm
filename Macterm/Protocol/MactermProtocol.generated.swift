@@ -401,6 +401,14 @@ extension MactermProtocol {
 }
 
 extension MactermProtocol {
+    enum PaneGrid: ProtocolMethod {
+        static let name = "pane.grid"
+        static let since: UInt32 = 3
+        static let senders: [MactermProtocol.Trust] = [.local]
+    }
+}
+
+extension MactermProtocol {
     struct Hello: Equatable {
         var level: UInt32
         var minLevel: UInt32
@@ -4367,6 +4375,76 @@ extension MactermProtocol.TabRebalance {
 }
 
 extension MactermProtocol.TabRebalance.Result: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        try reader.readMap { _, _ in false }
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(0)
+    }
+}
+
+extension MactermProtocol.PaneGrid {
+    struct Args: Equatable {
+        var tab: String
+        var target: String
+        var rows: UInt32
+        var columns: UInt32
+        var new: [MactermProtocol.Pane]
+        var splitIds: [String]
+    }
+}
+
+extension MactermProtocol.PaneGrid.Args: ProtocolValue {
+    init(from reader: inout MessagePackReader) throws {
+        var tab: String?
+        var target: String?
+        var rows: UInt32?
+        var columns: UInt32?
+        var new: [MactermProtocol.Pane]?
+        var splitIds: [String]?
+        try reader.readMap { key, reader in
+            switch key {
+            case "tab": tab = try String(from: &reader)
+            case "target": target = try String(from: &reader)
+            case "rows": rows = try UInt32(from: &reader)
+            case "columns": columns = try UInt32(from: &reader)
+            case "new": new = try [MactermProtocol.Pane](from: &reader)
+            case "split_ids": splitIds = try [String](from: &reader)
+            default: return false
+            }
+            return true
+        }
+        self.tab = try MessagePackReader.required(tab, "tab")
+        self.target = try MessagePackReader.required(target, "target")
+        self.rows = try MessagePackReader.required(rows, "rows")
+        self.columns = try MessagePackReader.required(columns, "columns")
+        self.new = try MessagePackReader.required(new, "new")
+        self.splitIds = try MessagePackReader.required(splitIds, "split_ids")
+    }
+
+    func encode(to writer: inout MessagePackWriter) {
+        writer.writeMapHeader(6)
+        writer.writeString("tab")
+        tab.encode(to: &writer)
+        writer.writeString("target")
+        target.encode(to: &writer)
+        writer.writeString("rows")
+        rows.encode(to: &writer)
+        writer.writeString("columns")
+        columns.encode(to: &writer)
+        writer.writeString("new")
+        new.encode(to: &writer)
+        writer.writeString("split_ids")
+        splitIds.encode(to: &writer)
+    }
+}
+
+extension MactermProtocol.PaneGrid {
+    struct Result: Equatable {}
+}
+
+extension MactermProtocol.PaneGrid.Result: ProtocolValue {
     init(from reader: inout MessagePackReader) throws {
         try reader.readMap { _, _ in false }
     }

@@ -564,6 +564,17 @@
       "args": "TabRebalance.Args",
       "result": "TabRebalance.Result",
       "doc": "Makes every ratio of the splits of a tab even."
+    },
+    {
+      "name": "pane.grid",
+      "type": "PaneGrid",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneGrid.Args",
+      "result": "PaneGrid.Result",
+      "doc": "Splits a pane into a grid of equal cells."
     }
   ],
   "events": [
@@ -3673,6 +3684,67 @@
     },
     {
       "name": "TabRebalance.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneGrid.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tab",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The tab of the pane."
+        },
+        {
+          "name": "target",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The pane to split. It becomes the top-left cell."
+        },
+        {
+          "name": "rows",
+          "type": "u32",
+          "optional": false,
+          "since": 3,
+          "doc": "The count of rows.",
+          "minimum": 1,
+          "maximum": 16
+        },
+        {
+          "name": "columns",
+          "type": "u32",
+          "optional": false,
+          "since": 3,
+          "doc": "The count of columns.",
+          "minimum": 1,
+          "maximum": 16
+        },
+        {
+          "name": "new",
+          "type": "[Pane]",
+          "optional": false,
+          "since": 3,
+          "doc": "The new panes, one for each cell after the first, with the ids that the client made."
+        },
+        {
+          "name": "split_ids",
+          "type": "[str]",
+          "optional": false,
+          "since": 3,
+          "doc": "The ids of the new splits, one for each new pane. The client makes them."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneGrid.Result",
       "kind": "struct",
       "fields": [],
       "cases": [],

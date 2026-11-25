@@ -365,6 +365,19 @@ t = tab()
 assert t["focused"] == "z" and t["root"]["a"]["id"] == "s9", t
 bad = c.request("pane.swap", id="n", other="nope")
 assert bad["err"]["code"] == "invalid_args", bad
+
+# A grid is one change: the target is the top-left cell, every cell is even.
+c.call("tab.create", project="p1", id="t2", root=pane("g"))
+new = [{"id": "g%d" % i, "session": "macterm-x-g%d" % i} for i in range(1, 6)]
+c.call("pane.grid", tab="t2", target="g", rows=2, columns=3, new=new, split_ids=["q%d" % i for i in range(1, 6)])
+m = c.call("state.subscribe")["model"]
+t2 = next(t for t in next(p for p in m["projects"] if p["id"] == "p1")["tabs"] if t["id"] == "t2")
+def leaves(n):
+    return [n["a"]["id"]] if n["t"] == "pane" else leaves(n["a"]["first"]) + leaves(n["a"]["second"])
+assert leaves(t2["root"]) == ["g", "g2", "g3", "g1", "g4", "g5"], leaves(t2["root"])
+assert t2["focused"] == "g"
+short = c.request("pane.grid", tab="t2", target="g", rows=2, columns=2, new=new[:1], split_ids=["x"])
+assert short["err"]["code"] == "invalid_args", short
 PY
 }
 

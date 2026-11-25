@@ -1343,6 +1343,40 @@ pub const SplitRatio = struct {
     pub const Result = struct {};
 };
 
+/// Splits pane `target` into a grid of `rows` x `columns` equal cells, in one
+/// change: the column of row heads first, then each row left to right. The
+/// target is the top-left cell and keeps the focus. `new` and `split_ids`
+/// hold the ids of the new panes and splits, in the order of the cells.
+pub const PaneGrid = struct {
+    pub const name = "pane.grid";
+    pub const doc = "Splits a pane into a grid of equal cells.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .tab = "The tab of the pane.",
+            .target = "The pane to split. It becomes the top-left cell.",
+            .rows = "The count of rows.",
+            .columns = "The count of columns.",
+            .new = "The new panes, one for each cell after the first, with the ids that the client made.",
+            .split_ids = "The ids of the new splits, one for each new pane. The client makes them.",
+        };
+        pub const field_limits = .{
+            .rows = .{ .minimum = 1, .maximum = 16 },
+            .columns = .{ .minimum = 1, .maximum = 16 },
+        };
+
+        tab: TabId,
+        target: PaneId,
+        rows: u32,
+        columns: u32,
+        new: []const model.Pane,
+        split_ids: []const SplitId,
+    };
+    pub const Result = struct {};
+};
+
 /// Swaps the places of two panes of one tab (Move Pane). The shape and the
 /// ratios of the tree stay. The focus stays on its pane.
 pub const PaneSwap = struct {
@@ -1539,7 +1573,7 @@ pub const methods = .{
     ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,    TabClose,      TabSet,         TabSelect,
     TabReorder,     TabMove,        TabMerge,      PaneSplit,    PaneClose,     PaneMove,       PaneSeparate,
     PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,    ModelImport,   ModelReplace,   ModelOptions,
-    SessionWait,    PaneSwap,       PaneReplace,   PaneSet,      TabLayout,     TabRebalance,
+    SessionWait,    PaneSwap,       PaneReplace,   PaneSet,      TabLayout,     TabRebalance,   PaneGrid,
 };
 
 /// The methods that change the model. The server answers one of them sent
@@ -1548,7 +1582,7 @@ pub const model_writes = .{
     ProjectCreate, ProjectSet, ProjectReorder, ProjectRemove, TabCreate, TabClose,    TabSet,
     TabSelect,     TabReorder, TabMove,        TabMerge,      PaneSplit, PaneClose,   PaneMove,
     PaneSeparate,  PaneFocus,  PaneZoom,       SplitRatio,    SelectSet, ModelImport, ModelReplace,
-    ModelOptions,  PaneSwap,   PaneReplace,    PaneSet,       TabLayout, TabRebalance,
+    ModelOptions,  PaneSwap,   PaneReplace,    PaneSet,       TabLayout, TabRebalance, PaneGrid,
 };
 
 // ── Events ──────────────────────────────────────────────────────────────────
