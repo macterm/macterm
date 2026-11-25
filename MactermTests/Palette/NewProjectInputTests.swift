@@ -131,6 +131,22 @@ struct NewProjectInputTests {
     }
 
     @Test
+    func a_second_tab_on_a_folder_goes_into_it() throws {
+        let folder = try makeFolder("api")
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("src"), withIntermediateDirectories: true)
+        let scope = InputPaletteScope(input: .newProject)
+        let (context, _) = makeContext()
+
+        var listed = rows(scope, folder.path, context)
+        var tab = try #require(scope.tabText(selected: listed.first, rows: listed))
+        #expect(tab == folder.path + "/", "the first Tab gives the folder its slash")
+        listed = rows(scope, tab, context)
+        #expect(listed.map(\.title) == ["api", "src"], "the typed folder stays the first row")
+        tab = try #require(scope.tabText(selected: listed.first, rows: listed))
+        #expect(tab == folder.path + "/src/", "the second Tab goes into the folder")
+    }
+
+    @Test
     func a_remote_spec_gets_the_remote_rows() throws {
         let (context, window) = makeContext()
         let scope = InputPaletteScope(input: .newProject)
@@ -146,6 +162,8 @@ struct NewProjectInputTests {
         let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")
         let known = try #require(rows(scope, "devbox:~/dev/api", context).first)
         #expect(known.subtitle == "Switch to remote project: devbox:~/dev/api")
+        let listed = rows(scope, "devbox:~/dev/api", context)
+        #expect(listed.allSatisfy { scope.completion(for: $0) == nil }, "Tab does not fill a remote row")
         #expect(scope.press(known) == .closed)
         #expect(context.appState.activeProjectID == existing.id)
     }

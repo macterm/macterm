@@ -7,16 +7,16 @@ import Foundation
 ///   the folder panel and always makes a new project
 ///   (`AppState.newProjectFromFolderPanel`). Any typed character takes it
 ///   away (Ethan, 0586).
-/// - For a typed path, the rows are the folders that exist for it, as the
-///   root palette's path mode lists them (`DirectorySource`): the typed
-///   folder first, then the folders under it or that complete it. Each row
-///   is the action (Ethan, 0594): Return or a click on the selected row adds
-///   that folder as a project, or switches to the project that has it; its
-///   Add another project row makes a second project there. Tab puts the
-///   folder in the field. A remote spec (`devbox:~/api`) gets the root
-///   palette's remote rows.
-/// - A path with no folder row gets the notice of `PathProblem`, and no
-///   rows.
+/// - For a typed path, the rows are the folder rows of the root palette's
+///   path mode (`DirectorySource`). The typed folder comes first. The
+///   folders under it, or the folders that complete it, come next.
+/// - Each row is the action (Ethan, 0594). Return or a click on the
+///   selected row adds the folder as a project. For a folder that a
+///   project has, the row switches to that project, and the row under it
+///   adds another project. Tab puts the folder in the field.
+/// - A remote spec (`devbox:~/api`) gets the remote rows of the root
+///   palette. Tab does not fill them.
+/// - A path with no row gets the notice of `PathProblem`, and no rows.
 extension PaletteInput {
     static var newProject: PaletteInput {
         PaletteInput(
@@ -39,7 +39,8 @@ enum NewProjectInput {
         return DirectorySource().items(query: typed, context: context).map { item in
             PaletteInputChoice(
                 item: item,
-                value: DirectorySource.path(of: item).map { PathCompleter.fieldText(for: $0, typed: typed) }
+                value: DirectorySource.path(of: item)
+                    .flatMap { ProjectPath.isRemote($0) ? nil : PathCompleter.fieldText(for: $0, typed: typed) }
             )
         }
     }
@@ -56,12 +57,9 @@ enum NewProjectInput {
         }
         // Spaces alone are typed text: no Select in Finder, and no path.
         let typed = text.trimmingCharacters(in: .whitespaces)
-        if typed.isEmpty || PaletteQuery.isRemoteSpecQuery(typed) { return .nothing }
-        // A folder row exists when the typed path is a folder or completes
-        // to one (`PathCompleter`, which `DirectorySource` lists).
-        if let completion = PathCompleter.complete(typed), completion.exactMatch != nil || !completion.children.isEmpty {
-            return .nothing
-        }
+        if typed.isEmpty || !choices(text, context: context).isEmpty { return .nothing }
+        // A folder always has its own row, so a path with no row has a
+        // problem.
         return .notice((PathProblem.local(atPath: typed) ?? .missing).notice(for: typed))
     }
 }

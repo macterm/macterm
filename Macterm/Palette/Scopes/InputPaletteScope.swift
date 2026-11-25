@@ -14,9 +14,9 @@ import Foundation
 /// does nothing, and the field text is never committed in another way.
 /// The rows under the action row are completions: Return, Tab or a click
 /// puts one in the field, and never runs the action. A screen can instead
-/// give rows that are actions themselves (`choices`, New Project's folder
-/// rows): the selection rests on the first one, Return or a click runs the
-/// selected one, and Tab puts its folder in the field. Escape, or Backspace
+/// give rows that are actions themselves (`choices`, folder rows): the
+/// selection rests on the first one, Return or a click runs the selected
+/// one, and Tab puts its folder in the field. Escape, or Backspace
 /// at an empty field, pops the screen like any screen. An action that
 /// refuses when it runs keeps the screen and shows the reason, until the
 /// text changes.
@@ -44,12 +44,13 @@ struct PaletteInput: Hashable {
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
     /// The rows that are themselves actions, best first: Return or a click
-    /// on one runs it, and Tab puts its `value` in the field. New Project
-    /// gives the folder rows of the root palette's path mode, so a folder
-    /// row adds that folder (Ethan, 0594).
+    /// on one runs it, and Tab puts its `value` in the field. A folder
+    /// screen gives the folder rows here, so that a folder row is the
+    /// action (Ethan, 0594).
     let choices: @MainActor (String, PaletteContext) -> [PaletteInputChoice]
     /// What the text in the field gives: the action row when the value is
-    /// valid, the notice when it is not, or nothing (an empty field). It
+    /// valid, the notice when it is not, or nothing (an empty field, or a
+    /// text whose rows are `choices`). It
     /// gets the palette's context, so that an action can reach the app and
     /// the projects.
     let check: @MainActor (String, PaletteContext) -> PaletteInputCheck
@@ -260,6 +261,15 @@ final class InputPaletteScope: PaletteScope {
     func completion(for item: PaletteItem) -> String? {
         if let choice = choices.first(where: { $0.item.id == item.id }) { return choice.value }
         return completions.first { Self.itemID($0) == item.id }?.value
+    }
+
+    /// What Tab puts in the field: the value of the selected row, else the
+    /// first value of `rows`. A value that the field already has is skipped,
+    /// so a second Tab on a folder goes into it. Nil when no row gives a new
+    /// value.
+    func tabText(selected item: PaletteItem?, rows: [PaletteItem]) -> String? {
+        if let item, let value = completion(for: item), value != text { return value }
+        return rows.lazy.compactMap { self.completion(for: $0) }.first { $0 != self.text }
     }
 
     /// What Return or a click on `item` does, with `item` nil when no row
