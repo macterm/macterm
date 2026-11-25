@@ -134,6 +134,52 @@ struct InputPaletteScopeTests {
     }
 
     @Test
+    func a_choice_row_is_the_action_and_tab_fills_its_value() throws {
+        var ran: [String] = []
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.choices",
+            pill: PalettePill(title: "Pick", icon: "folder"),
+            prompt: "Pick",
+            choices: { text, _ in
+                (text == "*" ? ["alpha", "beta"] : []).map { name in
+                    PaletteInputChoice(item: PaletteItem(id: "pick:\(name)", title: name) { ran.append(name) }, value: name + "/")
+                }
+            },
+            check: { _ in .nothing }
+        ))
+        let listed = rows(scope, "*")
+        #expect(listed.map(\.title) == ["alpha", "beta"])
+        #expect(scope.restingItemID == "pick:alpha", "the selection rests on the first choice")
+        let beta = try #require(listed.last)
+        #expect(scope.isChoice(beta))
+        #expect(scope.completion(for: beta) == "beta/", "Tab fills the value")
+        #expect(scope.press(beta) == .closed)
+        #expect(ran == ["beta"], "Return or a click runs the selected choice only")
+
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.cancelItemID], "no choice: Cancel rests")
+        #expect(scope.restingItemID == InputPaletteScope.cancelItemID)
+    }
+
+    @Test
+    func tab_skips_a_value_that_the_field_has_and_an_action_row_rests_before_a_choice() {
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.tab",
+            pill: PalettePill(title: "Pick", icon: "folder"),
+            prompt: "Pick",
+            choices: { _, _ in
+                ["a/", "a/b/"].map { PaletteInputChoice(item: PaletteItem(id: "pick:\($0)", title: $0) {}, value: $0) }
+            },
+            check: { _ in .action(PaletteInputAction(title: "Use") { .done }) }
+        ))
+        let listed = rows(scope, "a/")
+        #expect(listed.first?.id == InputPaletteScope.actionItemID, "the action row comes first")
+        #expect(scope.restingItemID == InputPaletteScope.actionItemID, "and the selection rests on it")
+        #expect(!listed.contains { $0.id == InputPaletteScope.cancelItemID }, "text hides Cancel")
+        #expect(scope.tabText(selected: listed[1], rows: listed) == "a/b/", "the field has a/, so Tab takes the next value")
+        #expect(scope.tabText(selected: listed[2], rows: listed) == "a/b/")
+    }
+
+    @Test
     func an_empty_field_with_an_action_row_rests_on_the_action_row() {
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.empty-action",
