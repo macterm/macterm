@@ -8,6 +8,7 @@ import Foundation
 /// The model has one type, the project: v1's pinned and scratch
 /// workspaces, the quick terminal's tab and each widget's tab become hidden
 /// projects (`hiddenProject`).
+@MainActor
 enum ModelConversion {
     /// v1's ids of its two sentinel workspaces, as `workspaces_v3.json`
     /// holds them. Only the import reads them: the model finds the pinned

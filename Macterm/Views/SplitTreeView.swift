@@ -127,8 +127,6 @@ struct SplitLeafView: View {
     let onZoomRequest: () -> Void
     let paneDrop: PaneDropContext?
 
-    @Environment(\.modelWriter)
-    private var writer
     @Environment(\.paneHost)
     private var host
 
@@ -212,6 +210,8 @@ struct SplitLeafView: View {
 
 /// A resizable split container with a draggable divider.
 struct SplitDividerView<First: View, Second: View>: View {
+    @Environment(\.modelWriter)
+    private var writer
     let branch: SplitBranch
     @ViewBuilder
     let first: First
