@@ -434,7 +434,7 @@ struct ProjectMemoryTests {
     }
 
     @Test
-    func a_project_list_that_did_not_load_prunes_nothing() throws {
+    func a_project_list_that_did_not_load_prunes_nothing() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-memory-prune-\(UUID().uuidString)", isDirectory: true)
         let store = ProjectMemoryStore(directory: directory)
