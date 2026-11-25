@@ -145,7 +145,12 @@ struct SidebarDragFeedbackTests {
                 }
         }
         .listStyle(.sidebar)
-        .background { SidebarDragFeedback(branchTypes: [projectType], isGuarded: .constant(false)) }
+        .background {
+            SidebarDragFeedback(
+                branches: .init(types: [projectType], topLevelCount: tree.count, trailingCount: 2),
+                isGuarded: .constant(false)
+            )
+        }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 240, height: 600),
             styleMask: [.titled],
@@ -235,7 +240,12 @@ struct SidebarDragFeedbackTests {
                 }
         }
         .listStyle(.sidebar)
-        .background { SidebarDragFeedback(branchTypes: [projectType], isGuarded: .constant(false)) }
+        .background {
+            SidebarDragFeedback(
+                branches: .init(types: [projectType], topLevelCount: tree.count),
+                isGuarded: .constant(false)
+            )
+        }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 240, height: 480),
             styleMask: [.titled],
@@ -294,6 +304,89 @@ struct SidebarDragFeedbackTests {
         #expect(drag.locationReads == reads)
     }
 
+    /// Pinned rows above the projects, and headers with their own drop
+    /// views, as in the sidebar. A project drag has no slot among the pinned
+    /// rows (ui-review 0613: a gap opened after the last pinned row). On the
+    /// first tab of a project, the slot before the project would move the
+    /// header under the pointer, where its drop view takes the drag. So the
+    /// gap goes after the tabs there, and it stays open.
+    @Test
+    func a_project_drag_has_no_slot_on_pinned_rows_and_a_stable_slot_on_a_first_tab() async throws {
+        let drops = DropLog()
+        let tree = [
+            ProbeNode(name: "P", tabs: ["T0", "T1", "T2"], children: []),
+            ProbeNode(name: "Q", tabs: ["Q0"], children: []),
+        ]
+        let projectType = NSPasteboard.PasteboardType(UTType.mactermProject.identifier)
+        let content = List {
+            Section {
+                ForEach(["W0", "W1"], id: \.self) { Text($0) }
+                    .dropDestination(for: MovableTab.self) { _, offset in
+                        drops.entries.append("pinned \(offset)")
+                    }
+            }
+            ForEach(tree) { ProbeProjectRow(node: $0, drops: drops, headerTakesDrops: true) }
+                .dropDestination(for: MovableProject.self) { _, offset in
+                    drops.entries.append("top \(offset)")
+                }
+        }
+        .listStyle(.sidebar)
+        .background {
+            SidebarDragFeedback(
+                branches: .init(types: [projectType], topLevelCount: tree.count),
+                isGuarded: .constant(false)
+            )
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: content)
+        window.layoutIfNeeded()
+
+        // Rows: (the section), W0, W1, P, T0, T1, T2, Q, Q0.
+        let outline = try #require(await poll {
+            window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows >= 8 ? $0 : nil
+            }
+        })
+        let base = outline.numberOfRows - 8
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        try pasteboard.setData(JSONEncoder().encode(MovableProject(projectID: UUID())), forType: projectType)
+
+        func drop(row: Int, fraction: CGFloat) async -> [String] {
+            drops.entries = []
+            let rect = outline.rect(ofRow: base + row)
+            let location = outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+            let drag = FakeDrag(location: location, pasteboard: pasteboard, window: window)
+            _ = outline.draggingEntered(drag)
+            _ = outline.draggingUpdated(drag)
+            guard outline.prepareForDragOperation(drag), outline.performDragOperation(drag) else {
+                outline.draggingExited(drag)
+                return []
+            }
+            outline.concludeDragOperation(drag)
+            return await poll { drops.entries.isEmpty ? nil : drops.entries } ?? []
+        }
+
+        // On the pinned rows: no drop.
+        #expect(await drop(row: 0, fraction: 0.5).isEmpty)
+        #expect(await drop(row: 1, fraction: 0.5).isEmpty)
+        #expect(await drop(row: 1, fraction: 0.9).isEmpty)
+        // On the first tab of P: before P at its upper edge, else after P.
+        #expect(await drop(row: 3, fraction: 0.1) == ["top 0"])
+        #expect(await drop(row: 3, fraction: 0.5) == ["top 1"])
+        // On the last tab of P and on the one tab of Q: after the project.
+        #expect(await drop(row: 5, fraction: 0.5) == ["top 1"])
+        #expect(await drop(row: 7, fraction: 0.5) == ["top 2"])
+    }
+
     private func sidebarList() -> some View {
         List {
             Section {
@@ -332,6 +425,8 @@ private struct ProbeProjectRow: View {
     let drops: DropLog
     /// The open projects. Nil: every project is open.
     var expansion: ProbeExpansion?
+    /// The header has its own drop destination, as in the sidebar.
+    var headerTakesDrops = false
 
     var body: some View {
         DisclosureGroup(isExpanded: Binding(
@@ -358,7 +453,11 @@ private struct ProbeProjectRow: View {
                     }
             }
         } label: {
-            Text(node.name)
+            if headerTakesDrops {
+                Text(node.name).dropDestination(for: MovableTab.self) { _, _ in true }
+            } else {
+                Text(node.name)
+            }
         }
     }
 }

@@ -469,8 +469,14 @@ struct SidebarContent: View {
         // Finder sidebar, in place of the insertion line. A project drag
         // opens it only at the slots of projects.
         .background {
+            // The top-level rows: the pinned rows, the projects, then the
+            // scratch rows. A project drag has no slot among the pinned rows.
             SidebarDragFeedback(
-                branchTypes: [NSPasteboard.PasteboardType(UTType.mactermProject.identifier)],
+                branches: OutlineGapDropGuard.Branches(
+                    types: [NSPasteboard.PasteboardType(UTType.mactermProject.identifier)],
+                    topLevelCount: projectStore.children(of: nil).count,
+                    trailingCount: showsScratchRows ? scratchTabs.count : 0
+                ),
                 isGuarded: $presentation.hasProjectDropSlots
             )
         }

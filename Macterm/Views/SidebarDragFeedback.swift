@@ -26,8 +26,9 @@ private let logger = Logger(subsystem: appBundleID, category: "SidebarDragFeedba
 /// A folder from Finder shows no gap, because `SidebarFolderDropTarget` takes
 /// that drag above the outline view.
 struct SidebarDragFeedback: NSViewRepresentable {
-    /// The pasteboard types that only the rows of projects take.
-    var branchTypes: Set<NSPasteboard.PasteboardType> = []
+    /// The drags that only the rows of projects take, and where those rows
+    /// are at the top level.
+    var branches = OutlineGapDropGuard.Branches()
     @Binding var isGuarded: Bool
 
     func makeNSView(context _: Context) -> ProbeView {
@@ -35,7 +36,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
     }
 
     func updateNSView(_ view: ProbeView, context _: Context) {
-        view.branchTypes = branchTypes
+        view.branches = branches
         let report: (Bool) -> Void = { guarded in
             if isGuarded != guarded { isGuarded = guarded }
         }
@@ -60,7 +61,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
         /// Passes left before the probe stops a search that finds nothing.
         private var triesLeft = 0
         private static let maxTries = 20
-        var branchTypes: Set<NSPasteboard.PasteboardType> = []
+        var branches = OutlineGapDropGuard.Branches()
         var onGuardChange: (Bool) -> Void = { _ in }
         /// True while the guard is on the outline view of this probe.
         var isGuarded: Bool {
@@ -87,9 +88,12 @@ struct SidebarDragFeedback: NSViewRepresentable {
         /// does no search.
         func scheduleApply() {
             if let outline, outline.window != nil, outline.window == window {
-                // Cheap: SwiftUI can set the style back.
-                if gapIsAllowed, outline.draggingDestinationFeedbackStyle != .gap {
-                    outline.draggingDestinationFeedbackStyle = .gap
+                // Cheap: SwiftUI can set the style back, and the rows change.
+                if gapIsAllowed {
+                    OutlineGapDropGuard.configure(outline, branches: branches)
+                    if outline.draggingDestinationFeedbackStyle != .gap {
+                        outline.draggingDestinationFeedbackStyle = .gap
+                    }
                 }
                 return
             }
@@ -105,7 +109,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
             guard let window, let root = window.contentView else { return }
             let frame = convert(bounds, to: nil)
             if let found = Self.outline(at: frame, in: root) {
-                switch OutlineGapDropGuard.install(on: found, branchTypes: branchTypes) {
+                switch OutlineGapDropGuard.install(on: found, branches: branches) {
                 case .installed:
                     outline = found
                     gapIsAllowed = true
@@ -179,7 +183,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
 ///    with "index -2 out of bounds". A drag leaves the outline view each time
 ///    that it goes onto a row with its own `.dropDestination`, for example a
 ///    project header. The guard answers "no drop" and does not call SwiftUI.
-/// 2. **A branch drag** (a pasteboard type of `branchTypes(of:)`: a project).
+/// 2. **A branch drag** (a pasteboard type of `branches(of:)`: a project).
 ///    Only the `ForEach`s of expandable rows take it. AppKit proposes the
 ///    slots between the leaf rows (the tabs), and SwiftUI refuses them. Then
 ///    the gap stays at the slot where the drag started. The guard moves each
@@ -232,8 +236,28 @@ enum OutlineGapDropGuard {
     /// The classes that have the guard.
     private static var guardedClasses: Set<ObjectIdentifier> = []
 
-    /// The key of the branch types of one outline view.
-    private static var branchTypesKey: UInt8 = 0
+    /// The drags that only the `ForEach`s of expandable rows take, and the
+    /// top-level rows that take them.
+    struct Branches {
+        /// The pasteboard types of a branch drag.
+        var types: Set<NSPasteboard.PasteboardType> = []
+        /// The number of top-level rows that take a branch drag (the
+        /// projects). Nil: the guard does not limit the top level.
+        var topLevelCount: Int?
+        /// The number of top-level rows after them (the scratch rows).
+        var trailingCount = 0
+    }
+
+    /// The branches of one outline view, in an object for the runtime.
+    private final class BranchesBox {
+        let value: Branches
+        init(_ value: Branches) {
+            self.value = value
+        }
+    }
+
+    /// The key of the branches of one outline view.
+    private static var branchesKey: UInt8 = 0
 
     /// The key of the drag whose gap is open on one outline view.
     private static var dragKey: UInt8 = 0
@@ -255,18 +279,23 @@ enum OutlineGapDropGuard {
         objc_setAssociatedObject(outline, &dragKey, info.map(DragReference.init), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
-    /// The pasteboard types that only the `ForEach`s of expandable rows of
-    /// `outline` take. Each outline view has its own: the guard is on a
-    /// class, which other Lists share.
-    static func branchTypes(of outline: NSOutlineView) -> [NSPasteboard.PasteboardType] {
-        (objc_getAssociatedObject(outline, &branchTypesKey) as? [String] ?? []).map { .init($0) }
+    /// The branches of `outline`. Each outline view has its own: the guard
+    /// is on a class, which other Lists share.
+    static func branches(of outline: NSOutlineView) -> Branches {
+        (objc_getAssociatedObject(outline, &branchesKey) as? BranchesBox)?.value ?? Branches()
+    }
+
+    /// Sets the branches of `outline`. The sidebar sets them again at each
+    /// update, because the number of projects changes.
+    static func configure(_ outline: NSOutlineView, branches: Branches) {
+        objc_setAssociatedObject(outline, &branchesKey, BranchesBox(branches), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
     /// Installs the guard on the class of the outline view's data source,
     /// one time for each class, and sets the branch types of `outline`.
     static func install(
         on outline: NSOutlineView,
-        branchTypes: Set<NSPasteboard.PasteboardType> = []
+        branches: Branches = Branches()
     ) -> Result {
         guard let source = outline.dataSource else { return .noDataSource }
         guard let dataSourceClass = declaredClass(of: source),
@@ -274,8 +303,7 @@ enum OutlineGapDropGuard {
               installValidate(on: dataSourceClass),
               installGapClose(on: outlineClass)
         else { return .unsupported }
-        let names = branchTypes.map(\.rawValue).sorted()
-        objc_setAssociatedObject(outline, &branchTypesKey, names, .OBJC_ASSOCIATION_COPY_NONATOMIC)
+        configure(outline, branches: branches)
         return .installed
     }
 
@@ -298,10 +326,18 @@ enum OutlineGapDropGuard {
                         return []
                     }
                     let operation: NSDragOperation
-                    let types = OutlineGapDropGuard.branchTypes(of: view)
-                    if !types.isEmpty, info.draggingPasteboard.availableType(from: types) != nil {
+                    let branches = OutlineGapDropGuard.branches(of: view)
+                    if !branches.types.isEmpty,
+                       info.draggingPasteboard.availableType(from: Array(branches.types)) != nil
+                    {
                         let location = view.convert(info.draggingLocation, from: nil)
-                        if let slot = branchSlot(in: view, item: item, index: index, location: location) {
+                        if let slot = branchSlot(
+                            in: view,
+                            item: item,
+                            index: index,
+                            location: location,
+                            topLevel: topLevelSlots(of: view, branches: branches)
+                        ) {
                             view.setDropItem(slot.item, dropChildIndex: slot.index)
                             operation = original(source, selector, view, info, slot.item, slot.index)
                         } else {
@@ -400,27 +436,54 @@ enum OutlineGapDropGuard {
         }
     }
 
+    /// The top-level slots that a branch drag can take: from the slot
+    /// before the first project to the slot after the last one. Nil when
+    /// `branches` does not limit the top level.
+    static func topLevelSlots(of outline: NSOutlineView, branches: Branches) -> ClosedRange<Int>? {
+        guard let count = branches.topLevelCount else { return nil }
+        let first = outline.numberOfChildren(ofItem: nil) - branches.trailingCount - count
+        return first >= 0 ? first ... first + count : nil
+    }
+
     /// The slot among expandable rows that is nearest to the pointer, for
     /// AppKit's proposal of the child `index` of `item`. `location` is in the
-    /// outline view's coordinates. Nil means no drop.
+    /// outline view's coordinates. `topLevel` is the range of `topLevelSlots`.
+    /// Nil means no drop.
     ///
+    /// - In a top-level row outside `topLevel` (a pinned row): no drop.
     /// - On the upper half of the row of `item`: before `item`.
     /// - Among the expandable children of an open `item`: the proposal.
     /// - Else (on the leaf rows of `item`, or below an `item` with no
     ///   expandable children): the nearer of two slots. One is before `item`.
     ///   The other is before its first expandable child, or else after
-    ///   `item` and its rows.
-    /// - At the top level: the proposal, but never below the slot after the
-    ///   last expandable row. SwiftUI refuses a slot that a `ForEach` of leaf
-    ///   rows owns, unless that `ForEach` takes the drag.
+    ///   `item` and its rows. The slot before `item` moves the row of `item`
+    ///   down by one row. When the drop view of that row (a header with its
+    ///   own drop destination) then comes under the pointer, it takes the
+    ///   drag and the gap closes. So in that case the other slot is used.
+    /// - At the top level: the proposal, limited to `topLevel`.
     /// - A drop on an item (the index -1): no drop. A header takes that drag
     ///   with its own drop view.
-    static func branchSlot(in outline: NSOutlineView, item: AnyObject?, index: Int, location: NSPoint) -> Slot? {
+    static func branchSlot(
+        in outline: NSOutlineView,
+        item: AnyObject?,
+        index: Int,
+        location: NSPoint,
+        topLevel: ClosedRange<Int>? = nil
+    ) -> Slot? {
         guard index >= 0 else { return nil }
         guard let item else {
-            let count = outline.numberOfChildren(ofItem: nil)
-            let lastBranch = (0 ..< count).last { outline.isExpandable(outline.child($0, ofItem: nil)) }
-            return Slot(item: nil, index: lastBranch.map { min(index, $0 + 1) } ?? index)
+            guard let topLevel else { return Slot(item: nil, index: index) }
+            guard index >= topLevel.lowerBound else { return nil }
+            return Slot(item: nil, index: min(index, topLevel.upperBound))
+        }
+        if let topLevel {
+            var top: AnyObject = item
+            while let parent = outline.parent(forItem: top) as AnyObject? {
+                top = parent
+            }
+            guard (topLevel.lowerBound ..< topLevel.upperBound).contains(outline.childIndex(forItem: top)) else {
+                return nil
+            }
         }
         let row = outline.row(forItem: item)
         let position = outline.childIndex(forItem: item)
@@ -441,7 +504,30 @@ enum OutlineGapDropGuard {
             next = Slot(item: parent, index: position + 1)
             nextTop = outline.rect(ofRow: lastRow(under: row, in: outline)).maxY
         }
-        return location.y - header.minY < nextTop - location.y ? before : next
+        guard location.y - header.minY < nextTop - location.y else { return next }
+        if let band = dropBand(ofRow: row, in: outline) {
+            let shifted = band.offsetBy(dx: 0, dy: header.height)
+            if location.y >= shifted.minY, location.y < shifted.maxY { return next }
+        }
+        return before
+    }
+
+    /// The vertical band of the row `row` that a drop view of the row (a
+    /// header with its own drop destination) covers, at the place of the
+    /// row with no gap. Nil when the row has no drop view.
+    private static func dropBand(ofRow row: Int, in outline: NSOutlineView) -> NSRect? {
+        guard let rowView = outline.rowView(atRow: row, makeIfNecessary: false) else { return nil }
+        func search(_ view: NSView) -> NSView? {
+            if !view.registeredDraggedTypes.isEmpty { return view }
+            for subview in view.subviews {
+                if let found = search(subview) { return found }
+            }
+            return nil
+        }
+        guard let dropView = rowView.subviews.lazy.compactMap(search).first else { return nil }
+        let frame = dropView.convert(dropView.bounds, to: outline)
+        let offset = outline.rect(ofRow: row).minY - rowView.frame.minY
+        return frame.offsetBy(dx: 0, dy: offset)
     }
 
     /// The last row of the item at `row` and of the rows under it.
