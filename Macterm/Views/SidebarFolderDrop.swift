@@ -8,7 +8,7 @@ import SwiftUI
 /// It is an AppKit view laid over the whole sidebar, not a `.dropDestination`:
 /// the List's outline view claims every drag over the sidebar, so a SwiftUI
 /// destination on the List never fires (see the notes in `SidebarContent`),
-/// and one on the rows would kill their insertion lines. AppKit picks a drag's
+/// and one on the rows would kill their drop slots. AppKit picks a drag's
 /// destination as the topmost view registered for a type on the pasteboard,
 /// without consulting `hitTest`, so this view can be transparent to every
 /// click and scroll while still taking file drags. It registers for file URLs
@@ -16,7 +16,7 @@ import SwiftUI
 /// reach the outline beneath. A drag with no folder in it is refused here
 /// rather than passed on — nothing in the sidebar took files before either.
 /// The only feedback is the cursor's "+": the project lands at the end of the
-/// list, not at a slot, so there is no insertion line to draw.
+/// list, not at a slot, so there is no drop slot to draw.
 ///
 /// The terminal's own drop (a path pasted at the cursor) is
 /// `GhosttyTerminalNSView`'s and is untouched: this view covers the sidebar

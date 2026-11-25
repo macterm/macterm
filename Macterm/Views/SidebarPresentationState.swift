@@ -41,6 +41,11 @@ final class SidebarPresentationState {
     /// tracking single-selection is what keeps the two in step.
     var selectionAnchor: SidebarItem?
 
+    /// True while `OutlineGapDropGuard` is on the outline view of this
+    /// sidebar (`SidebarDragFeedback`). The project `ForEach`s take project
+    /// drops only then.
+    var hasProjectDropSlots = false
+
     private(set) var renameTarget: SidebarRenameTarget?
     private(set) var originalCustomTitle: String?
 
