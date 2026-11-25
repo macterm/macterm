@@ -57,6 +57,19 @@ final class WindowState: Identifiable {
     /// A saved set that closed the active project therefore stays closed.
     var expandedRows: Set<UUID> = []
 
+    /// The sidebar's selection, rename draft and row order. On the window,
+    /// not on a view, because commands read the selection as their target
+    /// (`AppState.commandTarget(store:)`, design 013 §2.1). Both copies of
+    /// the sidebar (native and overlay) share it.
+    @ObservationIgnored
+    let sidebar = SidebarPresentationState()
+
+    /// The nodes that a command from the palette acts on, recorded when the
+    /// palette opens, before it takes the focus from the sidebar
+    /// (`AppState.commandTarget(store:)`). nil while the palette is closed.
+    @ObservationIgnored
+    var paletteTarget: [SidebarItem]?
+
     /// The tab this window shows for each project it has visited, keyed by
     /// project id.
     ///
@@ -104,7 +117,9 @@ final class WindowState: Identifiable {
     @ObservationIgnored
     var frame: String?
 
-    var isCommandPaletteVisible = false
+    var isCommandPaletteVisible = false {
+        didSet { if !isCommandPaletteVisible { paletteTarget = nil } }
+    }
     /// The view the palette and its breadcrumb row are drawn over while the
     /// palette is up — what Capture Palette frames
     /// (`PaletteScreenshot`). Unobserved; the palette sets it as it mounts.

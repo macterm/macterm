@@ -17,7 +17,7 @@ struct AppCommandMenuItem: View {
     var body: some View {
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
         let action = command.action(in: ctx)
-        let title = titleOverride.map { String(localized: $0) } ?? command.title
+        let title = titleOverride.map { String(localized: $0) } ?? command.title(in: ctx)
         Button(title) {
             action?()
         }

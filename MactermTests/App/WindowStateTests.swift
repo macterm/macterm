@@ -1433,11 +1433,14 @@ struct WindowStateTests {
             projectStore: ProjectStore(fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("macterm-window-tests-store-\(UUID().uuidString).json"))
         )
-        #expect(AppCommand.closeTab.action(in: ctx) != nil)
+        #expect(AppCommand.remove.action(in: ctx) != nil)
 
         state.showProjectScreen(project, in: window)
 
-        #expect(AppCommand.closeTab.action(in: ctx) == nil, "no hidden tab closes")
+        // Remove acts on the project there (design 013 §2.1), never on the
+        // tab that the screen hides.
+        #expect(!state.commandTarget(store: ctx.projectStore).contains { if case .tab = $0 { true } else { false } },
+                "no hidden tab closes")
         #expect(AppCommand.closePane.action(in: ctx) == nil)
         #expect(AppCommand.splitRight.action(in: ctx) == nil)
         #expect(AppCommand.newTab.action(in: ctx) != nil, "New Tab still works")

@@ -817,7 +817,29 @@ final class AppState {
 
     var isCommandPaletteVisible: Bool {
         get { keyOrFirstWindow?.isCommandPaletteVisible ?? false }
-        set { keyOrFirstWindow?.isCommandPaletteVisible = newValue }
+        set {
+            guard let window = keyOrFirstWindow else { return }
+            if newValue { recordPaletteTarget(in: window) }
+            window.isCommandPaletteVisible = newValue
+        }
+    }
+
+    /// The palette is about to show in `window`: record the nodes that its
+    /// commands act on before it takes the focus (`commandTarget(store:)`).
+    private func recordPaletteTarget(in window: WindowState) {
+        guard !window.isCommandPaletteVisible else { return }
+        window.paletteTarget = liveCommandTarget(in: window)
+    }
+
+    /// Replaces the read of the first responder in
+    /// `sidebarHasFocus(_:)`. Only tests set it: they have no `NSWindow`.
+    @ObservationIgnored
+    var sidebarFocusProbe: ((WindowState) -> Bool)?
+
+    /// Whether the sidebar of `window` has the focus, for the command target
+    /// (`liveCommandTarget(in:)`).
+    func sidebarHasFocus(_ window: WindowState) -> Bool {
+        sidebarFocusProbe?(window) ?? Self.sidebarOutlineHasFocus(nsWindow(for: window))
     }
 
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
@@ -830,6 +852,7 @@ final class AppState {
             window.showPaletteScope(scope)
             commandPaletteQuery = window.paletteStack.last?.scope.initialQuery ?? ""
         }
+        recordPaletteTarget(in: window)
         window.isCommandPaletteVisible = true
     }
 
@@ -2430,6 +2453,51 @@ final class AppState {
         return selected.flatMap { [$0] + store.descendants(of: $0).map(\.id) }.filter { seen.insert($0).inserted }
     }
 
+    /// Remove (design 013 §2.4): the one engine behind the Remove command,
+    /// the sidebar's bulk Remove and every single Close Tab and Remove
+    /// Project of a node. A pinned tab unloads (`closeTab`): its record
+    /// stays. A selected project goes with everything inside it, so a
+    /// project inside a selected project, and a tab of a project that goes,
+    /// are not counted or removed twice. One tab or one project gets its own
+    /// question (`requestCloseTab`, `requestRemoveProject`); a set gets one
+    /// question for all (`requestRemoveSelection`).
+    func requestRemove(_ nodes: [SidebarItem], store: ProjectStore, host: DialogHost = .mainWindow) {
+        var selected: [UUID] = []
+        var tabs: [(tabID: UUID, projectID: UUID)] = []
+        for node in nodes {
+            switch node {
+            case let .project(id):
+                // The rows of Pinned and Scratch Tabs are not projects.
+                if !Project.isSynthetic(id), store.row(id) != nil, !selected.contains(id) { selected.append(id) }
+            case let .tab(projectID, tabID):
+                tabs.append((tabID: tabID, projectID: projectID))
+            }
+        }
+        let selectedSet = Set(selected)
+        let tops = selected.filter { selectedSet.isDisjoint(with: store.ancestors(of: $0)) }
+        let removed = Set(projectsRemoved(with: tops, store: store))
+        let tabsToClose = tabs.filter { !removed.contains($0.projectID) }
+        switch (tops.count, tabsToClose.count) {
+        case (0, 0):
+            return
+        case (0, 1):
+            requestCloseTab(tabsToClose[0].tabID, projectID: tabsToClose[0].projectID)
+        case (1, 0):
+            requestRemoveProject(tops[0], store: store, host: host)
+        default:
+            requestRemoveSelection(projectIDs: tops, tabs: tabsToClose, store: store, host: host) { [weak self] in
+                guard let self else { return }
+                closeTabs(tabsToClose)
+                for id in tops {
+                    removeProject(id, store: store)
+                }
+                for window in windows {
+                    window.sidebar.selection.subtract(nodes)
+                }
+            }
+        }
+    }
+
     /// A bulk sidebar delete (multi-selection): run `removal` (the caller's
     /// close of `tabs` and removal of the `selected` projects) now, or after
     /// one question for the whole selection. A selected project goes with
@@ -2440,36 +2508,44 @@ final class AppState {
         projectIDs selected: [UUID],
         tabs: [(tabID: UUID, projectID: UUID)],
         store: ProjectStore,
+        host: DialogHost = .mainWindow,
         removal: @escaping @MainActor () -> Void
     ) {
         let removed = projectsRemoved(with: selected, store: store)
-        let tabCount = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        let tabsInProjects = removed.reduce(0) { $0 + (workspaces[$1]?.tabs.count ?? 0) }
+        // Every tab that goes, once: a selected tab of a project that goes is
+        // one of that project's tabs. A pinned tab does not go (its record
+        // stays).
+        let removedSet = Set(removed)
+        let tabCount = tabsInProjects + tabs.count(where: {
+            !removedSet.contains($0.projectID) && $0.projectID != PinnedTabs.workspaceID
+        })
         let selectedSet = Set(selected)
         let nested = removed.count(where: { !selectedSet.isDisjoint(with: store.ancestors(of: $0)) })
         judgeClose(panes(inProjects: removed, tabs: tabs), target: "selection") { [weak self] busy in
             guard let self else { return }
-            guard tabCount > 0 || nested > 0 else {
-                if busy { confirmRemoveSelection(removal: removal) } else { removal() }
+            guard tabsInProjects > 0 || nested > 0 else {
+                if busy { confirmRemoveSelection(host: host, removal: removal) } else { removal() }
                 return
             }
             let message = busy
                 ? String(localized: """
-                The selected projects contain \(tabCount) tabs and \(nested) nested projects. \
+                The selected items contain \(tabCount) tabs and \(nested) nested projects. \
                 A process is still running.
                 """)
-                : String(localized: "The selected projects contain \(tabCount) tabs and \(nested) nested projects.")
+                : String(localized: "The selected items contain \(tabCount) tabs and \(nested) nested projects.")
             present(PendingDialog(
                 kind: .removeSelection,
                 title: String(localized: "Remove the selected items?"),
                 message: message,
                 confirmTitle: String(localized: "Remove"),
-                host: .mainWindow,
+                host: host,
                 onConfirm: removal
             ))
         }
     }
 
-    private func confirmRemoveSelection(removal: @escaping @MainActor () -> Void) {
+    private func confirmRemoveSelection(host: DialogHost, removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeSelection,
             title: String(localized: "Remove items with running processes?"),
@@ -2478,7 +2554,7 @@ final class AppState {
             Removing them ends every process in their tabs.
             """),
             confirmTitle: String(localized: "Remove"),
-            host: .mainWindow,
+            host: host,
             onConfirm: removal
         ))
     }

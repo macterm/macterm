@@ -28,8 +28,7 @@ struct MainWindow: View {
     private var initialNativeSidebarVisible: Bool?
     @State
     private var initialSidebarVisibilityBeingApplied: Bool?
-    @State
-    private var sidebarPresentation = SidebarPresentationState()
+    private var sidebarPresentation: SidebarPresentationState { windowState.sidebar }
     /// The sidebar is temporarily out because the pointer is at the leading
     /// edge while the user's toggle state still says hidden. Resize peeks use
     /// `columnVisibility`; overlay peeks leave that column hidden and mount a

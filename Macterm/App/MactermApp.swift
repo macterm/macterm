@@ -151,7 +151,9 @@ struct MactermApp: App {
                 )
                 Divider()
                 AppCommandMenuItem(command: .closePane, appState: appState, projectStore: projectStore, titleOverride: "Close Pane")
-                AppCommandMenuItem(command: .closeTab, appState: appState, projectStore: projectStore, titleOverride: "Close Tab")
+                // Close Tab, or Remove Project on the project screen: its
+                // title follows the target (`AppCommand.title(in:)`).
+                AppCommandMenuItem(command: .remove, appState: appState, projectStore: projectStore)
                 AppCommandMenuItem(command: .closeWindow, appState: appState, projectStore: projectStore, titleOverride: "Close Window")
             }
             CommandGroup(replacing: .sidebar) {
@@ -221,7 +223,6 @@ struct MactermApp: App {
                     projectStore: projectStore,
                     titleOverride: "Rename Project…"
                 )
-                AppCommandMenuItem(command: .removeProject, appState: appState, projectStore: projectStore, titleOverride: "Remove Project")
                 AppCommandMenuItem(
                     command: .replaceProjectPathWithCurrentDir,
                     appState: appState,

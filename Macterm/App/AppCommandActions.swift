@@ -15,7 +15,6 @@ extension AppCommand {
     var actsOnShownTab: Bool {
         switch self {
         case .closePane,
-             .closeTab,
              .renameTab,
              .moveTabUp,
              .moveTabDown,
@@ -102,14 +101,14 @@ extension AppCommand {
                     ctx.appState.requestClosePane(pane.id, projectID: projectID)
                 }
             }
-        case .closeTab:
-            // Close the active tab — pinned or normal. `requestCloseTab` owns
-            // the busy confirmation and routes a pinned tab to the unload path
-            // (sessions end, the record stays), so one command serves both.
-            guard let projectID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab
-            else { return nil }
-            return { ctx.appState.requestCloseTab(tab.id, projectID: projectID) }
+        case .remove:
+            // The one Remove of a node (design 013 §2.4): the tab that the
+            // window shows, the project on its project screen, or the
+            // sidebar selection. `requestRemove` owns the questions, and a
+            // pinned tab unloads (its record stays).
+            let nodes = ctx.appState.commandTarget(store: ctx.projectStore)
+            guard !nodes.isEmpty else { return nil }
+            return { ctx.appState.requestRemove(nodes, store: ctx.projectStore) }
         case .nextTab:
             return { ctx.appState.selectGlobalTab(.next, projects: ctx.projectStore.projects) }
         case .previousTab:
@@ -310,11 +309,6 @@ extension AppCommand {
             return { ctx.projectStore.moveOut(current.id) }
         case .newRemoteProject:
             return { ctx.appState.isNewRemoteProjectSheetPresented = true }
-        case .removeProject:
-            guard let projectID, !Project.isSynthetic(projectID) else { return nil }
-            return {
-                ctx.appState.requestRemoveProject(projectID, store: ctx.projectStore)
-            }
         case .replaceProjectPathWithCurrentDir:
             // Remote projects (#104): OSC 7 reports a directory on the REMOTE
             // host — writing it into `Project.path` would corrupt the
@@ -489,6 +483,12 @@ extension AppCommand {
     /// left out.
     @MainActor
     func paletteSubtitle(in ctx: AppCommandContext) -> String? {
+        if self == .remove {
+            // The node that goes, so that the row says which.
+            let nodes = ctx.appState.commandTarget(store: ctx.projectStore)
+            guard nodes.count == 1, let node = nodes.first else { return nil }
+            return ctx.appState.displayName(of: node, store: ctx.projectStore)
+        }
         guard self == .applyLayout,
               let projectID = ctx.appState.activeProjectID,
               let current = ctx.projectStore.projects.first(where: { $0.id == projectID })
@@ -499,5 +499,30 @@ extension AppCommand {
         guard mine.count > 1 else { return nil }
         let ignored = mine.dropFirst().map(\.url.lastPathComponent).joined(separator: ", ")
         return String(localized: "Using \(mine[0].url.lastPathComponent) and ignoring the duplicate \(ignored)")
+    }
+
+    /// The title that the palette and the menu bar show now. Only Remove
+    /// changes: it names what it does to its target (Ethan, design 013
+    /// question 1), "Close Tab" for a tab and "Remove Project" for a
+    /// project. `title` is the name in Keymaps and Shortcuts.
+    @MainActor
+    func title(in ctx: AppCommandContext) -> String {
+        guard self == .remove else { return title }
+        return Self.removeTitle(for: ctx.appState.commandTarget(store: ctx.projectStore)) ?? title
+    }
+
+    /// The title of Remove for `nodes`, as the sidebar's bulk menu words
+    /// it, or nil for no node.
+    static func removeTitle(for nodes: [SidebarItem]) -> String? {
+        let projects = nodes.count(where: { if case .project = $0 { true } else { false } })
+        let tabs = nodes.count - projects
+        switch (projects, tabs) {
+        case (0, 0): return nil
+        case (0, 1): return String(localized: "Close Tab")
+        case (1, 0): return String(localized: "Remove Project")
+        case (0, _): return String(localized: "Close \(tabs) Tabs")
+        case (_, 0): return String(localized: "Remove \(projects) Projects")
+        default: return String(localized: "Remove \(nodes.count) Items")
+        }
     }
 }

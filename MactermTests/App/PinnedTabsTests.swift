@@ -144,10 +144,10 @@ struct PinnedTabsTests {
 
     // MARK: - Close = unload
 
-    /// One `AppCommand.closeTab` serves both kinds of tab: on the pinned
+    /// One `AppCommand.remove` serves both kinds of tab: on the pinned
     /// workspace it unloads (record kept), on a project it closes for good.
     @Test
-    func closeTab_command_unloads_pinned_and_closes_normal_tabs() throws {
+    func remove_command_unloads_pinned_and_closes_normal_tabs() throws {
         let fx = makeFixture()
         let storeTmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("macterm-tests-projstore-\(UUID().uuidString).json")
@@ -159,7 +159,7 @@ struct PinnedTabsTests {
         // Active tab is the pinned one → close unloads, keeping the record.
         // (Bound before calling: invoking the `#require` result directly
         // crashes the Swift 6.3 frontend.)
-        let closePinned = try #require(AppCommand.closeTab.action(in: ctx))
+        let closePinned = try #require(AppCommand.remove.action(in: ctx))
         closePinned()
         #expect(fx.state.pinnedWorkspace?.tabs.isEmpty == true)
         #expect(fx.state.pinnedRecords.map(\.id) == [tab.id])
@@ -168,7 +168,7 @@ struct PinnedTabsTests {
         // fresh one), close removes the tab outright.
         fx.state.activeProjectID = p.id
         _ = try #require(fx.state.createTab(projectID: p.id, projectPath: p.path))
-        let closeNormal = try #require(AppCommand.closeTab.action(in: ctx))
+        let closeNormal = try #require(AppCommand.remove.action(in: ctx))
         closeNormal()
         #expect(fx.state.workspaces[p.id]?.tabs.isEmpty == true)
     }
