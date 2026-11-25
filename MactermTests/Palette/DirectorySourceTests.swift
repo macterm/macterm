@@ -41,7 +41,7 @@ struct DirectorySourceTests {
         #expect(!PaletteQuery(raw: "apply layout").looksLikePath)
     }
 
-    // MARK: - Remote items
+    // MARK: - The folder row (`PathRow`)
 
     @Test
     func a_folder_row_has_the_folder_name_and_open_as_new_project_with_the_full_path() throws {
@@ -55,6 +55,8 @@ struct DirectorySourceTests {
         #expect(row.subtitle == "Open as new project: \(dir.path)/api", "the text of the root palette's row is the same as before")
         #expect(row.subtitleIsPath)
     }
+
+    // MARK: - Remote items
 
     @Test
     func local_directory_switches_to_existing_matching_project() throws {
