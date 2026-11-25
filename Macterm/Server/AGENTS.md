@@ -36,7 +36,7 @@ This file loads when you work in `Macterm/Server/`. The root `AGENTS.md` has the
 
 ## The model shadow (design/010 §9, step 3)
 
-`AppState` still owns the model. A Debug or tip build (`ModelShadow.isEnabled`) gives the server `MACTERM_STATE_DIR` (the App Support folder), and after each `saveWorkspaces` sends it a copy of the model in `model.replace` (`ModelShadow`, `ModelConversion`). `ModelMirror` follows the server's batches (`LocalSessions.setModelFeed`). A Debug build compares the mirror with the copy that the server took and logs a difference. Nothing reads the mirror, and a user sees nothing. A server that another build started with no state folder has no model: the shadow then sends nothing.
+`AppState` still owns the model. A Debug or tip build (`ModelShadow.isEnabled`) gives the server `MACTERM_STATE_DIR` (the App Support folder), and after each `persistState` sends it a copy of the model in `model.replace` (`ModelShadow`, `ModelConversion`). `ModelMirror` follows the server's batches (`LocalSessions.setModelFeed`). A Debug build compares the mirror with the copy that the server took and logs a difference. Nothing reads the mirror, and a user sees nothing. A server that another build started with no state folder has no model: the shadow then sends nothing.
 
 ## Local panes are v2 sessions
 

@@ -1329,7 +1329,7 @@ struct AppStateTests {
         let pane = try #require(state.workspaces[project.id]?.activeTab?.focusedPane)
         pane.receiveAttention(unseenFailure)
         #expect(pane.executionState == .done)
-        state.saveWorkspaces()
+        state.persistState()
 
         let restored = WorkspaceSerializer.restore(from: store.load().workspaces, validIDs: [project.id])
         #expect(restored.first?.tabs.first?.executionState == .idle)
@@ -2870,7 +2870,7 @@ struct AppStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         try writerQuick.split(paneID: #require(writerQuick.focusedPaneID), direction: .horizontal)
         let expectedNames = Set(writerQuick.tab.splitRoot.allPanes().map(\.sessionName))
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let fresh = QuickTerminalSplitState()
         let bornWith = fresh.tab.id
@@ -2895,7 +2895,7 @@ struct AppStateTests {
     func restoreSelection_keeps_a_quick_terminal_that_is_already_on_screen() throws {
         let (writer, writerQuick, storeURL, dir) = try makeQuickTerminalFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        writer.saveWorkspaces()
+        writer.persistState()
         let persistedID = writerQuick.tab.id
 
         let shown = QuickTerminalSplitState()
@@ -2957,7 +2957,7 @@ struct AppStateTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         try writerQuick.split(paneID: #require(writerQuick.focusedPaneID), direction: .horizontal)
         let quickNames = Set(writerQuick.tab.splitRoot.allPanes().map(\.sessionName))
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let ended = KilledSessions()
         var sessionClient = SessionClient.noop
@@ -3010,7 +3010,7 @@ struct AppStateTests {
     func a_v1_session_that_did_not_end_leaves_the_flag_unset() async throws {
         let (writer, _, storeURL, dir) = try makeQuickTerminalFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let calls = LockedBox(0)
         var sessionClient = SessionClient.noop

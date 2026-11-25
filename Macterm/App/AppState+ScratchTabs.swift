@@ -3,79 +3,76 @@ import os
 
 private let logger = Logger(subsystem: appBundleID, category: "ScratchTabs")
 
-/// Scratch tabs (#665): a workspace below the projects, keyed by the fixed
-/// `ScratchTabs.workspaceID` sentinel. It holds ordinary tabs that belong to no
-/// project.
+/// Scratch tabs (#665): the hidden project with the alias `scratch`
+/// (design/010 §11), below the projects. It holds ordinary tabs that belong
+/// to no project.
 ///
 /// The rules, in one place:
-/// - The workspace is a plain `Workspace`. Selection, per-window tab
-///   selection, mirrors, moves, merges and reorders all take the generic
-///   path. `ensureWorkspace` is the one place that treats it specially: it
-///   starts EMPTY, because the path-taking init would spawn a tab that
-///   nobody asked for.
-/// - Closing a scratch tab is a close, not an unload. Nothing declares a scratch
-///   tab outside the workspace snapshot, and a dead one leaves no row.
-/// - The snapshot restores it like a project workspace
-///   (`WorkspaceSerializer.restore` counts the sentinel as valid), so its
-///   sessions are claims for the orphan sweep from the first launch on.
-/// - A move into the workspace is a plain `moveTab` with the home directory
-///   as `destPath`. A move out of it, to a project or to the pinned
-///   workspace, is the same move or a pin.
+/// - It is a project of the model. Selection, per-window tab selection,
+///   mirrors, moves, merges and reorders all take the generic path. The app
+///   makes it EMPTY at the first need: a tab there is one that someone asked
+///   for.
+/// - Closing a scratch tab is a close, not an unload. Nothing declares a
+///   scratch tab outside the model, and a dead one leaves no row.
+/// - A move into it is a plain `moveTab`. A move out of it, to a project or
+///   to the pinned project, is the same move or a pin.
 extension AppState {
     // MARK: - Queries
 
-    var scratchWorkspace: Workspace? { workspaces[ScratchTabs.workspaceID] }
+    /// The scratch project, found by its alias. Nil until the first scratch
+    /// tab.
+    var scratchProjectID: UUID? { model.project(alias: ScratchTabs.alias)?.id }
 
     /// Whether the sidebar has scratch rows to draw.
-    var hasScratchTabs: Bool { !(scratchWorkspace?.tabs.isEmpty ?? true) }
+    var hasScratchTabs: Bool { scratchProjectID.map { !model.tabs(of: $0).isEmpty } ?? false }
 
-    func ensureScratchWorkspace() {
-        if workspaces[ScratchTabs.workspaceID] == nil {
-            workspaces[ScratchTabs.workspaceID] = Workspace(
-                id: ScratchTabs.workspaceID, tabs: [], activeTabID: nil
-            )
-        }
+    /// The scratch project, made at the first need.
+    @discardableResult
+    func ensureScratchProject() -> UUID? {
+        if let id = scratchProjectID { return id }
+        let project = ScratchTabs.newProject()
+        guard writer.projectCreate(project) else { return nil }
+        return project.id
     }
 
     // MARK: - Selection
 
-    /// Select the scratch workspace itself (the sidebar's Scratch Tabs header),
-    /// in `window`, or app-wide when none is given. The generic project
-    /// selection serves: `ensureWorkspace` knows the sentinel, and the sweep
-    /// and the remote reconnect have nothing to do for a local workspace.
+    /// Select the scratch project itself (the sidebar's Scratch Tabs header),
+    /// in `window`, or app-wide when none is given.
     func selectScratchTabs(in window: WindowState? = nil) {
-        selectProject(ScratchTabs.project, in: window)
-        // The workspace can be restored with no selection (every tab was
+        guard let id = ensureScratchProject(), let project = model.project(id) else { return }
+        selectProject(project, in: window)
+        // The project can be restored with no selection (every tab was
         // closed, then a tab was created from the CLI with `--no-focus`);
         // a nil active tab renders a blank detail view.
-        if let ws = scratchWorkspace, ws.activeTabID == nil {
-            ModelWriter.tabPeek(ws.tabs.first?.id, in: ws)
+        if model.activeTabID(of: id) == nil, let first = model.tabs(of: id).first {
+            writer.tabPeek(first.id, in: id)
         }
     }
 
-    /// Select a scratch tab from a keyboard cycle or the CLI: the workspace
+    /// Select a scratch tab from a keyboard cycle or the CLI: the project
     /// first, then the tab.
     func selectScratchTab(_ tabID: UUID) {
-        guard let ws = scratchWorkspace, ws.tabs.contains(where: { $0.id == tabID }) else { return }
-        activeProjectID = ScratchTabs.workspaceID
-        ModelWriter.tabSelect(tabID, in: ws)
+        guard let id = scratchProjectID, model.tabs(of: id).contains(where: { $0.id == tabID }) else { return }
+        activeProjectID = id
+        writer.tabSelect(tabID, in: id)
         warmFocusedProject()
-        saveWorkspaces()
+        persistState()
     }
 
     // MARK: - Creation and moves
 
     /// A new scratch tab: a shell in home, or in the focused scratch pane's
     /// directory under `tab-inherit-working-directory`. With `focus` the
-    /// workspace becomes the active one first, so the key window follows
-    /// the new tab as it does for Cmd+T in a project.
+    /// project becomes the active one first, so the key window follows the
+    /// new tab as it does for Cmd+T in a project.
     @discardableResult
     func createScratchTab(command: PaneStartCommand? = nil, env: [String: String]? = nil, focus: Bool = true) -> UUID? {
-        ensureScratchWorkspace()
-        if focus, activeProjectID != ScratchTabs.workspaceID {
-            activeProjectID = ScratchTabs.workspaceID
+        guard let scratch = ensureScratchProject() else { return nil }
+        if focus, activeProjectID != scratch {
+            activeProjectID = scratch
         }
-        let id = createTab(projectID: ScratchTabs.workspaceID, projects: [], command: command, env: env, focus: focus)
+        let id = createTab(projectID: scratch, projects: [], command: command, env: env, focus: focus)
         logger.info("createScratchTab: \(id?.uuidString ?? "nil", privacy: .public)")
         return id
     }
@@ -84,7 +81,7 @@ extension AppState {
     /// its own working directory. `toIndex` is the slot among the scratch
     /// rows; nil appends.
     func moveTabToScratchTabs(_ tabID: UUID, from sourceProjectID: UUID, toIndex: Int? = nil) {
-        guard sourceProjectID != ScratchTabs.workspaceID else { return }
-        moveTab(tabID, from: sourceProjectID, to: ScratchTabs.workspaceID, destPath: ScratchTabs.fallbackRoot, toIndex: toIndex)
+        guard let scratch = ensureScratchProject(), sourceProjectID != scratch else { return }
+        moveTab(tabID, from: sourceProjectID, to: scratch, toIndex: toIndex)
     }
 }

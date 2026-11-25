@@ -54,28 +54,28 @@ struct DesktopWidgetSpan: Codable, Equatable, Hashable, CustomStringConvertible 
     var description: String { "\(columns)x\(rows)" }
 }
 
-/// One terminal on the desktop: a single pane whose zmx session outlives a
-/// quit exactly like a pinned tab's, placed where the user left it.
+/// One terminal on the desktop: a single pane whose session outlives a quit
+/// exactly like a pinned tab's, placed where the user left it.
 ///
 /// A widget is one pane by design — the widget is the unit the user places
 /// and sizes, so there is nothing a split inside it would add that a second
-/// widget doesn't. The pane still lives in a `TerminalTab` because that is
-/// what the snapshot, the split-tree views and every pane-walking helper
-/// already speak.
+/// widget doesn't. Its tab is the one tab of a hidden project of the model
+/// whose id is the widget's id (design/010 §11): `sidebar: none` and
+/// `single_tab`. The geometry, the placements and the recipe are GUI data
+/// (`gui-state.json`, `widgets.yaml`), keyed by the same id.
 ///
 /// Whether a widget is being edited is not the widget's to hold: at most one
 /// is at a time, and none after a launch, so it is `AppState`'s
 /// (`editingDesktopWidgetID`) and never persisted.
 @MainActor @Observable
 final class DesktopWidget: Identifiable {
-    /// The routing id of every widget's panes — the counterpart of
-    /// `QuickTerminalService.projectID`, and fresh per launch for the same
-    /// reason: widgets are restored by the caller that knows they are
-    /// widgets, so nothing may key on a persisted value.
-    static let projectID = UUID()
-
+    /// The id of the widget, and of its project.
     let id: UUID
-    private(set) var tab: TerminalTab
+    /// The model that holds the widget's project. Set by `AppState`.
+    @ObservationIgnored
+    weak var model: ModelMirror?
+    /// The widget's one tab. Nil before its project has one.
+    var tab: TerminalTab? { model?.tabs(of: id).first }
     /// Optional label (Settings, `widget list`, `widgets.yaml`'s matching).
     var name: String?
     var span: DesktopWidgetSpan
@@ -100,7 +100,7 @@ final class DesktopWidget: Identifiable {
 
     init(
         id: UUID = UUID(),
-        tab: TerminalTab? = nil,
+        model: ModelMirror? = nil,
         name: String? = nil,
         span: DesktopWidgetSpan,
         topLeft: CGPoint,
@@ -115,12 +115,25 @@ final class DesktopWidget: Identifiable {
         self.command = command
         self.cwd = cwd
         self.placements = placements
-        self.tab = tab ?? Self.freshTab(command: command, cwd: cwd)
+        self.model = model
     }
 
     /// The widget's one pane.
     var pane: Pane? {
-        tab.splitRoot.allPanes().first
+        tab?.splitRoot.allPanes().first
+    }
+
+    /// The request of a widget's project (design/010 §11, §2).
+    static func newProject(id: String) -> MactermProtocol.Project {
+        .init(id: id, name: "Widget", path: "", sidebar: .none, singleTab: true)
+    }
+
+    /// The widget's project as the app makes it: the widget's id.
+    var newProject: Project {
+        var project = Project(id: id, name: name ?? "Widget", path: "")
+        project.sidebar = .none
+        project.singleTab = true
+        return project
     }
 
     /// The widget's frame in AppKit's bottom-left-origin screen space.
@@ -128,14 +141,10 @@ final class DesktopWidget: Identifiable {
         DesktopWidgetGrid.frame(topLeft: topLeft, span: span)
     }
 
-    /// Replace the pane with a fresh shell in a new session — what happens
-    /// when the widget's shell exits. The caller has already disposed of the
-    /// old pane (its surface and session).
-    func startOver() {
-        tab = Self.freshTab(command: command, cwd: cwd)
-    }
-
-    private static func freshTab(command: String?, cwd: String?) -> TerminalTab {
+    /// A new pane for the widget: a shell in a new session that runs the
+    /// recipe — at creation, when its shell exits, and when its session is
+    /// gone at a launch.
+    func freshPane() -> Pane {
         // A declared directory that no longer exists (a hand-edit, a deleted
         // checkout) starts the shell at home rather than failing its `cd`.
         var isDirectory: ObjCBool = false
@@ -143,11 +152,11 @@ final class DesktopWidget: Identifiable {
         let directory = declared.flatMap {
             FileManager.default.fileExists(atPath: $0, isDirectory: &isDirectory) && isDirectory.boolValue ? $0 : nil
         } ?? NSHomeDirectory()
-        return TerminalTab(
+        return Pane(
             projectPath: directory,
-            projectID: projectID,
+            projectID: id,
             sessionSlug: ZmxSessionName.desktopWidgetSlug,
-            command: command.map(PaneStartCommand.typed)
+            start: command.map(PaneStartCommand.typed)
         )
     }
 }

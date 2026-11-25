@@ -90,6 +90,6 @@ extension AppState {
         for pane in replacements.values {
             warmIfUnrendered(pane, in: tab)
         }
-        saveWorkspaces()
+        persistState()
     }
 }

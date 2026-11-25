@@ -298,7 +298,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         let loaded = WorkspaceStore(fileURL: fx.storeURL).load()
         #expect(loaded.pinned.count == 1)
@@ -316,7 +316,7 @@ struct PinnedTabsTests {
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         let originalSession = try #require(tab.splitRoot.allPanes().first?.sessionName)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         // Second launch: a fresh state restoring the same file, with a zmx
         // whose listing says nothing survived. Pinned tabs are EAGER: the
@@ -372,7 +372,7 @@ struct PinnedTabsTests {
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         let sessionName = try #require(tab.splitRoot.allPanes().first?.sessionName)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         let state2 = AppState(
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
@@ -399,7 +399,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         let state2 = AppState(
             workspaceStore: WorkspaceStore(fileURL: fx.storeURL),
@@ -530,7 +530,7 @@ struct PinnedTabsTests {
         fx.state.pinTab(first.id, fromProject: p.id)
         fx.state.pinTab(second.id, fromProject: p.id)
         fx.state.selectPinnedTab(second.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         let loaded = WorkspaceStore(fileURL: fx.storeURL).load()
         #expect(loaded.pinnedActiveTabID == second.id)
@@ -747,7 +747,7 @@ struct PinnedTabsTests {
         let p = seedProject(fx.state)
         let tab = try #require(fx.state.workspaces[p.id]?.activeTab)
         fx.state.pinTab(tab.id, fromProject: p.id)
-        fx.state.saveWorkspaces()
+        fx.state.persistState()
 
         // Next launch: the user deleted the entry while the app was closed.
         let state2 = AppState(

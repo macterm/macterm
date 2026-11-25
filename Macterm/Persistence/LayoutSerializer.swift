@@ -1,18 +1,18 @@
 import Foundation
 
-/// Serializes a live workspace back into a declarative `LayoutFile` — the
+/// Serializes the live tabs of a project back into a declarative `LayoutFile` — the
 /// `save` direction, inverse of `LayoutBuilder`. Mirrors
 /// `WorkspaceSerializer.snapshotNode`: walks the live split tree and emits
 /// `LayoutNode`s, recording each pane's cwd (project-relative) and declared
 /// `run` command.
 @MainActor
 enum LayoutSerializer {
-    /// Build a `LayoutFile` from a workspace's tabs. `liveCommand` returns a
+    /// Build a `LayoutFile` from a project's tabs. `liveCommand` returns a
     /// pane's current foreground command (saved as its `run`); `liveShell`
     /// returns the pane's foreground shell when it's sitting in one (saved as
     /// `shell:`). Both default to `ProcessInspector`, injected by tests.
     static func layout(
-        for workspace: Workspace,
+        tabs: [TerminalTab],
         projectName: String,
         projectRoot: String,
         liveCommand: (Pane) -> String? = { ProcessInspector.runningCommand(forPane: $0) },
@@ -20,7 +20,7 @@ enum LayoutSerializer {
     ) -> LayoutFile {
         LayoutFile(
             name: projectName,
-            tabs: workspace.tabs.map { tab in
+            tabs: tabs.map { tab in
                 LayoutTab(
                     name: tab.customTitle,
                     layout: node(

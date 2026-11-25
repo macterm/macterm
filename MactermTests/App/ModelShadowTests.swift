@@ -40,7 +40,7 @@ struct ModelShadowTests {
             state.modelShadow = shadow
             await shadow.start()
             await sessions.prepare()
-            state.saveWorkspaces()
+            state.persistState()
             let first = try await agreement(shadow, after: nil)
 
             // Every project, the group and the one with no workspace too,
@@ -75,14 +75,14 @@ struct ModelShadowTests {
 
             // A change after the first save comes back as events.
             state.closeTab(tabs[0].id, projectID: a.id)
-            state.saveWorkspaces()
+            state.persistState()
             let second = try await agreement(shadow, after: first)
             #expect(second.projects.first { $0.id == a.id.uuidString }?.tabs.map(\.id) == tabs.dropFirst().map(\.id.uuidString))
             #expect(shadow.mirror.seq > 0)
 
             // The pinned row is a hidden project that a window can select.
             state.activeProjectID = PinnedTabs.workspaceID
-            state.saveWorkspaces()
+            state.persistState()
             let third = try await agreement(shadow, after: second)
             #expect(third.selection.activeProject == PinnedTabs.workspaceID.uuidString)
         }

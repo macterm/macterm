@@ -62,7 +62,7 @@ enum LayoutReconciler {
     /// have no live surface to inspect.
     static func plan(
         layout file: LayoutFile,
-        workspace: Workspace?,
+        tabs liveTabs: [TerminalTab],
         projectRoot: String,
         projectID: UUID,
         liveCommand: @escaping (Pane) -> String? = { ProcessInspector.runningCommand(forPane: $0) },
@@ -78,7 +78,6 @@ enum LayoutReconciler {
             )
         }
     ) -> Plan {
-        let liveTabs = workspace?.tabs ?? []
         var consumedTabIDs = Set<UUID>()
         var reusedPaneIDs = Set<UUID>()
         var plannedTabs: [PlannedTab] = []

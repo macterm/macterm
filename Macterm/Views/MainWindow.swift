@@ -1189,7 +1189,7 @@ struct WorkspaceView: View {
             renderedTabID: tab.id,
             onMovePane: { paneID, target in
                 if ModelWriter.paneMove(tab, paneID: paneID, to: target) {
-                    appState.saveWorkspaces()
+                    appState.persistState()
                 }
             },
             onMergeTab: { movable, target in

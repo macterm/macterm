@@ -837,7 +837,7 @@ final class ControlHandler {
         let (index, tab) = try resolveTab(args, in: workspace)
 
         ModelWriter.tabSet(tab, title: newTitle)
-        appState.saveWorkspaces()
+        appState.persistState()
 
         return ControlData(tabs: [tabInfo(tab, index: index, in: workspace)])
     }
@@ -1058,7 +1058,7 @@ final class ControlHandler {
         let (_, workspace) = try resolveWorkspace(args)
         let target = try resolvePane(args, in: workspace)
         ModelWriter.paneZoom(target.tab, toggling: target.pane.id)
-        appState.saveWorkspaces()
+        appState.persistState()
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1093,7 +1093,7 @@ final class ControlHandler {
                 action: "the pane must be inside a split on that axis"
             )
         }
-        appState.saveWorkspaces()
+        appState.persistState()
         return ControlData(panes: [paneInfo(target.pane, in: target.tab, workspace: workspace)])
     }
 
@@ -1307,7 +1307,7 @@ final class ControlHandler {
                 message: "move failed: the target is the pane itself, or the pane is the only pane of the tab"
             )
         }
-        appState.saveWorkspaces()
+        appState.persistState()
         return ControlData(panes: [paneInfo(source.pane, in: source.tab, workspace: workspace)])
     }
 

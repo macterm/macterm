@@ -224,7 +224,7 @@ struct WindowStateTests {
         state.registerWindow(b)
         state.noteKeyWindow(b)
 
-        state.saveWorkspaces()
+        state.persistState()
 
         let saved = store.load().windows
         #expect(saved.map(\.isKey) == [false, true])
@@ -564,7 +564,7 @@ struct WindowStateTests {
         writer.registerWindow(w1)
         writer.registerWindow(w2)
         writer.noteKeyWindow(w2)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.restoreSelection(projects: [p, q])
@@ -605,7 +605,7 @@ struct WindowStateTests {
         writer.projectMemoryPanelVisible.toggle()
         #expect(w1.projectMemoryPanelVisible)
         #expect(!w2.projectMemoryPanelVisible, "the toggle acts on the key window only")
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files, legacyPanelVisible: { true })
         reader.restoreSelection(projects: [p, q])
@@ -643,7 +643,7 @@ struct WindowStateTests {
         writer.registerWindow(w1)
         writer.registerWindow(w2)
         writer.noteKeyWindow(w1)
-        writer.saveWorkspaces()
+        writer.persistState()
         // The file as the app-wide builds wrote it.
         var file = try JSONSerialization.jsonObject(with: Data(contentsOf: tmp)) as? [String: Any] ?? [:]
         var windows = file["windows"] as? [[String: Any]] ?? []
@@ -705,7 +705,7 @@ struct WindowStateTests {
         w2.frame = secondFrame
         writer.registerWindow(w1)
         writer.registerWindow(w2)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.restoreSelection(projects: [p])
@@ -747,7 +747,7 @@ struct WindowStateTests {
         let w2 = WindowState(activeProjectID: q.id, sidebarWidth: 280)
         writer.registerWindow(w1)
         writer.registerWindow(w2)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.restoreSelection(projects: [p, q])
@@ -783,7 +783,7 @@ struct WindowStateTests {
         writer.restoreSelection(projects: [p])
         writer.selectProject(p)
         writer.registerWindow(WindowState(activeProjectID: p.id))
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.restoreSelection(projects: [p])
@@ -845,7 +845,7 @@ struct WindowStateTests {
         w2.expandedRows = [q.id, p.id]
         writer.registerWindow(w1)
         writer.registerWindow(w2)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.restoreSelection(projects: [p, q, r])
@@ -1302,7 +1302,7 @@ struct WindowStateTests {
         let w = WindowState(activeProjectID: PinnedTabs.workspaceID)
         writer.registerWindow(w)
         writer.noteKeyWindow(w)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.sessionClient = .noop
@@ -1566,7 +1566,7 @@ struct WindowStateTests {
         let (project, ws, window) = try keyWindowOnTwoTabs(writer)
         let behind = ws.tabs[1].id
         writer.showProjectScreen(project, in: window)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: files)
         reader.incubatePane = { _ in }

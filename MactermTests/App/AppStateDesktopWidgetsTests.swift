@@ -944,7 +944,7 @@ extension AppStateDesktopWidgetsTests {
             return object?["version"] as? Int ?? -1
         }
         state.restoreSelection(projects: [])
-        state.saveWorkspaces()
+        state.persistState()
         #expect(try version() == 6)
         let widget = state.createDesktopWidget()
         #expect(try version() == 7)

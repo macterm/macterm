@@ -243,7 +243,7 @@ struct ScratchTabsTests {
         let writer = makeState(storeURL: storeURL)
         let id = try #require(writer.createScratchTab())
         let session = try #require(writer.scratchWorkspace?.tabs.first?.splitRoot.allPanes().first?.sessionName)
-        writer.saveWorkspaces()
+        writer.persistState()
 
         let reader = makeState(storeURL: storeURL)
         reader.restoreSelection(projects: [])
@@ -265,7 +265,7 @@ struct ScratchTabsTests {
 
         let writer = makeState(storeURL: storeURL)
         let id = try #require(writer.createScratchTab())
-        writer.saveWorkspaces()
+        writer.persistState()
         Preferences.shared.activeProjectID = scratchID
 
         let reader = makeState(storeURL: storeURL)
@@ -275,7 +275,7 @@ struct ScratchTabsTests {
 
         // Every scratch tab closed, then quit: the next launch selects nothing.
         writer.closeTab(id, projectID: scratchID)
-        writer.saveWorkspaces()
+        writer.persistState()
         Preferences.shared.activeProjectID = scratchID
         let empty = makeState(storeURL: storeURL)
         empty.restoreSelection(projects: [])

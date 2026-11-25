@@ -63,7 +63,7 @@ extension AppState {
         // `pinned.yaml`. The project tab is the one on screen; the pinned row
         // sits above it with its tutorial already printed.
         selectProject(project)
-        saveWorkspaces()
+        persistState()
         Task { await materializeRestoredPinnedTabs() }
         return true
     }
