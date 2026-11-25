@@ -209,6 +209,41 @@ enum HostCommands {
         command(hexFolder + " " + folderCheckScript, [Scripts.hex(directory)])
     }
 
+    /// The most folder names that one listing gives (`folderListScript`).
+    /// Large, because the field filters the names by the typed prefix
+    /// after they come: a small cap would hide a folder in a big folder.
+    static let folderListCap = 5000
+
+    /// The folders in a folder on the host, for the path completion of a
+    /// remote folder field (0614). The first line is the folder's path
+    /// from `/` (`pwd`, so a `~` is resolved), and each next line is the
+    /// name of one folder in it, hidden folders too, at most
+    /// `folderListCap`. A link to a folder counts as a folder (`ls -L`), as
+    /// in a local listing. Exit 3: a shell cannot `cd` to the folder.
+    /// POSIX only (`ls -1pAL`, `sed`, `head`), so a BusyBox or a macOS host
+    /// gives the same answer.
+    static let folderListScript = expandTilde
+        + " cd -- \"$d\" 2>/dev/null || exit 3; pwd; ls -1pAL 2>/dev/null | sed -n \"s|/\\$||p\" | head -n \(folderListCap)"
+
+    /// The ssh command of `folderListScript`. The folder goes as hex, one
+    /// plain word, as for the folder check, so no shell parses it. nil for
+    /// a folder too long for one argument.
+    static func folderListCommand(directory: String) -> String? {
+        command(hexFolder + " " + folderListScript, [Scripts.hex(directory)])
+    }
+
+    /// The answer of `folderListScript`: the folder's path from `/` and the
+    /// names of the folders in it. nil when the script did not end with 0
+    /// or gave no path.
+    static func folderList(status: Int32?, output: String) -> (path: String, names: [String])? {
+        guard status == 0 else { return nil }
+        var lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.last?.isEmpty == true { lines.removeLast() }
+        guard let path = lines.first, path.hasPrefix("/") else { return nil }
+        let names = lines.dropFirst().filter { !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("/") }
+        return (path, Array(names.prefix(folderListCap)))
+    }
+
     /// Makes `$d` the folder that `$1` gives as hex (`Scripts.hex`). The
     /// same text is in `server/host/plain.sh`.
     static let hexFolder = oneLine(#"""
