@@ -486,7 +486,8 @@ final class GhosttyApp {
     }
 
     /// Keys read only here. Keys a Macterm type interprets live on that
-    /// type (`MacosHidden.key`, `ShortcutsAccess.key`, `WindowTheme.key`).
+    /// type (`MacosHidden.key`, `ShortcutsAccess.key`, `WindowTheme.key`,
+    /// `ConfirmCloseSurface.key`).
     private enum Keys {
         static let background = GhosttyConfigKey.color("background")
         static let foreground = GhosttyConfigKey.color("foreground")
@@ -587,6 +588,13 @@ final class GhosttyApp {
     /// each pointer move, so a config reload takes effect at once.
     var focusFollowsMouse: Bool {
         read(Keys.focusFollowsMouse) ?? false
+    }
+
+    /// `confirm-close-surface`: when a close or a quit asks first
+    /// (`ConfirmCloseSurface`). Read live by every close guard, so a config
+    /// reload takes effect at the next close.
+    var confirmCloseSurface: ConfirmCloseSurface {
+        ConfirmCloseSurface.resolve(configValue: read(ConfirmCloseSurface.key))
     }
 
     /// The app's config, and the same config with the disabled cursor last

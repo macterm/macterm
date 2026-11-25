@@ -382,7 +382,7 @@ struct MactermIntentsTests {
         // without `--force`.
         //
         // It is asserted here rather than through `perform()` because
-        // `needsConfirmClose` short-circuits on `hasSurface`: a pane in a
+        // `needsConfirmClose` short-circuits on a missing surface: a pane in a
         // windowless test never builds a surface and so always reads idle,
         // which is why the close test above closes instead of refusing.
         let busy = ForegroundSample(
@@ -394,15 +394,15 @@ struct MactermIntentsTests {
             sample: busy,
             executionState: .running,
             isRemote: false,
-            hasSurface: true,
-            surfaceBusy: true
+            confirmClose: .true,
+            surfaceBusy: { true }
         ))
         #expect(!ForegroundPolicy.needsConfirmClose(
             sample: busy,
             executionState: .running,
             isRemote: false,
-            hasSurface: false,
-            surfaceBusy: true
+            confirmClose: .true,
+            surfaceBusy: nil
         ))
     }
 
