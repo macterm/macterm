@@ -1466,16 +1466,17 @@ final class ControlHandler {
             return try projectTabs(holding: session)
         }
         let project = try resolveProject(args.project)
+        // A project of the tree with no folder (a row of a dev build's group)
+        // holds no tabs, as v1 said.
+        if project.isTreeProject, !project.hasFolder {
+            throw ControlError(code: .notFound, message: "project \"\(project.name)\" has no tabs")
+        }
         return (project, tabs(of: project))
     }
 
     /// The tabs of a project, as the selectors read them.
     private func tabs(of project: Project) -> ProjectTabs {
-        ProjectTabs(
-            id: project.id,
-            tabs: appState.model.tabs(of: project.id),
-            activeTabID: appState.model.activeTabID(of: project.id)
-        )
+        ProjectTabs(id: project.id, model: appState.model)
     }
 
     /// The project that has a pane on `session`. The active project is
@@ -1819,13 +1820,16 @@ extension ControlHandler {
     #endif
 }
 
-/// The tabs of one project, as the selectors of the CLI read them: a value
-/// view of the mirror (`ModelMirror`), never a store.
+/// The tabs of one project, as the selectors of the CLI read them: a live
+/// view of the mirror (`ModelMirror`), never a store or a copy. A verb that
+/// changes the model and then reports reads the change.
 @MainActor
 private struct ProjectTabs {
     let id: UUID
-    let tabs: [TerminalTab]
-    let activeTabID: UUID?
+    let model: ModelMirror
+
+    var tabs: [TerminalTab] { model.tabs(of: id) }
+    var activeTabID: UUID? { model.activeTabID(of: id) }
 
     var activeTab: TerminalTab? {
         guard let activeTabID else { return nil }
