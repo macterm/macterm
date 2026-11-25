@@ -210,10 +210,11 @@ struct SidebarDragFeedbackTests {
     }
 
     /// A held drag opens a closed project while the gap is open (the
-    /// spring-open of a project header). SwiftUI then changes the rows in
-    /// the middle of the drag. Without the row-update part of
-    /// `OutlineGapDropGuard`, AppKit raises "Setting the gap row (index -1)
-    /// while updating" and the test process stops.
+    /// spring-open of a project header), and closes it again. SwiftUI then
+    /// adds and removes rows in the middle of the drag, and the drop changes
+    /// rows too. Without the row-update part of `OutlineGapDropGuard`, AppKit
+    /// raises "Setting the gap row (index -1) while updating" and the test
+    /// process stops.
     @Test
     func a_project_that_opens_during_a_drag_keeps_the_gap_and_the_drop() async throws {
         let drops = DropLog()
@@ -264,18 +265,33 @@ struct SidebarDragFeedbackTests {
         // On the line between B.x and B.y: the gap opens after B.x.
         let drag = FakeDrag(location: point(row: 4, fraction: 0.9), pasteboard: pasteboard, window: window)
         #expect(!outline.draggingEntered(drag).isEmpty)
-        // B.x opens under the held drag.
+        // B.x opens under the held drag: rows are added.
         expansion.open.insert("B.x")
-        let opened = await poll { outline.numberOfRows == 8 ? true : nil }
-        #expect(opened == true)
+        #expect(await poll { outline.numberOfRows == 8 ? true : nil } == true)
         // The next drag update opens the gap again, after B.x and its tab.
+        // A pointer that does not move keeps it there.
         drag.location = point(row: 5, fraction: 0.9)
         #expect(!outline.draggingUpdated(drag).isEmpty)
+        #expect(!outline.draggingUpdated(drag).isEmpty)
+        // B.x closes under the held drag: rows are removed. The pointer is
+        // held still, and the guard opens the gap again after the update.
+        drag.location = point(row: 4, fraction: 0.9)
+        expansion.open.remove("B.x")
+        #expect(await poll { outline.numberOfRows == 7 ? true : nil } == true)
+        #expect(await poll { outline.draggingUpdated(drag).isEmpty ? nil : true } == true)
+        // The drop changes rows at once: B.x opens again.
+        drops.afterDrop = { expansion.open.insert("B.x") }
         #expect(outline.prepareForDragOperation(drag))
         #expect(outline.performDragOperation(drag))
         outline.concludeDragOperation(drag)
         let log = await poll { drops.entries.isEmpty ? nil : drops.entries }
         #expect(log == ["into B 1"])
+        #expect(await poll { outline.numberOfRows == 8 ? true : nil } == true)
+        // After the drop, a row update does not run the drag again.
+        let reads = drag.locationReads
+        expansion.open.remove("B")
+        #expect(await poll { outline.numberOfRows == 3 ? true : nil } == true)
+        #expect(drag.locationReads == reads)
     }
 
     private func sidebarList() -> some View {
@@ -338,6 +354,7 @@ private struct ProbeProjectRow: View {
                 ForEach(node.children) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
                     .dropDestination(for: MovableProject.self) { _, offset in
                         drops.entries.append("into \(node.name) \(offset)")
+                        drops.afterDrop?()
                     }
             }
         } label: {
@@ -362,6 +379,8 @@ private final class GuardFlag {
 @MainActor
 private final class DropLog {
     var entries: [String] = []
+    /// Runs in the drop handler, after the entry.
+    var afterDrop: (() -> Void)?
 }
 
 /// A drag that the test moves by hand. AppKit reads only the location, the
@@ -379,7 +398,14 @@ private final class FakeDrag: NSObject, NSDraggingInfo {
 
     var draggingDestinationWindow: NSWindow? { window }
     var draggingSourceOperationMask: NSDragOperation { [.move, .copy, .generic] }
-    var draggingLocation: NSPoint { location }
+    /// The number of reads of `draggingLocation`: AppKit reads it at each
+    /// drag update.
+    private(set) var locationReads = 0
+    var draggingLocation: NSPoint {
+        locationReads += 1
+        return location
+    }
+
     var draggedImageLocation: NSPoint { location }
     var draggedImage: NSImage? { nil }
     var draggingPasteboard: NSPasteboard { pasteboard }

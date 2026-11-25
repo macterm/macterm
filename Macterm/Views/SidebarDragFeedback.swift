@@ -168,10 +168,10 @@ struct SidebarDragFeedback: NSViewRepresentable {
 /// view in the gap style. Never set `.gap` on a SwiftUI outline view without
 /// it.
 ///
-/// It replaces the `validateDrop` method of the data source class. Calls
-/// for an outline view in another style go to SwiftUI with no change. Other
-/// Lists keep the default style, so the guard does not touch their drags. On
-/// an outline view in the gap style, the guard does two things:
+/// It replaces methods of the data source class and of the outline view
+/// class, which other Lists share. Each replacement checks the style first:
+/// for an outline view in another style, it calls the original with no
+/// change. On an outline view in the gap style, the guard does three things:
 ///
 /// 1. **The exit.** `NSOutlineView.draggingExited` validates one more drop
 ///    to close the gap. That call has no item and the child index -2.
@@ -188,24 +188,31 @@ struct SidebarDragFeedback: NSViewRepresentable {
 ///    slot. The guard never proposes a slot in an item with no children or in
 ///    a closed item, because SwiftUI crashes on those.
 ///
-/// It also replaces `beginUpdates` of the outline view class. When SwiftUI
-/// changes the rows during a drag (a closed project opens under a held
-/// drag), AppKit moves the open gap inside the row update and raises
-/// "Setting the gap row (index -1) while updating". The guard closes the gap
-/// first: it runs the drag update one more time, and validation answers "no
-/// drop". The next drag update opens the gap again.
+/// 3. **A row update during a drag.** When SwiftUI changes the rows while the
+///    gap is open (a closed project opens under a held drag), AppKit moves
+///    the gap inside the row update. It then raises "Setting the gap row
+///    (index -1) while updating", and the app stops. The guard replaces
+///    `beginUpdates` and closes the gap before the update: it sends the drag
+///    an exit, which always closes the gap. (A repeated drag update does not:
+///    AppKit skips validation when the pointer did not move.) On the next
+///    turn of the run loop, after the update, it sends the drag an entry
+///    again, so the gap opens at the new slot. To do this, the guard keeps a
+///    weak reference to the drag while the gap is open. It forgets the drag
+///    when validation answers "no drop", when the drag exits, and at the
+///    drop (`prepareForDragOperation:` and `concludeDragOperation:`).
 ///
 /// `SidebarDragFeedbackTests` drives a fake drag on a hosted List. Without
 /// the guard, the exit crashes, a project that opens during a drag crashes,
-/// and a project drag drops at the wrong slots.
+/// and a project drag drops at the wrong slots. A crash stops the whole test
+/// process, not only one test.
 @MainActor
 enum OutlineGapDropGuard {
     private typealias Validate = @convention(c) (
         AnyObject, Selector, NSOutlineView, NSDraggingInfo, AnyObject?, Int
     ) -> NSDragOperation
-    private typealias Update = @convention(c) (NSOutlineView, Selector) -> Void
-    private typealias DragStep = @convention(c) (NSOutlineView, Selector, NSDraggingInfo) -> Void
-    private typealias DragCheck = @convention(c) (NSOutlineView, Selector, NSDraggingInfo) -> Bool
+    private typealias BeginUpdates = @convention(c) (NSOutlineView, Selector) -> Void
+    private typealias ConcludeDrag = @convention(c) (NSOutlineView, Selector, NSDraggingInfo) -> Void
+    private typealias PrepareDrag = @convention(c) (NSOutlineView, Selector, NSDraggingInfo) -> Bool
 
     enum Result {
         case installed
@@ -228,19 +235,24 @@ enum OutlineGapDropGuard {
     /// The key of the branch types of one outline view.
     private static var branchTypesKey: UInt8 = 0
 
-    /// The key of the drag that is over one outline view, from its last
-    /// validation. Nil when no drag is over it.
+    /// The key of the drag whose gap is open on one outline view.
     private static var dragKey: UInt8 = 0
 
-    /// True while the guard closes a gap before a row update.
-    private static var isClosingGap = false
-
-    private static func drag(over outline: NSOutlineView) -> NSDraggingInfo? {
-        objc_getAssociatedObject(outline, &dragKey) as? NSDraggingInfo
+    /// A weak reference: the guard never keeps a drag that AppKit ended.
+    private final class DragReference {
+        weak var info: NSDraggingInfo?
+        init(_ info: NSDraggingInfo) {
+            self.info = info
+        }
     }
 
-    private static func setDrag(_ info: NSDraggingInfo?, over outline: NSOutlineView) {
-        objc_setAssociatedObject(outline, &dragKey, info, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    /// The drag whose gap is open on `outline`, or nil.
+    private static func openDrag(on outline: NSOutlineView) -> NSDraggingInfo? {
+        (objc_getAssociatedObject(outline, &dragKey) as? DragReference)?.info
+    }
+
+    private static func setOpenDrag(_ info: NSDraggingInfo?, on outline: NSOutlineView) {
+        objc_setAssociatedObject(outline, &dragKey, info.map(DragReference.init), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
     /// The pasteboard types that only the `ForEach`s of expandable rows of
@@ -260,7 +272,7 @@ enum OutlineGapDropGuard {
         guard let dataSourceClass = declaredClass(of: source),
               let outlineClass = declaredClass(of: outline),
               installValidate(on: dataSourceClass),
-              installRowUpdates(on: outlineClass)
+              installGapClose(on: outlineClass)
         else { return .unsupported }
         let names = branchTypes.map(\.rawValue).sorted()
         objc_setAssociatedObject(outline, &branchTypesKey, names, .OBJC_ASSOCIATION_COPY_NONATOMIC)
@@ -282,21 +294,24 @@ enum OutlineGapDropGuard {
                         return original(source, selector, view, info, item, index)
                     }
                     if index < NSOutlineViewDropOnItemIndex {
-                        setDrag(nil, over: view)
+                        setOpenDrag(nil, on: view)
                         return []
                     }
-                    if isClosingGap { return [] }
-                    setDrag(info, over: view)
+                    let operation: NSDragOperation
                     let types = OutlineGapDropGuard.branchTypes(of: view)
-                    guard !types.isEmpty, info.draggingPasteboard.availableType(from: types) != nil else {
-                        return original(source, selector, view, info, item, index)
+                    if !types.isEmpty, info.draggingPasteboard.availableType(from: types) != nil {
+                        let location = view.convert(info.draggingLocation, from: nil)
+                        if let slot = branchSlot(in: view, item: item, index: index, location: location) {
+                            view.setDropItem(slot.item, dropChildIndex: slot.index)
+                            operation = original(source, selector, view, info, slot.item, slot.index)
+                        } else {
+                            operation = []
+                        }
+                    } else {
+                        operation = original(source, selector, view, info, item, index)
                     }
-                    let location = view.convert(info.draggingLocation, from: nil)
-                    guard let slot = branchSlot(in: view, item: item, index: index, location: location) else {
-                        return []
-                    }
-                    view.setDropItem(slot.item, dropChildIndex: slot.index)
-                    return original(source, selector, view, info, slot.item, slot.index)
+                    setOpenDrag(operation.isEmpty ? nil : info, on: view)
+                    return operation
                 }
             }
         replace(method, of: dataSourceClass, with: replacement)
@@ -304,10 +319,11 @@ enum OutlineGapDropGuard {
         return true
     }
 
-    /// Replaces `beginUpdates` of the outline view class: a row update in a
-    /// drag closes the gap first. The drop and the end of a drag forget the
-    /// drag. False when the class lacks one of the methods.
-    private static func installRowUpdates(on outlineClass: AnyClass) -> Bool {
+    /// Replaces `beginUpdates` of the outline view class: a row update
+    /// while a gap is open closes the gap first. Also replaces the two drop
+    /// steps, which forget the drag. False when the class lacks one of the
+    /// methods.
+    private static func installGapClose(on outlineClass: AnyClass) -> Bool {
         let key = ObjectIdentifier(outlineClass)
         if guardedClasses.contains(key) { return true }
         let begin = #selector(NSOutlineView.beginUpdates)
@@ -318,26 +334,23 @@ enum OutlineGapDropGuard {
               let concludeMethod = class_getInstanceMethod(outlineClass, conclude)
         else { return false }
 
-        let beginOriginal = unsafeBitCast(method_getImplementation(beginMethod), to: Update.self)
+        let beginOriginal = unsafeBitCast(method_getImplementation(beginMethod), to: BeginUpdates.self)
         let beginReplacement: @convention(block) (NSOutlineView) -> Void = { view in
             MainActor.assumeIsolated {
-                if !isClosingGap, view.draggingDestinationFeedbackStyle == .gap, let info = drag(over: view) {
-                    setDrag(nil, over: view)
-                    isClosingGap = true
-                    _ = view.draggingUpdated(info)
-                    isClosingGap = false
-                }
+                guard view.draggingDestinationFeedbackStyle == .gap, let info = openDrag(on: view) else { return }
+                view.draggingExited(info)
+                reenter(DragReference(info), on: view)
             }
             beginOriginal(view, begin)
         }
-        let prepareOriginal = unsafeBitCast(method_getImplementation(prepareMethod), to: DragCheck.self)
+        let prepareOriginal = unsafeBitCast(method_getImplementation(prepareMethod), to: PrepareDrag.self)
         let prepareReplacement: @convention(block) (NSOutlineView, NSDraggingInfo) -> Bool = { view, info in
-            MainActor.assumeIsolated { setDrag(nil, over: view) }
+            MainActor.assumeIsolated { setOpenDrag(nil, on: view) }
             return prepareOriginal(view, prepare, info)
         }
-        let concludeOriginal = unsafeBitCast(method_getImplementation(concludeMethod), to: DragStep.self)
+        let concludeOriginal = unsafeBitCast(method_getImplementation(concludeMethod), to: ConcludeDrag.self)
         let concludeReplacement: @convention(block) (NSOutlineView, NSDraggingInfo) -> Void = { view, info in
-            MainActor.assumeIsolated { setDrag(nil, over: view) }
+            MainActor.assumeIsolated { setOpenDrag(nil, on: view) }
             concludeOriginal(view, conclude, info)
         }
         replace(beginMethod, of: outlineClass, with: beginReplacement)
@@ -345,6 +358,36 @@ enum OutlineGapDropGuard {
         replace(concludeMethod, of: outlineClass, with: concludeReplacement)
         guardedClasses.insert(key)
         return true
+    }
+
+    /// After a row update closed the gap: enter the drag again on the next
+    /// turn of the run loop, outside SwiftUI's update, so that the gap opens
+    /// at the new slot with no pointer move. Only while the drag is alive,
+    /// no newer validation opened a gap, and the pointer is over `outline`.
+    private static func reenter(_ drag: DragReference, on outline: NSOutlineView) {
+        DispatchQueue.main.async { [weak outline] in
+            MainActor.assumeIsolated {
+                guard let outline, let info = drag.info, openDrag(on: outline) == nil,
+                      outline.window === info.draggingDestinationWindow,
+                      dropView(at: info.draggingLocation, in: outline) === outline
+                else { return }
+                _ = outline.draggingEntered(info)
+            }
+        }
+    }
+
+    /// The deepest view in `outline` (with `outline` itself) that is under
+    /// `point` (window coordinates) and takes drags. A row with its own drop
+    /// destination (a project header) takes the drag from the outline view.
+    private static func dropView(at point: NSPoint, in outline: NSOutlineView) -> NSView? {
+        func search(_ view: NSView) -> NSView? {
+            guard !view.isHidden, view.convert(view.bounds, to: nil).contains(point) else { return nil }
+            for subview in view.subviews.reversed() {
+                if let found = search(subview) { return found }
+            }
+            return view.registeredDraggedTypes.isEmpty ? nil : view
+        }
+        return search(outline)
     }
 
     /// Puts `block` in place of `method` on `cls`. A method that the class
