@@ -177,7 +177,10 @@ struct AppStateProjectDirectoryTests {
         let fixture = makeFixture(path: "")
         let input = try #require(fixture.state.changeProjectDirectoryInput(for: fixture.project, projectStore: fixture.store))
         #expect(action(input, "") == nil)
-        #expect(try #require(action(input, root)).run() == .done)
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let first = try #require(input.choices(root, context).first, "the typed folder is the first folder row")
+        #expect(first.item.title == (root as NSString).lastPathComponent)
+        first.item.action()
         #expect(path(of: fixture) == root)
     }
 

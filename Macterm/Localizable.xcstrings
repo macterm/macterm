@@ -2183,22 +2183,6 @@
         }
       }
     },
-    "Change to \"%@\"" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "\"%@\"(으)로 변경"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更改为“%@”"
-          }
-        }
-      }
-    },
     "Change to: %@" : {
       "localizations" : {
         "ko" : {
