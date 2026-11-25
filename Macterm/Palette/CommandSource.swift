@@ -105,17 +105,6 @@ struct CommandSource: PaletteSource {
             )
         }
 
-        // Rename actions need to wait until the palette has dismissed so the
-        // textfield in the sidebar can take first responder. Defer via
-        // postPaletteAction; `MainWindow` fires it once the palette closes.
-        let action: () -> Void = switch command {
-        case .renameTab,
-             .renameProject:
-            { ctx.appState.postPaletteAction = rawAction }
-        default:
-            rawAction
-        }
-
         return PaletteItem(
             title: command.title,
             // A palette screen says what it lists, as a custom palette's
@@ -125,11 +114,11 @@ struct CommandSource: PaletteSource {
             keybind: command.hotkeyAction.flatMap(keybindDisplay),
             keybindSymbols: command.hotkeyAction.flatMap(keybindSymbols),
             score: 0,
-            // A command that is a palette screen opens it in place rather
-            // than closing the palette to reopen it.
-            opensScope: command.paletteScope(in: commandCtx),
+            // A command that is a palette screen, or asks its value on one,
+            // opens it in place rather than closing the palette to reopen it.
+            opensScope: command.paletteScope(in: commandCtx) ?? command.inputScope(in: commandCtx),
             searchAliases: command.searchAliases,
-            action: action
+            action: rawAction
         )
     }
 

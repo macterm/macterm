@@ -290,7 +290,10 @@ struct CommandPalettePanel: View {
                                 ForEach(section.items) { item in
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
-                                        selectedIndex = idx
+                                        // Read the index at the click. SwiftUI can keep the
+                                        // action of a row whose item did not change.
+                                        guard let index = flatIndexByID[item.id] else { return }
+                                        selectedIndex = index
                                         if let inputScope {
                                             runInputRow(inputScope)
                                         } else {
@@ -391,7 +394,7 @@ struct CommandPalettePanel: View {
                 isFieldFocused = true
                 // Select the preserved text so a fresh keystroke replaces it
                 // while arrows/edits still work — Spotlight/Raycast behavior.
-                selectFieldText()
+                selectFieldText(once: query)
             }
         }
         .onChange(of: query) {
@@ -409,7 +412,7 @@ struct CommandPalettePanel: View {
             // wipe.
             if let inputScope, inputScope.isFirstShow {
                 inputScope.isFirstShow = false
-                DispatchQueue.main.async { selectFieldText() }
+                selectFieldText(once: query)
             }
         }
         .onChange(of: availability.unavailable) {
@@ -537,14 +540,31 @@ struct CommandPalettePanel: View {
         }
     }
 
-    /// Select all text in the focused search field via the window's field
-    /// editor, so reopening the palette with a preserved query highlights it.
-    private func selectFieldText() {
-        guard !query.isEmpty,
-              let window = NSApp.keyWindow,
-              let editor = window.fieldEditor(false, for: nil)
-        else { return }
-        editor.selectAll(nil)
+    /// Select `text` in the palette field, so that a keystroke replaces it.
+    /// The palette uses it for a kept query when it opens, and for the value
+    /// of an input screen when the screen opens.
+    ///
+    /// The select uses the first responder of the palette's window. SwiftUI's
+    /// `TextField` has a field editor of its own. The window's shared field
+    /// editor (`fieldEditor(_:for:)`) is not that editor, so a select there
+    /// does nothing (measured in `CommandPaletteTests`). A field that takes
+    /// focus selects its text itself. A screen that opens from a palette row
+    /// changes the text of a field that already has focus, so that field
+    /// needs this select.
+    ///
+    /// The field holds the new text 10 ms later in the tests. The select
+    /// tries again every 10 ms, 5 times at most. It does nothing when the
+    /// user changed the query.
+    private func selectFieldText(once text: String, attempts: Int = 5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
+            guard !text.isEmpty, query == text else { return }
+            let editor = appState.nsWindow(for: windowState)?.firstResponder as? NSTextView
+            if let editor, editor.isFieldEditor, editor.string == text {
+                editor.selectAll(nil)
+            } else if attempts > 1 {
+                selectFieldText(once: text, attempts: attempts - 1)
+            }
+        }
     }
 
     /// Tab autocompletes the input with the top result. Commands and projects

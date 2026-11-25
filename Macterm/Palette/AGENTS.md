@@ -55,6 +55,13 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The pill of an input screen is its `title`, with no icon (`PaletteInput.pill`, Ethan, 0561).
       - The New Project screen (`PaletteInput.newProject`, `NewProjectInput`) is the screen of `AppCommand.newProject`. Its action row is Select in Finder while the field is empty, and only then (Ethan, 0586). For a typed path, its rows are the folder rows of the root palette's path mode (`DirectorySource`), as `PaletteInput.choices`. Each row is the action (Ethan, 0594): Return or a click adds the folder, switches to the project that has it, or adds another project there. There is no `New Project "<path>"` row. A path with no row gets the `PathProblem` notice.
       - Escape, or Backspace at an empty field, pops it like any screen.
+      - Its pill has no glyph (`PaletteInput.pill`, from `PaletteInput.title`). A `PaletteInput` cannot name one. Its palette row therefore has no glyph either.
+      - An `AppCommand` that asks its value on an input screen returns it from `AppCommand.inputScope`. Its palette row enters it in place, and its keybind and menu item open the palette on it.
+      - Rename Current Tab and Rename Current Project ask the name here (`PaletteInput.renameTab`, `PaletteInput.renameProject`).
+        - A new name has the action row `Rename to "<name>"`. The current name has no row, so a tab with an automatic name stays automatic.
+        - An empty field on a renamed tab has the row `Use the automatic name "<name>"`.
+        - A project name that `Project.nameRefusal` refuses shows the reason and no row.
+        - The inline rename of a sidebar row (a double-click, the context menu) and ghostty's `prompt_surface_title` still edit the row.
     - `MoveToProjectPaletteScope`: the Move to Project screen, one for both kinds of node of the tree, a project and a tab (Ethan, ui-review 0601). It lists only existing projects (Ethan, ui-review 0592): the destinations of `SidebarTree.moveDestinations`, each titled by its path of names (`Work/api`, `SidebarTree.pathName`). The query filters by name, path of names or folder; an empty query keeps the order of the project list. Return moves the node (`AppState.moveNode`). It has no action row for the typed text and no notice. The node is the one that the key window shows (`AppState.moveToProjectNode`): the tab that the window selects, else the project on its project screen or with no tab. A sidebar multi-selection does not change it. The command opens the screen through `AppCommand.paletteScope(in:)`, not `paletteScope`.
     - `PasswordPaletteScope`.
     - `FilesPaletteScope`: the files and directories of the active local project.

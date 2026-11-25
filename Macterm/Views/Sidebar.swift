@@ -445,8 +445,7 @@ struct SidebarContent: View {
                     presentation: presentation,
                     isInteractive: isInteractive,
                     onRename: { newName in
-                        ModelWriter.tabSet(tab, title: newName.isEmpty ? nil : newName)
-                        appState.saveWorkspaces()
+                        appState.setTabTitle(tab, title: newName.isEmpty ? nil : newName)
                     }
                 )
             } else {
@@ -589,8 +588,7 @@ struct SidebarContent: View {
             isInteractive: isInteractive,
             projectColor: project.color,
             onRename: { newName in
-                ModelWriter.tabSet(tab, title: newName.isEmpty ? nil : newName)
-                appState.saveWorkspaces()
+                appState.setTabTitle(tab, title: newName.isEmpty ? nil : newName)
             }
         )
         .padding(.trailing, rowTrailingInset)

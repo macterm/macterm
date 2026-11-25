@@ -2276,23 +2276,32 @@ final class AppState {
         return selected
     }
 
-    /// Rename a project from its sidebar row (the inline edit, which Rename
-    /// Current Project opens too). A name that `Project.nameRefusal` refuses
-    /// (a slash, a reserved name) gets a notice and the old name stays — as
-    /// `project rename` refuses it with a `bad_request`. The field has closed
-    /// by the time the name arrives, so the notice is the one place left to
-    /// say why.
+    /// Rename a project from its sidebar row (the inline edit). A name that
+    /// `Project.nameRefusal` refuses (a slash, a reserved name) gets a notice
+    /// and the old name stays, as `project rename` refuses it with a
+    /// `bad_request`. The field has closed by the time the name arrives, so
+    /// the notice is the one place left to say why.
     func renameProject(_ projectID: UUID, to name: String, store: ProjectStore) {
-        if let message = Project.nameRefusal(for: name) {
+        if let message = applyProjectRename(projectID, to: name, store: store) {
             present(.notice(
                 .refusedProjectName,
                 title: String(localized: "Cannot rename project"),
                 message: message,
                 host: .mainWindow
             ))
-            return
         }
+    }
+
+    /// The one check and write of a project rename in the GUI (the sidebar
+    /// row and the palette's Rename Current Project). Returns why `name` is
+    /// refused, and then changes nothing. Returns nil when the rename is
+    /// done or when the name does not change. An unchanged name writes
+    /// nothing.
+    func applyProjectRename(_ projectID: UUID, to name: String, store: ProjectStore) -> String? {
+        if let message = Project.nameRefusal(for: name) { return message }
+        guard store.projects.first(where: { $0.id == projectID })?.name != name else { return nil }
         store.rename(id: projectID, to: name)
+        return nil
     }
 
     /// Update the active project's path to wherever the focused pane currently
@@ -3542,7 +3551,7 @@ final class AppState {
         sidebarVisible = true
         let tabID = tab.id
         // Defer a tick so the sidebar row's TextField exists before it's asked
-        // to begin editing — same reason as the Rename Tab command.
+        // to begin editing.
         DispatchQueue.main.async { self.renamingTabID = tabID }
     }
 
@@ -3552,6 +3561,13 @@ final class AppState {
     func setTabTitle(containing paneID: UUID, projectID: UUID, title: String?) {
         guard let tab = workspaces[projectID]?.tabs.first(where: { $0.splitRoot.contains(paneID: paneID) })
         else { return }
+        setTabTitle(tab, title: title)
+    }
+
+    /// The one write of a tab's custom title from the GUI (the sidebar row,
+    /// the palette's Rename Current Tab, the ghostty keybind). nil gives back
+    /// the automatic title.
+    func setTabTitle(_ tab: TerminalTab, title: String?) {
         ModelWriter.tabSet(tab, title: title)
         saveWorkspaces()
     }

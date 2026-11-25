@@ -7702,6 +7702,23 @@
         }
       }
     },
+    "Project name" : {
+      "comment" : "Placeholder of the Rename Project field in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 이름"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目名称"
+          }
+        }
+      }
+    },
     "Projects" : {
       "comment" : "Command category\nSettings pane",
       "localizations" : {
@@ -8442,6 +8459,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新命名标签页"
+          }
+        }
+      }
+    },
+    "Rename to \"%@\"" : {
+      "comment" : "The action row of the Rename Tab and Rename Project fields in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”(으)로 이름 변경"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新命名为“%@”"
           }
         }
       }
@@ -10460,6 +10494,23 @@
         }
       }
     },
+    "Tab name" : {
+      "comment" : "Placeholder of the Rename Tab field in the palette",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签页名称"
+          }
+        }
+      }
+    },
     "Tab switcher" : {
       "localizations" : {
         "ko" : {
@@ -12191,6 +12242,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用已存储的密码"
+          }
+        }
+      }
+    },
+    "Use the automatic name \"%@\"" : {
+      "comment" : "The action row of the Rename Tab field in the palette when the field is empty",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동 이름 “%@” 사용"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用自动名称“%@”"
           }
         }
       }
