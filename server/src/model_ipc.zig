@@ -170,6 +170,7 @@ pub fn replySubscribe(s: *Server, peer: u64, re: u64) void {
 // ── Requests ────────────────────────────────────────────────────────────────
 
 pub fn isWrite(comptime M: type) bool {
+    @setEvalBranchQuota(10_000);
     inline for (m.model_writes) |W| if (W == M) return true;
     return false;
 }
@@ -328,12 +329,48 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             }
             if (holder) |h| mo.selectTab(h.id, args.tab.?) catch |err| return modelError(err);
         },
+        m.PaneSwap => mo.swapPanes(args.id, args.other) catch |err| return modelError(err),
+        m.PaneReplace => _ = mo.replacePane(args.id, args.new) catch |err| return modelError(err),
+        m.PaneSet => mo.setPaneFolders(args.id, args.cwd, args.host_session_dir) catch |err| return modelError(err),
+        m.TabLayout => _ = mo.setTabRoot(args.id, args.root, args.focused) catch |err| return modelError(err),
+        m.TabRebalance => mo.rebalanceTab(args.id) catch |err| return modelError(err),
+        m.PaneGrid => {
+            const cells = @as(usize, args.rows) * @as(usize, args.columns);
+            if (cells < 2 or args.new.len != cells - 1 or args.split_ids.len != cells - 1) return modelError(error.BadRequest);
+            var gen: GridIds = .{ .a = mo.arena.allocator(), .panes = args.new, .splits = args.split_ids };
+            _ = mo.makeGrid(args.tab, args.target, args.rows, args.columns, &gen) catch |err| return switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => modelError(err),
+            };
+        },
         m.ModelImport => return putModel(s, a, args.model, .{ .import = args.source }),
         m.ModelReplace => return putModel(s, a, args.model, .replace),
         else => @compileError("not a model request: " ++ M.name),
     }
     return done;
 }
+
+/// The ids of `pane.grid`, in the order that `tree.makeGrid` asks for them.
+/// The ids are copied into the model's arena: the request's memory goes.
+const GridIds = struct {
+    a: std.mem.Allocator,
+    panes: []const model.Pane,
+    splits: []const model.SplitId,
+    next_pane: usize = 0,
+    next_split: usize = 0,
+
+    pub fn newPane(g: *GridIds) !model.Pane {
+        if (g.next_pane >= g.panes.len) return error.BadRequest;
+        defer g.next_pane += 1;
+        return tree.clonePane(g.a, g.panes[g.next_pane]);
+    }
+
+    pub fn newSplitId(g: *GridIds) !model.SplitId {
+        if (g.next_split >= g.splits.len) return error.BadRequest;
+        defer g.next_split += 1;
+        return g.splits[g.next_split].dupe(g.a);
+    }
+};
 
 /// The `sort_order` after the last `tree` child of `parent`.
 fn nextSortOrder(mo: *const Model, parent: ?model.ProjectId) i64 {

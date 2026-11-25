@@ -18,26 +18,20 @@ struct MactermIntentsTests {
     // MARK: - Fixtures
 
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-\(UUID().uuidString).json")
-        let projectsDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: projectsDir)
-        )
+        TestModel.appState()
     }
 
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-intent-tests-store-\(UUID().uuidString).json"))
+    private func makeProjectStore(_ appState: AppState) -> ProjectStore {
+        let store = TestModel.projectStore(appState)
+        store.onAdd = { [weak appState] in appState?.projectAdded($0) }
+        return store
     }
 
     /// Attach the host and open the permission gate — the state a running app
     /// is in once `installResponders` has run and the user has allowed.
     private func makeHost() -> (AppState, ProjectStore) {
         let appState = makeAppState()
-        let projectStore = makeProjectStore()
+        let projectStore = makeProjectStore(appState)
         MactermIntentHost.shared.attachForTesting(appState: appState, projectStore: projectStore)
         IntentPermissionGate.shared.resetForTesting()
         IntentPermissionGate.shared.access = { .allow }
@@ -54,8 +48,9 @@ struct MactermIntentsTests {
         name: String = "demo",
         path: String = "/tmp"
     ) -> Project {
-        let project = Project(name: name, path: path, sortOrder: projectStore.projects.count)
-        projectStore.add(project)
+        guard let project = projectStore.add(Project(name: name, path: path)) else {
+            preconditionFailure("the test server refused the project")
+        }
         appState.selectProject(project)
         return project
     }
@@ -199,7 +194,7 @@ struct MactermIntentsTests {
 
         await #expect(throws: MactermIntentError.self) { try await intent.perform() }
         #expect(projectStore.projects.isEmpty)
-        #expect(appState.workspaces.isEmpty)
+        #expect(appState.model.projects.isEmpty)
     }
 
     @Test
@@ -209,7 +204,6 @@ struct MactermIntentsTests {
         let project = seedProject(appState, projectStore)
         let entity = MactermProjectEntity(project)
         appState.removeProject(project.id)
-        projectStore.removeWithDescendants(project.id)
 
         let intent = FocusMactermProjectIntent()
         intent.project = entity
@@ -259,15 +253,39 @@ struct MactermIntentsTests {
         #expect(set.keywords == ["Website", "acme-site"])
     }
 
+    /// Spotlight gets the tree projects only: the hidden projects of the
+    /// model (Pinned, Scratch Tabs, the quick terminal, the widgets) are
+    /// never in the list that `ProjectSpotlightIndex` indexes.
     @Test
-    func a_save_hands_the_saved_list_to_the_spotlight_hook() {
-        let projectStore = makeProjectStore()
+    func the_spotlight_list_has_no_hidden_project() throws {
+        let appState = makeAppState()
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let projectStore = makeProjectStore(appState)
+        var saved: [[String]] = []
+        projectStore.onSave = { saved.append($0.map(\.name)) }
+        _ = try #require(appState.ensurePinnedProject())
+        _ = try #require(appState.createScratchTab(focus: false))
+        _ = try #require(appState.quickTerminal.ensureTab())
+        _ = appState.createDesktopWidget()
+        #expect(appState.model.projects.count == 4)
+
+        _ = try #require(projectStore.create(name: "api", path: "/tmp"))
+
+        #expect(saved == [["api"]])
+        #expect(projectStore.projects.map(\.name) == ["api"])
+    }
+
+    @Test
+    func a_save_hands_the_saved_list_to_the_spotlight_hook() throws {
+        let appState = makeAppState()
+        let projectStore = makeProjectStore(appState)
         var saved: [[String]] = []
         projectStore.onSave = { saved.append($0.map(\.name)) }
 
-        let project = projectStore.create(name: "api", path: "/tmp")
+        let project = try #require(projectStore.create(name: "api", path: "/tmp"))
         projectStore.rename(id: project.id, to: "backend")
-        projectStore.removeWithDescendants(project.id)
+        appState.removeProject(project.id, store: projectStore)
 
         #expect(saved == [["api"], ["backend"], []])
     }
@@ -284,13 +302,13 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let before = appState.workspaces[project.id]?.tabs.count ?? 0
+        let before = appState.liveTabs[project.id]?.tabs.count ?? 0
 
         let intent = NewMactermTabIntent()
         intent.project = MactermProjectEntity(project)
         let result = try await intent.perform()
 
-        let tabs = try #require(appState.workspaces[project.id]?.tabs)
+        let tabs = try #require(appState.liveTabs[project.id]?.tabs)
         #expect(tabs.count == before + 1)
         #expect(result.value?.id == tabs.last?.id)
     }
@@ -306,7 +324,7 @@ struct MactermIntentsTests {
         intent.command = "  npm run dev  "
         _ = try await intent.perform()
 
-        let tab = try #require(appState.workspaces[project.id]?.tabs.last)
+        let tab = try #require(appState.liveTabs[project.id]?.tabs.last)
         let pane = try #require(tab.splitRoot.allPanes().first)
         // The command is a typed `PaneStartCommand`, the layout `run:`
         // path, not a paste — trimmed, because a trailing space in a Shortcuts
@@ -325,7 +343,7 @@ struct MactermIntentsTests {
         intent.command = "   "
         _ = try await intent.perform()
 
-        let pane = try #require(appState.workspaces[project.id]?.tabs.last?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.last?.splitRoot.allPanes().first)
         #expect(pane.start == nil)
     }
 
@@ -335,7 +353,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         _ = appState.createTab(projectID: project.id, projects: projectStore.projects)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let first = try #require(workspace.tabs.first)
         try appState.selectTab(#require(workspace.tabs.last).id, projectID: project.id)
 
@@ -356,7 +374,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         _ = appState.createTab(projectID: project.id, projects: projectStore.projects)
-        let workspace = try #require(appState.workspaces[project.id])
+        let workspace = try #require(appState.liveTabs[project.id])
         let doomed = try #require(workspace.tabs.last)
         let before = workspace.tabs.count
 
@@ -413,7 +431,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
 
         let entity = MactermPaneEntity(pane, projectID: project.id, in: ctx)
@@ -431,10 +449,10 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let view = NSView()
 
-        MactermPaneEntity.annotate(view, for: pane)
+        MactermPaneEntity.annotate(view, for: pane, addressable: true)
 
         let identifier = try #require(view.appEntityIdentifier)
         #expect(identifier == MactermPaneEntity.identifier(forSession: pane.sessionName))
@@ -444,14 +462,27 @@ struct MactermIntentsTests {
     }
 
     @Test
-    func quick_terminal_and_widget_panes_name_no_entity() {
+    func quick_terminal_and_widget_panes_name_no_entity() throws {
         guard #available(macOS 15.4, *) else { return }
-        for projectID in [QuickTerminalService.projectID, DesktopWidget.projectID] {
+        let (appState, projectStore) = makeHost()
+        defer { teardown() }
+        appState.desktopScreens = { [DesktopScreen(name: "Test", visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))] }
+        appState.nativeDesktopWidgetFrames = { [] }
+        let quick = try #require(appState.quickTerminal.ensureTab()?.focusedPane)
+        let widget = try #require(appState.createDesktopWidget().pane)
+        let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
+        for pane in [quick, widget] {
+            // `PaneSurface` asks whether a window can show the pane's
+            // project. The hidden projects of these panes are not.
+            let project = try #require(appState.model.project(pane.projectID))
+            #expect(!project.isSelectable)
             let view = NSView()
-            MactermPaneEntity.annotate(view, for: Pane(projectPath: "/tmp", projectID: projectID))
-            // `allPanes` walks the workspaces only, so an identifier here
-            // would name a pane that every pane intent reports as not found.
+            MactermPaneEntity.annotate(view, for: pane, addressable: project.isSelectable)
+            // `allPanes` walks the projects that Shortcuts can address only,
+            // so an identifier here would name a pane that every pane intent
+            // reports as not found.
             #expect(view.appEntityIdentifier == nil)
+            #expect(!IntentTargets.allPanes(in: ctx).contains { $0.pane === pane })
         }
     }
 
@@ -460,7 +491,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
 
         let intent = RunCommandInMactermPaneIntent()
@@ -476,7 +507,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = RunCommandInMactermPaneIntent()
         intent.command = ""
@@ -495,7 +526,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = SendKeyToMactermPaneIntent()
         intent.key = "ctrl+nonsense"
@@ -522,7 +553,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
         pane.foregroundProcessName = "hx"
 
         #expect(GetMactermPaneDetailsIntent.value(of: .id, for: pane) == pane.id.uuidString)
@@ -540,7 +571,7 @@ struct MactermIntentsTests {
         let (appState, projectStore) = makeHost()
         defer { teardown() }
         let project = seedProject(appState, projectStore)
-        let pane = try #require(appState.workspaces[project.id]?.tabs.first?.splitRoot.allPanes().first)
+        let pane = try #require(appState.liveTabs[project.id]?.tabs.first?.splitRoot.allPanes().first)
 
         let intent = GetMactermPaneContentsIntent()
         intent.scrollback = false
@@ -582,7 +613,7 @@ struct MactermIntentsTests {
         defer { teardown() }
         let project = seedProject(appState, projectStore)
         let delegate = attachDelegate(appState, projectStore)
-        let before = appState.workspaces[project.id]?.tabs.count ?? 0
+        let before = appState.liveTabs[project.id]?.tabs.count ?? 0
 
         let intent = InvokeMactermKeybindIntent()
         intent.keybind = .newTab
@@ -591,7 +622,7 @@ struct MactermIntentsTests {
         #expect(result.value == true)
         // The action ran through `AppCommand.newTab.action(in:)` — the same
         // closure the palette, the menu bar and the Dock menu run.
-        #expect(appState.workspaces[project.id]?.tabs.count == before + 1)
+        #expect(appState.liveTabs[project.id]?.tabs.count == before + 1)
         #expect(appState.appDelegate === delegate)
     }
 
@@ -679,7 +710,8 @@ struct MactermIntentsTests {
 
         // The pinned workspace is not a project, so it has no memory.
         let pinned = GetMactermProjectMemoryIntent()
-        pinned.project = MactermProjectEntity(PinnedTabs.project)
+        let pinnedID = try #require(appState.ensurePinnedProject())
+        pinned.project = try MactermProjectEntity(#require(appState.model.project(pinnedID)))
         await #expect(throws: MactermIntentError.self) { try await pinned.perform() }
     }
 }

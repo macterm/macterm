@@ -256,8 +256,12 @@ struct SplitLayoutTests {
             Issue.record("expected a split")
             return
         }
-        ModelWriter.splitRatio(branch, ratio: 0.7)
-        #expect(SplitLayout.animationKey(of: tree, zoomedPaneID: nil) == before)
+        // The same branch with a new ratio, as the mirror builds it after a
+        // divider drag.
+        let dragged = SplitNode.split(SplitBranch(
+            id: branch.id, direction: branch.direction, ratio: 0.7, first: branch.first, second: branch.second
+        ))
+        #expect(SplitLayout.animationKey(of: dragged, zoomedPaneID: nil) == before)
     }
 
     @Test
@@ -272,18 +276,22 @@ struct SplitLayoutTests {
 
     @Test
     func keyboard_resize_bumps_the_tab_generation_and_a_direct_ratio_write_does_not() throws {
-        let (tree, ids) = build(H(pane("l"), pane("r"), ratio: 0.5))
-        let tab = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: ids["l"])
-        let before = tab.animatedResizeGeneration
-        ModelWriter.splitResize(tab, direction: .right)
-        #expect(tab.animatedResizeGeneration == before + 1)
+        let state = TestModel.appState()
+        let project = TestModel.project(state)
+        let tab = try #require(state.liveTabs[project.id]?.activeTab)
+        state.splitPane(direction: .horizontal, projectID: project.id, projects: [project])
         guard case let .split(branch) = tab.splitRoot else {
             Issue.record("expected a split")
             return
         }
-        ModelWriter.splitRatio(branch, ratio: 0.3)
+        let before = tab.animatedResizeGeneration
+        let ratio = branch.ratio
+        state.splitResize(tab, direction: .right)
         #expect(tab.animatedResizeGeneration == before + 1)
-        #expect(try ModelWriter.splitRatio(tab, paneID: #require(ids["l"]), axis: .horizontal, ratio: 0.6))
+        #expect(branch.ratio != ratio)
+        // A divider drag and `pane resize-split` write the ratio directly.
+        state.writer.splitRatio(branch.id, ratio: 0.3)
+        #expect(branch.ratio == 0.3)
         #expect(tab.animatedResizeGeneration == before + 1)
     }
 
@@ -293,9 +301,14 @@ struct SplitLayoutTests {
         let flat = SplitLayout.animationKey(of: tree, zoomedPaneID: nil)
         #expect(SplitLayout.animationKey(of: tree, zoomedPaneID: ids["l"]) != flat)
 
-        let (regrown, _) = try tree.splitting(
-            paneID: #require(ids["r"]), direction: .vertical, position: .second, projectPath: "/", projectID: UUID()
-        )
+        // The same panes, with a new pane split off `r`.
+        let lID = try #require(ids["l"])
+        let rID = try #require(ids["r"])
+        let l = try #require(tree.findPane(id: lID))
+        let r = try #require(tree.findPane(id: rID))
+        let regrown = SplitNode.split(SplitBranch(direction: .horizontal, first: .pane(l), second: .split(SplitBranch(
+            direction: .vertical, first: .pane(r), second: .pane(Pane(projectPath: "/", projectID: UUID()))
+        ))))
         #expect(SplitLayout.animationKey(of: regrown, zoomedPaneID: nil) != flat)
         // Same panes, opposite axis: a different layout, so a different key.
         let (vertical, _) = build(V(pane("a"), pane("b")))

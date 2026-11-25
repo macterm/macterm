@@ -2,216 +2,25 @@ import Foundation
 @testable import Macterm
 import Testing
 
+/// The reads of a tab: its titles, its status dot and its agent icon. The
+/// server changes the tree (`server/src/model/`), so these tests make a tab
+/// from a tree and read it.
 @MainActor
 struct TerminalTabTests {
-    /// Build a TerminalTab from a TreeBuilder spec, with an empty focus history.
-    private func makeTab(_ spec: TreeSpec, focused: String? = nil) -> (TerminalTab, [String: UUID]) {
+    private func makeTab(_ spec: TreeSpec, focused: String? = nil, title: String? = nil) -> (TerminalTab, [String: UUID]) {
         let (tree, ids) = build(spec)
         let tab = TerminalTab(
             id: UUID(),
             splitRoot: tree,
-            focusedPaneID: focused.flatMap { ids[$0] } ?? tree.allPanes().first?.id
+            focusedPaneID: focused.flatMap { ids[$0] } ?? tree.allPanes().first?.id,
+            customTitle: title
         )
         return (tab, ids)
     }
 
-    // MARK: - focusPane
-
-    @Test
-    func focusPane_updates_history_on_switch() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["b"]))
-        #expect(tab.focusedPaneID == ids["b"])
-        #expect(tab.paneFocusHistory.items.first == ids["a"])
-    }
-
-    @Test
-    func focusPane_same_pane_is_noop() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["a"]))
-        #expect(tab.paneFocusHistory.isEmpty)
-    }
-
-    // MARK: - moveFocusedPane
-
-    @Test
-    func moveFocusedPane_swaps_with_the_neighbor_and_keeps_focus() {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(ModelWriter.paneSwap(tab, direction: .right))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["b"], ids["a"]])
-        #expect(tab.focusedPaneID == ids["a"])
-        // And back.
-        #expect(ModelWriter.paneSwap(tab, direction: .left))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["a"], ids["b"]])
-    }
-
-    @Test
-    func moveFocusedPane_follows_the_focus_neighbor_across_axes() {
-        // a | (b / c), focus on c: up swaps with b, left swaps with a.
-        let (tab, ids) = makeTab(H(pane("a"), V(pane("b"), pane("c"))), focused: "c")
-        #expect(ModelWriter.paneSwap(tab, direction: .up))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["a"], ids["c"], ids["b"]])
-        #expect(ModelWriter.paneSwap(tab, direction: .left))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["c"], ids["a"], ids["b"]])
-        #expect(tab.focusedPaneID == ids["c"])
-    }
-
-    @Test
-    func moveFocusedPane_without_a_neighbor_leaves_the_tree() {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(!ModelWriter.paneSwap(tab, direction: .left))
-        #expect(!ModelWriter.paneSwap(tab, direction: .up))
-        #expect(!ModelWriter.paneSwap(tab, direction: .down))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["a"], ids["b"]])
-    }
-
-    // MARK: - nextFocusAfterClose
-
-    @Test
-    func nextFocusAfterClose_prefers_most_recent_valid() throws {
-        let (tab, ids) = makeTab(H(pane("a"), H(pane("b"), pane("c"))), focused: "a")
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["b"])) // history: [a]
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["c"])) // history: [b, a]
-        let cID = try #require(ids["c"])
-        #expect(ModelWriter.paneDetach(tab, paneID: cID) != nil)
-        #expect(tab.focusedPaneID == ids["b"])
-    }
-
-    @Test
-    func nextFocusAfterClose_falls_back_to_first_pane_when_history_empty() throws {
-        let (tab, ids) = makeTab(H(pane("a"), H(pane("b"), pane("c"))), focused: "a")
-        #expect(try ModelWriter.paneDetach(tab, paneID: #require(ids["a"])) != nil)
-        #expect(tab.focusedPaneID == ids["b"])
-    }
-
-    // MARK: - split
-
-    @Test
-    func split_focuses_new_pane() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        let newID = try ModelWriter.paneSplit(tab, paneID: #require(ids["a"]), direction: .horizontal)
-        #expect(newID != nil)
-        #expect(tab.focusedPaneID == newID)
-    }
-
-    @Test(arguments: [false, true])
-    func split_without_focus_preserves_focus_history_and_zoom(zoomed: Bool) throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let sourceID = try #require(ids["a"])
-        let currentID = try #require(ids["b"])
-        ModelWriter.paneFocus(tab, paneID: currentID)
-        if zoomed { ModelWriter.paneZoom(tab, toggling: currentID) }
-        let history = tab.paneFocusHistory.items
-        let zoom = tab.zoomedPaneID
-
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: sourceID, direction: .vertical, focus: false))
-
-        #expect(tab.splitRoot.findPane(id: newID) != nil)
-        #expect(tab.focusedPaneID == currentID)
-        #expect(tab.paneFocusHistory.items == history)
-        #expect(tab.zoomedPaneID == zoom)
-    }
-
-    @Test
-    func split_position_first_places_new_pane_before_the_target() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        let target = try #require(ids["a"])
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: target, direction: .horizontal, position: .first))
-        #expect(tab.splitRoot.allPanes().map(\.id) == [newID, target])
-    }
-
-    @Test
-    func split_pushes_old_focus_to_history() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        _ = try ModelWriter.paneSplit(tab, paneID: #require(ids["a"]), direction: .horizontal)
-        #expect(tab.paneFocusHistory.items.first == ids["a"])
-    }
-
-    @Test
-    func split_nonexistent_pane_is_noop() {
-        let (tab, _) = makeTab(pane("a"), focused: "a")
-        let originalFocus = tab.focusedPaneID
-        let newID = ModelWriter.paneSplit(tab, paneID: UUID(), direction: .horizontal)
-        #expect(newID == nil)
-        #expect(tab.focusedPaneID == originalFocus)
-    }
-
-    // MARK: - autoSplit
-
-    @Test
-    func autoSplit_creates_and_focuses_new_pane() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        let newID = try ModelWriter.paneAutoSplit(tab, paneID: #require(ids["a"]))
-        #expect(newID != nil)
-        #expect(tab.focusedPaneID == newID)
-    }
-
-    @Test
-    func autoSplit_falls_back_to_horizontal_without_measurable_bounds() throws {
-        // In headless tests the pane has no attached NSView, so bounds are zero
-        // and the longer-axis heuristic resolves to a horizontal (left/right) split.
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        _ = try ModelWriter.paneAutoSplit(tab, paneID: #require(ids["a"]))
-        guard case let .split(branch) = tab.splitRoot else {
-            Issue.record("expected a split at the root")
-            return
-        }
-        #expect(branch.direction == .horizontal)
-    }
-
-    // MARK: - resize
-
-    @Test
-    func resize_without_focused_pane_is_noop() {
-        let (tree, _) = build(H(pane("a"), pane("b")))
-        let tab = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: nil)
-        let before = tab.splitRoot
-        ModelWriter.splitResize(tab, direction: .right, delta: 0.1)
-        if case let .split(b1) = before, case let .split(b2) = tab.splitRoot {
-            #expect(abs(b1.ratio - b2.ratio) < 0.0001)
-        }
-    }
-
-    @Test
-    func resize_adjusts_ratio_of_focused_ancestor() {
-        let (tab, _) = makeTab(H(pane("a"), pane("b"), ratio: 0.5), focused: "a")
-        ModelWriter.splitResize(tab, direction: .right, delta: 0.1)
-        if case let .split(b) = tab.splitRoot {
-            #expect(abs(b.ratio - 0.6) < 0.0001)
-        } else {
-            Issue.record("expected split root")
-        }
-    }
-
-    // MARK: - removePane
-
-    @Test
-    func removePane_only_pane_returns_onlyPaneLeft() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        #expect(try ModelWriter.paneClose(tab, paneID: #require(ids["a"])) == .onlyPaneLeft)
-    }
-
-    @Test
-    func removePane_middle_reshapes_tree_and_advances_focus() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["b"])) // history: [a], focused: b
-        #expect(try ModelWriter.paneClose(tab, paneID: #require(ids["b"])) == .removed)
-        #expect(render(tab.splitRoot, ids: ids) == "a")
-        #expect(tab.focusedPaneID == ids["a"])
-    }
-
-    @Test
-    func removePane_of_unfocused_leaves_focus_alone() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(try ModelWriter.paneClose(tab, paneID: #require(ids["b"])) == .removed)
-        #expect(tab.focusedPaneID == ids["a"])
-    }
-
-    @Test
-    func removePane_notFound_is_noop() {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(ModelWriter.paneClose(tab, paneID: UUID()) == .notFound)
-        #expect(tab.splitRoot.allPanes().count == 2)
+    private func paneNamed(_ name: String, in tab: TerminalTab, _ ids: [String: UUID]) throws -> Pane {
+        let id = try #require(ids[name])
+        return try #require(tab.splitRoot.findPane(id: id))
     }
 
     // MARK: - executionState
@@ -228,11 +37,6 @@ struct TerminalTabTests {
         #expect(tab.executionState == .done)
         b.receiveAttention(MactermProtocol.Attention())
         #expect(tab.executionState == .idle)
-    }
-
-    private func paneNamed(_ name: String, in tab: TerminalTab, _ ids: [String: UUID]) throws -> Pane {
-        let id = try #require(ids[name])
-        return try #require(tab.splitRoot.findPane(id: id))
     }
 
     @Test
@@ -272,85 +76,15 @@ struct TerminalTabTests {
         #expect(!tab.hasUnseenBell)
     }
 
-    // MARK: - toggleZoom
+    // MARK: - focusedPane
 
     @Test
-    func toggleZoom_sets_and_clears_zoomedPaneID() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        ModelWriter.paneZoom(tab, toggling: aID)
-        #expect(tab.zoomedPaneID == aID)
-        ModelWriter.paneZoom(tab, toggling: aID)
-        #expect(tab.zoomedPaneID == nil)
-    }
-
-    @Test
-    func toggleZoom_switches_focus_to_zoomed_pane() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let bID = try #require(ids["b"])
-        ModelWriter.paneZoom(tab, toggling: bID)
-        #expect(tab.zoomedPaneID == bID)
-        #expect(tab.focusedPaneID == bID)
-    }
-
-    @Test
-    func toggleZoom_unknown_pane_is_noop() {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        ModelWriter.paneZoom(tab, toggling: UUID())
-        #expect(tab.zoomedPaneID == nil)
-    }
-
-    @Test
-    func split_while_zoomed_clears_zoom() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        ModelWriter.paneZoom(tab, toggling: aID)
-        #expect(tab.zoomedPaneID == aID)
-        _ = ModelWriter.paneSplit(tab, paneID: aID, direction: .horizontal)
-        #expect(tab.zoomedPaneID == nil)
-    }
-
-    @Test
-    func focusPane_while_zoomed_clears_zoom() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        let bID = try #require(ids["b"])
-        ModelWriter.paneZoom(tab, toggling: aID)
-        #expect(tab.zoomedPaneID == aID)
-        ModelWriter.paneFocus(tab, paneID: bID)
-        #expect(tab.zoomedPaneID == nil)
-        #expect(tab.focusedPaneID == bID)
-    }
-
-    @Test
-    func focusPane_on_zoomed_pane_keeps_zoom() throws {
+    func focusedPane_is_the_pane_of_the_focused_id() {
         let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "b")
-        let aID = try #require(ids["a"])
-        ModelWriter.paneZoom(tab, toggling: aID)
-        #expect(tab.zoomedPaneID == aID)
-        // re-focusing the already-zoomed pane is a no-op (same pane)
-        ModelWriter.paneFocus(tab, paneID: aID)
-        #expect(tab.zoomedPaneID == aID)
-        #expect(tab.focusedPaneID == aID)
-    }
-
-    @Test
-    func removing_zoomed_pane_clears_zoom() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let bID = try #require(ids["b"])
-        ModelWriter.paneZoom(tab, toggling: bID)
-        #expect(tab.zoomedPaneID == bID)
-        #expect(ModelWriter.paneClose(tab, paneID: bID) == .removed)
-        #expect(tab.zoomedPaneID == nil)
-    }
-
-    @Test
-    func removePane_prunes_history() throws {
-        let (tab, ids) = makeTab(H(pane("a"), H(pane("b"), pane("c"))), focused: "a")
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["b"])) // history: [a]
-        try ModelWriter.paneFocus(tab, paneID: #require(ids["c"])) // history: [b, a]
-        #expect(try ModelWriter.paneClose(tab, paneID: #require(ids["b"])) == .removed)
-        #expect(try !tab.paneFocusHistory.items.contains(#require(ids["b"])))
+        #expect(tab.focusedPane?.id == ids["b"])
+        let (unfocused, _) = build(H(pane("c"), pane("d")))
+        #expect(TerminalTab(id: UUID(), splitRoot: unfocused, focusedPaneID: nil).focusedPane == nil)
+        #expect(TerminalTab(id: UUID(), splitRoot: unfocused, focusedPaneID: UUID()).focusedPane == nil)
     }
 
     // MARK: - sidebarRowTitle (#227)
@@ -363,12 +97,8 @@ struct TerminalTabTests {
 
     @Test
     func sidebarRowTitle_rename_wins_over_pane_count() {
-        let (tab, _) = makeTab(H(H(pane("a"), pane("b")), H(pane("c"), pane("d"))))
-        ModelWriter.tabSet(tab, title: "my workbench")
+        let (tab, _) = makeTab(H(H(pane("a"), pane("b")), H(pane("c"), pane("d"))), title: "my workbench")
         #expect(tab.sidebarRowTitle == "my workbench")
-        // Clearing the rename falls back to the count, not the pipe list.
-        ModelWriter.tabSet(tab, title: nil)
-        #expect(tab.sidebarRowTitle == "4 panes")
     }
 
     @Test
@@ -377,353 +107,59 @@ struct TerminalTabTests {
         #expect(tab.sidebarRowTitle == tab.sidebarTitle)
     }
 
-    // MARK: - insertTree (#227)
-
-    @Test
-    func insertTree_wraps_destination_pane_in_zone_split() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, incomingIDs) = build(pane("x"))
-        let ok = try ModelWriter.tabMerge(tab, tree: incoming, at: .pane(#require(ids["b"]), .top))
-        #expect(ok)
-        #expect(tab.splitRoot.allPanes().map(\.id) == [ids["a"], incomingIDs["x"], ids["b"]])
-        #expect(tab.focusedPaneID == incomingIDs["x"])
-    }
-
-    @Test
-    func insertTree_unknown_pane_leaves_tree_unchanged() {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, _) = build(pane("x"))
-        let ok = ModelWriter.tabMerge(tab, tree: incoming, at: .pane(UUID(), .left))
-        #expect(!ok)
-        #expect(tab.splitRoot.allPanes().count == 2)
-    }
-
-    // MARK: - mergeTree (#227 workspace drops)
-
-    @Test
-    func mergeTree_rootEdge_bottom_takes_the_full_width_half() throws {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, incomingIDs) = build(pane("x"))
-        #expect(ModelWriter.tabMerge(tab, tree: incoming, at: .rootEdge(.bottom)))
-        let xID = try #require(incomingIDs["x"])
-        let frame = try #require(tab.splitRoot.paneFrames()[xID])
-        #expect(abs(frame.width - 1) < 0.001)
-        #expect(abs(frame.height - 0.5) < 0.001)
-        #expect(abs(frame.minY - 0.5) < 0.001)
-        #expect(tab.focusedPaneID == xID)
-    }
-
-    @Test
-    func mergeTree_rootEdge_left_equalizes_to_thirds() throws {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, incomingIDs) = build(pane("x"))
-        #expect(ModelWriter.tabMerge(tab, tree: incoming, at: .rootEdge(.left)))
-        let frames = tab.splitRoot.paneFrames()
-        for frame in frames.values {
-            #expect(abs(frame.width - 1.0 / 3.0) < 0.001)
-        }
-        let xID = try #require(incomingIDs["x"])
-        #expect(try abs(#require(frames[xID]).minX) < 0.001)
-    }
-
-    @Test
-    func mergeTree_divider_equalizes_to_thirds() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, incomingIDs) = build(pane("x"))
-        #expect(try ModelWriter.tabMerge(tab, tree: incoming, at: .divider(#require(ids["b"]), .left)))
-        let frames = tab.splitRoot.paneFrames()
-        #expect(frames.count == 3)
-        for frame in frames.values {
-            #expect(abs(frame.width - 1.0 / 3.0) < 0.001)
-        }
-        // The new pane sits in the middle column, where the divider was.
-        let xID = try #require(incomingIDs["x"])
-        #expect(try abs(#require(frames[xID]).minX - 1.0 / 3.0) < 0.001)
-    }
-
-    @Test
-    func mergeTree_pane_target_halves_the_pane() throws {
-        Preferences.shared.autoTilingEnabled = false
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, incomingIDs) = build(pane("x"))
-        #expect(try ModelWriter.tabMerge(tab, tree: incoming, at: .pane(#require(ids["a"]), .left)))
-        // 1/4 + 1/4 + 1/2: a local split never disturbs the sibling column.
-        let frames = tab.splitRoot.paneFrames()
-        let xID = try #require(incomingIDs["x"])
-        let bID = try #require(ids["b"])
-        #expect(try abs(#require(frames[xID]).width - 0.25) < 0.001)
-        #expect(try abs(#require(frames[bID]).width - 0.5) < 0.001)
-    }
-
-    @Test
-    func mergeTree_unknown_pane_fails_without_reshaping() {
-        let (tab, _) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let (incoming, _) = build(pane("x"))
-        #expect(!ModelWriter.tabMerge(tab, tree: incoming, at: .pane(UUID(), .left)))
-        #expect(tab.splitRoot.allPanes().count == 2)
-    }
-
-    // MARK: - movePane(to:) — the grab handle shares the tab-drop grammar
-
-    @Test
-    func movePane_to_rootEdge_takes_the_whole_edge() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        #expect(ModelWriter.paneMove(tab, paneID: aID, to: .rootEdge(.bottom)))
-        let frame = try #require(tab.splitRoot.paneFrames()[aID])
-        #expect(abs(frame.width - 1) < 0.001)
-        #expect(abs(frame.minY - 0.5) < 0.001)
-        #expect(tab.focusedPaneID == aID)
-    }
-
-    @Test
-    func movePane_to_divider_equalizes() throws {
-        let (tab, ids) = makeTab(H(pane("a"), H(pane("b"), pane("c"))), focused: "a")
-        let aID = try #require(ids["a"])
-        #expect(try ModelWriter.paneMove(tab, paneID: aID, to: .divider(#require(ids["c"]), .right)))
-        // a detaches from the left, lands after c; three equal columns.
-        let frames = tab.splitRoot.paneFrames()
-        for frame in frames.values {
-            #expect(abs(frame.width - 1.0 / 3.0) < 0.001)
-        }
-        #expect(try abs(#require(frames[aID]).minX - 2.0 / 3.0) < 0.001)
-    }
-
-    @Test
-    func movePane_moves_without_duplicating_or_losing_panes() throws {
-        // Reordering is detach-then-merge: the moved pane must vanish from
-        // its old spot (the tree collapses around it) and every other pane
-        // must survive exactly once.
-        let (tab, ids) = makeTab(H(pane("a"), V(pane("b"), pane("c"))), focused: "a")
-        let before = Set(tab.splitRoot.allPanes().map(\.id))
-        let cID = try #require(ids["c"])
-        #expect(try ModelWriter.paneMove(tab, paneID: cID, to: .pane(#require(ids["a"]), .top)))
-        let after = tab.splitRoot.allPanes().map(\.id)
-        #expect(Set(after) == before)
-        #expect(after.count == 3)
-        // c left the right column (which collapsed to just b) and now sits
-        // above a.
-        #expect(after == [ids["c"], ids["a"], ids["b"]].compactMap(\.self))
-    }
-
-    @Test
-    func movePane_to_target_at_itself_is_noop() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        #expect(!ModelWriter.paneMove(tab, paneID: aID, to: .pane(aID, .left)))
-        #expect(!ModelWriter.paneMove(tab, paneID: aID, to: .divider(aID, .right)))
-        #expect(tab.splitRoot.allPanes().count == 2)
-    }
-
-    @Test
-    func movePane_to_rootEdge_with_only_pane_is_noop() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        #expect(try !ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .rootEdge(.left)))
-    }
-
-    // MARK: - movePane
-
-    @Test
-    func movePane_detaches_and_splits_destination() throws {
-        let (tab, ids) = makeTab(H(pane("a"), V(pane("b"), pane("c"))), focused: "a")
-        #expect(try ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .pane(#require(ids["c"]), .right)))
-        #expect(render(tab.splitRoot, ids: ids) == "V(b, H(c, a))")
-    }
-
-    @Test
-    func movePane_top_zone_places_pane_before_destination() throws {
-        let (tab, ids) = makeTab(H(pane("a"), V(pane("b"), pane("c"))), focused: "a")
-        #expect(try ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .pane(#require(ids["b"]), .top)))
-        #expect(render(tab.splitRoot, ids: ids) == "V(V(a, b), c)")
-    }
-
-    @Test
-    func movePane_reuses_pane_instance() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        let before = try #require(tab.splitRoot.findPane(id: aID))
-        #expect(try ModelWriter.paneMove(tab, paneID: aID, to: .pane(#require(ids["b"]), .bottom)))
-        #expect(tab.splitRoot.findPane(id: aID) === before)
-    }
-
-    @Test
-    func movePane_onto_sibling_swaps_sides() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(try ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .pane(#require(ids["b"]), .right)))
-        #expect(render(tab.splitRoot, ids: ids) == "H(b, a)")
-    }
-
-    @Test
-    func movePane_focuses_moved_pane_and_clears_zoom() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "b")
-        let aID = try #require(ids["a"])
-        try ModelWriter.paneZoom(tab, toggling: #require(ids["b"]))
-        #expect(try ModelWriter.paneMove(tab, paneID: aID, to: .pane(#require(ids["b"]), .top)))
-        #expect(tab.focusedPaneID == aID)
-        #expect(tab.zoomedPaneID == nil)
-    }
-
-    @Test
-    func movePane_onto_self_is_noop() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        #expect(!ModelWriter.paneMove(tab, paneID: aID, to: .pane(aID, .left)))
-        #expect(render(tab.splitRoot, ids: ids) == "H(a, b)")
-    }
-
-    @Test
-    func movePane_only_pane_is_noop() throws {
-        let (tab, ids) = makeTab(pane("a"), focused: "a")
-        #expect(try !ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .pane(UUID(), .left)))
-        #expect(render(tab.splitRoot, ids: ids) == "a")
-    }
-
-    @Test
-    func movePane_unknown_source_or_destination_is_noop() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        #expect(try !ModelWriter.paneMove(tab, paneID: UUID(), to: .pane(#require(ids["b"]), .left)))
-        #expect(try !ModelWriter.paneMove(tab, paneID: #require(ids["a"]), to: .pane(UUID(), .left)))
-        #expect(render(tab.splitRoot, ids: ids) == "H(a, b)")
-    }
-
     // MARK: - autoTitle / sidebarTitle / customTitle
 
     @Test
     func sidebarTitle_returns_customTitle_when_set() {
-        let (tab, _) = makeTab(pane("a"))
-        ModelWriter.tabSet(tab, title: "My Tab")
+        let (tab, _) = makeTab(pane("a"), title: "My Tab")
         #expect(tab.sidebarTitle == "My Tab")
     }
 
     @Test
     func sidebarTitle_falls_back_to_autoTitle_when_customTitle_nil() {
         let (tab, _) = makeTab(pane("a"))
-        ModelWriter.tabSet(tab, title: nil)
         #expect(tab.sidebarTitle == tab.autoTitle)
     }
 
     @Test
     func autoTitle_is_unaffected_by_customTitle() {
-        let (tab, _) = makeTab(pane("a"))
-        let autoBeforeSet = tab.autoTitle
-        ModelWriter.tabSet(tab, title: "My Tab")
-        #expect(tab.autoTitle == autoBeforeSet)
-    }
-
-    @Test
-    func clearing_customTitle_restores_autoTitle_in_sidebarTitle() {
-        let (tab, _) = makeTab(pane("a"))
-        let auto = tab.autoTitle
-        ModelWriter.tabSet(tab, title: "My Tab")
-        #expect(tab.sidebarTitle == "My Tab")
-        ModelWriter.tabSet(tab, title: nil)
-        #expect(tab.sidebarTitle == auto)
+        let (tree, _) = build(pane("a"))
+        let plain = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: nil)
+        let renamed = TerminalTab(id: UUID(), splitRoot: tree, focusedPaneID: nil, customTitle: "My Tab")
+        #expect(renamed.autoTitle == plain.autoTitle)
     }
 
     @Test
     func autoTitle_joins_multiple_pane_titles_with_separator() {
         let (tab, _) = makeTab(H(pane("a"), pane("b")))
-        // Both panes have the same processTitle in a test environment, so we
-        // just verify the separator is present and autoTitle has two segments.
+        // Both panes have the same title in a test, so the test checks
+        // only that the title has two segments.
         let parts = tab.autoTitle.components(separatedBy: " | ")
         #expect(parts.count == 2)
-    }
-
-    /// Regression: `H(l1, V(r1, r2))`, close `l1` → must become `V(r1, r2)`
-    /// with the original panes intact.
-    @Test
-    func removePane_HV_close_regression() throws {
-        let (tab, ids) = makeTab(H(pane("l1"), V(pane("r1"), pane("r2"))), focused: "l1")
-        #expect(try ModelWriter.paneClose(tab, paneID: #require(ids["l1"])) == .removed)
-        #expect(render(tab.splitRoot, ids: ids) == "V(r1, r2)")
-        let remaining = Set(tab.splitRoot.allPanes().map(\.id))
-        #expect(try remaining == [#require(ids["r1"]), #require(ids["r2"])])
-        #expect(tab.focusedPaneID != nil)
-        #expect(try remaining.contains(#require(tab.focusedPaneID)))
-    }
-
-    // MARK: - split with command
-
-    @Test
-    func split_threads_command_into_new_pane() throws {
-        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "a")
-        let aID = try #require(ids["a"])
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: aID, direction: .vertical, command: .typed("btop")))
-        let newPane = try #require(tab.splitRoot.findPane(id: newID))
-        #expect(newPane.start == .typed("btop"))
-        // The source pane's command is untouched.
-        let sourcePane = try #require(tab.splitRoot.findPane(id: aID))
-        #expect(sourcePane.start == nil)
-    }
-
-    // MARK: - makeGrid
-
-    @Test
-    func makeGrid_creates_rows_times_cols_panes() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        let source = try #require(tab.focusedPaneID)
-        let created = ModelWriter.paneGrid(tab, paneID: source, rows: 2, columns: 3, command: .typed("yes"))
-        #expect(created.count == 5)
-        #expect(tab.splitRoot.allPanes().count == 6)
-        // Every NEW pane carries the command; the source pane doesn't.
-        for id in created {
-            let newPane = try #require(tab.splitRoot.findPane(id: id))
-            #expect(newPane.start == .typed("yes"))
-        }
-        let sourcePane = try #require(tab.splitRoot.findPane(id: source))
-        #expect(sourcePane.start == nil)
-        // Focus returns to the source (top-left) pane.
-        #expect(tab.focusedPaneID == source)
-    }
-
-    @Test
-    func makeGrid_single_column_stacks_rows() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        let source = try #require(tab.focusedPaneID)
-        let created = ModelWriter.paneGrid(tab, paneID: source, rows: 3, columns: 1)
-        #expect(created.count == 2)
-        #expect(tab.splitRoot.allPanes().count == 3)
-    }
-
-    @Test
-    func makeGrid_rejects_degenerate_shapes() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        let source = try #require(tab.focusedPaneID)
-        #expect(ModelWriter.paneGrid(tab, paneID: source, rows: 1, columns: 1).isEmpty)
-        #expect(ModelWriter.paneGrid(tab, paneID: source, rows: 0, columns: 4).isEmpty)
-        #expect(ModelWriter.paneGrid(tab, paneID: UUID(), rows: 2, columns: 2).isEmpty)
-        #expect(tab.splitRoot.allPanes().count == 1)
     }
 
     // MARK: - Agent icon
 
     @Test
     func tab_agentIcon_prefers_focused_pane() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        let firstPane = try #require(tab.splitRoot.allPanes().first)
-        firstPane.applyForegroundName("codex")
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: firstPane.id, direction: .horizontal))
-        let newPane = try #require(tab.splitRoot.findPane(id: newID))
-        newPane.applyForegroundName("claude")
-        ModelWriter.paneFocus(tab, paneID: newID)
+        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "b")
+        try paneNamed("a", in: tab, ids).applyForegroundName("codex")
+        try paneNamed("b", in: tab, ids).applyForegroundName("claude")
         #expect(tab.agentIcon == .claude)
     }
 
     @Test
     func tab_agentIcon_falls_back_to_any_pane_running_an_agent() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        let firstPane = try #require(tab.splitRoot.allPanes().first)
-        let newID = try #require(ModelWriter.paneSplit(tab, paneID: firstPane.id, direction: .horizontal))
-        firstPane.applyForegroundName("grok")
-        try #require(tab.splitRoot.findPane(id: newID)).applyForegroundName("zsh")
-        ModelWriter.paneFocus(tab, paneID: newID)
+        let (tab, ids) = makeTab(H(pane("a"), pane("b")), focused: "b")
+        try paneNamed("a", in: tab, ids).applyForegroundName("grok")
+        try paneNamed("b", in: tab, ids).applyForegroundName("zsh")
         #expect(tab.agentIcon == .grok)
     }
 
     @Test
     func tab_agentIcon_is_nil_when_no_agent_runs() throws {
-        let tab = TerminalTab(projectPath: "/", projectID: UUID())
-        try #require(tab.splitRoot.allPanes().first).applyForegroundName("zsh")
+        let (tab, ids) = makeTab(pane("a"))
+        try paneNamed("a", in: tab, ids).applyForegroundName("zsh")
         #expect(tab.agentIcon == nil)
     }
 }

@@ -331,6 +331,56 @@ assert "pane.removed" not in [e["e"] for e in c.events()]
 PY
 }
 
+@test "model: swap, replace, folders, a new tree and an even tab" {
+  "$ZMX" server
+  python3 - <<'PY'
+from v2client import ServerClient
+c = ServerClient(level=3)
+pane = lambda pid: {"t": "pane", "a": {"id": pid, "session": "macterm-x-" + pid}}
+split = lambda sid, d, r, a, b: {"t": "split", "a": {"id": sid, "dir": d, "ratio": r, "first": a, "second": b}}
+c.call("project.create", id="p1", name="One", path="/tmp/one")
+c.call("tab.create", project="p1", id="t1", root=split("s1", "horizontal", 0.3, pane("a"), pane("b")))
+
+def tab():
+    m = c.call("state.subscribe")["model"]
+    return next(p for p in m["projects"] if p["id"] == "p1")["tabs"][0]
+
+c.call("pane.swap", id="a", other="b")
+root = tab()["root"]
+assert [root["a"]["first"]["a"]["id"], root["a"]["second"]["a"]["id"]] == ["b", "a"], root
+
+res = c.call("pane.replace", id="a", new={"id": "n", "session": "macterm-x-n"})
+assert [p["id"] for p in res["panes"]] == ["a"], res
+assert tab()["root"]["a"]["second"]["a"]["id"] == "n"
+
+c.call("pane.set", id="n", cwd="/tmp/one/src")
+assert tab()["root"]["a"]["second"]["a"]["cwd"] == "/tmp/one/src"
+
+c.call("tab.rebalance", id="t1")
+assert tab()["root"]["a"]["ratio"] == 0.5
+
+res = c.call("tab.layout", id="t1", root=split("s9", "vertical", 0.5, pane("n"), pane("z")), focused="z")
+assert [p["id"] for p in res["panes"]] == ["b"], res
+t = tab()
+assert t["focused"] == "z" and t["root"]["a"]["id"] == "s9", t
+bad = c.request("pane.swap", id="n", other="nope")
+assert bad["err"]["code"] == "invalid_args", bad
+
+# A grid is one change: the target is the top-left cell, every cell is even.
+c.call("tab.create", project="p1", id="t2", root=pane("g"))
+new = [{"id": "g%d" % i, "session": "macterm-x-g%d" % i} for i in range(1, 6)]
+c.call("pane.grid", tab="t2", target="g", rows=2, columns=3, new=new, split_ids=["q%d" % i for i in range(1, 6)])
+m = c.call("state.subscribe")["model"]
+t2 = next(t for t in next(p for p in m["projects"] if p["id"] == "p1")["tabs"] if t["id"] == "t2")
+def leaves(n):
+    return [n["a"]["id"]] if n["t"] == "pane" else leaves(n["a"]["first"]) + leaves(n["a"]["second"])
+assert leaves(t2["root"]) == ["g", "g2", "g3", "g1", "g4", "g5"], leaves(t2["root"])
+assert t2["focused"] == "g"
+short = c.request("pane.grid", tab="t2", target="g", rows=2, columns=2, new=new[:1], split_ids=["x"])
+assert short["err"]["code"] == "invalid_args", short
+PY
+}
+
 @test "model: the capability fields of a project refuse what they do not allow" {
   "$ZMX" server
   python3 - <<'PY'

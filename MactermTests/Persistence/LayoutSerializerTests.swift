@@ -4,13 +4,17 @@ import Testing
 
 @MainActor
 struct LayoutSerializerTests {
+    /// The tabs of a project with one tab of `root`.
+    private func tabs(_ root: SplitNode) -> [TerminalTab] {
+        [TerminalTab(id: UUID(), splitRoot: root, focusedPaneID: root.allPanes().first?.id)]
+    }
+
     @Test
     func emits_tab_topology_with_direction_and_ratio() {
-        let ws = Workspace(id: UUID(), projectPath: "/proj")
         let (tree, _) = build(H(pane("a", projectPath: "/proj"), pane("b", projectPath: "/proj/sub"), ratio: 0.7))
-        ModelWriter.tabSetTree(ws.tabs[0], root: tree, focusedPaneID: ws.tabs[0].focusedPaneID)
+        let ws = tabs(tree)
 
-        let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj")
+        let file = LayoutSerializer.layout(tabs: ws, projectName: "proj", projectRoot: "/proj")
         #expect(file.tabs.count == 1)
         guard case let .split(b) = file.tabs[0].layout else {
             Issue.record("expected split")
@@ -47,12 +51,12 @@ struct LayoutSerializerTests {
         // probe-cached remote foreground, so Save Layout captures a running
         // command with no local pid (the bug: it used to save an empty leaf).
         let root = "devbox:~/dev/api"
-        let ws = Workspace(id: UUID(), projectPath: root)
-        let pane = Pane(projectPath: root, projectID: ws.id)
+        let projectID = UUID()
+        let pane = Pane(projectPath: root, projectID: projectID)
         pane.applyForeground(SessionForeground(comm: "btop", command: "btop --utf-force"))
-        ModelWriter.tabSetTree(ws.tabs[0], root: .pane(pane), focusedPaneID: ws.tabs[0].focusedPaneID)
+        let ws = tabs(.pane(pane))
 
-        let file = LayoutSerializer.layout(for: ws, projectName: "api", projectRoot: root)
+        let file = LayoutSerializer.layout(tabs: ws, projectName: "api", projectRoot: root)
         guard case let .pane(p) = file.tabs[0].layout else {
             Issue.record("expected leaf")
             return
@@ -67,12 +71,12 @@ struct LayoutSerializerTests {
         // The probe reporting the session's shell means an idle prompt —
         // nothing to record, same as a local idle pane.
         let root = "devbox:~/dev/api"
-        let ws = Workspace(id: UUID(), projectPath: root)
-        let pane = Pane(projectPath: root, projectID: ws.id)
+        let projectID = UUID()
+        let pane = Pane(projectPath: root, projectID: projectID)
         pane.applyForeground(SessionForeground(comm: "-zsh", command: "-zsh"))
-        ModelWriter.tabSetTree(ws.tabs[0], root: .pane(pane), focusedPaneID: ws.tabs[0].focusedPaneID)
+        let ws = tabs(.pane(pane))
 
-        let file = LayoutSerializer.layout(for: ws, projectName: "api", projectRoot: root)
+        let file = LayoutSerializer.layout(tabs: ws, projectName: "api", projectRoot: root)
         guard case let .pane(p) = file.tabs[0].layout else {
             Issue.record("expected leaf")
             return
@@ -84,14 +88,10 @@ struct LayoutSerializerTests {
     func records_live_running_command_per_pane() {
         // Save records what the pane is *currently* running (its live foreground
         // command), not what it was spawned with.
-        let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ModelWriter.tabSetTree(
-            ws.tabs[0],
-            root: .pane(Pane(projectPath: "/proj", projectID: ws.id)),
-            focusedPaneID: ws.tabs[0].focusedPaneID
-        )
+        let projectID = UUID()
+        let ws = tabs(.pane(Pane(projectPath: "/proj", projectID: projectID)))
 
-        let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in "btop" })
+        let file = LayoutSerializer.layout(tabs: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in "btop" })
         guard case let .pane(p) = file.tabs[0].layout else {
             Issue.record("expected leaf")
             return
@@ -103,14 +103,10 @@ struct LayoutSerializerTests {
     func omits_run_for_idle_pane() {
         // Pane idle at a prompt (no live command) → no run, even if it was
         // spawned with one.
-        let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ModelWriter.tabSetTree(
-            ws.tabs[0],
-            root: .pane(Pane(projectPath: "/proj", projectID: ws.id, start: .typed("btop"))),
-            focusedPaneID: ws.tabs[0].focusedPaneID
-        )
+        let projectID = UUID()
+        let ws = tabs(.pane(Pane(projectPath: "/proj", projectID: projectID, start: .typed("btop"))))
 
-        let file = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in nil })
+        let file = LayoutSerializer.layout(tabs: ws, projectName: "proj", projectRoot: "/proj", liveCommand: { _ in nil })
         guard case let .pane(p) = file.tabs[0].layout else {
             Issue.record("expected leaf")
             return
@@ -122,15 +118,11 @@ struct LayoutSerializerTests {
     func records_live_shell_when_pane_sits_in_one() {
         // A pane the user dropped into a non-default shell (e.g. `zsh` from `nu`)
         // saves that shell as `shell:`.
-        let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ModelWriter.tabSetTree(
-            ws.tabs[0],
-            root: .pane(Pane(projectPath: "/proj", projectID: ws.id)),
-            focusedPaneID: ws.tabs[0].focusedPaneID
-        )
+        let projectID = UUID()
+        let ws = tabs(.pane(Pane(projectPath: "/proj", projectID: projectID)))
 
         let file = LayoutSerializer.layout(
-            for: ws,
+            tabs: ws,
             projectName: "proj",
             projectRoot: "/proj",
             liveCommand: { _ in nil },
@@ -148,15 +140,11 @@ struct LayoutSerializerTests {
     func omits_shell_when_pane_is_in_default_shell() {
         // Idle in the default login shell → no shell recorded (liveShell returns
         // nil for the default), so the layout stays portable.
-        let ws = Workspace(id: UUID(), projectPath: "/proj")
-        ModelWriter.tabSetTree(
-            ws.tabs[0],
-            root: .pane(Pane(projectPath: "/proj", projectID: ws.id)),
-            focusedPaneID: ws.tabs[0].focusedPaneID
-        )
+        let projectID = UUID()
+        let ws = tabs(.pane(Pane(projectPath: "/proj", projectID: projectID)))
 
         let file = LayoutSerializer.layout(
-            for: ws,
+            tabs: ws,
             projectName: "proj",
             projectRoot: "/proj",
             liveCommand: { _ in nil },
@@ -178,16 +166,16 @@ struct LayoutSerializerTests {
         let root = dir.path
         let store = ProjectFileStore(directoryURL: dir.appendingPathComponent("projects"))
 
-        let ws = Workspace(id: UUID(), projectPath: root)
+        let projectID = UUID()
         let tree = SplitNode.split(SplitBranch(
             direction: .vertical,
             ratio: 0.4,
-            first: .pane(Pane(projectPath: root, projectID: ws.id, start: .typed("npm run dev"))),
-            second: .pane(Pane(projectPath: root, projectID: ws.id))
+            first: .pane(Pane(projectPath: root, projectID: projectID, start: .typed("npm run dev"))),
+            second: .pane(Pane(projectPath: root, projectID: projectID))
         ))
-        ModelWriter.tabSetTree(ws.tabs[0], root: tree, focusedPaneID: ws.tabs[0].focusedPaneID)
+        let ws = tabs(tree)
 
-        let layout = LayoutSerializer.layout(for: ws, projectName: "proj", projectRoot: root, liveCommand: { $0.start?.text })
+        let layout = LayoutSerializer.layout(tabs: ws, projectName: "proj", projectRoot: root, liveCommand: { $0.start?.text })
         try store.write(ProjectFile(name: "proj", path: root, tabs: layout.tabs), projectName: "proj")
         let loaded = try #require(try store.loadFull(forProjectPath: root))
 

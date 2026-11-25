@@ -257,18 +257,27 @@ class MactermHarness:
 
     def open_project(self, attempts=30):
         """Ask the app to open a project so a real shell + surface is on
-        screen. ProjectStore.add saves projects.json into the isolated data
-        dir synchronously, so its existence is the readiness marker; retry
-        (idempotently) rather than sleep-and-hope, since the window this
-        needs only exists once macOS granted activation."""
-        marker = os.path.join(self.data_dir, "projects.json")
+        screen. The server writes the project to model.json in the isolated
+        data dir 100 ms after the change (design/010 §2), so a model.json
+        that names the project is the readiness marker; retry (idempotently)
+        rather than sleep-and-hope, since the window this needs only exists
+        once macOS granted activation."""
+        marker = os.path.join(self.data_dir, "model.json")
+
+        def opened():
+            try:
+                with open(marker) as handle:
+                    return '"Benchmark"' in handle.read()
+            except OSError:
+                return False
+
         for _ in range(attempts):
             notify("activate")
             notify("open-project")
             time.sleep(2)
             if not self.is_alive():
                 raise HarnessError("app process died while opening the project")
-            if os.path.exists(marker):
+            if opened():
                 return
         raise HarnessError(
             "app never opened a project — window creation requires app "

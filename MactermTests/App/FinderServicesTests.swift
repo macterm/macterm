@@ -9,16 +9,15 @@ import Testing
 @MainActor
 struct FinderServicesTests {
     private func makeAppState() -> AppState {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-\(UUID().uuidString).json")
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        return AppState(workspaceStore: WorkspaceStore(fileURL: tmp), projectFiles: ProjectFileStore(directoryURL: dir))
+        TestModel.appState()
     }
 
-    private func makeProjectStore() -> ProjectStore {
-        ProjectStore(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-tests-finder-\(UUID().uuidString).json"))
+    /// The project store of `state`'s model. As in the app, each project
+    /// that it adds gets its first tab.
+    private func makeProjectStore(_ state: AppState) -> ProjectStore {
+        let store = TestModel.projectStore(state)
+        store.onAdd = { [weak state] in state?.projectAdded($0) }
+        return store
     }
 
     // MARK: - Request resolution
@@ -60,7 +59,7 @@ struct FinderServicesTests {
     @Test
     func a_request_waits_for_attach_and_the_launch_restore_then_creates_and_selects() {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         let provider = FinderServiceProvider()
 
         provider.open(paths: ["/Users/me/proj"])
@@ -80,7 +79,7 @@ struct FinderServicesTests {
     @Test
     func after_the_restore_a_request_acts_immediately_and_selects_the_last_folder() {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let provider = FinderServiceProvider()
         provider.attach(appState: state, projectStore: store)
@@ -99,7 +98,7 @@ struct FinderServicesTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let provider = FinderServiceProvider()
         provider.attach(appState: state, projectStore: store)
@@ -118,7 +117,7 @@ struct FinderServicesTests {
     @Test
     func an_empty_selection_reports_an_error_instead_of_creating_anything() {
         let state = makeAppState()
-        let store = makeProjectStore()
+        let store = makeProjectStore(state)
         state.restoreWindows(adopting: WindowState())
         let provider = FinderServiceProvider()
         provider.attach(appState: state, projectStore: store)

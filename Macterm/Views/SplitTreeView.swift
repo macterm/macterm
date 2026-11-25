@@ -210,6 +210,8 @@ struct SplitLeafView: View {
 
 /// A resizable split container with a draggable divider.
 struct SplitDividerView<First: View, Second: View>: View {
+    @Environment(\.modelWriter)
+    private var writer
     let branch: SplitBranch
     @ViewBuilder
     let first: First
@@ -255,7 +257,7 @@ struct SplitDividerView<First: View, Second: View>: View {
                         resizedValue: { start, delta in
                             SplitDividerMetrics.draggedRatio(start: start, delta: delta, total: total)
                         },
-                        onResize: { ModelWriter.splitRatio(branch, ratio: $0) }
+                        onResize: { writer?.splitRatio(branch.id, ratio: $0) }
                     )
                     .frame(
                         width: h ? SplitDividerMetrics.bandThickness : nil,

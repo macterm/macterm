@@ -5054,6 +5054,22 @@
         }
       }
     },
+    "Macterm could not add the project." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 프로젝트를 추가하지 못했습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法添加项目。"
+          }
+        }
+      }
+    },
     "Macterm could not encode the image." : {
       "localizations" : {
         "ko" : {
@@ -5082,6 +5098,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 无法解释此文本。请重试。"
+          }
+        }
+      }
+    },
+    "Macterm could not read the projects of an earlier version" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 이전 버전의 프로젝트를 읽지 못했습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 无法读取早期版本的项目"
           }
         }
       }
@@ -5345,6 +5377,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macterm 从提示符中存储密钥密码短语。请在提示符处输入一次并存储。"
+          }
+        }
+      }
+    },
+    "Macterm tries again at the next start." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm이 다음 시작 때 다시 시도합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macterm 会在下次启动时重试。"
           }
         }
       }
@@ -10737,6 +10785,22 @@
         }
       }
     },
+    "The change did not apply" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경 사항이 적용되지 않았습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改未应用"
+          }
+        }
+      }
+    },
     "The command did not finish within %lld seconds." : {
       "localizations" : {
         "ko" : {
@@ -11232,6 +11296,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
+          }
+        }
+      }
+    },
+    "The session server is not available. Macterm tries again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 서버를 사용할 수 없습니다. Macterm이 다시 시도합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话服务器不可用。Macterm 会重试。"
           }
         }
       }

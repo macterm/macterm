@@ -94,11 +94,11 @@ final class ProjectMemory {
         isEnabled && window.projectMemoryPanelVisible
     }
 
-    /// Whether a workspace is a project that memory covers.
-    static func covers(_ projectID: UUID) -> Bool {
-        !Project.isSynthetic(projectID)
-            && projectID != QuickTerminalService.projectID
-            && projectID != DesktopWidget.projectID
+    /// Whether memory covers a project: a project with a folder
+    /// (design/010 §11, §2). Pinned, Scratch Tabs, the quick terminal and the
+    /// widgets have none.
+    static func covers(_ project: Project?) -> Bool {
+        project?.hasFolder == true
     }
 
     // MARK: - Recording
@@ -114,7 +114,7 @@ final class ProjectMemory {
         // Any command can move the branch (`git switch`, a commit), recorded
         // or not: a command with no text changes the Git state just as well.
         if panelShows(end.projectID) { refreshGit(end.projectID, after: Self.gitReadAfterCommand) }
-        guard Self.isEnabled, Self.covers(end.projectID) else { return }
+        guard Self.isEnabled, Self.covers(projectLookup(end.projectID)) else { return }
         guard let entry = Self.makeEntry(end) else { return }
         store.append(entry, to: end.projectID)
         logger.debug("recorded a command in \(end.projectID, privacy: .public)")

@@ -105,7 +105,10 @@ final class PaneSurface: Identifiable {
         _nsView = view
         connectUICallbacks(view)
         pane.connectViewCallbacks(view)
-        MactermPaneEntity.annotate(view, for: pane)
+        // The quick terminal's and the widgets' panes are in projects that
+        // no window selects: the pane entities do not name them.
+        let addressable = NotificationHandler.shared.appState?.model.project(pane.projectID)?.isSelectable ?? true
+        MactermPaneEntity.annotate(view, for: pane, addressable: addressable)
         return view
     }
 

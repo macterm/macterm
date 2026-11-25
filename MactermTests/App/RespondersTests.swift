@@ -14,13 +14,8 @@ struct MainAppResponderTests {
     }
 
     private func makeFixture() -> Fixture {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-responder-tests-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("workspaces.json")),
-            projectFiles: ProjectFileStore(directoryURL: tmp.appendingPathComponent("projects", isDirectory: true))
-        )
-        let projects = ProjectStore(fileURL: tmp.appendingPathComponent("projects.json"))
+        let state = TestModel.appState()
+        let projects = TestModel.projectStore(state)
         return Fixture(state: state, projects: projects, responder: MainAppResponder(appState: state, projectStore: projects))
     }
 
@@ -45,21 +40,19 @@ struct MainAppResponderTests {
     @Test
     func a_bound_chord_runs_its_commands_action_against_the_active_project() throws {
         let fx = makeFixture()
-        let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
         // In the store as well as selected: the command resolves the project
         // directory for the new pane from `projectStore.projects`.
-        fx.projects.add(project)
-        fx.state.selectProject(project)
-        let tab = try #require(fx.state.workspaces[project.id]?.activeTab)
+        let project = TestModel.project(fx.state)
+        let tab = try #require(fx.state.liveTabs[project.id]?.activeTab)
         #expect(tab.splitRoot.allPanes().count == 1)
 
         #expect(try fx.responder.handle(keyDown(for: .splitDown)) == .handled)
         #expect(tab.splitRoot.allPanes().count == 2)
 
-        _ = fx.state.workspaces[project.id].map { ModelWriter.tabCreate(in: $0, projectPath: "/tmp") }
-        let before = fx.state.workspaces[project.id]?.activeTabID
+        fx.state.createTab(projectID: project.id, projectPath: "/tmp")
+        let before = fx.state.liveTabs[project.id]?.activeTabID
         #expect(try fx.responder.handle(keyDown(for: .nextTabInProject)) == .handled)
-        #expect(fx.state.workspaces[project.id]?.activeTabID != before)
+        #expect(fx.state.liveTabs[project.id]?.activeTabID != before)
     }
 
     /// A hidden toolbar takes the traffic lights and the window drag with it,
@@ -88,8 +81,7 @@ struct MainAppResponderTests {
         HotkeyRegistry.setShortcutString("cmd+opt+ctrl+shift+k", for: action)
 
         // Set directly, not selected: selecting a remote project starts ssh.
-        let project = Project(name: "devbox", path: "devbox:/srv/app", sortOrder: 0)
-        fx.projects.add(project)
+        let project = try #require(fx.projects.add(Project(name: "devbox", path: "devbox:/srv/app", sortOrder: 0)))
         fx.state.activeProjectID = project.id
 
         #expect(try fx.responder.handle(keyDown(for: action)) == .handled)
@@ -110,7 +102,7 @@ struct MainAppResponderTests {
     @Test
     func an_unbound_key_passes_through() throws {
         let fx = makeFixture()
-        fx.state.selectProject(Project(name: "proj", path: "/tmp", sortOrder: 0))
+        TestModel.project(fx.state)
         let plainX = try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
             context: nil, characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7
