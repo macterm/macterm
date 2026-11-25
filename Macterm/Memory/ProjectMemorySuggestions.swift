@@ -7,7 +7,9 @@ import Foundation
 /// panel will run.** A click types the command into a shell, so a
 /// suggestion is kept only when it is a command that ran in this project
 /// (`candidates`), or one of `safeGitCommands`. Anything else the model
-/// proposes is dropped. Without suggestions the panel shows no Suggested
+/// proposes is dropped. A git command is kept only when the Git state
+/// gives it a reason, and a destructive one never
+/// (`gitStateSupports`). Without suggestions the panel shows no Suggested
 /// section, as it shows no summary: a command is never suggested only
 /// because it ran recently.
 enum ProjectMemorySuggestions {
@@ -64,20 +66,83 @@ enum ProjectMemorySuggestions {
         return actions
     }
 
-    /// Whether the Git state gives a git command a reason: a pull needs
-    /// commits behind, a fetch needs an upstream, status and diff need
-    /// changes, a stash list needs stashes. A log always reads. A command
-    /// that is not one of `safeGitCommands` is not judged here. With no Git
-    /// state, nothing is refuted.
+    /// Whether the Git state gives a git command a reason. A command with
+    /// no git in it is not judged here. Each git part of a compound command
+    /// (`;`, `|`, `&`) must pass on its own:
+    ///
+    /// - A destructive one (`isDestructive`) never passes, even when the log
+    ///   has it: a click types it into a shell. `git clean -fd` was offered
+    ///   in a clean tree because the log had it and nothing judged it.
+    /// - With no Git state (no repository), none passes.
+    /// - Each subcommand needs its reason: a pull needs commits behind, a
+    ///   plain push commits ahead, a fetch an upstream; status, diff, add,
+    ///   commit and a plain stash need changes; a stash list or a stash pop
+    ///   needs stashes. A log always reads. Any other subcommand, or an
+    ///   option before the subcommand (`git -C repo push`), never passes.
     static func gitStateSupports(_ command: String, git: GitStatus?) -> Bool {
-        guard let git, safeGitCommands.contains(command) else { return true }
-        switch command {
-        case "git pull": return git.behind > 0
-        case "git fetch": return git.upstream != nil
-        case "git status",
-             "git diff": return !git.isClean
-        case "git stash list": return git.stashes > 0
-        default: return true
+        let invocations = gitInvocations(in: command)
+        guard !invocations.isEmpty else { return true }
+        guard let git else { return false }
+        return invocations.allSatisfy { supports($0, git: git) }
+    }
+
+    /// The git invocations in `command`, each as the words after `git`. A
+    /// part's leading `NAME=value` words are skipped (`GIT_DIR=x git push`).
+    static func gitInvocations(in command: String) -> [[String]] {
+        command.split(whereSeparator: { ";|&\n".contains($0) }).compactMap { part in
+            let words = part.split(whereSeparator: \.isWhitespace).map(String.init)
+                .drop { $0.contains("=") && !$0.hasPrefix("-") }
+            guard words.first == "git" else { return nil }
+            return Array(words.dropFirst())
+        }
+    }
+
+    private static func supports(_ words: [String], git: GitStatus) -> Bool {
+        guard let subcommand = words.first, !isDestructive(words) else { return false }
+        let arguments = words.dropFirst()
+        switch subcommand {
+        case "pull": return git.behind > 0
+        case "push": return arguments.isEmpty && git.ahead > 0
+        case "fetch": return git.upstream != nil
+        case "log": return true
+        case "status",
+             "diff",
+             "add",
+             "commit": return !git.isClean
+        case "stash":
+            switch arguments.first {
+            case nil: return !git.isClean
+            case "list",
+                 "pop": return arguments.count == 1 && git.stashes > 0
+            default: return false
+            }
+        default: return false
+        }
+    }
+
+    /// Whether a git invocation (the words after `git`) can lose work that
+    /// is not committed, or rewrite history. Matched on the subcommand and
+    /// its options, never on a substring.
+    static func isDestructive(_ words: [String]) -> Bool {
+        guard let subcommand = words.first else { return false }
+        let arguments = Array(words.dropFirst())
+        let has = { (option: String) in arguments.contains(option) }
+        switch subcommand {
+        case "clean",
+             "rebase",
+             "filter-branch": return true
+        case "reset": return has("--hard") || has("--merge")
+        case "checkout": return has(".") || has("--") || has("-f") || has("--force")
+        case "restore":
+            return !(has("--staged") || has("-S")) || has("--worktree") || has("-W")
+        case "push":
+            return arguments.contains { $0.hasPrefix("--force") || $0.hasPrefix("+")
+                || ($0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("f"))
+            }
+        case "branch": return has("-D")
+        case "stash": return arguments.first == "drop" || arguments.first == "clear"
+        case "gc": return arguments.contains { $0.hasPrefix("--prune") }
+        default: return false
         }
     }
 }

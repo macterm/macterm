@@ -41,7 +41,7 @@ struct ProjectMemorySuggestionsTests {
             suggestion("git status", "See the changed files."),
             suggestion("make build"),
             suggestion("make test", "Again."),
-        ], entries: entries)
+        ], entries: entries, git: GitStatus(branch: "main", unstaged: 1))
 
         #expect(actions.map(\.command) == ["make test", "git status", "make build"])
         #expect(actions[0].subtitle == "The latest run failed.")
@@ -78,8 +78,66 @@ struct ProjectMemorySuggestionsTests {
         #expect(ProjectMemorySuggestions.actions(from: all, entries: [], git: git).map(\.command)
             == Array(ProjectMemorySuggestions.safeGitCommands.prefix(ProjectMemorySuggestions.limit)))
 
-        // No Git state refutes nothing; a project command is never judged.
-        #expect(ProjectMemorySuggestions.actions(from: all, entries: [], git: nil).count == ProjectMemorySuggestions.limit)
+        // With no Git state, no git command passes; a project command is never judged.
+        #expect(ProjectMemorySuggestions.actions(from: all, entries: [], git: nil).isEmpty)
         #expect(ProjectMemorySuggestions.gitStateSupports("make test", git: GitStatus(branch: "main")))
+        #expect(ProjectMemorySuggestions.gitStateSupports("make test", git: nil))
+    }
+
+    @Test
+    func a_destructive_git_command_is_never_offered_even_from_the_log() {
+        let entries = [
+            entry("git clean -fd", minutesAgo: 9),
+            entry("git push --force", minutesAgo: 8),
+            entry("git reset --hard", minutesAgo: 7),
+            entry("git checkout .", minutesAgo: 6),
+            entry("git restore src/a.swift", minutesAgo: 5),
+            entry("git stash drop", minutesAgo: 4),
+            entry("git branch -D old", minutesAgo: 3),
+            entry("git rebase main", minutesAgo: 2),
+            entry("make test && git push -f", minutesAgo: 1),
+        ]
+        let all = ProjectMemorySuggestions.candidates(entries: entries).map { suggestion($0) }
+        var dirty = GitStatus(branch: "main", upstream: "origin/main")
+        dirty.ahead = 2
+        dirty.behind = 1
+        dirty.unstaged = 3
+        dirty.untracked = 1
+        dirty.stashes = 2
+        #expect(ProjectMemorySuggestions.actions(from: all, entries: entries, git: GitStatus(branch: "main")).isEmpty)
+        #expect(ProjectMemorySuggestions.actions(from: all, entries: entries, git: dirty).isEmpty)
+    }
+
+    @Test
+    func each_git_subcommand_needs_its_own_reason() {
+        let supports = ProjectMemorySuggestions.gitStateSupports
+        let clean = GitStatus(branch: "main", upstream: "origin/main")
+        var ahead = clean
+        ahead.ahead = 1
+        var dirty = clean
+        dirty.untracked = 1
+
+        #expect(!supports("git push", clean))
+        #expect(supports("git push", ahead))
+        #expect(!supports("git push origin main --force-with-lease", ahead))
+        #expect(!supports("git add -A", clean))
+        #expect(supports("git add -A", dirty))
+        #expect(supports("git commit -m wip", dirty))
+        #expect(!supports("git stash", clean))
+        #expect(supports("git stash", dirty))
+        #expect(!supports("git stash pop", dirty))
+        var stashed = clean
+        stashed.stashes = 1
+        #expect(supports("git stash pop", stashed))
+        #expect(!ProjectMemorySuggestions.isDestructive(["restore", "--staged", "a.swift"]))
+        #expect(ProjectMemorySuggestions.isDestructive(["restore", "a.swift"]))
+        // An unknown subcommand, or an option before it, is never offered.
+        #expect(!supports("git merge feature", dirty))
+        #expect(!supports("git cherry-pick abc123", dirty))
+        #expect(!supports("git -C repo status", dirty))
+        // Every git part of a compound command must pass.
+        #expect(supports("make test && git add -A", dirty))
+        #expect(!supports("git add -A && git push", dirty))
+        #expect(!supports("GIT_DIR=x git clean -fd", dirty))
     }
 }
