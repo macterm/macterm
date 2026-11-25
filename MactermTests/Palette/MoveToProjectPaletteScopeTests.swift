@@ -146,6 +146,16 @@ struct MoveToProjectPaletteScopeTests {
     }
 
     @Test
+    func a_pinned_tab_moves_to_the_project_as_an_unpin() throws {
+        let f = makeFixture()
+        let tab = try makeTab(f, in: f.moving)
+        f.state.pinTab(tab, fromProject: f.moving.id)
+        #expect(f.state.moveNode(.tab(projectID: PinnedTabs.workspaceID, tabID: tab), to: f.api, store: f.store, in: nil))
+        #expect(f.state.workspaces[f.api.id]?.tabs.contains { $0.id == tab } == true)
+        #expect(f.state.pinnedRecord(tab) == nil)
+    }
+
+    @Test
     func a_tab_lists_every_project_but_its_own() throws {
         let f = makeFixture()
         let tab = try makeTab(f, in: f.api)
@@ -165,7 +175,7 @@ struct MoveToProjectPaletteScopeTests {
     }
 
     @Test
-    func the_command_moves_the_shown_tab_and_on_the_project_screen_the_project() throws {
+    func the_node_is_the_shown_tab_and_on_the_project_screen_the_project() throws {
         let f = makeFixture()
         let window = WindowState(activeProjectID: f.moving.id)
         f.state.registerWindow(window)
@@ -175,6 +185,8 @@ struct MoveToProjectPaletteScopeTests {
         #expect(f.state.moveToProjectNode(store: f.store) == .tab(projectID: f.moving.id, tabID: tab))
         f.state.showProjectScreen(f.moving, in: window)
         #expect(f.state.moveToProjectNode(store: f.store) == .project(f.moving.id))
+        let row = try #require(CommandSource().emptyItems(context: f.palette)?.first { $0.title == AppCommand.moveToProject.title })
+        #expect(row.opensScope == .moveToProject(.project(f.moving.id)))
     }
 
     // MARK: - When the commands apply

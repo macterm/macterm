@@ -32,18 +32,18 @@ extension AppState {
     }
 
     /// The node that Move to Project moves from the palette and the menu
-    /// bar: the node that the key window shows. That is the active project
-    /// while the window shows its project screen (a click on its sidebar
-    /// row) or while it has no tab, else the active tab. A single sidebar
-    /// selection shows its node, so this is the selected row. The palette
-    /// takes the focus from the sidebar, so the focus cannot choose.
+    /// bar: the node that the key window shows. That is the tab that the
+    /// window selects (`selectedTab(for:in:)`), else the active project: on
+    /// its project screen (a click on its sidebar row) or with no tab. A
+    /// single sidebar selection shows its node, so this is the selected row.
+    /// The palette takes the focus from the sidebar, so the focus cannot
+    /// choose. A multi-selection of the sidebar does not change the node;
+    /// design issue 0608 decides a move of more than one node.
     func moveToProjectNode(store: ProjectStore) -> SidebarItem? {
         guard let projectID = activeProjectID else { return nil }
-        let tab = workspaces[projectID]?.activeTab
-        if store.row(projectID) != nil, keyWindowShowsProjectScreen || tab == nil {
-            return .project(projectID)
-        }
-        return tab.map { .tab(projectID: projectID, tabID: $0.id) }
+        let tab = keyWindow.map { selectedTab(for: projectID, in: $0) } ?? workspaces[projectID]?.activeTab
+        if let tab { return .tab(projectID: projectID, tabID: tab.id) }
+        return store.row(projectID) != nil ? .project(projectID) : nil
     }
 
     /// New Project Inside: Open Folder, starting in the folder of `parent`.
