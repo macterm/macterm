@@ -148,15 +148,18 @@ struct NewProjectInputTests {
 
     @Test
     func a_remote_spec_gets_the_remote_rows() throws {
-        let (context, window) = makeContext()
+        let (context, _) = makeContext()
         let scope = InputPaletteScope(input: .newProject)
 
         let new = try #require(rows(scope, "devbox:~/dev/api", context).first)
         #expect(new.subtitle == "Add remote project: devbox:~/dev/api")
         #expect(scope.failure == nil)
-        #expect(scope.press(new) == .closed)
-        #expect(window.isNewRemoteProjectSheetPresented, "the dialog adds the project")
-        #expect(window.newRemoteProjectDraft != nil)
+        guard case let .opens(.input(folderStep)) = scope.press(new) else {
+            Issue.record("the remote row opens the folder step of New Remote Project")
+            return
+        }
+        #expect(folderStep.id == "remote-folder:devbox")
+        #expect(folderStep.initialValue == "~/dev/api")
         #expect(context.projectStore.projects.isEmpty)
 
         let existing = context.projectStore.create(name: "api", path: "devbox:~/dev/api")

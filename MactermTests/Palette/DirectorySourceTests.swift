@@ -160,25 +160,23 @@ struct DirectorySourceTests {
     }
 
     @Test
-    func typed_remote_spec_opens_the_filled_sheet_that_checks_the_folder() throws {
-        // 0358: the sheet checks the folder on the host, so the palette adds
-        // nothing itself.
-        let (ctx, state, store) = makeContext()
-        let window = WindowState()
-        state.registerWindow(window)
+    func typed_remote_spec_opens_the_folder_step_filled_in() throws {
+        // 0358: step 2 of New Remote Project checks the folder on the host,
+        // so the row adds nothing itself.
+        let (ctx, _, store) = makeContext()
         let items = DirectorySource().items(query: "me@devbox:~/dev/api", context: ctx)
         let item = try #require(items.first)
         #expect(items.count == 1)
         #expect(item.title == "api")
         #expect(item.subtitle?.contains("Add remote project") == true)
 
-        item.action()
+        guard case let .input(input)? = item.opensScope else {
+            Issue.record("the row opens the folder step")
+            return
+        }
+        #expect(input.id == "remote-folder:me@devbox")
+        #expect(input.initialValue == "~/dev/api")
         #expect(store.projects.isEmpty)
-        #expect(window.isNewRemoteProjectSheetPresented)
-        let draft = try #require(window.newRemoteProjectDraft)
-        #expect(draft.host == "me@devbox")
-        #expect(draft.directory == "~/dev/api")
-        #expect(ProjectPath.composeRemote(host: draft.host, directory: draft.directory) == "me@devbox:~/dev/api")
     }
 
     @Test
@@ -197,22 +195,22 @@ struct DirectorySourceTests {
 
     @Test
     func typed_remote_spec_backing_a_project_also_offers_adding_another() throws {
-        let (ctx, state, store) = makeContext()
-        let window = WindowState()
-        state.registerWindow(window)
+        let (ctx, _, store) = makeContext()
         let existing = Project(name: "api box", path: "devbox:~/dev/api", sortOrder: 0)
         store.add(existing)
 
         let items = DirectorySource().items(query: "devbox:~/dev/api", context: ctx)
         let addAnother = try #require(items.first { $0.subtitle?.contains("Add another project") == true })
         #expect(addAnother.title == "api")
-        addAnother.action()
 
-        // The sheet adds the second project after its check.
+        // The folder step adds the second project after its check.
+        guard case let .input(input)? = addAnother.opensScope else {
+            Issue.record("the row opens the folder step")
+            return
+        }
+        #expect(input.id == "remote-folder:devbox")
+        #expect(input.initialValue == "~/dev/api")
         #expect(store.projects.map(\.id) == [existing.id])
-        #expect(window.newRemoteProjectDraft?.host == "devbox")
-        #expect(window.newRemoteProjectDraft?.directory == "~/dev/api")
-        #expect(window.isNewRemoteProjectSheetPresented)
     }
 
     @Test
