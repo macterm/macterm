@@ -43,6 +43,9 @@ final class AppState {
     var activeProjectID: UUID? {
         didSet {
             Preferences.shared.activeProjectID = activeProjectID
+            // The server keeps the key window's selection (`select.set`), so
+            // the CLI and a new window find it with no GUI state.
+            if activeProjectID != oldValue, let activeProjectID { writer.selectSet(project: activeProjectID) }
             // Push into the key window too (#345). Most callers still set this
             // directly — CLI `project select`, notification navigation, a
             // cross-project tab move — and the window the user is looking at
@@ -362,7 +365,7 @@ final class AppState {
     /// via `pinnedActiveTabID`), and a per-window entry for it is read by
     /// nothing and maintained by nothing — see `selectedTab(for:in:)`.
     private func recordRestoredTab(_ tabID: UUID?, in window: WindowState) {
-        guard let project = window.activeProjectID, project != PinnedTabs.workspaceID, let tabID else { return }
+        guard let project = window.activeProjectID, hasWindowTabSelection(project), let tabID else { return }
         window.activeTabIDs[project] = tabID
     }
 
@@ -533,22 +536,29 @@ final class AppState {
     ///
     /// A window that shows the project screen of `projectID` selects no tab.
     func selectedTab(for projectID: UUID, in window: WindowState) -> TerminalTab? {
-        guard let ws = workspaces[projectID] else { return nil }
-        if showsProjectScreen(projectID, in: window, ws: ws) { return nil }
-        if ws.kind != .pinned,
+        guard let project = model.project(projectID) else { return nil }
+        if showsProjectScreen(project, in: window) { return nil }
+        if hasWindowTabSelection(projectID),
            let id = window.activeTabIDs[projectID],
-           let tab = ws.tabs.first(where: { $0.id == id })
+           let tab = model.tabs(of: projectID).first(where: { $0.id == id })
         {
             return tab
         }
-        return ws.activeTab
+        return model.activeTab(of: projectID)
     }
 
-    /// Whether `window` shows the project screen of `projectID`. Only a
-    /// `.project` workspace has one: a flag restored over a pinned or scratch
+    /// Whether each window keeps its own tab selection in `projectID`. A
+    /// project whose tabs are rows above the tree (`sidebar: top`, Pinned)
+    /// has one selection for every window: its active tab.
+    func hasWindowTabSelection(_ projectID: UUID) -> Bool {
+        model.project(projectID)?.sidebar != .top
+    }
+
+    /// Whether `window` shows the project screen of `project`. Only a
+    /// project of the tree has one: a flag restored over a pinned or scratch
     /// selection is ignored.
-    private func showsProjectScreen(_ projectID: UUID, in window: WindowState, ws: Workspace) -> Bool {
-        window.showsProjectScreen && window.activeProjectID == projectID && ws.kind == .project
+    private func showsProjectScreen(_ project: Project, in window: WindowState) -> Bool {
+        window.showsProjectScreen && window.activeProjectID == project.id && project.isTreeProject
     }
 
     /// Show the project screen of `project` in `window` (the key window when
@@ -559,7 +569,7 @@ final class AppState {
     func showProjectScreen(_ project: Project, in window: WindowState?) {
         selectProject(project, in: window)
         guard let target = window ?? keyWindow, target.activeProjectID == project.id,
-              workspaces[project.id]?.kind == .project, !target.showsProjectScreen
+              model.project(project.id)?.isTreeProject == true, !target.showsProjectScreen
         else { return }
         target.showsProjectScreen = true
         settleWindowSelections()
@@ -585,8 +595,8 @@ final class AppState {
     /// as in a project with no tabs: the workspace's active tab is not on
     /// screen.
     var keyWindowShowsProjectScreen: Bool {
-        guard let key = keyWindow, let projectID = key.activeProjectID, let ws = workspaces[projectID] else { return false }
-        return showsProjectScreen(projectID, in: key, ws: ws)
+        guard let key = keyWindow, let projectID = key.activeProjectID, let project = model.project(projectID) else { return false }
+        return showsProjectScreen(project, in: key)
     }
 
     /// A tab of the window's project is selected: the window shows it.
@@ -625,10 +635,11 @@ final class AppState {
     private func settleWindowSelections() {
         var shown: [UUID: Set<UUID>] = [:]
         for window in renderingWindows {
-            guard let projectID = window.activeProjectID, let ws = workspaces[projectID] else { continue }
-            if ws.kind != .pinned {
-                let valid = window.activeTabIDs[projectID].map { id in ws.tabs.contains { $0.id == id } } ?? false
-                if !valid, let current = ws.activeTabID {
+            guard let projectID = window.activeProjectID, model.project(projectID) != nil else { continue }
+            if hasWindowTabSelection(projectID) {
+                let tabs = model.tabs(of: projectID)
+                let valid = window.activeTabIDs[projectID].map { id in tabs.contains { $0.id == id } } ?? false
+                if !valid, let current = model.activeTabID(of: projectID) {
                     window.activeTabIDs[projectID] = current
                 }
             }
@@ -685,11 +696,11 @@ final class AppState {
     /// shows is fine — this window draws the same panes with surfaces of its
     /// own.
     func selectTab(_ tabID: UUID, projectID: UUID, in window: WindowState) {
-        if keyWindowID == window.id || projectID == PinnedTabs.workspaceID {
+        if keyWindowID == window.id || !hasWindowTabSelection(projectID) {
             selectTab(tabID, projectID: projectID)
             return
         }
-        guard let ws = workspaces[projectID], ws.tabs.contains(where: { $0.id == tabID }) else { return }
+        guard model.tabs(of: projectID).contains(where: { $0.id == tabID }) else { return }
         if window.activeProjectID == projectID { endProjectScreen(in: window) }
         window.activeTabIDs[projectID] = tabID
         settleWindowSelections()
@@ -713,11 +724,11 @@ final class AppState {
     /// (`selectedTab(for:in:)`).
     private func alignKeyWindowTab() {
         if let key = keyWindow, let projectID = key.activeProjectID,
-           let ws = workspaces[projectID], ws.kind != .pinned
+           model.project(projectID) != nil, hasWindowTabSelection(projectID)
         {
-            if let chosen = key.activeTabIDs[projectID], ws.tabs.contains(where: { $0.id == chosen }) {
-                if ws.activeTabID != chosen { ModelWriter.tabPeek(chosen, in: ws) }
-            } else if let current = ws.activeTabID {
+            if let chosen = key.activeTabIDs[projectID], model.tabs(of: projectID).contains(where: { $0.id == chosen }) {
+                if model.activeTabID(of: projectID) != chosen { writer.tabPeek(chosen, in: projectID) }
+            } else if let current = model.activeTabID(of: projectID) {
                 key.activeTabIDs[projectID] = current
             }
         }
@@ -753,36 +764,24 @@ final class AppState {
         }
     }
 
-    /// The workspace hook: its active tab changed by any writer — `createTab`,
+    /// The mirror's hook: a project's active tab changed by any writer — `createTab`,
     /// `closeTab` picking a neighbour, cycling, the CLI — so the window it is
     /// the mirror of records the change. The key window when it is on the
     /// project; otherwise the first window that is, so a `tab select
     /// --project` for a background project still moves the window showing it.
-    private func workspaceActiveTabDidChange(_ ws: Workspace) {
-        guard ws.kind != .pinned else { return }
-        let onProject = windows.filter { $0.activeProjectID == ws.id }
+    private func projectActiveTabDidChange(_ projectID: UUID) {
+        guard hasWindowTabSelection(projectID) else { return }
+        let onProject = windows.filter { $0.activeProjectID == projectID }
         guard let target = onProject.first(where: { $0.id == keyWindowID }) ?? onProject.first else { return }
-        if let tab = ws.activeTabID {
-            target.activeTabIDs[ws.id] = tab
+        if let tab = model.activeTabID(of: projectID) {
+            target.activeTabIDs[projectID] = tab
             // A selected tab ends the project screen: it is what shows now.
             endProjectScreen(in: target)
         } else {
-            target.activeTabIDs.removeValue(forKey: ws.id)
+            target.activeTabIDs.removeValue(forKey: projectID)
         }
         settleWindowSelections()
         if target.id == keyWindowID { claimLeadershipForKeyWindow() }
-    }
-
-    /// Install the hook on every workspace the dictionary holds. Runs from
-    /// `workspaces`'s `didSet`, which fires when a workspace object is added
-    /// or replaced — the only moments a new one can appear.
-    private func attachWorkspaceHooks() {
-        for ws in workspaces.values where ws.onActiveTabChanged == nil {
-            ws.onActiveTabChanged = { [weak self, weak ws] in
-                guard let self, let ws else { return }
-                workspaceActiveTabDidChange(ws)
-            }
-        }
     }
 
     /// A window's sidebar width, open sections or Project Insights panel
@@ -896,30 +895,22 @@ final class AppState {
         }
     }
 
-    /// The tab model (`ModelState`). Replaced as one unit, the hooks follow.
-    var model = ModelState() {
-        didSet { attachWorkspaceHooks() }
-    }
-
-    var workspaces: [WorkspaceID: Workspace] {
-        get { model.workspaces }
-        set {
-            model.workspaces = newValue
-            attachWorkspaceHooks()
-        }
-    }
+    /// The link to the model on the Mac server (design/010). The views read
+    /// `model`, and every change goes through `writer`.
+    @ObservationIgnored
+    let modelConnection: ModelConnection
+    /// The projects, their tabs and their panes, as the server has them.
+    var model: ModelMirror { modelConnection.mirror }
+    /// The one way to change the model: requests to the server.
+    @ObservationIgnored
+    let writer: ModelWriter
 
     /// Ordered pinned-tab records — the sidebar's pinned section. A record
-    /// whose id matches a live tab in the pinned workspace
-    /// (`workspaces[PinnedTabs.workspaceID]`) is loaded; the rest are unloaded
-    /// (their sessions died) and rebuild from their declaration on selection.
-    /// All mutation goes through `AppState+PinnedTabs.swift`.
+    /// whose id matches a live tab of the pinned project (alias `pinned`)
+    /// is loaded; the rest are unloaded (their sessions died) and rebuild
+    /// from their declaration on selection. All mutation goes through
+    /// `AppState+PinnedTabs.swift`.
     var pinnedRecords: [PinnedTabRecord] = []
-
-    /// The shadow stage of design/010 §9 (`ModelShadow`): nil in a build
-    /// that does not run it.
-    @ObservationIgnored
-    var modelShadow: ModelShadow?
 
     /// `pinned.yaml` I/O. Shares the project-file directory, so a test's
     /// injected `ProjectFileStore` tempdir isolates this file too.
@@ -1059,12 +1050,17 @@ final class AppState {
     var paneContainerAspect: CGFloat? { tabCycler.paneContainerAspect }
     var isLivePreviewing: Bool { tabCycler.isLivePreviewing }
 
+    /// The v1 snapshot, `workspaces_v3.json`: read once by the import
+    /// (design/010 §8), never written.
     private let workspaceStore: WorkspaceStore
+    /// `gui-state.json`: what only a window needs (design/010 §2).
+    @ObservationIgnored
+    let guiStateStore: GUIStateStore
 
-    /// Whether the snapshot came back unreadable — the store stays private,
-    /// but its fail-closed verdict is needed outside this file (the first-run
-    /// seed must not mistake an unread snapshot for a fresh install).
-    var snapshotLoadFailed: Bool { workspaceStore.loadFailed }
+    /// Whether the model could not be read: the server has no model, or a
+    /// model that it cannot write. The first-run seed must not mistake an
+    /// unread model for a fresh install, and nothing is ended on it.
+    var snapshotLoadFailed: Bool { model.data == nil || model.readonly || guiStateStore.loadFailed }
 
     /// A `.retry` sweep is planned (`scheduleReconnectRetry`).
     @ObservationIgnored
@@ -1296,25 +1292,36 @@ final class AppState {
     var projectFiles: ProjectFileStore { layoutFiles.projectFiles }
 
     init(
+        modelConnection: ModelConnection,
         workspaceStore: WorkspaceStore = WorkspaceStore(),
+        guiStateStore: GUIStateStore = GUIStateStore(),
         projectFiles: ProjectFileStore = ProjectFileStore(),
         paletteHotkeys: PaletteHotkeys = .shared,
         quickTerminal: QuickTerminalSplitState? = nil,
         legacyPanelVisible: @escaping () -> Bool = { Preferences.shared.takeLegacyProjectMemoryPanelVisible() }
     ) {
+        self.modelConnection = modelConnection
+        writer = ModelWriter(connection: modelConnection)
         self.workspaceStore = workspaceStore
+        self.guiStateStore = guiStateStore
         self.legacyPanelVisible = legacyPanelVisible
         layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         widgetLayoutStore = WidgetLayoutStore(directoryURL: projectFiles.configDirectoryURL)
         customPalettes = CustomPaletteStore(configDirectoryURL: projectFiles.configDirectoryURL, hotkeys: paletteHotkeys)
         if let quickTerminal { adoptQuickTerminal(quickTerminal) }
+        writer.onError = { [weak self] message in
+            self?.presentToast(String(localized: "The change did not apply"), subtitle: message)
+        }
+        model.onActiveTabChanged = { [weak self] projectID in self?.projectActiveTabDidChange(projectID) }
+        model.onPanesRemoved = { [weak self] panes, records in self?.panesLeftModel(panes, records: records) }
+        modelConnection.onInstall = { [weak self] state in self?.modelDidInstall(state) }
         let autoTileToken = NotificationCenter.default.addObserver(
             forName: .autoTilingEnabledDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rebalanceAllWorkspacesIfEnabled() }
+            MainActor.assumeIsolated { self?.rebalanceAllTabsIfEnabled() }
         }
         autoTileObserver = autoTileToken
         observerTokens.append(center: NotificationCenter.default, token: autoTileToken)
@@ -1466,12 +1473,10 @@ final class AppState {
     /// (`Pane.applyForeground`).
     func settleAllPanes() {
         var sawBusyPane = false
-        for (projectID, ws) in workspaces {
-            for tab in ws.tabs {
-                for pane in tab.splitRoot.allPanes() {
-                    if pane.executionState == .running { sawBusyPane = true }
-                    markSeenIfActive(paneID: pane.id, projectID: projectID)
-                }
+        for (projectID, tab) in model.allTabs {
+            for pane in tab.splitRoot.allPanes() {
+                if pane.executionState == .running { sawBusyPane = true }
+                markSeenIfActive(paneID: pane.id, projectID: projectID)
             }
         }
         lastPollSawBusyPane = sawBusyPane
@@ -1494,14 +1499,40 @@ final class AppState {
         return projectRecency.top(limit, in: valid).compactMap { byID[$0] }
     }
 
-    private func rebalanceAllWorkspacesIfEnabled() {
+    /// The auto-tiling preference changed: the server takes it as the
+    /// default `rebalance` of a request, and every tab is made even.
+    private func rebalanceAllTabsIfEnabled() {
+        writer.modelOptions(autoTiling: Preferences.shared.autoTilingEnabled)
         guard Preferences.shared.autoTilingEnabled else { return }
-        for ws in workspaces.values {
-            for tab in ws.tabs {
-                ModelWriter.splitRebalance(tab)
-            }
+        for (_, tab) in model.allTabs {
+            writer.tabRebalance(tab.id)
         }
-        saveWorkspaces()
+        persistState()
+    }
+
+    // MARK: - The model on the server
+
+    /// After each `state.subscribe`: the first at launch, and the one after
+    /// each new connection. The first launch with no import imports v1's
+    /// files (design/010 §8).
+    private func modelDidInstall(_ state: MactermProtocol.StateSubscribe.Result) {
+        writer.modelOptions(autoTiling: Preferences.shared.autoTilingEnabled)
+        guard let data = state.model, !state.readonly, !data.importedV1 else { return }
+        importV1Files()
+    }
+
+    /// The panes that left the model, in any request of any client: their
+    /// surfaces go (the closing ghost first), and a remote pane's session
+    /// ends over its host's link, because the server has no link to a host
+    /// (design/010 §5). The server ends a local pane's session itself.
+    private func panesLeftModel(_ panes: [Pane], records: [MactermProtocol.PaneRemoved]) {
+        let gone = Dictionary(panes.map { (model.wire($0.id), $0) }, uniquingKeysWith: { first, _ in first })
+        for record in records where record.host != nil {
+            gone[record.id]?.killPersistentSession(using: sessionClient)
+        }
+        for pane in panes {
+            SurfaceRegistry.shared.destroySurfaces(of: pane)
+        }
     }
 
     // MARK: - Restore / Save
@@ -1509,162 +1540,113 @@ final class AppState {
     func restoreSelection(projects: [Project]) {
         logger.info("restoreSelection: \(projects.count, privacy: .public) projects")
         hasRestoredSelection = true
-        // The scratch workspace restores like a project's (#665): its only
-        // record is the snapshot, and its sessions must be claims before the
-        // orphan sweep below.
-        let valid = Set(projects.map(\.id)).union([ScratchTabs.workspaceID])
-        // One pane is one session, across workspaces, pinned tabs, the quick
-        // terminal and widgets.
-        let loaded = WorkspaceSerializer.withoutRepeatedSessions(workspaceStore.load(), validIDs: valid)
-        // Restore every project's snapshot — including layout-file projects.
-        // The snapshot carries each pane's persisted zmx session identity, so
-        // panes REATTACH their still-running shells; applying the project
-        // file's declared layout here would silently destroy them on every
-        // launch. A declared layout is only ever applied by an explicit Apply
-        // Layout; a project with no snapshot gets the default workspace.
-        for ws in WorkspaceSerializer.restore(from: loaded.workspaces, validIDs: valid) {
-            workspaces[ws.id] = ws
-        }
-        // A project holds its tabs from the start (design 010 section 11):
-        // one with no snapshot gets its first tab now, not when a window
-        // first shows it.
-        for project in projects {
-            giveFirstTab(to: project)
-        }
-        // Pinned tabs: records first, then the launch reconcile against
-        // `pinned.yaml` (the file is authoritative for membership — see
-        // AppState+PinnedTabs). Live tabs materialize async, after zmx says
-        // which sessions actually survived.
+        let gui = guiStateStore.load()
         // The retired value is read (and removed) only when a window can
         // take it.
-        savedWindowSnapshots = loaded.windows.isEmpty
+        let windows = gui?.windows ?? []
+        lastSavedWindows = windows.isEmpty ? nil : windows
+        savedWindowSnapshots = windows.isEmpty
             ? []
-            : WindowSnapshot.adoptingLegacyPanelVisibility(loaded.windows, legacyVisible: legacyPanelVisible())
-        restorePinnedState(loaded.pinned, activeTabID: loaded.pinnedActiveTabID)
+            : WindowSnapshot.adoptingLegacyPanelVisibility(windows, legacyVisible: legacyPanelVisible())
+        // Pinned tabs: records first, then the launch reconcile against
+        // `pinned.yaml` (the file is authoritative for membership — see
+        // AppState+PinnedTabs). Tabs whose sessions died rebuild from their
+        // declaration, async, after the server says which sessions survived.
+        restorePinnedState(gui?.pinned ?? [])
         reconcilePinnedLayoutAtLaunch(projects: projects)
-        // The quick terminal's tab reattaches like any workspace tab. Before
-        // the orphan sweep below, which spares only what a pane claims.
-        restoreQuickTerminal(loaded.quickTerminal)
-        // Widgets too: their sessions must be claimed before the sweep, and
-        // `widgets.yaml` decides which exist before either.
-        let restoredWidgets = restoreDesktopWidgets(loaded.desktopWidgets)
+        // The quick terminal is a hidden project of the model.
+        restoreQuickTerminal()
+        // `widgets.yaml` decides which widgets exist.
+        let restoredWidgets = restoreDesktopWidgets(gui?.desktopWidgets ?? [])
         reconcileWidgetLayoutAtLaunch()
         Task { await materializeRestoredDesktopWidgets(restoredWidgets) }
-        if let id = Preferences.shared.activeProjectID {
-            if id == PinnedTabs.workspaceID {
-                if !pinnedRecords.isEmpty {
-                    ensurePinnedWorkspace()
-                    activeProjectID = id
-                }
-            } else if id == ScratchTabs.workspaceID {
-                // Only with tabs: an empty scratch workspace has no row in the
-                // sidebar, so a launch on it would show an empty detail view
-                // with nothing selected.
-                if hasScratchTabs {
-                    activeProjectID = id
-                    markActiveTabSeen(projectID: id)
-                    warmFocusedProject()
-                }
-            } else if let project = projects.first(where: { $0.id == id }) {
+        if let id = Preferences.shared.activeProjectID, let project = model.project(id), project.isSelectable {
+            // A project of the top or the bottom section shows only while
+            // it has a tab or a record: else the window would show an empty
+            // detail view with nothing selected.
+            let shown = project.isTreeProject || !model.tabs(of: id).isEmpty || (project.sidebar == .top && !pinnedRecords.isEmpty)
+            if shown {
                 activeProjectID = id
-                recordProjectVisit(id)
-                ensureWorkspace(projectID: id, path: project.path)
+                if project.isTreeProject { recordProjectVisit(id) }
                 markActiveTabSeen(projectID: id)
                 warmFocusedProject()
             }
         }
-        // Pinned live tabs materialize async, after the server says which
-        // sessions survived (#285) — ahead of the loadFailed gate, since
-        // pinned records come from pinned.yaml, not the snapshot.
         Task { await materializeRestoredPinnedTabs() }
-        // A failed snapshot LOAD gives no names: nothing is ended (an empty
-        // claim set would mark every live session an orphan).
-        guard !workspaceStore.loadFailed else { return }
+        // A model that did not read gives no names: nothing is ended (an
+        // empty claim set would mark every live session an orphan).
+        guard !snapshotLoadFailed else { return }
         endV1SessionsOnce(names: localSessionNames())
         sweepLocalOrphans()
     }
 
-    func saveWorkspaces() {
-        // Every structural mutation ends here, so it is also where the
-        // windows' surfaces follow the workspace.
+    /// The windows of the last save that had any: a save while no window
+    /// is registered (launch, quit) keeps them.
+    @ObservationIgnored
+    private var lastSavedWindows: [WindowSnapshot]?
+
+    /// Writes what only the GUI keeps (`gui-state.json`), and gives the
+    /// server the live folder of each pane (`pane.set`), so that a pane
+    /// whose session is gone (a restart of the Mac) starts its new shell
+    /// where the user was. Every change ends here, so it is also where the
+    /// windows' surfaces follow the model.
+    func persistState() {
         settleWindowSelections()
-        // Any mutation can have created a tab inside the pinned workspace
-        // (CLI `tab new`, a pane separated into it, a merge) — make sure it
-        // has a record before the snapshot serializes.
-        syncPinnedRecordsWithWorkspace()
-        let ordinary = workspaces.filter { $0.value.kind != .pinned }
-        let ordinarySnapshots = WorkspaceSerializer.snapshot(ordinary)
-        let pinnedSnapshots = WorkspaceSerializer.snapshotPinned(
-            records: pinnedRecords,
-            workspace: workspaces[PinnedTabs.workspaceID]
-        )
-        workspaceStore.save(
-            ordinarySnapshots,
-            pinned: pinnedSnapshots,
-            // The pinned workspace is excluded from `ordinary`, so it loses
-            // the WorkspaceSnapshot.activeTabID every other workspace keeps —
-            // carry the selection separately or a relaunch always lands on
-            // the first pinned row.
-            pinnedActiveTabID: workspaces[PinnedTabs.workspaceID]?.activeTabID,
-            // Every open window, so a relaunch brings them all back (#345).
-            // Empty is never written as an empty list: windows register as
-            // their views appear, so a save during launch would otherwise
-            // persist "no windows" over a real multi-window setup.
-            windows: windows.isEmpty
-                ? nil
-                : windows.map { window in
-                    WindowSnapshot(
-                        activeProjectID: window.activeProjectID,
-                        sidebarWidth: window.sidebarWidth,
-                        isKey: window.id == keyWindowID,
-                        // On the project screen: the tab that the screen replaced.
-                        activeTabID: window.activeProjectID.flatMap {
-                            selectedTab(for: $0, in: window)?.id ?? window.activeTabIDs[$0]
-                        },
-                        sidebarVisible: window.sidebarVisible,
-                        projectMemoryPanelVisible: window.projectMemoryPanelVisible,
-                        frame: window.frame,
-                        expandedProjectIDs: window.expandedRows.sorted { $0.uuidString < $1.uuidString },
-                        showsProjectScreen: window.showsProjectScreen ? true : nil
-                    )
-                },
-            quickTerminal: quickTerminalSnapshot(),
-            desktopWidgets: desktopWidgetSnapshots()
-        )
-        shadowModel(ordinary: ordinarySnapshots, pinned: pinnedSnapshots)
+        // Any change can have made a tab inside the pinned project (CLI `tab
+        // new`, a pane separated into it, a merge): it gets a record.
+        syncPinnedRecordsWithModel()
+        syncPaneFolders()
         // A closed or unloaded tab takes its bell out of the count with it.
         syncDockBadge()
+        // Before the restore, the GUI state is not known yet: a write would
+        // lose it.
+        guard hasRestoredSelection else { return }
+        let snapshots: [WindowSnapshot]? = windows.isEmpty
+            ? lastSavedWindows
+            : windows.map { window in
+                WindowSnapshot(
+                    activeProjectID: window.activeProjectID,
+                    sidebarWidth: window.sidebarWidth,
+                    isKey: window.id == keyWindowID,
+                    // On the project screen: the tab that the screen replaced.
+                    activeTabID: window.activeProjectID.flatMap {
+                        selectedTab(for: $0, in: window)?.id ?? window.activeTabIDs[$0]
+                    },
+                    sidebarVisible: window.sidebarVisible,
+                    projectMemoryPanelVisible: window.projectMemoryPanelVisible,
+                    frame: window.frame,
+                    expandedProjectIDs: window.expandedRows.sorted { $0.uuidString < $1.uuidString },
+                    showsProjectScreen: window.showsProjectScreen ? true : nil
+                )
+            }
+        if !windows.isEmpty { lastSavedWindows = snapshots }
+        guiStateStore.save(GUIStateFile(
+            version: GUIStateStore.currentVersion,
+            windows: snapshots,
+            pinned: pinnedRecords.map { PinnedRecordState(id: $0.id, declaration: $0.declaration, originProjectID: $0.originProjectID) },
+            desktopWidgets: desktopWidgetStates()
+        ))
     }
 
-    /// Gives `modelShadow` the snapshots that a save wrote, with the pinned
-    /// tabs in the order of their workspace.
-    private func shadowModel(ordinary: [WorkspaceSnapshot], pinned: [PinnedTabSnapshot]) {
-        // `save` refuses to write over a file that did not load: the copy
-        // would be as empty as the state.
-        guard let modelShadow, !workspaceStore.loadFailed else { return }
-        var inputs = ordinary.map { snapshot in
-            ModelConversion.WorkspaceInput(
-                id: snapshot.projectID,
-                kind: WorkspaceKind(id: snapshot.projectID),
-                tabs: snapshot.tabs,
-                activeTabID: snapshot.activeTabID
-            )
+    /// Gives the server each pane's folder where it differs from the
+    /// model's: the live folder of a local pane (OSC 7, else the kernel's
+    /// cwd of its foreground), and the host folder of a remote pane.
+    private func syncPaneFolders() {
+        for (_, tab) in model.allTabs {
+            for pane in tab.splitRoot.allPanes() {
+                guard let value = model.paneValue(pane.id) else { continue }
+                if pane.isRemote {
+                    let live = SurfaceRegistry.shared.view(of: pane)?.currentPwd.flatMap { HostCommands.isSafeHostFolder($0) ? $0 : nil }
+                    if let folder = live ?? pane.hostSessionDirectory, folder != value.hostSessionDir {
+                        writer.paneSet(pane.id, hostSessionDirectory: folder)
+                    }
+                } else if let live = SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: pane),
+                          live != value.cwd
+                {
+                    writer.paneSet(pane.id, cwd: live)
+                }
+            }
         }
-        if let pinnedWorkspace = workspaces[PinnedTabs.workspaceID] {
-            let live = Dictionary(
-                pinned.compactMap { record in record.live.map { (record.id, $0) } },
-                uniquingKeysWith: { first, _ in first }
-            )
-            inputs.append(.init(
-                id: pinnedWorkspace.id,
-                kind: .pinned,
-                tabs: pinnedWorkspace.tabs.compactMap { live[$0.id] },
-                activeTabID: pinnedWorkspace.activeTabID
-            ))
-        }
-        // The pinned and the scratch workspaces are hidden projects of the
-        // model, so a window can select them (design/010 §11).
-        modelShadow.workspacesDidSave(inputs, activeProjectID: activeProjectID)
     }
 
     // MARK: - Project
