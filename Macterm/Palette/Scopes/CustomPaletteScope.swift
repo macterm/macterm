@@ -271,15 +271,13 @@ final class CustomPaletteScope: PaletteScope {
         self.context = context
         guard fileReads(context), !gated, let palette = palette(context) else { return [] }
         guard let node = palette.nodes[target.node] else {
-            return [PaletteSection(header: nil, items: [
-                PaletteItem(
-                    id: "custom-missing-node",
-                    title: String(localized: "No node named \(target.node)"),
-                    subtitle: String(localized: "Check the palette's file"),
-                    isEnabled: false,
-                    action: {}
-                ),
-            ])]
+            // The palette's notice, as every message of a screen. ⌘R reads
+            // the file again.
+            failure = failure ?? PaletteFailure(
+                title: String(localized: "No node named \(target.node)"),
+                detail: String(localized: "Check the palette's file")
+            )
+            return []
         }
         let search = SearchQuery(query.trimmed)
         let written: [PaletteItem] = node.items.enumerated().compactMap { index, entry in

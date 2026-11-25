@@ -95,7 +95,7 @@ struct InputPaletteScopeTests {
         #expect(rows(scope, "a/b").isEmpty)
         let failure = try #require(scope.failure)
         #expect(failure.title == "A name cannot contain a slash.")
-        #expect(!failure.retryable, "a notice is one line with no Retry")
+        #expect(!failure.retryable, "a notice has no Retry")
 
         #expect(rows(scope, "ab").count == 1)
         #expect(scope.failure == nil, "an edit clears it")
@@ -189,20 +189,132 @@ struct InputPaletteScopeTests {
     }
 
     @Test
-    func an_action_that_refuses_keeps_the_screen_with_one_line_until_the_text_changes() throws {
+    func an_action_that_refuses_keeps_the_screen_with_its_notice_until_the_text_changes() throws {
         let log = Log()
         let scope = InputPaletteScope(input: makeInput(log: log))
 
         let action = try #require(rows(scope, "taken").first)
         #expect(scope.press(action) == .refused)
         #expect(scope.failure?.title == "The name is taken.")
-        _ = rows(scope, "taken")
+        #expect(rows(scope, "taken").isEmpty, "a refused text has no action row: the notice is alone")
         #expect(scope.failure?.title == "The name is taken.", "a redraw of the same text keeps the reason")
 
         let other = try #require(rows(scope, "free").first)
         #expect(scope.failure == nil, "an edit clears it")
         #expect(scope.press(other) == .closed)
         #expect(log.committed == ["free"])
+    }
+
+    /// Waits until `condition` holds, sleeping between reads.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0 ..< 200 where !condition() {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// A check whose answer the test gives: nil to run, else the reason.
+    final class Gate {
+        var continuation: CheckedContinuation<PaletteFailure?, Never>?
+    }
+
+    private func checkingInput(gate: Gate, log: Log) -> PaletteInput {
+        PaletteInput(id: "test.check", title: "Check", prompt: "Folder") { text, _ in
+            .action(PaletteInputAction(
+                title: "Add \"\(text)\"",
+                check: PaletteInputCheckStep(message: "Checking \(text)…") { await withCheckedContinuation { gate.continuation = $0 } },
+                run: {
+                    log.committed.append(text)
+                    return .done
+                }
+            ))
+        }
+    }
+
+    /// Return on the action row of `text`.
+    private func pressAction(_ scope: InputPaletteScope, _ text: String) -> PaletteInputPress {
+        scope.press(rows(scope, text).first)
+    }
+
+    @Test
+    func a_checked_action_loads_then_finishes_and_tells_the_palette() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        var changes = 0
+        scope.activate(context: makeContext()) { changes += 1 }
+
+        #expect(pressAction(scope, "~/api") == .checking, "a check keeps the screen")
+        #expect(scope.loading == PaletteLoading(message: "Checking ~/api…"))
+        try await waitUntil { gate.continuation != nil }
+        #expect(rows(scope, "~/api").isEmpty, "no action row while the check runs: its notice is alone")
+        #expect(
+            scope.press(PaletteItem(id: InputPaletteScope.actionItemID, title: "", action: {})) == .nothing,
+            "Return does nothing while the check runs"
+        )
+        #expect(scope.loading != nil, "a redraw of the same text keeps the check")
+
+        gate.continuation?.resume(returning: nil)
+        try await waitUntil { changes > 0 }
+        #expect(scope.takeCloseRequest(), "the palette closes")
+        #expect(!scope.takeCloseRequest(), "once")
+        #expect(scope.loading == nil)
+        #expect(changes == 1)
+        #expect(log.committed == ["~/api"])
+    }
+
+    @Test
+    func a_checked_refusal_keeps_the_screen_with_its_notice() async throws {
+        let gate = Gate()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: Log()))
+        scope.activate(context: makeContext()) {}
+
+        #expect(pressAction(scope, "~/none") == .checking)
+        try await waitUntil { gate.continuation != nil }
+        gate.continuation?.resume(returning: PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
+        try await waitUntil { scope.loading == nil }
+        #expect(!scope.takeCloseRequest())
+        #expect(scope.failure == PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
+        #expect(rows(scope, "~/none").isEmpty, "the refusal is alone and centered")
+        scope.retry()
+        #expect(scope.loading == nil, "a refusal that cannot change has no Retry")
+        #expect(scope.failure?.title == "Path ~/none doesn't exist", "the refusal stands")
+        #expect(scope.failure != nil, "a redraw of the same text keeps the reason")
+    }
+
+    @Test
+    func an_edit_during_the_check_cancels_it() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        scope.activate(context: makeContext()) {}
+
+        #expect(pressAction(scope, "~/api") == .checking)
+        try await waitUntil { gate.continuation != nil }
+        _ = rows(scope, "~/ap")
+        #expect(scope.loading == nil)
+        gate.continuation?.resume(returning: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!scope.takeCloseRequest())
+        #expect(log.committed.isEmpty, "the add is not for text that is no longer in the field")
+    }
+
+    @Test
+    func leaving_the_screen_cancels_its_check() async throws {
+        let gate = Gate()
+        let log = Log()
+        let scope = InputPaletteScope(input: checkingInput(gate: gate, log: log))
+        var changes = 0
+        scope.activate(context: makeContext()) { changes += 1 }
+
+        #expect(pressAction(scope, "~/api") == .checking)
+        try await waitUntil { gate.continuation != nil }
+        scope.deactivate()
+        #expect(scope.loading == nil)
+        gate.continuation?.resume(returning: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!scope.takeCloseRequest())
+        #expect(changes == 0)
+        #expect(log.committed.isEmpty, "a cancelled check does not act")
     }
 
     @Test

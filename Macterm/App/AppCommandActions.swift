@@ -307,7 +307,7 @@ extension AppCommand {
             guard let current, current.parent != nil else { return nil }
             return { ctx.projectStore.moveOut(current.id) }
         case .newRemoteProject:
-            return { ctx.appState.isNewRemoteProjectSheetPresented = true }
+            return { ctx.appState.openCommandPalette(scope: .remoteHosts) }
         case .removeProject:
             guard let projectID, ctx.appState.model.project(projectID).map({ $0.removable && $0.isTreeProject }) == true else { return nil }
             return {

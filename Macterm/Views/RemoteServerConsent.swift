@@ -3,15 +3,10 @@ import AppKit
 /// The question before the first install of the Macterm server on a host
 /// (design/006 §5), as a sheet on a terminal window, like the login's
 /// questions (`SSHLoginPrompts`). Return installs. Escape continues
-/// without the server. While the New Remote Project dialog checks the same
-/// host, the question is the dialog's next step, in the same window
-/// (`NewRemoteProjectDialog.askInstall`, 0358).
+/// without the server.
 @MainActor
 enum RemoteServerConsent {
     static func ask(_ host: String) async -> Bool {
-        if let dialog = NewRemoteProjectDialog.checking(host) {
-            return await dialog.askInstall()
-        }
         let alert = NSAlert()
         alert.messageText = title(host)
         alert.informativeText = text
