@@ -58,6 +58,9 @@ extension AppState {
                     }
                     let typed = text.trimmingCharacters(in: .whitespaces)
                     let listed = FolderCompletion.listedFolder(for: typed)
+                    // `~name` with no slash is no folder that the field
+                    // lists: only the notice, as for a local path.
+                    guard listed != nil else { return .notice(PathProblem.missing.notice(for: folder)) }
                     switch hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) {
                     case let rows? where rows.isEmpty:
                         // The host listed the folders and none matches.
@@ -68,7 +71,7 @@ extension AppState {
                     case nil where listed.map(lister.isMissing) == true:
                         // The host says that the folder is not there.
                         return .notice(PathProblem.missing.notice(for: folder))
-                    case nil where listed.map(lister.hasFailed) != true && listed != nil:
+                    case nil where listed.map(lister.hasFailed) != true:
                         // The first answer is not there yet.
                         return .nothing
                     case nil:
@@ -180,11 +183,15 @@ extension AppState {
     }
 
     /// The folder of the focused pane, when the key window shows a tab of
-    /// `project`. A remote pane's folder is the one that its shell reports
-    /// on the host.
+    /// `project`. A local pane's folder comes from its shell's report, else
+    /// from its process. A remote pane's folder is only the one that its
+    /// shell reports (OSC 7): through the session (`Pane.sessionDirectory`)
+    /// on a host with the server, else through the surface. The protocol
+    /// carries no folder of the host's process, so a shell that reports no
+    /// folder gives no row.
     func currentPaneDirectory(of project: Project) -> String? {
         guard !keyWindowShowsProjectScreen, let pane = focusedPane(for: project.id) else { return nil }
-        if project.isRemote { return SurfaceRegistry.shared.view(of: pane)?.currentPwd }
+        if project.isRemote { return pane.sessionDirectory ?? SurfaceRegistry.shared.view(of: pane)?.currentPwd }
         return pane.liveLocalWorkingDirectory()
     }
 

@@ -385,7 +385,8 @@ struct AppStateProjectDirectoryTests {
         #expect(scope.failure?.title == "Path ~/typo/sub doesn't exist")
 
         let tilde = try await settledItems(scope, "~p", context)
-        #expect(tilde.map(\.title) == ["Change to \"~p\""], "~p is not a folder in the home folder: the host checks it")
+        #expect(tilde.isEmpty, "~p is no folder that the field lists: no row, as locally")
+        #expect(scope.failure?.title == "Path ~p doesn't exist", "only the notice, as locally")
 
         let picked = try await settledItems(scope, "~/pro", context)
         #expect(scope.press(picked[0]) == .closed, "a folder row is the action")
