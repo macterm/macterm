@@ -41,7 +41,7 @@ extension AppState {
             let tab = ModelConversion.firstTab(path: project.path)
             inputs.append(.init(id: project.id, kind: .project, tabs: [tab], activeTabID: tab.id))
         }
-        let pinnedLive = clean.pinned.compactMap { $0.live }
+        let pinnedLive = clean.pinned.compactMap(\.live)
         if !clean.pinned.isEmpty {
             inputs.append(.init(
                 id: ModelConversion.V1.pinnedID,

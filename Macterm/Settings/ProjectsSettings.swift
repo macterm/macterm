@@ -279,7 +279,8 @@ struct ProjectsSettings: View {
         guard let path = layout.declaredPath else { return .noPath }
         if let line = await refusal(path) { return .refused(line) }
         guard !Task.isCancelled else { return .cancelled }
-        guard let project = addProject(from: layout, path: path, in: store) else { return .refused(String(localized: "Macterm could not add the project.")) }
+        guard let project = addProject(from: layout, path: path, in: store)
+        else { return .refused(String(localized: "Macterm could not add the project.")) }
         return .created(project)
     }
 

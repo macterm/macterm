@@ -563,7 +563,11 @@ final class ModelMirror {
     }
 
     /// A pane that a new tab holds for one moment, before its tree is set.
-    @ObservationIgnored private let placeholderPane = Pane(projectPath: NSHomeDirectory(), projectID: UUID(), sessionName: "macterm-placeholder")
+    @ObservationIgnored private let placeholderPane = Pane(
+        projectPath: NSHomeDirectory(),
+        projectID: UUID(),
+        sessionName: "macterm-placeholder"
+    )
 
     private func update(_ tab: TerminalTab, from value: MactermProtocol.Tab, projectID: UUID, animated: Bool, seen: inout Set<UUID>) {
         if tab.customTitle != value.customTitle { tab.customTitle = value.customTitle }

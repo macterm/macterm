@@ -26,6 +26,7 @@ final class ModelConnection {
     private var connection: ServerConnection? {
         didSet { holder.set(connection) }
     }
+
     /// Ends the connection when this object goes (a test's AppState): the
     /// server exits once no client is left.
     private let holder = LinkHolder()

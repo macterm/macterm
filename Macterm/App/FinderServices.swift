@@ -138,7 +138,8 @@ final class FinderServiceProvider: NSObject {
                 ) ?? {
                     let folder = (file as NSString).deletingLastPathComponent
                     return projectStore.create(name: (folder as NSString).lastPathComponent, path: folder)
-                }() else { continue }
+                }()
+                else { continue }
                 appState.selectProject(project)
                 appState.openTextFile(file, line: line, inProject: project.id, projects: projectStore.projects)
             }

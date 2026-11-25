@@ -603,7 +603,8 @@ final class ControlHandler {
         guard let project = projectStore.create(
             name: name ?? (canonical as NSString).lastPathComponent,
             path: canonical
-        ) else {
+        )
+        else {
             throw ControlError(code: .internalError, message: "the server refused the project")
         }
         if args.select == true {

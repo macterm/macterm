@@ -55,7 +55,8 @@ struct NewMactermProjectIntent: AppIntent {
         guard let project = ctx.projectStore.create(
             name: (trimmed?.isEmpty == false ? trimmed : nil) ?? (path as NSString).lastPathComponent,
             path: path
-        ) else { throw MactermIntentError.badInput(String(localized: "Macterm could not add the project.")) }
+        )
+        else { throw MactermIntentError.badInput(String(localized: "Macterm could not add the project.")) }
         ctx.appState.selectProject(project)
         // The shortcut ran from outside the app, so nothing has fronted a
         // window — and this one's whole point is to show the user their new

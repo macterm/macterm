@@ -22,7 +22,7 @@ extension AppState {
             alreadySeeded: Preferences.shared.hasSeededFirstRun,
             projectCount: projectStore.projects.count,
             pinnedRecordCount: pinnedRecords.count,
-            workspaceCount: model.projects.filter { $0.isSelectable && !model.tabs(of: $0.id).isEmpty }.count,
+            workspaceCount: model.projects.count(where: { $0.isSelectable && !model.tabs(of: $0.id).isEmpty }),
             snapshotLoadFailed: snapshotLoadFailed,
             isHarnessRun: BenchmarkControl.isEnabled
         )

@@ -1626,8 +1626,9 @@ final class AppState {
                     if let folder = live ?? pane.hostSessionDirectory, folder != value.hostSessionDir {
                         writer.paneSet(pane.id, hostSessionDirectory: folder)
                     }
-                } else if let live = SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: pane),
-                          live != value.cwd
+                } else if let live = SurfaceRegistry.shared.view(of: pane)?.currentPwd ?? ProcessInspector
+                    .foregroundWorkingDirectory(forPane: pane),
+                    live != value.cwd
                 {
                     writer.paneSet(pane.id, cwd: live)
                 }
@@ -2206,7 +2207,8 @@ final class AppState {
             name: url.lastPathComponent,
             path: url.path(percentEncoded: false),
             parent: parent?.id
-        ) else { return nil }
+        )
+        else { return nil }
         selectProject(project)
         return project
     }
@@ -3056,7 +3058,8 @@ final class AppState {
                 direction: direction,
                 focus: false,
                 rebalance: last
-            ) else { return nil }
+            )
+            else { return nil }
             created.append(id)
             return id
         }

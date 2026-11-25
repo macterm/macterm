@@ -28,7 +28,9 @@ final class ModelWriter {
 
     var mirror: ModelMirror { connection.mirror }
 
-    private func w(_ id: UUID) -> String { mirror.wire(id) }
+    private func w(_ id: UUID) -> String {
+        mirror.wire(id)
+    }
 
     /// Sends one request. nil when it failed.
     @discardableResult
@@ -236,22 +238,30 @@ final class ModelWriter {
     /// ratio even, as v1 did.
     @discardableResult
     func tabMerge(_ source: UUID, into destination: UUID, at target: TabDropResolution.Target) -> Bool {
-        let (pane, zone, rebalance) = Self.parts(of: target)
+        let parts = DropParts(target)
         return send(MactermProtocol.TabMerge.self, .init(
             src: w(source),
             dst: w(destination),
-            targetPane: pane.map(w),
-            zone: Self.zone(zone),
+            targetPane: parts.pane.map(w),
+            zone: Self.zone(parts.zone),
             splitId: w(UUID()),
-            rebalance: rebalance
+            rebalance: parts.rebalance
         )) != nil
     }
 
-    private static func parts(of target: TabDropResolution.Target) -> (UUID?, PaneDropZone, Bool?) {
-        switch target {
-        case let .pane(id, zone): (id, zone, nil)
-        case let .divider(id, zone): (id, zone, true)
-        case let .rootEdge(zone): (nil, zone, true)
+    /// The parts of a drop target as `tab.merge` takes them. A divider or a
+    /// root edge makes every ratio even, as v1 did.
+    private struct DropParts {
+        let pane: UUID?
+        let zone: PaneDropZone
+        let rebalance: Bool?
+
+        init(_ target: TabDropResolution.Target) {
+            switch target {
+            case let .pane(id, zone): (pane, self.zone, rebalance) = (id, zone, nil)
+            case let .divider(id, zone): (pane, self.zone, rebalance) = (id, zone, true)
+            case let .rootEdge(zone): (pane, self.zone, rebalance) = (nil, zone, true)
+            }
         }
     }
 

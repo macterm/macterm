@@ -111,7 +111,13 @@ enum TestModel {
     /// A project of the tree in `state`'s model, with its first tab, and
     /// selected. `path` empty: a project with no folder and no tab.
     @discardableResult
-    static func project(_ state: AppState, name: String = "proj", path: String = "/tmp", parent: UUID? = nil, select: Bool = true) -> Project {
+    static func project(
+        _ state: AppState,
+        name: String = "proj",
+        path: String = "/tmp",
+        parent: UUID? = nil,
+        select: Bool = true
+    ) -> Project {
         let project = Project(name: name, path: path, parent: parent)
         guard state.writer.projectCreate(project), let stored = state.model.project(project.id) else {
             preconditionFailure("the test server refused the project")
