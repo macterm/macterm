@@ -91,7 +91,8 @@ final class HostFolderLister {
     private var listings: [(folder: String, listing: FolderListing)] = []
     /// The answers of `check(_:)` that came, the newest last.
     private var checks: [(path: String, answer: RemoteHosts.FolderCheck)] = []
-    /// Whether the host answered a request once: its connection is up.
+    /// Whether the host answered a request once. A screen takes it as a sign
+    /// that the connection is up; the connection can end later.
     private(set) var hasAnswered = false
     /// When a request for a folder gave no answer: the lister asks again
     /// only after `retryAfter`, so that a host that is down is not asked
@@ -150,16 +151,24 @@ final class HostFolderLister {
     /// the host gave no answer, or with no `probe`. A screen asks it for a
     /// path that its listing does not show, so that it can tell a file from
     /// a missing path as the user types. The rules of `listing(_:)` apply.
+    /// The host is asked only after `checkDelay` with no newer path, and a
+    /// newer path stops the request of an older one: one keystroke does not
+    /// start one command on the host.
     func check(_ path: String) -> RemoteHosts.FolderCheck? {
         guard let probe else { return nil }
         if let index = checks.firstIndex(where: { $0.path == path }) {
             return checks[index].answer
         }
-        let key = "check:" + path
+        let key = Self.checkPrefix + path
         if let when = failed[key], ContinuousClock.now - when < Self.retryAfter { return nil }
+        for (other, request) in requests where other.hasPrefix(Self.checkPrefix) && other != key {
+            request.cancel()
+            requests[other] = nil
+        }
         if requests[key] == nil {
             requests[key] = Task { [weak self] in
-                guard let self else { return }
+                try? await Task.sleep(for: Self.checkDelay)
+                guard let self, !Task.isCancelled else { return }
                 let answer = await probe(path)
                 guard !Task.isCancelled else { return }
                 requests[key] = nil
@@ -176,6 +185,10 @@ final class HostFolderLister {
         }
         return nil
     }
+
+    private static let checkPrefix = "check:"
+    /// How long `check(_:)` waits for the user to stop typing.
+    static let checkDelay: Duration = .milliseconds(250)
 
     /// Whether a request is in flight.
     var isListing: Bool { !requests.isEmpty }

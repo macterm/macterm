@@ -313,6 +313,9 @@ final class InputPaletteScope: PaletteScope {
         case let .notice(text): notice = text
         case .nothing: break
         }
+        // A refusal that can change (no connection) goes when the screen
+        // has a newer answer for the text, such as a host's notice.
+        if let refusal, refusal.failure.retryable, notice != nil { self.refusal = nil }
         // While a check runs, and while a refusal stands for this text, the
         // action row is not offered: the message is then alone and fills
         // the results, as the notice of a value that is not valid does. A
@@ -401,9 +404,6 @@ final class InputPaletteScope: PaletteScope {
         return run(action)
     }
 
-    /// Run `check`, then `action` when it says yes, else show its reason.
-    /// The text that the check is for keeps the reason: the line goes
-    /// when the text changes.
     /// Retry and ⌘R on a refusal that can change: run the check of its
     /// action again.
     func retry() {
@@ -414,6 +414,9 @@ final class InputPaletteScope: PaletteScope {
         onChange?()
     }
 
+    /// Run `check`, then `action` when it says yes, else show its reason.
+    /// The text that the check is for keeps the reason: the line goes
+    /// when the text changes.
     private func startCheck(_ check: PaletteInputCheckStep, of action: PaletteInputAction) {
         let checkedText = text
         self.checkedText = checkedText

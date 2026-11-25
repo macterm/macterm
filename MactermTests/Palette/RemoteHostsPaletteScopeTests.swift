@@ -41,9 +41,11 @@ struct RemoteHostsPaletteScopeTests {
     /// The rows of the folder step for `text`, after the host's listing
     /// that they need has come.
     private func settledRows(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> [PaletteItem] {
-        // A listing can lead to a probe of the path: wait for both.
-        for _ in 0 ..< 3 {
+        // A listing can lead to a probe of the path: draw again until a
+        // draw starts no request.
+        for _ in 0 ..< 10 {
             _ = folderRows(scope, text, context)
+            guard scope.input.hostFolders?.isListing == true else { break }
             try await waitUntil { scope.input.hostFolders?.isListing != true }
         }
         return folderRows(scope, text, context)
@@ -250,6 +252,9 @@ struct RemoteHostsPaletteScopeTests {
         var answers: [RemoteHosts.FolderCheck] = [.unreachable, .exists]
         var checks = 0
         let scope = unlistedStep(context, checked: { _ in checks += 1 }, answer: { _ in answers.removeFirst() })
+        _ = folderRows(scope, "~/other", context)
+        scope.retry()
+        #expect(checks == 0, "no refusal: Retry does nothing")
 
         #expect(try await press(scope, "~/api", context) == .checking)
         try await waitUntil { scope.loading == nil }
@@ -262,6 +267,31 @@ struct RemoteHostsPaletteScopeTests {
         #expect(checks == 2)
         #expect(scope.takeCloseRequest())
         #expect(store.projects.map(\.path) == ["devbox:~/api"])
+    }
+
+    @Test
+    func a_probe_waits_for_the_user_to_stop_typing() async throws {
+        let (context, _, _) = makeContext()
+        var probed: [String] = []
+        let input = RemoteHostsPaletteScope.folderInput(
+            destination: "devbox",
+            context: context,
+            listFolders: homeList,
+            probeFolder: { path, _ in
+                probed.append(path)
+                return .missing
+            },
+            folderCheck: { _, _ in .exists }
+        )
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        _ = try await settledRows(scope, "~/", context)
+        for text in ["~/z", "~/zz", "~/zzz"] {
+            _ = folderRows(scope, text, context)
+        }
+        _ = try await settledRows(scope, "~/zzz", context)
+        #expect(probed == ["~/zzz"], "a newer path stops the request of an older one")
+        #expect(scope.failure?.title == "Path ~/zzz doesn't exist")
     }
 
     @Test
@@ -357,7 +387,9 @@ struct RemoteHostsPaletteScopeTests {
         #expect(scope.failure == PaletteFailure(title: "~/notes.txt is not a directory", retryable: false))
         #expect(try await settledRows(scope, "~/zzz", context).isEmpty)
         #expect(scope.failure?.title == "Path ~/zzz doesn't exist")
-        #expect(probed == ["~/notes.txt", "~/zzz"])
+        #expect(try await settledRows(scope, "~/zzz/ab", context).isEmpty, "a missing folder above the path")
+        #expect(scope.failure?.title == "Path ~/zzz/ab doesn't exist")
+        #expect(probed == ["~/notes.txt", "~/zzz", "~/zzz/ab"])
         #expect(folderRows(scope, "api", context).isEmpty, "a session starts only in a folder from / or ~")
         #expect(scope.failure?.title == "Path api doesn't exist")
         #expect(store.projects.isEmpty)

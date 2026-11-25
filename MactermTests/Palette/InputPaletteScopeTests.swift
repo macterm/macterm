@@ -281,6 +281,7 @@ struct InputPaletteScopeTests {
         #expect(rows(scope, "~/none").isEmpty, "the refusal is alone and centered")
         scope.retry()
         #expect(scope.loading == nil, "a refusal that cannot change has no Retry")
+        #expect(scope.failure?.title == "Path ~/none doesn't exist", "the refusal stands")
         #expect(scope.failure != nil, "a redraw of the same text keeps the reason")
     }
 

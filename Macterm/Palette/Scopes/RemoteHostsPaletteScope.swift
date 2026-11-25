@@ -172,19 +172,18 @@ final class RemoteHostsPaletteScope: PaletteScope {
                 case let rows? where !rows.isEmpty:
                     // The folder rows are the action.
                     return .nothing
-                case .some:
-                    // The host listed the folders and none matches: ask what
-                    // the path is.
+                case nil where lister.isListing:
+                    return .nothing
+                default:
+                    // No folder row: the host listed no match, or could not
+                    // list the parent (a missing folder or a file above).
+                    // Ask what the path is.
                     switch lister.check(folder) {
                     case .missing: return .notice(PathProblem.missing.notice(for: folder))
                     case .notDirectory: return .notice(PathProblem.notDirectory.notice(for: folder))
                     case nil where lister.isListing: return .nothing
                     default: break
                     }
-                case nil where lister.isListing:
-                    return .nothing
-                case nil:
-                    break
                 }
                 return .action(checkedAction(
                     path: path,
@@ -274,7 +273,9 @@ final class RemoteHostsPaletteScope: PaletteScope {
 
     /// Add the remote project at `path` (`host:folder`) and show it.
     private static func addProject(_ path: String, appState: AppState, projectStore: ProjectStore) -> PaletteCommit {
-        guard case let .remote(_, host, folder) = ProjectPath.parse(path) else { return .refused("") }
+        guard case let .remote(_, host, folder) = ProjectPath.parse(path) else {
+            return .refused(PathProblem.missing.notice(for: path))
+        }
         // A name that nobody typed: `ProjectStore.create` changes a reserved
         // one (`Pinned 2`), as for a local folder.
         let name = ProjectPath.remoteDisplayName(host: host, directory: folder)

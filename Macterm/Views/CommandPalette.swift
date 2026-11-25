@@ -892,7 +892,8 @@ enum PaletteNotice: Equatable {
     /// A search with no match.
     case noMatches
     /// A listing that failed (with Retry), or a value that an input screen
-    /// refused (no Retry: the user changes the text).
+    /// refused (Retry only when the refusal can change, as no connection;
+    /// else the user changes the text).
     case failure(PaletteFailure)
 
     /// The notice of the results, nil for none. A failure wins. Then a
