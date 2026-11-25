@@ -225,6 +225,10 @@ struct SidebarContent: View {
     private var showNewProjectButton: Bool
     @Bindable
     private var presentation: SidebarPresentationState
+    /// A tab or pane drag on this copy of the sidebar opens the pin band
+    /// while no tab is pinned (`PinTabDropZone`).
+    @State
+    private var pinDrag = PinDragPresence()
     private let isInteractive: Bool
     private let paintsFallbackFooterBackground: Bool
     private let forcesScrollEdgeEffects: Bool
@@ -377,17 +381,24 @@ struct SidebarContent: View {
         // List on purpose — a plain view's `.dropDestination` has none of the
         // outline view's drop hazards (see the notes inside the List body),
         // and it exists even with zero pinned rows, so the FIRST pin can be a
-        // drag too. It only draws its "Pin Tab" band in exactly that case:
-        // once a pinned row exists, the native drop gap above it says
-        // the same thing, and the band on top of it is noise.
+        // drag too. It draws its "Pin Tab" band only in that case, during a
+        // tab or pane drag. With a pinned row, the drop gap shows the slot.
         .safeAreaInset(edge: .top, spacing: 0) {
             // Same handlers as the drop slot, fixed at the first slot
             // — the strip and the line are one operation, so a routing fix
             // in one can't strand the other.
             PinTabDropZone(
                 showsBand: appState.pinnedRecords.isEmpty,
-                onPinTab: { receivePinnedTabDrop($0, at: 0) },
-                onPinPane: { appState.separatePaneIntoPinned($0.paneID, atRecordIndex: 0) }
+                isDragOnSidebar: pinDrag.isActive,
+                onTargetChange: { pinDrag.set(.strip, holds: $0) },
+                onPinTab: {
+                    pinDrag.reset()
+                    receivePinnedTabDrop($0, at: 0)
+                },
+                onPinPane: {
+                    pinDrag.reset()
+                    appState.separatePaneIntoPinned($0.paneID, atRecordIndex: 0)
+                }
             )
         }
         .sidebarSafeAreaBar(
@@ -474,7 +485,17 @@ struct SidebarContent: View {
                     topLevelCount: projectStore.children(of: nil).count,
                     trailingCount: showsBottomRows ? bottomProject.map { appState.model.tabs(of: $0.id).count } ?? 0 : 0
                 ),
-                isGuarded: $presentation.hasProjectDropSlots
+                isGuarded: $presentation.hasProjectDropSlots,
+                onRowDrag: { event in
+                    switch event {
+                    case let .over(info):
+                        pinDrag.set(.rows, holds: PinDragPresence.isPinnable(info.draggingPasteboard))
+                    case .exited:
+                        pinDrag.set(.rows, holds: false)
+                    case .ended:
+                        pinDrag.reset()
+                    }
+                }
             )
         }
     }
@@ -732,6 +753,7 @@ struct SidebarContent: View {
         // target, no taller band) so the tab ForEach's drop slot can
         // appear there.
         .dropDestination(for: SidebarDropItem.self) { items, _ in
+            pinDrag.reset()
             // False when the store refused every project of the drop (a
             // project into itself or into a project inside it).
             var accepted = false
@@ -755,6 +777,10 @@ struct SidebarContent: View {
             // hovered header itself doesn't move when it expands, so the
             // drop stays on target.
             if targeted { windowState.expandedRows.insert(project.id) }
+            pinDrag.set(
+                .header(project.id),
+                holds: targeted && PinDragPresence.isPinnable(NSPasteboard(name: .drag))
+            )
         }
     }
 
@@ -1618,20 +1644,31 @@ private struct SidebarTabRow: View {
 }
 
 /// The pin drop zone at the top of the sidebar: a strip that pins a dropped
-/// tab or pane at the first slot. It draws chrome only when there are no
-/// pinned rows yet (`showsBand`) — with rows present the List's own insertion
-/// line already marks the same slot, so the band would just double it. Either
-/// way the strip must keep a nonzero idle height: `isTargeted` only fires once
-/// the pointer is over the target, so a zero-height strip could never be
-/// discovered by a drag.
-private struct PinTabDropZone: View {
+/// tab or pane at the first slot. With pinned rows it draws nothing: the
+/// drop gap above the first pinned row marks the same slot. With no pinned
+/// rows (`showsBand`), the List has no pinned slot. Then the strip opens a
+/// "Pin Tab" band while a tab or pane drag is on the sidebar
+/// (`isDragOnSidebar`), so that the user can see the target. With no drag,
+/// the strip is empty. It keeps a nonzero idle height, because `isTargeted`
+/// fires only when the pointer is on the strip.
+struct PinTabDropZone: View {
     let showsBand: Bool
+    let isDragOnSidebar: Bool
+    let onTargetChange: (Bool) -> Void
     let onPinTab: (MovableTab) -> Void
     let onPinPane: (MovablePane) -> Void
     @State
     private var isTargeted = false
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
-    private var isBandVisible: Bool { showsBand && isTargeted }
+    private var isBandVisible: Bool {
+        Self.isBandVisible(showsBand: showsBand, isDragOnSidebar: isDragOnSidebar, isTargeted: isTargeted)
+    }
+
+    static func isBandVisible(showsBand: Bool, isDragOnSidebar: Bool, isTargeted: Bool) -> Bool {
+        showsBand && (isDragOnSidebar || isTargeted)
+    }
 
     var body: some View {
         ZStack {
@@ -1640,6 +1677,7 @@ private struct PinTabDropZone: View {
                 // draws no target here, because an empty ForEach has no row.
                 Label("Pin Tab", systemImage: "pin.fill")
                     .font(.callout.weight(.medium))
+                    .foregroundStyle(isTargeted ? .primary : .secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 30)
                     .glassPanelBackground(cornerRadius: 6)
@@ -1649,6 +1687,8 @@ private struct PinTabDropZone: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: isBandVisible ? 38 : SidebarLayoutMetrics.idlePinDropHeight)
+        // The band opens as a slot opens in the rows: the rows move down.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isBandVisible)
         .contentShape(Rectangle())
         .dropDestination(for: TabSlotDropItem.self) { items, _ in
             for item in items {
@@ -1661,10 +1701,60 @@ private struct PinTabDropZone: View {
             }
             return true
         } isTargeted: { targeted in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isTargeted = targeted
+            isTargeted = targeted
+            onTargetChange(targeted)
+        }
+    }
+}
+
+/// Whether a drag that can pin (a tab or a pane) is on the sidebar. Each
+/// drop view of the sidebar tells when it holds such a drag or lets it go:
+/// the rows (`OutlineGapDropGuard.observeRowDrag`), a project header and the
+/// pin strip. The pin band stays open while one of them holds the drag. A
+/// drop anywhere in the sidebar clears all of them (`reset`).
+///
+/// A drag that goes from one drop view to the next leaves the first view
+/// before it enters the second. Thus the band closes one turn of the run
+/// loop after the last view lets go, and only if no view took the drag.
+/// If the band closed at once, the rows would move up under the pointer.
+/// The rows would then take the drag, and the band would open again.
+@MainActor @Observable
+final class PinDragPresence {
+    enum Holder: Hashable {
+        case rows
+        case header(UUID)
+        case strip
+    }
+
+    /// True while a drag that can pin is on the sidebar.
+    private(set) var isActive = false
+    @ObservationIgnored
+    private var holders: Set<Holder> = []
+
+    func set(_ holder: Holder, holds: Bool) {
+        if holds {
+            holders.insert(holder)
+            if !isActive { isActive = true }
+        } else if holders.remove(holder) != nil, holders.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, holders.isEmpty, isActive else { return }
+                isActive = false
             }
         }
+    }
+
+    /// Clears every holder at once: the drag dropped.
+    func reset() {
+        holders.removeAll()
+        if isActive { isActive = false }
+    }
+
+    /// True when `pasteboard` has a tab or a pane: the drags that can pin.
+    static func isPinnable(_ pasteboard: NSPasteboard) -> Bool {
+        pasteboard.availableType(from: [
+            NSPasteboard.PasteboardType(UTType.mactermTab.identifier),
+            .mactermPaneID,
+        ]) != nil
     }
 }
 

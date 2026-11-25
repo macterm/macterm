@@ -395,6 +395,87 @@ struct SidebarDragFeedbackTests {
         #expect(await drop(row: 7, fraction: 0.5) == ["top 2"])
     }
 
+    /// The sidebar opens its pin band while a tab drag is on the rows
+    /// (`PinTabDropZone`). The probe reports each validation, the exit and
+    /// the drop. A row update during the drag closes and opens the gap again
+    /// (`OutlineGapDropGuard`), and the probe reports no exit there.
+    @Test
+    func the_probe_reports_a_row_drag_until_it_exits_or_drops() async throws {
+        let drops = DropLog()
+        let expansion = ProbeExpansion(open: ["A"])
+        let tree = [
+            ProbeNode(name: "A", tabs: ["A0", "A1"], children: []),
+            ProbeNode(name: "B", tabs: ["B0"], children: []),
+        ]
+        let reports = DragReports()
+        let content = List {
+            ForEach(tree) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
+        }
+        .listStyle(.sidebar)
+        .background {
+            SidebarDragFeedback(isGuarded: .constant(false)) { event in
+                switch event {
+                case .over: reports.values.append("over")
+                case .exited: reports.values.append("exited")
+                case .ended: reports.values.append("ended")
+                }
+            }
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 320),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: content)
+        window.layoutIfNeeded()
+
+        // Rows: 0 A, 1 A0, 2 A1, 3 B (closed).
+        let outline = try #require(await poll {
+            window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 4 ? $0 : nil
+            }
+        })
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        try pasteboard.setData(
+            JSONEncoder().encode(MovableTab(tabID: UUID(), sourceProjectID: UUID())),
+            forType: NSPasteboard.PasteboardType(UTType.mactermTab.identifier)
+        )
+        func point(row: Int, fraction: CGFloat) -> NSPoint {
+            let rect = outline.rect(ofRow: row)
+            return outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+        }
+
+        let drag = FakeDrag(location: point(row: 1, fraction: 0.8), pasteboard: pasteboard, window: window)
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        #expect(reports.values.last == "over")
+        // B opens under the held drag. The guard closes the gap for the row
+        // update and opens it again: no exit is reported.
+        let beforeUpdate = reports.values.count
+        expansion.open.insert("B")
+        #expect(await poll { outline.numberOfRows == 5 ? true : nil } == true)
+        #expect(await poll { reports.values.count > beforeUpdate ? true : nil } == true)
+        #expect(reports.values[beforeUpdate...].allSatisfy { $0 == "over" })
+        outline.draggingExited(drag)
+        #expect(reports.values.last == "exited")
+        // Back in, and a drop.
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        #expect(reports.values.last == "over")
+        #expect(outline.prepareForDragOperation(drag))
+        #expect(reports.values.last == "ended")
+        #expect(outline.performDragOperation(drag))
+        outline.concludeDragOperation(drag)
+        // The drop lands in A's tabs. Its slot is not the subject here: the
+        // open gap moves the rows, and other tests check the slot.
+        let log = await poll { drops.entries.isEmpty ? nil : drops.entries }
+        #expect(log?.count == 1)
+        #expect(log?.first?.hasPrefix("tab A ") == true)
+    }
+
     private func sidebarList() -> some View {
         List {
             Section {
@@ -481,6 +562,11 @@ private final class ProbeExpansion {
 @MainActor
 private final class GuardFlag {
     var value = false
+}
+
+@MainActor
+private final class DragReports {
+    var values: [String] = []
 }
 
 @MainActor

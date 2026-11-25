@@ -30,6 +30,8 @@ struct SidebarDragFeedback: NSViewRepresentable {
     /// are at the top level.
     var branches = OutlineGapDropGuard.Branches()
     @Binding var isGuarded: Bool
+    /// Gets each drag on the rows (`OutlineGapDropGuard.observeRowDrag`).
+    var onRowDrag: (OutlineGapDropGuard.RowDrag) -> Void = { _ in }
 
     func makeNSView(context _: Context) -> ProbeView {
         ProbeView()
@@ -37,6 +39,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
 
     func updateNSView(_ view: ProbeView, context _: Context) {
         view.branches = branches
+        view.onRowDrag = onRowDrag
         let report: (Bool) -> Void = { guarded in
             if isGuarded != guarded { isGuarded = guarded }
         }
@@ -63,6 +66,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
         private static let maxTries = 20
         var branches = OutlineGapDropGuard.Branches()
         var onGuardChange: (Bool) -> Void = { _ in }
+        var onRowDrag: (OutlineGapDropGuard.RowDrag) -> Void = { _ in }
         /// True while the guard is on the outline view of this probe.
         var isGuarded: Bool {
             gapIsAllowed && outline?.window != nil
@@ -112,6 +116,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
                 switch OutlineGapDropGuard.install(on: found, branches: branches) {
                 case .installed:
                     outline = found
+                    OutlineGapDropGuard.observeRowDrag(on: found) { [weak self] event in self?.onRowDrag(event) }
                     gapIsAllowed = true
                     if found.draggingDestinationFeedbackStyle != .gap {
                         found.draggingDestinationFeedbackStyle = .gap
@@ -205,6 +210,10 @@ struct SidebarDragFeedback: NSViewRepresentable {
 ///    when validation answers "no drop", when the drag exits, and at the
 ///    drop (`prepareForDragOperation:` and `concludeDragOperation:`).
 ///
+/// An observer (`observeRowDrag`) gets each validation, the exit and the
+/// drop. The exit of point 3 is not a real exit, so the observer does not
+/// get it.
+///
 /// `SidebarDragFeedbackTests` drives a fake drag on a hosted List. Without
 /// the guard, the exit crashes, a project that opens during a drag crashes,
 /// and a project drag drops at the wrong slots. A crash stops the whole test
@@ -279,6 +288,46 @@ enum OutlineGapDropGuard {
         objc_setAssociatedObject(outline, &dragKey, info.map(DragReference.init), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
+    /// What the observer of an outline view learns about a drag on its rows.
+    enum RowDrag {
+        /// A validation: the drag is on the rows. The rows can take it or not.
+        case over(NSDraggingInfo)
+        /// The drag left the rows.
+        case exited
+        /// The drag dropped on the rows.
+        case ended
+    }
+
+    /// True while the guard closes a gap before a row update (point 3). The
+    /// drag stays on the rows, so the observer gets no exit.
+    private static var isClosingForUpdate = false
+
+    private static func notify(_ event: RowDrag, on outline: NSOutlineView) {
+        observer(of: outline)?(event)
+    }
+
+    /// The key of the observer of one outline view.
+    private static var observerKey: UInt8 = 0
+
+    /// An observer as an object, because an associated object must be one.
+    private final class ObserverBox {
+        let body: (RowDrag) -> Void
+        init(_ body: @escaping (RowDrag) -> Void) {
+            self.body = body
+        }
+    }
+
+    private static func observer(of outline: NSOutlineView) -> ((RowDrag) -> Void)? {
+        (objc_getAssociatedObject(outline, &observerKey) as? ObserverBox)?.body
+    }
+
+    /// Tells `body` about each drag on the rows of `outline` in the gap
+    /// style: each validation, the exit and the drop. The sidebar uses it to
+    /// open its pin band.
+    static func observeRowDrag(on outline: NSOutlineView, _ body: @escaping (RowDrag) -> Void) {
+        objc_setAssociatedObject(outline, &observerKey, ObserverBox(body), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
     /// The branches of `outline`. Each outline view has its own: the guard
     /// is on a class, which other Lists share.
     static func branches(of outline: NSOutlineView) -> Branches {
@@ -323,6 +372,7 @@ enum OutlineGapDropGuard {
                     }
                     if index < NSOutlineViewDropOnItemIndex {
                         setOpenDrag(nil, on: view)
+                        if !isClosingForUpdate { notify(.exited, on: view) }
                         return []
                     }
                     let operation: NSDragOperation
@@ -349,6 +399,7 @@ enum OutlineGapDropGuard {
                         operation = original(source, selector, view, info, item, index)
                     }
                     setOpenDrag(operation.isEmpty ? nil : info, on: view)
+                    notify(.over(info), on: view)
                     return operation
                 }
             }
@@ -376,19 +427,27 @@ enum OutlineGapDropGuard {
         let beginReplacement: @convention(block) (NSOutlineView) -> Void = { view in
             MainActor.assumeIsolated {
                 guard view.draggingDestinationFeedbackStyle == .gap, let info = openDrag(on: view) else { return }
+                isClosingForUpdate = true
                 view.draggingExited(info)
+                isClosingForUpdate = false
                 reenter(DragReference(info), on: view)
             }
             beginOriginal(view, begin)
         }
         let prepareOriginal = unsafeBitCast(method_getImplementation(prepareMethod), to: PrepareDrag.self)
         let prepareReplacement: @convention(block) (NSOutlineView, NSDraggingInfo) -> Bool = { view, info in
-            MainActor.assumeIsolated { setOpenDrag(nil, on: view) }
+            MainActor.assumeIsolated {
+                setOpenDrag(nil, on: view)
+                notify(.ended, on: view)
+            }
             return prepareOriginal(view, prepare, info)
         }
         let concludeOriginal = unsafeBitCast(method_getImplementation(concludeMethod), to: ConcludeDrag.self)
         let concludeReplacement: @convention(block) (NSOutlineView, NSDraggingInfo) -> Void = { view, info in
-            MainActor.assumeIsolated { setOpenDrag(nil, on: view) }
+            MainActor.assumeIsolated {
+                setOpenDrag(nil, on: view)
+                notify(.ended, on: view)
+            }
             concludeOriginal(view, conclude, info)
         }
         replace(beginMethod, of: outlineClass, with: beginReplacement)
@@ -405,10 +464,15 @@ enum OutlineGapDropGuard {
     private static func reenter(_ drag: DragReference, on outline: NSOutlineView) {
         DispatchQueue.main.async { [weak outline] in
             MainActor.assumeIsolated {
-                guard let outline, let info = drag.info, openDrag(on: outline) == nil,
+                guard let outline, openDrag(on: outline) == nil else { return }
+                guard let info = drag.info,
                       outline.window === info.draggingDestinationWindow,
                       dropView(at: info.draggingLocation, in: outline) === outline
-                else { return }
+                else {
+                    // The drag is not on the rows now.
+                    notify(.exited, on: outline)
+                    return
+                }
                 _ = outline.draggingEntered(info)
             }
         }
