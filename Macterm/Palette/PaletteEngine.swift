@@ -15,8 +15,9 @@ struct PaletteItem: Identifiable {
     let id: String
     let title: String
     let subtitle: String?
-    /// The subtitle is a path: the row cuts a long one in the middle, so
-    /// that its start and its last folder both show.
+    /// The subtitle ends in a path (`PathRow`): a long one is cut in the
+    /// middle, so the end of the path stays. Other subtitles are cut at the
+    /// end.
     let subtitleIsPath: Bool
     let category: String?
     let keybind: String?

@@ -219,12 +219,30 @@ struct InputPaletteScopeTests {
                 withIntermediateDirectories: true
             )
         }
-        let completions = PaletteInput.pathCompletions(root.path + "/s")
+        let completions = PaletteInput.pathCompletions(root.path + "/s", action: .changeTo)
         #expect(completions == [
-            PaletteCompletion(title: "scripts", value: root.path + "/scripts/"),
-            PaletteCompletion(title: "src", value: root.path + "/src/"),
+            PaletteCompletion(title: "scripts", value: root.path + "/scripts/", subtitle: "Change to: \(root.path)/scripts"),
+            PaletteCompletion(title: "src", value: root.path + "/src/", subtitle: "Change to: \(root.path)/src"),
         ])
-        #expect(PaletteInput.pathCompletions("devbox:~/dev").isEmpty, "a remote path gets no completion")
+        #expect(
+            PaletteInput.pathCompletions(root.path + "/s", action: .openAsNewProject).first?.subtitle
+                == "Open as new project: \(root.path)/scripts",
+            "the screen gives the words before the path"
+        )
+        #expect(PaletteInput.pathCompletions("devbox:~/dev", action: .changeTo).isEmpty, "a remote path gets no completion")
+
+        // The screen draws them as path rows: the subtitle is cut in the middle.
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.path",
+            pill: PalettePill(title: "Folder", icon: "folder"),
+            prompt: "Folder",
+            completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
+            check: { _ in .nothing }
+        ))
+        let row = try #require(rows(scope, root.path + "/s").first)
+        #expect(row.title == "scripts")
+        #expect(row.subtitle == "Change to: \(root.path)/scripts")
+        #expect(row.subtitleIsPath)
     }
 
     @Test

@@ -89,6 +89,7 @@ struct AppStateProjectDirectoryTests {
         #expect(input.initialValue.isEmpty)
         #expect(action(input, "") == nil, "no pane folder: only the typed field")
         #expect(input.completions(root + "/").map(\.title) == ["sub"])
+        #expect(input.completions(root + "/").first?.subtitle?.hasPrefix("Change to: ") == true, "a folder row says what it does")
         let row = try #require(action(input, root + "/sub/"))
         #expect(row.title == "Change to \"\(root)/sub/\"", "one action row names the typed path")
         #expect(row.subtitle == nil)

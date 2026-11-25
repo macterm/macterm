@@ -31,7 +31,7 @@ extension AppState {
             id: "changeProjectDirectory:\(projectID.uuidString)",
             pill: Self.changeProjectDirectoryPill,
             prompt: String(localized: "Type a folder path"),
-            completions: PaletteInput.pathCompletions,
+            completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
             check: { [self] text in
                 if text.trimmingCharacters(in: .whitespaces).isEmpty {
                     guard let paneDirectory = Self.paneDirectoryOffer(readPaneDirectory(), for: project) else {
