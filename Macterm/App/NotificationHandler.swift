@@ -175,7 +175,7 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
         [
             "paneID": pane.id.uuidString,
             "projectID": pane.projectID.uuidString,
-            "isQuickTerminal": pane.projectID == QuickTerminalService.projectID,
+            "isQuickTerminal": pane.projectID == QuickTerminalService.shared.splitState.projectID,
         ]
     }
 
@@ -280,11 +280,11 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
     private func handleTap(paneID: UUID, projectID: UUID, isQuickTerminal: Bool) {
         if isQuickTerminal {
             QuickTerminalService.shared.showPanel()
-            if QuickTerminalService.shared.splitState.tab.splitRoot.findPane(id: paneID) != nil {
+            if let root = QuickTerminalService.shared.splitState.splitRoot, root.findPane(id: paneID) != nil {
                 QuickTerminalService.shared.splitState.focusPane(paneID)
                 FocusRestoration.restoreFocus(
                     to: paneID,
-                    in: QuickTerminalService.shared.splitState.tab.splitRoot,
+                    in: root,
                     window: QuickTerminalService.shared.panel
                 )
             }

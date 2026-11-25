@@ -282,7 +282,7 @@ struct ProjectsSettings: View {
         return .created(addProject(from: layout, path: path, in: store))
     }
 
-    private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project {
+    private static func addProject(from layout: ProjectFileStore.Listing, path: String, in store: ProjectStore) -> Project? {
         // `name:` is optional in a project file; fall back to the filename,
         // which is the slug of a name Macterm itself wrote.
         let declared = layout.declaredName?.trimmingCharacters(in: .whitespacesAndNewlines)

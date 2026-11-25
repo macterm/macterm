@@ -40,9 +40,9 @@ struct LocalServer {
             executable: executable,
             directory: directory,
             buildTag: ServerBuilds.bundledKey,
-            // The folder of the v1 files (design/010 §2), only while the
-            // shadow stage runs: a release server has no model yet.
-            stateDirectory: ModelShadow.isEnabled ? FileStorage.appSupportDirectory() : nil
+            // The folder of the v1 files (design/010 §2): `model.json` is
+            // next to them.
+            stateDirectory: FileStorage.appSupportDirectory()
         )
     }
 

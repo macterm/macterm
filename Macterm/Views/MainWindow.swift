@@ -346,6 +346,12 @@ struct MainWindow: View {
         }
         .task {
             guard !appState.hasRestoredSelection else { return }
+            // The model is on the server: the restore reads it, so the
+            // connection comes first. The unit-test host runs no server.
+            if SessionClient.liveBypass != .unitTestHost, !appState.modelConnection.isConnected {
+                await appState.modelConnection.connect()
+            }
+            guard !appState.hasRestoredSelection else { return }
             appState.restoreSelection(projects: projectStore.projects)
             // After the restore, never before: "is this a fresh install?" is
             // only answerable once the snapshot is loaded, `pinned.yaml` is
