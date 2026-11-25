@@ -43,6 +43,28 @@ struct PinDragPresenceTests {
     }
 
     @Test
+    func a_drop_clears_every_holder_at_once() async {
+        let presence = PinDragPresence()
+        presence.set(.header(UUID()), holds: true)
+        presence.set(.rows, holds: true)
+        presence.reset()
+        #expect(!presence.isActive)
+        // The header never let go, but it does not keep the next drag open.
+        presence.set(.strip, holds: true)
+        presence.set(.strip, holds: false)
+        #expect(await poll { presence.isActive ? nil : true } == true)
+    }
+
+    @Test
+    func the_band_shows_during_a_drag_only_when_no_tab_is_pinned() {
+        typealias Zone = PinTabDropZone
+        #expect(Zone.isBandVisible(showsBand: true, isDragOnSidebar: true, isTargeted: false))
+        #expect(Zone.isBandVisible(showsBand: true, isDragOnSidebar: false, isTargeted: true))
+        #expect(!Zone.isBandVisible(showsBand: true, isDragOnSidebar: false, isTargeted: false))
+        #expect(!Zone.isBandVisible(showsBand: false, isDragOnSidebar: true, isTargeted: true))
+    }
+
+    @Test
     func only_a_tab_or_a_pane_can_pin() throws {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }
