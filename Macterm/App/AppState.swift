@@ -2220,13 +2220,14 @@ final class AppState {
     @ObservationIgnored
     var plainShellAnswerTimeout: Duration = .seconds(2)
 
-    /// Shows an open panel, adds or finds the selected directory as a project,
-    /// and selects it. Returns the selected project, nil if cancelled. With
-    /// `parent` (New Project Inside), the panel starts in the folder of
-    /// `parent` when it is a local folder, and the new project goes at the
-    /// end of the projects inside `parent`.
+    /// Shows the folder panel, adds the selected directory as a new project,
+    /// and selects it: the Select in Finder row of the New Project screen,
+    /// the `+` of Settings → Projects and New Project Inside. Returns the
+    /// project, nil if cancelled. With `parent` (New Project Inside), the
+    /// panel starts in the folder of `parent` when it is a local folder, and
+    /// the new project goes at the end of the projects inside `parent`.
     @discardableResult
-    func openProject(store: ProjectStore, inside parent: Project? = nil) -> Project? {
+    func newProjectFromFolderPanel(store: ProjectStore, inside parent: Project? = nil) -> Project? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false

@@ -60,13 +60,13 @@ struct DockMenuTests {
 
     @Test
     func the_menu_offers_ghosttys_four_items() {
-        #expect(DockMenu.commands == [.newWindow, .newTab, .openProject, .toggleQuickTerminal])
+        #expect(DockMenu.commands == [.newWindow, .newTab, .newProject, .toggleQuickTerminal])
         #expect(DockMenu.commands.map(DockMenu.title(for:)) == [
             "New Window", "New Tab", "New Project…", "Toggle Quick Terminal",
         ])
         // Every title is an `AppCommand`'s own title or the menu bar's override
         // for it — never a string of the Dock menu's own.
-        for command in DockMenu.commands where command != .openProject {
+        for command in DockMenu.commands where command != .newProject {
             #expect(DockMenu.title(for: command) == command.title)
         }
     }
@@ -162,7 +162,7 @@ struct DockMenuTests {
     @Test
     func window_bound_picks_front_a_window_and_the_quick_terminal_keeps_focus_where_it_is() {
         #expect(DockMenu.preparation(for: .newTab) == .frontTerminalWindow)
-        #expect(DockMenu.preparation(for: .openProject) == .frontTerminalWindow)
+        #expect(DockMenu.preparation(for: .newProject) == .frontTerminalWindow)
         #expect(DockMenu.preparation(for: .newWindow) == .activate)
         #expect(DockMenu.preparation(for: .toggleQuickTerminal) == .none)
     }
