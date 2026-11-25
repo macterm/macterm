@@ -49,8 +49,8 @@ enum PaletteScopeID: Hashable {
         switch self {
         case .passwords: String(localized: "Manage passwords")
         case .files: String(localized: "Browse files and folders in this project")
-        case .custom,
-             .input: ""
+        case .custom: ""
+        case let .input(input): input.summary
         }
     }
 
@@ -76,9 +76,8 @@ enum PaletteScopeID: Hashable {
     }
 }
 
-/// A pill in the breadcrumb above the input: a frame's name and glyph.
-/// An input screen's pill has no glyph (`PaletteInput.pill`): it names the
-/// action that asks for a value, and the field is the screen.
+/// A pill in the breadcrumb above the input: a frame's name and glyph. An
+/// input screen's pill has no glyph (`PaletteInput.pill`).
 struct PalettePill: Hashable {
     let title: String
     let icon: PaletteIcon?

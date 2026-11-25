@@ -294,8 +294,8 @@ extension AppCommand {
                   let view = SurfaceRegistry.shared.view(of: pane), view.surface != nil
             else { return nil }
             return { view.explainOutput() }
-        case .openProject:
-            return { _ = ctx.appState.openProject(store: ctx.projectStore) }
+        case .newProject:
+            return { ctx.appState.toggleCommandPalette(scope: .input(.newProject)) }
         case .newRemoteProject:
             return { ctx.appState.isNewRemoteProjectSheetPresented = true }
         case .removeProject:

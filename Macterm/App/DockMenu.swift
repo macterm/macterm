@@ -12,16 +12,14 @@ private let logger = Logger(subsystem: appBundleID, category: "DockMenu")
 /// delegate's built menu against it.
 enum DockMenu {
     /// The menu, top to bottom. Mirrors Ghostty's Dock menu.
-    static let commands: [AppCommand] = [.newWindow, .newTab, .openProject, .toggleQuickTerminal]
+    static let commands: [AppCommand] = [.newWindow, .newTab, .newProject, .toggleQuickTerminal]
 
     /// The item's title. `AppCommand.title` is the palette's wording; the one
-    /// override matches the menu bar's Project menu, which also calls the
-    /// folder picker "New Project…" (the File menu's "Open Project…" is the
-    /// same command — from the Dock the user is making something, not
-    /// reopening it).
+    /// override adds the ellipsis that the menu bar's File and Project menus
+    /// give New Project…, because it opens a screen that asks for a folder.
     static func title(for command: AppCommand) -> String {
         switch command {
-        case .openProject: String(localized: "New Project…")
+        case .newProject: String(localized: "New Project…")
         default: command.title
         }
     }
@@ -56,7 +54,7 @@ enum DockMenu {
         // would flip a flag nothing draws. Not reachable from the Dock menu
         // itself — it is here for the App Intent.
         case .newTab,
-             .openProject,
+             .newProject,
              .toggleCommandPalette,
              .passwordManager: .frontTerminalWindow
         case .toggleQuickTerminal: .none

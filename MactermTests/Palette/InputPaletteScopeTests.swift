@@ -19,7 +19,7 @@ struct InputPaletteScopeTests {
             prompt: "Folder name",
             initialValue: "untitled",
             completions: completions
-        ) { text in
+        ) { text, _ in
             let name = text.trimmingCharacters(in: .whitespaces)
             if name.isEmpty { return .nothing }
             if name.contains("/") { return .notice("A name cannot contain a slash.") }
@@ -57,7 +57,8 @@ struct InputPaletteScopeTests {
         let input = makeInput(log: Log())
         let frame = PaletteFrame(.input(input))
         let scope = try #require(frame.scope as? InputPaletteScope)
-        #expect(frame.pill == PalettePill(title: "New Folder"), "an input pill has no glyph")
+        #expect(frame.pill == PalettePill(title: "New Folder"))
+        #expect(frame.pill.icon == nil, "an input screen's pill has no icon")
         #expect(scope.placeholder == "Folder name")
         #expect(scope.initialQuery == "untitled")
         #expect(PaletteScopeID.input(input).command == nil)
@@ -145,7 +146,7 @@ struct InputPaletteScopeTests {
                     PaletteInputChoice(item: PaletteItem(id: "pick:\(name)", title: name) { ran.append(name) }, value: name + "/")
                 }
             },
-            check: { _ in .nothing }
+            check: { _, _ in .nothing }
         ))
         let listed = rows(scope, "*")
         #expect(listed.map(\.title) == ["alpha", "beta"])
@@ -169,7 +170,7 @@ struct InputPaletteScopeTests {
             choices: { _, _ in
                 ["a/", "a/b/"].map { PaletteInputChoice(item: PaletteItem(id: "pick:\($0)", title: $0) {}, value: $0) }
             },
-            check: { _ in .action(PaletteInputAction(title: "Use") { .done }) }
+            check: { _, _ in .action(PaletteInputAction(title: "Use") { .done }) }
         ))
         let listed = rows(scope, "a/")
         #expect(listed.first?.id == InputPaletteScope.actionItemID, "the action row comes first")
@@ -184,8 +185,9 @@ struct InputPaletteScopeTests {
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.empty-action",
             title: "Here",
-            prompt: "Folder"
-        ) { _ in .action(PaletteInputAction(title: "Current Pane's Directory") { .done }) })
+            prompt: "Folder",
+            check: { _, _ in .action(PaletteInputAction(title: "Current Pane's Directory") { .done }) }
+        ))
         #expect(rows(scope, "").map(\.id) == [InputPaletteScope.actionItemID, InputPaletteScope.cancelItemID])
         #expect(scope.restingItemID == InputPaletteScope.actionItemID, "Cancel is selected only when no other row is")
     }
@@ -237,7 +239,7 @@ struct InputPaletteScopeTests {
             id: "test.folder",
             title: "Folder",
             prompt: "Folder"
-        ) { text in
+        ) { text, _ in
             PaletteInput.folderCheck(text) { path in PaletteInputAction(title: "Change to \"\(path)\"") { .done } }
         })
 
@@ -283,7 +285,7 @@ struct InputPaletteScopeTests {
             title: "Folder",
             prompt: "Folder",
             completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
-            check: { _ in .nothing }
+            check: { _, _ in .nothing }
         ))
         let row = try #require(rows(scope, root.path + "/s").first)
         #expect(row.title == "scripts")

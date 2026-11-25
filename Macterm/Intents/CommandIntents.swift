@@ -123,7 +123,7 @@ enum MactermKeybind: String, AppEnum {
         .movePaneRight: "Move Pane Right",
         .newWindow: "New Window",
         .closeWindow: "Close Window",
-        .openProject: "Open Project",
+        .openProject: "New Project",
         .zoomPane: "Zoom Pane",
         .settings: "Settings",
         .toggleCommandPalette: "Command Palette",

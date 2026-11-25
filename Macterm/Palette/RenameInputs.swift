@@ -23,7 +23,7 @@ extension PaletteInput {
             title: AppCommand.renameTab.title,
             prompt: String(localized: "Tab name", comment: "Placeholder of the Rename Tab field in the palette"),
             initialValue: tab.sidebarTitle
-        ) { text in
+        ) { text, _ in
             guard let tab = find() else { return .nothing }
             let name = text.trimmingCharacters(in: .whitespaces)
             let title: String?
@@ -61,7 +61,7 @@ extension PaletteInput {
             title: AppCommand.renameProject.title,
             prompt: String(localized: "Project name", comment: "Placeholder of the Rename Project field in the palette"),
             initialValue: project.name
-        ) { text in
+        ) { text, _ in
             let name = text.trimmingCharacters(in: .whitespaces)
             guard let project = find(), !name.isEmpty, name != project.name else { return .nothing }
             if let refusal = Project.nameRefusal(for: name) { return .notice(refusal) }
