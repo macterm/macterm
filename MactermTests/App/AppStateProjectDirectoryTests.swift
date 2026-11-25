@@ -259,7 +259,7 @@ struct AppStateProjectDirectoryTests {
         #expect(input.choices("~/", context).isEmpty, "no list, no folder rows")
         let before = redraws
         #expect(scope.press(items[0]) == .checking)
-        #expect(scope.loading?.message == "Checking the folder on me@devbox")
+        #expect(scope.loading?.message == "Connecting to me@devbox…", "the host has not answered yet")
         #expect(scope.press(items[0]) == .nothing, "a second Return waits for the check")
         try await waitUntil { scope.loading == nil }
         #expect(asked.count == 1)
@@ -273,8 +273,12 @@ struct AppStateProjectDirectoryTests {
         #expect(path(of: fixture) == "me@devbox:~/proj")
 
         answer = .exists
-        #expect(scope.press(items[0]) == .checking)
-        #expect(scope.failure == nil, "a new check hides the old reason")
+        // The reason goes when the text changes.
+        _ = try await settledItems(scope, "~/ap", context)
+        let retyped = try await settledItems(scope, "~/api", context)
+        #expect(scope.failure == nil, "new text hides the old reason")
+        #expect(retyped.map(\.title) == ["Change to \"~/api\""])
+        #expect(scope.press(retyped[0]) == .checking)
         try await waitUntil { scope.loading == nil }
         #expect(scope.takeCloseRequest(), "a yes runs the action and closes the palette")
         #expect(path(of: fixture) == "me@devbox:~/api")
@@ -335,7 +339,7 @@ struct AppStateProjectDirectoryTests {
         let old = try await settledItems(scope, "~/apj", context)
         #expect(scope.press(old[0]) == .checking)
         _ = scope.sections(for: PaletteQuery(raw: "~/api"), context: context)
-        #expect(scope.loading == nil, "new text stops the check")
+        #expect(scope.loading?.message != "Connecting to devbox…", "new text stops the check")
         try await Task.sleep(for: .milliseconds(400))
         #expect(path(of: fixture) == "devbox:~/proj", "the old text's answer runs nothing")
         #expect(!scope.takeCloseRequest())
@@ -444,10 +448,14 @@ struct AppStateProjectDirectoryTests {
         #expect(asked == 1, "with a report, the host is not asked")
     }
 
-    /// The rows of `text` once the host's listing in flight has ended.
+    /// The rows of `text` once the host's requests have ended. A listing can start a probe of the path, so it draws until no
+    /// request starts.
     private func settledItems(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> [PaletteItem] {
-        _ = scope.sections(for: PaletteQuery(raw: text), context: context)
-        try await waitUntil { scope.loading == nil }
+        for _ in 0 ..< 5 {
+            _ = scope.sections(for: PaletteQuery(raw: text), context: context)
+            if scope.loading == nil { break }
+            try await waitUntil { scope.loading == nil }
+        }
         return scope.sections(for: PaletteQuery(raw: text), context: context).flatMap(\.items)
     }
 
