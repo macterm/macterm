@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 /// Moves in the tree of projects and tabs (design 013) that the sidebar
 /// menu and the commands both make. `ProjectStore` holds the tree; this adds
@@ -40,10 +40,13 @@ extension AppState {
     /// order of the sidebar rows. The rows of Pinned and Scratch Tabs are
     /// not nodes.
     func commandTarget(store: ProjectStore) -> [SidebarItem] {
-        guard let window = keyWindow else { return shownNode(in: nil).map { [$0] } ?? [] }
-        let nodes = window.isCommandPaletteVisible
-            ? window.paletteTarget ?? liveCommandTarget(in: window)
-            : liveCommandTarget(in: window)
+        let nodes = if let window = keyWindow {
+            window.isCommandPaletteVisible
+                ? window.paletteTarget ?? liveCommandTarget(in: window)
+                : liveCommandTarget(in: window)
+        } else {
+            shownNode(in: nil).map { [$0] } ?? []
+        }
         return nodes.filter { nodeExists($0, store: store) }
     }
 
@@ -51,10 +54,11 @@ extension AppState {
     /// has the focus, else the node that it shows. A click in a terminal
     /// pane does not clear a selection of more rows
     /// (`SidebarContent.syncSelection` follows a change of tab or project
-    /// only), so the selection counts only while the user is in the sidebar.
+    /// only), so the selection counts only while the user is in the sidebar
+    /// (`WindowState.sidebarHasFocus`), and only while it shows.
     func liveCommandTarget(in window: WindowState) -> [SidebarItem] {
         let selection = window.sidebar.selection
-        if !selection.isEmpty, sidebarHasFocus(window) {
+        if !selection.isEmpty, window.sidebarHasFocus, window.sidebarVisible {
             let order = window.sidebar.orderedItems
             return selection.sorted { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
         }
@@ -78,13 +82,6 @@ extension AppState {
         case let .project(id): store.row(id) != nil
         case let .tab(projectID, tabID): workspaces[projectID]?.tabs.contains { $0.id == tabID } == true
         }
-    }
-
-    /// Whether the focus of `window` is in its sidebar: the first responder
-    /// is the outline view of the sidebar's `List`. Nothing else in a main
-    /// window is an outline view. Tests replace it.
-    static func sidebarOutlineHasFocus(_ nsWindow: NSWindow?) -> Bool {
-        nsWindow?.firstResponder is NSOutlineView
     }
 
     /// The name of `node` as its sidebar row says it: the tab's title, or

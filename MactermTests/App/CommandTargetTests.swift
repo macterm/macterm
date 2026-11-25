@@ -17,7 +17,11 @@ struct CommandTargetTests {
         let a: Project
         let b: Project
         let window: WindowState
-        var sidebarFocused = false
+        var sidebarFocused: Bool {
+            get { window.sidebarHasFocus }
+            set { window.sidebarHasFocus = newValue }
+        }
+
         var ctx: AppCommandContext { AppCommandContext(appState: state, projectStore: store) }
 
         init() {
@@ -37,7 +41,6 @@ struct CommandTargetTests {
             state.noteKeyWindow(window)
             state.selectProject(b, in: window)
             state.selectProject(a, in: window)
-            state.sidebarFocusProbe = { [unowned self] _ in sidebarFocused }
         }
 
         func tabs(of project: Project) -> [UUID] {
@@ -87,6 +90,28 @@ struct CommandTargetTests {
             f.state.commandTarget(store: f.store) == [.project(f.a.id), .tab(projectID: f.b.id, tabID: bTab)],
             "the selection, in the order of the rows"
         )
+    }
+
+    @Test
+    func a_hidden_sidebar_gives_no_target() throws {
+        let f = Fixture()
+        let bTab = try #require(f.tabs(of: f.b).first)
+        f.window.sidebar.selection = [.tab(projectID: f.b.id, tabID: bTab), .project(f.a.id)]
+        f.sidebarFocused = true
+        f.window.sidebarVisible = false
+        #expect(f.state.commandTarget(store: f.store).count == 1, "the shown tab")
+    }
+
+    @Test
+    func the_title_follows_the_focus() throws {
+        let f = Fixture()
+        let bTab = try #require(f.tabs(of: f.b).first)
+        f.window.sidebar.selection = [.tab(projectID: f.b.id, tabID: bTab), .project(f.a.id)]
+        #expect(AppCommand.remove.title(in: f.ctx) == "Close Tab")
+        f.sidebarFocused = true
+        #expect(AppCommand.remove.title(in: f.ctx) == "Remove 2 Items")
+        f.sidebarFocused = false
+        #expect(AppCommand.remove.title(in: f.ctx) == "Close Tab")
     }
 
     @Test
@@ -225,6 +250,32 @@ struct CommandTargetTests {
         #expect(f.tabs(of: f.a).count == 2, "nothing goes before the answer")
         f.state.confirmPendingDialog()
         #expect(f.tabs(of: f.a).isEmpty)
+    }
+
+    @Test
+    func a_busy_project_in_a_set_says_that_a_process_runs() {
+        let f = Fixture()
+        f.state.paneNeedsConfirmClose = { _ in true }
+        f.state.requestRemove([.project(f.a.id), .project(f.b.id)], store: f.store)
+        #expect(f.state.pendingDialog?.kind == .removeSelection)
+        #expect(f.state.pendingDialog?.message.hasSuffix("A process is still running.") == true)
+    }
+
+    @Test
+    func a_pinned_tab_in_a_set_keeps_its_record_and_is_not_counted() throws {
+        let f = Fixture()
+        let pinned = try f.newTab(in: f.b)
+        f.state.pinTab(pinned, fromProject: f.b.id)
+        f.state.requestRemove([.project(f.a.id), .tab(projectID: PinnedTabs.workspaceID, tabID: pinned)], store: f.store)
+
+        #expect(
+            f.state.pendingDialog?.message == "The selected items contain 1 tab and 0 nested projects.",
+            "the tab of a; the pinned tab does not go"
+        )
+        f.state.confirmPendingDialog()
+        #expect(f.store.row(f.a.id) == nil)
+        #expect(f.state.pinnedRecords.map(\.id) == [pinned], "the row stays")
+        #expect(f.state.pinnedWorkspace?.tabs.isEmpty == true, "its processes end")
     }
 
     @Test

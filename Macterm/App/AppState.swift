@@ -273,7 +273,10 @@ final class AppState {
     /// for a given one wins and later instances adopt it (`WindowRegistry`).
     func canonicalWindowState(for nsWindow: NSWindow, proposed: WindowState) -> WindowState {
         let (state, isNew) = windowRegistry.adopt(proposed, for: nsWindow)
-        if isNew { registerWindow(state) }
+        if isNew {
+            registerWindow(state)
+            state.watchFocus(of: nsWindow)
+        }
         return state
     }
 
@@ -829,17 +832,6 @@ final class AppState {
     private func recordPaletteTarget(in window: WindowState) {
         guard !window.isCommandPaletteVisible else { return }
         window.paletteTarget = liveCommandTarget(in: window)
-    }
-
-    /// Replaces the read of the first responder in
-    /// `sidebarHasFocus(_:)`. Only tests set it: they have no `NSWindow`.
-    @ObservationIgnored
-    var sidebarFocusProbe: ((WindowState) -> Bool)?
-
-    /// Whether the sidebar of `window` has the focus, for the command target
-    /// (`liveCommandTarget(in:)`).
-    func sidebarHasFocus(_ window: WindowState) -> Bool {
-        sidebarFocusProbe?(window) ?? Self.sidebarOutlineHasFocus(nsWindow(for: window))
     }
 
     /// Show the palette on `scope` alone (nil: the root), whatever stack of
@@ -2461,7 +2453,7 @@ final class AppState {
     /// are not counted or removed twice. One tab or one project gets its own
     /// question (`requestCloseTab`, `requestRemoveProject`); a set gets one
     /// question for all (`requestRemoveSelection`).
-    func requestRemove(_ nodes: [SidebarItem], store: ProjectStore, host: DialogHost = .mainWindow) {
+    func requestRemove(_ nodes: [SidebarItem], store: ProjectStore) {
         var selected: [UUID] = []
         var tabs: [(tabID: UUID, projectID: UUID)] = []
         for node in nodes {
@@ -2483,9 +2475,9 @@ final class AppState {
         case (0, 1):
             requestCloseTab(tabsToClose[0].tabID, projectID: tabsToClose[0].projectID)
         case (1, 0):
-            requestRemoveProject(tops[0], store: store, host: host)
+            requestRemoveProject(tops[0], store: store)
         default:
-            requestRemoveSelection(projectIDs: tops, tabs: tabsToClose, store: store, host: host) { [weak self] in
+            requestRemoveSelection(projectIDs: tops, tabs: tabsToClose, store: store) { [weak self] in
                 guard let self else { return }
                 closeTabs(tabsToClose)
                 for id in tops {
@@ -2498,9 +2490,9 @@ final class AppState {
         }
     }
 
-    /// A bulk sidebar delete (multi-selection): run `removal` (the caller's
-    /// close of `tabs` and removal of the `selected` projects) now, or after
-    /// one question for the whole selection. A selected project goes with
+    /// The question of a set of nodes (`requestRemove`): run `removal` (the
+    /// caller's close of `tabs` and removal of the `selected` projects) now,
+    /// or after one question for the whole set. A selected project goes with
     /// everything inside it, as a single Remove does, so the question has
     /// the same counts when a selected project holds tabs or nested
     /// projects. A selection of tabs alone asks only when a process runs.
@@ -2508,7 +2500,6 @@ final class AppState {
         projectIDs selected: [UUID],
         tabs: [(tabID: UUID, projectID: UUID)],
         store: ProjectStore,
-        host: DialogHost = .mainWindow,
         removal: @escaping @MainActor () -> Void
     ) {
         let removed = projectsRemoved(with: selected, store: store)
@@ -2525,7 +2516,7 @@ final class AppState {
         judgeClose(panes(inProjects: removed, tabs: tabs), target: "selection") { [weak self] busy in
             guard let self else { return }
             guard tabsInProjects > 0 || nested > 0 else {
-                if busy { confirmRemoveSelection(host: host, removal: removal) } else { removal() }
+                if busy { confirmRemoveSelection(removal: removal) } else { removal() }
                 return
             }
             let message = busy
@@ -2539,13 +2530,13 @@ final class AppState {
                 title: String(localized: "Remove the selected items?"),
                 message: message,
                 confirmTitle: String(localized: "Remove"),
-                host: host,
+                host: .mainWindow,
                 onConfirm: removal
             ))
         }
     }
 
-    private func confirmRemoveSelection(host: DialogHost, removal: @escaping @MainActor () -> Void) {
+    private func confirmRemoveSelection(removal: @escaping @MainActor () -> Void) {
         present(PendingDialog(
             kind: .removeSelection,
             title: String(localized: "Remove items with running processes?"),
@@ -2554,7 +2545,7 @@ final class AppState {
             Removing them ends every process in their tabs.
             """),
             confirmTitle: String(localized: "Remove"),
-            host: host,
+            host: .mainWindow,
             onConfirm: removal
         ))
     }

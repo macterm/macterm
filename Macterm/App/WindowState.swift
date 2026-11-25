@@ -64,6 +64,28 @@ final class WindowState: Identifiable {
     @ObservationIgnored
     let sidebar = SidebarPresentationState()
 
+    /// Whether the focus of this window is in its sidebar: the first
+    /// responder is the outline view of the sidebar's `List`. Observed, so
+    /// that a menu item whose title follows the command target updates when
+    /// the focus moves (`AppState.commandTarget(store:)`). `watchFocus(of:)`
+    /// keeps it current.
+    var sidebarHasFocus = false
+
+    @ObservationIgnored
+    private var focusObservation: NSKeyValueObservation?
+
+    /// Follow the first responder of `nsWindow` into `sidebarHasFocus`.
+    /// Nothing else in a main window is an outline view.
+    func watchFocus(of nsWindow: NSWindow) {
+        sidebarHasFocus = nsWindow.firstResponder is NSOutlineView
+        focusObservation = nsWindow.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
+            MainActor.assumeIsolated {
+                let focused = window.firstResponder is NSOutlineView
+                if self?.sidebarHasFocus != focused { self?.sidebarHasFocus = focused }
+            }
+        }
+    }
+
     /// The nodes that a command from the palette acts on, recorded when the
     /// palette opens, before it takes the focus from the sidebar
     /// (`AppState.commandTarget(store:)`). nil while the palette is closed.
