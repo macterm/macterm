@@ -27,6 +27,37 @@ enum FileIndex {
     /// something a palette can show anyway, and the scan has to end.
     static let limit = 20000
 
+    /// The folders of the home folder that macOS guards with a prompt:
+    /// Desktop, Documents and Downloads (Files and Folders), and Music (Media
+    /// and Apple Music). A walk that enters one makes macOS ask for access,
+    /// and the user did not ask for that folder. `~/Library` and `/Volumes`
+    /// are hidden, so the walk skips them already.
+    static let protectedHomeFolders = ["Desktop", "Documents", "Downloads", "Music"]
+
+    /// The directories `scan` lists but does not enter, as resolved paths:
+    /// the `protectedHomeFolders` of `home`, unless Macterm has Full Disk
+    /// Access (`FullDiskAccess`, a probe that never prompts), which includes
+    /// all of them. A grant for one folder alone has no probe that does not
+    /// prompt, so `nil` (no evidence) skips them too. The user still gets to
+    /// a skipped folder: its row opens a shell in it, and a typed path
+    /// (`~/Documents/`) in the palette completes in it.
+    static func protectedDirectories(home: URL, fullDiskAccess: Bool?) -> Set<String> {
+        guard fullDiskAccess != true else { return [] }
+        let resolvedHome = home.resolvingSymlinksInPath()
+        return Set(protectedHomeFolders.map { resolvedPath(resolvedHome.appendingPathComponent($0, isDirectory: true)) })
+    }
+
+    /// `protectedDirectories` for this Mac and its Full Disk Access now.
+    static func protectedDirectories() -> Set<String> {
+        protectedDirectories(home: FileManager.default.homeDirectoryForCurrentUser, fullDiskAccess: FullDiskAccess.isGranted())
+    }
+
+    /// The path of `url` with no trailing slash, the form `skipping` holds.
+    private static func resolvedPath(_ url: URL) -> String {
+        let path = url.standardizedFileURL.path(percentEncoded: false)
+        return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+
     /// Every entry under `root`, shallow first and alphabetical within a
     /// depth, so the top of the list is the project's own top level.
     ///
@@ -36,10 +67,15 @@ enum FileIndex {
     /// to a directory is listed as a directory and never entered (a link back
     /// up the tree would loop); a package (`.app`) is listed as one entry. An
     /// unreadable directory is skipped, and a cancelled task stops the walk.
-    static func scan(root: URL, limit: Int = limit) -> [FileIndexEntry] {
+    /// A directory in `skipping` (resolved paths, `protectedDirectories`) is
+    /// listed and not entered. The root itself is always entered: the user
+    /// asked for it.
+    static func scan(root: URL, limit: Int = limit, skipping: Set<String> = []) -> [FileIndexEntry] {
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
         var entries: [FileIndexEntry] = []
-        var level: [(url: URL, relative: String)] = [(root, "")]
+        // Resolved, so that a child's path compares with `skipping` however
+        // the project path was written (`/var` for `/private/var`).
+        var level: [(url: URL, relative: String)] = [(root.resolvingSymlinksInPath(), "")]
         walk: while !level.isEmpty {
             var next: [(url: URL, relative: String)] = []
             for (directory, prefix) in level {
@@ -64,7 +100,9 @@ enum FileIndex {
                     let relative = prefix.isEmpty ? name : "\(prefix)/\(name)"
                     entries.append(FileIndexEntry(relativePath: relative, isDirectory: isDirectory))
                     if entries.count >= limit { break walk }
-                    if isDirectory, !isLink, values?.isPackage != true { next.append((child, relative)) }
+                    if isDirectory, !isLink, values?.isPackage != true, !skipping.contains(resolvedPath(child)) {
+                        next.append((child, relative))
+                    }
                 }
             }
             level = next
@@ -126,7 +164,9 @@ final class FilesPaletteScope: PaletteScope {
     private var context: PaletteContext?
     private let scan: @Sendable (URL) -> [FileIndexEntry]
 
-    init(scan: @escaping @Sendable (URL) -> [FileIndexEntry] = { FileIndex.scan(root: $0) }) {
+    init(scan: @escaping @Sendable (URL) -> [FileIndexEntry] = {
+        FileIndex.scan(root: $0, skipping: FileIndex.protectedDirectories())
+    }) {
         self.scan = scan
     }
 

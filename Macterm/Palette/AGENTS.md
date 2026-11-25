@@ -67,6 +67,7 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
     - `PasswordPaletteScope`.
     - `FilesPaletteScope`: the files and directories of the active local project.
       - `FileIndex.scan` walks a level at a time, so that the cap of 20k cuts the deepest level, never the top. It skips hidden directories and the directories for dependencies and builds. It lists a linked directory, and it never enters it.
+      - It lists the folders of the home folder that macOS guards with a prompt (`FileIndex.protectedHomeFolders`), and it does not enter them unless Macterm has Full Disk Access (`FileIndex.protectedDirectories`). The project root itself is always entered. No macOS prompt comes from an index.
       - Macterm indexes one time on `activate`, off the main actor. The search is by name or by part of a path. It shows 50 rows.
       - Enter opens a split next to the focused pane (a tab in that directory when the project has none). A directory opens as a shell there. A file opens in the terminal editor.
       - `PaletteItem.alt` of the row opens it with the default app, with ⌥↩ or ⌥-click. The subtitle is swapped while Option is down, to show the alt action. There are no ⌥↩ caps, because the held key implies them. Macterm decides from the event of Return or the click. It never decides from the flag that it tracks.
