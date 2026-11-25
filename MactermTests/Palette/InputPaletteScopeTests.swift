@@ -135,6 +135,33 @@ struct InputPaletteScopeTests {
     }
 
     @Test
+    func a_choice_row_is_the_action_and_tab_fills_its_value() throws {
+        var ran: [String] = []
+        let scope = InputPaletteScope(input: PaletteInput(
+            id: "test.choices",
+            title: "Pick",
+            prompt: "Pick",
+            choices: { text, _ in
+                (text == "*" ? ["alpha", "beta"] : []).map { name in
+                    PaletteInputChoice(item: PaletteItem(id: "pick:\(name)", title: name) { ran.append(name) }, value: name + "/")
+                }
+            },
+            check: { _, _ in .nothing }
+        ))
+        let listed = rows(scope, "*")
+        #expect(listed.map(\.title) == ["alpha", "beta"])
+        #expect(scope.restingItemID == "pick:alpha", "the selection rests on the first choice")
+        let beta = try #require(listed.last)
+        #expect(scope.isChoice(beta))
+        #expect(scope.completion(for: beta) == "beta/", "Tab fills the value")
+        #expect(scope.press(beta) == .closed)
+        #expect(ran == ["beta"], "Return or a click runs the selected choice only")
+
+        #expect(rows(scope, "").map(\.id) == [InputPaletteScope.cancelItemID], "no choice: Cancel rests")
+        #expect(scope.restingItemID == InputPaletteScope.cancelItemID)
+    }
+
+    @Test
     func an_empty_field_with_an_action_row_rests_on_the_action_row() {
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.empty-action",
