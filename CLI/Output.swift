@@ -126,12 +126,20 @@ enum Output {
         printColumns(rows)
     }
 
+    /// To a pipe, each tab has the name of its project after its title, as
+    /// a project has the name of its parent in `renderProjects`: the two
+    /// lists name a node with the same columns (design 013). A terminal
+    /// shows one project's tabs, so it leaves the column out. An older app
+    /// sends no project, and the column is "-".
     private static func renderTabs(_ tabs: [ControlTabInfo]) {
+        let pipe = isatty(STDOUT_FILENO) != 1
         let rows = tabs.map { tab -> [String] in
-            [
+            let parent = tab.parent.flatMap { $0.isEmpty ? nil : $0 } ?? "-"
+            return [
                 "tab:\(tab.index)",
                 tab.active ? "*" : " ",
                 tab.title,
+            ] + (pipe ? [parent] : []) + [
                 "\(tab.paneCount) pane\(tab.paneCount == 1 ? "" : "s")",
             ]
         }

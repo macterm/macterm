@@ -15,7 +15,7 @@ enum ControlProtocol {
     /// The server's supported version. Optional fields remain decodable by
     /// older apps, but require a bump when ignoring them changes the intent
     /// of a request (such as silently selecting a no-focus terminal).
-    static let version = 2
+    static let version = 3
 
     /// The oldest protocol version a server still accepts.
     static let minimumSupportedVersion = 1
@@ -23,6 +23,12 @@ enum ControlProtocol {
     /// The version that introduced the `focus` field — the `--no-focus` wire
     /// option.
     static let focusFieldVersion = 2
+
+    /// The version that introduced the fields that place a node in the tree
+    /// of projects (design 013): `parent` (`project.create`) and
+    /// `toProject` (`tab.move`). An older app ignores them, and then makes
+    /// a top-level project or reorders the tab in its own project.
+    static let treeFieldVersion = 3
 
     /// Socket file inside the app-support directory (per build flavor:
     /// `Macterm/` vs `Macterm Debug/`).
@@ -148,6 +154,12 @@ struct ControlArgs: Codable, Equatable {
     /// Destination slot for `tab.move`: the tab's FINAL 1-based position in
     /// `tab list` order, not a drag-and-drop insertion offset.
     var slot: Int?
+    /// The project that `project.create` puts the new project in (a project
+    /// selector). Absent means the top level.
+    var parent: String?
+    /// The project that `tab.move` moves the tab to (a project selector).
+    /// With `slot` too, the slot is in the tab list of that project.
+    var toProject: String?
     /// Custom title for `tab.rename`.
     var title: String?
     /// Reset custom title back to automatic default (`tab.rename`).
@@ -234,10 +246,9 @@ struct ControlArgs: Codable, Equatable {
     }
 
     /// The oldest server version that honors every field these args may carry.
-    /// Only `focus` (the `--no-focus` wire field) is versioned; a future v3
-    /// field extends this.
     var minimumProtocolVersion: Int {
-        focus == nil
+        if parent != nil || toProject != nil { return ControlProtocol.treeFieldVersion }
+        return focus == nil
             ? ControlProtocol.minimumSupportedVersion
             : ControlProtocol.focusFieldVersion
     }
@@ -504,6 +515,12 @@ struct ControlTabInfo: Codable, Equatable {
     var title: String
     var active: Bool
     var paneCount: Int
+    /// The name of the project that holds the tab, as `ControlProjectInfo`
+    /// names a parent: `project list` and `tab list` name a node with the
+    /// same fields (design 013). Absent from an older app.
+    var parent: String?
+    /// The id of that project.
+    var parentID: String?
 }
 
 struct ControlPaneInfo: Codable, Equatable {

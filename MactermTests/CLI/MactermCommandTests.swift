@@ -209,6 +209,81 @@ struct MactermCommandTests {
         #expect(json.contains(#""parentID" : "w1""#), "\(json)")
     }
 
+    /// The verbs of the tree (design 013 §2.8) and the old forms that still
+    /// work: each argument line sends this request.
+    @Test
+    func tree_verbs_and_their_old_forms_send_these_requests() throws {
+        let socket = RecordingSocket()
+        defer { socket.stop() }
+        let cases: [(arguments: [String], command: String, check: (ControlArgs?) -> Bool)] = [
+            (["tab", "move", "tab:2", "1"], "tab.move", { $0?.slot == 1 && $0?.toProject == nil }),
+            (["tab", "move", "tab:2", "--to-project", "web"], "tab.move", { $0?.slot == nil && $0?.toProject == "web" }),
+            (
+                ["tab", "move", "tab:2", "3", "--to-project", "web", "--project", "api"],
+                "tab.move",
+                { $0?.tab == "tab:2" && $0?.slot == 3 && $0?.toProject == "web" && $0?.project == "api" }
+            ),
+            (["tab", "close", "tab:2"], "tab.close", { $0?.tab == "tab:2" && $0?.force == false }),
+            (["tab", "remove", "tab:2", "--force", "--project", "api"], "tab.close", {
+                $0?.tab == "tab:2" && $0?.force == true && $0?.project == "api"
+            }),
+            (["project", "create", "/tmp"], "project.create", { $0?.path == "/tmp" && $0?.parent == nil }),
+            (["project", "create", "/tmp", "--parent", "Work"], "project.create", { $0?.parent == "Work" }),
+        ]
+        for (arguments, command, check) in cases {
+            let result = try socket.cli(arguments)
+            let line = "macterm " + arguments.joined(separator: " ")
+            #expect(result.status == 0, "`\(line)`: \(result.stderr)")
+            let request = try #require(socket.requests.last)
+            #expect(request.command == command, "`\(line)`")
+            #expect(check(request.args), "`\(line)` sent \(String(describing: request.args))")
+        }
+    }
+
+    @Test
+    func tab_move_needs_a_slot_or_a_project() throws {
+        let socket = RecordingSocket()
+        defer { socket.stop() }
+        let result = try socket.cli(["tab", "move", "tab:2"])
+        #expect(result.status != 0)
+        #expect(result.stderr.contains("--to-project"), "\(result.stderr)")
+        #expect(socket.requests.isEmpty)
+    }
+
+    /// An older app would ignore `--parent` and `--to-project`, and make a
+    /// top-level project or reorder the tab in its own project.
+    @Test(arguments: [
+        ["project", "create", "/tmp", "--parent", "Work"],
+        ["tab", "move", "tab:2", "1", "--to-project", "web"],
+    ])
+    func tree_options_against_an_older_app_error_before_any_change(arguments: [String]) throws {
+        let socket = RecordingSocket(responseVersion: ControlProtocol.focusFieldVersion)
+        defer { socket.stop() }
+        let result = try socket.cli(arguments)
+        #expect(result.status == 1)
+        #expect(result.stderr.contains("Update Macterm"), "\(result.stderr)")
+        #expect(socket.requests.map(\.command) == ["status"])
+    }
+
+    @Test
+    func tab_list_prints_the_project_column_to_a_pipe_only() throws {
+        let socket = RecordingSocket(data: ControlData(tabs: [
+            ControlTabInfo(index: 1, id: "t1", title: "zsh", active: true, paneCount: 1, parent: "api", parentID: "p1"),
+            ControlTabInfo(index: 2, id: "t2", title: "build", active: false, paneCount: 3),
+        ]))
+        defer { socket.stop() }
+        #expect(try socket.cli(["tab", "list"]).stdout == """
+        tab:1  *  zsh    api  1 pane
+        tab:2     build  -    3 panes
+
+        """)
+        #expect(try socket.cli(["tab", "list"], terminal: true).stdout == """
+        tab:1  *  zsh    1 pane
+        tab:2     build  3 panes
+
+        """)
+    }
+
     @Test
     func pane_run_prints_help_for_a_help_flag_before_the_terminator() throws {
         let socket = RecordingSocket()

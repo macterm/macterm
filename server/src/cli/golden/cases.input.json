@@ -212,6 +212,35 @@
   {
     "arguments": [
       "project",
+      "create",
+      "/tmp/api",
+      "--parent",
+      "Work"
+    ],
+    "method": null,
+    "responses": {
+      "project.create": {
+        "data": {
+          "projects": [
+            {
+              "active": false,
+              "id": "P3",
+              "index": 3,
+              "name": "api",
+              "path": "/tmp/api",
+              "tabCount": 1,
+              "parent": "Work",
+              "parentID": "P1"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "project",
       "select",
       "api"
     ],
@@ -428,6 +457,31 @@
   {
     "arguments": [
       "tab",
+      "list"
+    ],
+    "method": null,
+    "responses": {
+      "tab.list": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T1",
+              "index": 1,
+              "paneCount": 1,
+              "title": "zsh",
+              "parent": "api",
+              "parentID": "P1"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
       "new",
       "--project",
       "api",
@@ -620,6 +674,77 @@
   {
     "arguments": [
       "tab",
+      "move",
+      "2",
+      "--to-project",
+      "web"
+    ],
+    "method": null,
+    "responses": {
+      "tab.move": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T2",
+              "index": 3,
+              "paneCount": 3,
+              "title": "build",
+              "parent": "web",
+              "parentID": "P2"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "move",
+      "2",
+      "1",
+      "--to-project",
+      "web",
+      "--project",
+      "api"
+    ],
+    "method": null,
+    "responses": {
+      "tab.move": {
+        "data": {
+          "tabs": [
+            {
+              "active": true,
+              "id": "T2",
+              "index": 3,
+              "paneCount": 3,
+              "title": "build",
+              "parent": "web",
+              "parentID": "P2"
+            }
+          ]
+        },
+        "ok": true
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "move",
+      "2",
+      "--to-project",
+      "web"
+    ],
+    "method": null,
+    "app_version": 2,
+    "responses": {}
+  },
+  {
+    "arguments": [
+      "tab",
       "close",
       "2",
       "--force"
@@ -645,6 +770,20 @@
           "message": "no tab 9"
         },
         "ok": false
+      }
+    }
+  },
+  {
+    "arguments": [
+      "tab",
+      "remove",
+      "2",
+      "--force"
+    ],
+    "method": null,
+    "responses": {
+      "tab.close": {
+        "ok": true
       }
     }
   },
