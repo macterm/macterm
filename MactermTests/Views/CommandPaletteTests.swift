@@ -117,21 +117,16 @@ struct CommandPaletteTests {
         }
     }
 
-    /// Click the title of the first row of the list. The scroll view lists
-    /// its rows to accessibility only on demand, so the point comes from
-    /// its frame: the list's top padding and then half of a row.
+    /// Click the title of the first row of the list. The point comes from
+    /// the frame of the list's scroll view (an `NSScrollView` under
+    /// SwiftUI's `ScrollView`): the list's top padding and then half of a
+    /// row. CI has no accessibility tree to find the row by.
     private func clickFirstRow(in h: Harness) throws {
-        let list = try #require(
-            (h.window.contentView?.accessibilityChildren() ?? [])
-                .compactMap { $0 as? NSAccessibilityProtocol }
-                .first { $0.accessibilityRole() == .scrollArea },
-            "the list is in the panel"
-        )
         h.window.contentView?.layoutSubtreeIfNeeded()
-        let frame = list.accessibilityFrame()
-        let point = h.window.convertPoint(
-            fromScreen: NSPoint(x: frame.minX + 60, y: frame.maxY - PaletteRowInsets.highlight - 12)
-        )
+        let content = try #require(h.window.contentView)
+        let list = try #require(Self.scrollView(in: content), "the list is in the panel")
+        let frame = list.convert(list.bounds, to: nil)
+        let point = NSPoint(x: frame.minX + 60, y: frame.maxY - PaletteRowInsets.highlight - 12)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -144,6 +139,17 @@ struct CommandPaletteTests {
         let down = try #require(event(.leftMouseDown))
         h.window.postEvent(up, atStart: false)
         h.window.sendEvent(down)
+    }
+
+    /// The tallest scroll view under `view`: the list.
+    private static func scrollView(in view: NSView) -> NSScrollView? {
+        var found: [NSScrollView] = []
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView { found.append(scroll) }
+            view.subviews.forEach(walk)
+        }
+        walk(view)
+        return found.max { $0.frame.height < $1.frame.height }
     }
 
     private func expectSelected(_ text: String, on command: AppCommand, in h: Harness) async {
