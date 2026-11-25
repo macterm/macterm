@@ -32,12 +32,13 @@ final class PaletteResponder: KeyResponder {
             PaletteScreenshot.capture(appState: appState)
             return .handled
         }
-        // While the palette is up, `MainAppResponder` stands aside, so typed
+        // While the palette is up, `MainAppResponder` does not act, so typed
         // text never runs a binding. One kind of binding still acts: a chord
         // whose command opens a palette screen (Files, Rename Current Tab,
-        // Move to Project, …) switches the palette to that screen, or closes
-        // it as its toggle does. Every other binding passes through to the
-        // palette's own keys. The chord resolves to its command as in
+        // Move to Project, …) runs that command. The palette then shows that
+        // screen in place of the stack, or closes when the command toggles
+        // and its screen is already up. Every other binding passes through
+        // to the palette's own keys. The chord resolves to its command as in
         // `MainAppResponder`, so two bindings on one chord give one answer
         // in both places.
         if appState.isCommandPaletteVisible,
@@ -74,10 +75,12 @@ final class PaletteResponder: KeyResponder {
     }
 
     /// The palette's own Retry key, ⌘R (`CommandPalette`), fixed and not a
-    /// binding.
+    /// binding. It matches as a binding matches (`HotkeyShortcut.matches`),
+    /// so a keyboard layout or Caps Lock gives the same answer for both.
+    private static let retryShortcut = HotkeyRegistry.parseShortcut("cmd+r")
+
     static func isRetryChord(_ event: NSEvent) -> Bool {
-        event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
-            && event.charactersIgnoringModifiers?.lowercased() == "r"
+        retryShortcut?.matches(event) ?? false
     }
 }
 

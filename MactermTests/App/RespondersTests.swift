@@ -203,12 +203,12 @@ struct PaletteResponderTests {
     @Test
     func a_chord_that_opens_no_screen_is_left_to_the_palette() throws {
         let fx = makeFixture()
-        let restore = bind(.splitDown, to: "cmd+opt+ctrl+shift+j")
+        let restore = bind(.newTab, to: "cmd+t")
         defer { restore() }
-        let tab = try #require(fx.state.workspaces[fx.project.id]?.activeTab)
+        let tabs = fx.state.workspaces[fx.project.id]?.tabs.count
 
-        #expect(try fx.responder.handle(keyDown("cmd+opt+ctrl+shift+j")) == .passThrough)
-        #expect(tab.splitRoot.allPanes().count == 1)
+        #expect(try fx.responder.handle(keyDown("cmd+t")) == .passThrough)
+        #expect(fx.state.workspaces[fx.project.id]?.tabs.count == tabs)
         #expect(fx.window.paletteScope == nil)
         #expect(fx.state.isCommandPaletteVisible)
     }
