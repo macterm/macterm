@@ -64,7 +64,7 @@ struct WorkspacesFile: Codable {
 struct DesktopWidgetSnapshot: Codable {
     var id: UUID
     var name: String?
-    var tab: TabSnapshot
+    var tab: TabSnapshot?
     /// The widget's span in grid cells (`DesktopWidgetSpan`).
     var columns: Int
     var rows: Int
@@ -259,16 +259,14 @@ struct PinnedTabSnapshot: Codable {
 
 // MARK: - Persistence
 
+/// v1's `workspaces_v3.json`. The import reads it one time (design/010
+/// §8). Nothing writes it after the cut-over, so a return to v1 finds it as
+/// it was.
 final class WorkspaceStore {
     private let fileURL: URL
-    /// Set when `load()` found a present-but-undecodable file. While set,
-    /// `save()` refuses to overwrite — a single corrupt field (or a snapshot
-    /// written by a newer build) must never let the next autosave clobber the
-    /// user's persisted tabs/sessions with empty state.
-    /// Exposed read-only (#281): the orphan reapers infer "unclaimed" from the
-    /// set of restored session names, so a failed load would present an empty
-    /// claim set and mark every live session an orphan. Both reapers skip
-    /// entirely while this is set — same fail-closed stance as `save`.
+    /// Set when `load()` found a present-but-undecodable file, or a file of
+    /// a newer build. The import then imports nothing (design/010 §8): a
+    /// model made from a file that did not read would be empty.
     private(set) var loadFailed = false
 
     init(fileURL: URL = FileStorage.fileURL(filename: "workspaces_v3.json")) {
@@ -335,36 +333,6 @@ final class WorkspaceStore {
             return Loaded()
         }
     }
-
-    func save(
-        _ snapshots: [WorkspaceSnapshot],
-        pinned: [PinnedTabSnapshot] = [],
-        pinnedActiveTabID: UUID? = nil,
-        windows: [WindowSnapshot]? = nil,
-        quickTerminal: TabSnapshot? = nil,
-        desktopWidgets: [DesktopWidgetSnapshot] = []
-    ) {
-        guard !loadFailed else {
-            logger.error("Refusing to save workspaces: prior load failed, file preserved")
-            return
-        }
-        do {
-            let file = WorkspacesFile(
-                version: desktopWidgets.isEmpty ? widgetFreeSchemaVersion : currentSchemaVersion,
-                workspaces: snapshots,
-                pinned: pinned,
-                pinnedActiveTabID: pinnedActiveTabID,
-                windows: windows,
-                quickTerminal: quickTerminal,
-                desktopWidgets: desktopWidgets.isEmpty ? nil : desktopWidgets
-            )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(file).write(to: fileURL, options: .atomic)
-        } catch {
-            logger.error("Failed to save workspaces: \(error, privacy: .public)")
-        }
-    }
 }
 
 extension WorkspaceStore.Loaded {
@@ -382,131 +350,8 @@ extension WorkspaceStore.Loaded {
 
 // MARK: - Snapshot / Restore
 
-@MainActor
+/// The checks of v1's snapshot that the import runs (design/010 §8).
 enum WorkspaceSerializer {
-    static func snapshot(_ workspaces: [UUID: Workspace]) -> [WorkspaceSnapshot] {
-        // Sort by projectID so the serialized file is byte-stable across saves
-        // (Dictionary.values iteration order is unspecified). restore() is
-        // order-independent, so this only tames diff churn on the file.
-        workspaces.values.sorted { $0.id.uuidString < $1.id.uuidString }.map { ws in
-            WorkspaceSnapshot(
-                projectID: ws.id,
-                activeTabID: ws.activeTabID,
-                tabs: ws.tabs.map { snapshotTab($0) }
-            )
-        }
-    }
-
-    static func restore(from snapshots: [WorkspaceSnapshot], validIDs: Set<UUID>) -> [Workspace] {
-        // One set for every tab: a pane of `pane mirror` could move to
-        // another tab or project.
-        var seen: Set<String> = []
-        return snapshots.compactMap { snap in
-            guard validIDs.contains(snap.projectID) else { return nil }
-            // An empty workspace restores empty: the user closed every tab.
-            // A tab whose every pane repeats a session goes.
-            let tabs = snap.tabs.compactMap { restoreTab($0, projectID: snap.projectID, seen: &seen) }
-            return Workspace(id: snap.projectID, tabs: tabs, activeTabID: snap.activeTabID)
-        }
-    }
-
-    /// Rebuild one live tab from its snapshot. Shared by the per-project
-    /// restore above and the pinned-tab restore (which materializes tabs
-    /// one-by-one after checking whether their sessions survived).
-    static func restoreTab(_ t: TabSnapshot, projectID: UUID) -> TerminalTab {
-        var seen: Set<String> = []
-        // The first pane of a tab is never a repeat in a new set.
-        let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) ?? t.splitRoot
-        return build(t, root: restoreNode(kept, projectID: projectID))
-    }
-
-    /// `restoreTab`, leaving out each pane whose session `seen` holds. Nil
-    /// when no pane is left.
-    static func restoreTab(_ t: TabSnapshot, projectID: UUID, seen: inout Set<String>) -> TerminalTab? {
-        guard let kept = withoutRepeatedSessions(t.splitRoot, seen: &seen) else { return nil }
-        return build(t, root: restoreNode(kept, projectID: projectID))
-    }
-
-    private static func build(_ t: TabSnapshot, root: SplitNode) -> TerminalTab {
-        // An older build saved the focused pane's runtime id: find its
-        // snapshot and take the id that the pane restores with.
-        let savedFocus = t.focusedPaneID.flatMap { paneSnapshot(id: $0, in: t.splitRoot) }
-        let focused = savedFocus.flatMap { root.findPane(id: $0.sessionID ?? $0.id)?.id } ?? root.allPanes().first?.id
-        return TerminalTab(id: t.id, splitRoot: root, focusedPaneID: focused, customTitle: t.customTitle)
-    }
-
-    private static func paneSnapshot(id: UUID, in node: SplitNodeSnapshot) -> PaneSnapshot? {
-        switch node {
-        case let .pane(p): p.id == id ? p : nil
-        case let .split(b): paneSnapshot(id: id, in: b.first) ?? paneSnapshot(id: id, in: b.second)
-        }
-    }
-
-    /// Serialize one live tab — the pinned counterpart of the per-workspace
-    /// walk inside `snapshot(_:)`.
-    static func snapshotTab(_ tab: TerminalTab) -> TabSnapshot {
-        TabSnapshot(
-            id: tab.id,
-            customTitle: tab.customTitle,
-            focusedPaneID: tab.focusedPaneID,
-            splitRoot: snapshotNode(tab.splitRoot)
-        )
-    }
-
-    /// Serialize the pinned records in order, attaching each loaded record's
-    /// live tab snapshot (session identity for reattach). An unloaded record
-    /// persists its declaration alone.
-    static func snapshotPinned(records: [PinnedTabRecord], workspace: Workspace?) -> [PinnedTabSnapshot] {
-        records.map { record in
-            let live = workspace?.tabs.first { $0.id == record.id }
-            return PinnedTabSnapshot(
-                id: record.id,
-                declaration: record.declaration,
-                originProjectID: record.originProjectID,
-                live: live.map { snapshotTab($0) }
-            )
-        }
-    }
-
-    static func snapshotNode(_ node: SplitNode) -> SplitNodeSnapshot {
-        switch node {
-        case let .pane(p):
-            // `projectPath` is the pane's IDENTITY — persisted verbatim so a
-            // remote pane's scp-style spec (`host:dir`) survives restart and
-            // still parses as `.remote` (drives ssh + zmx reattach). Never
-            // overwrite it with a live cwd.
-            //
-            // `workingDirectory` is a *local* respawn hint: prefer the shell's
-            // live cwd so reopening lands a LOCAL pane back where the user had
-            // navigated (OSC 7 `currentPwd` first, then the foreground
-            // process's kernel cwd). It is deliberately nil for remote panes —
-            // `currentPwd` there is a REMOTE-filesystem path (OSC 7 from the
-            // remote shell) that would parse as a bogus local dir on restore
-            // and orphan the remote session.
-            let liveCwd = p.isRemote
-                ? nil
-                : (SurfaceRegistry.shared.view(of: p)?.currentPwd ?? ProcessInspector.foregroundWorkingDirectory(forPane: p))
-            return .pane(PaneSnapshot(
-                id: p.id,
-                projectPath: p.projectPath,
-                sessionID: p.id,
-                sessionName: p.sessionName,
-                workingDirectory: liveCwd,
-                hostSessionDirectory: p.isRemote ? p.hostSessionDirectory.map { known in
-                    SurfaceRegistry.shared.view(of: p)?.currentPwd.flatMap { HostCommands.isSafeHostFolder($0) ? $0 : nil } ?? known
-                } : nil
-            ))
-        case let .split(b):
-            return .split(SplitBranchSnapshot(
-                id: b.id,
-                direction: b.direction,
-                ratio: Double(b.ratio),
-                first: snapshotNode(b.first),
-                second: snapshotNode(b.second)
-            ))
-        }
-    }
-
     /// The tree with each pane that names a session already seen left out.
     /// One pane is one session. Older builds had `pane mirror`, which put a
     /// second pane on a session. Only the first pane restores, and the
@@ -562,7 +407,7 @@ enum WorkspaceSerializer {
         result.quickTerminal = loaded.quickTerminal.flatMap { withoutRepeatedSessions($0, seen: &seen) }
         result.desktopWidgets = loaded.desktopWidgets.map { widget in
             var widget = widget
-            widget.tab = withoutRepeatedSessions(widget.tab, seen: &seen) ?? withFreshSessions(widget.tab)
+            widget.tab = widget.tab.map { withoutRepeatedSessions($0, seen: &seen) ?? withFreshSessions($0) }
             return widget
         }
         return result
@@ -599,38 +444,5 @@ enum WorkspaceSerializer {
             }
         }
         return TabSnapshot(id: t.id, customTitle: t.customTitle, focusedPaneID: t.focusedPaneID, splitRoot: fresh(t.splitRoot))
-    }
-
-    private static func restoreNode(_ snap: SplitNodeSnapshot, projectID: UUID) -> SplitNode {
-        switch snap {
-        case let .pane(p):
-            // Reuse the persisted session identity (the pane id) so the restored pane
-            // reattaches to its still-running zmx daemon: `zmx attach` is an
-            // upsert, so a session that died while the app was closed just
-            // becomes a fresh shell in the saved working directory — no
-            // staleness handling needed. Old snapshots (nil identity) get a
-            // fresh session.
-            //
-            // A LOCAL pane prefers its persisted live cwd (`workingDirectory`)
-            // so a respawn lands where the user was; a REMOTE pane persists no
-            // `workingDirectory` (see `snapshotNode`), so this falls back to
-            // `projectPath` — the scp-style spec that keeps the pane remote.
-            let pane = Pane(
-                projectPath: p.workingDirectory ?? p.projectPath,
-                projectID: projectID,
-                id: p.sessionID ?? p.id,
-                sessionName: p.sessionName
-            )
-            if pane.isRemote { pane.hostSessionDirectory = p.hostSessionDirectory }
-            return .pane(pane)
-        case let .split(b):
-            return .split(SplitBranch(
-                id: b.id ?? UUID(),
-                direction: b.direction,
-                ratio: CGFloat(b.ratio),
-                first: restoreNode(b.first, projectID: projectID),
-                second: restoreNode(b.second, projectID: projectID)
-            ))
-        }
     }
 }

@@ -165,9 +165,10 @@ final class WindowState: Identifiable {
         expandActiveProject()
     }
 
-    /// The pinned workspace has no section to open.
+    /// A project of a sidebar section (Pinned, Scratch Tabs) has no row to
+    /// open: its id in the set opens nothing.
     private func expandActiveProject() {
-        guard let activeProjectID, activeProjectID != PinnedTabs.workspaceID else { return }
+        guard let activeProjectID else { return }
         expandedRows.insert(activeProjectID)
     }
 }

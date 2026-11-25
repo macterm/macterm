@@ -64,7 +64,7 @@ extension AppCommand {
         guard let projectID = ctx.appState.activeProjectID else { return nil }
         let input: PaletteInput? = switch self {
         case .renameTab:
-            ctx.appState.workspaces[projectID]?.activeTab.flatMap { tab in
+            ctx.appState.model.activeTab(of: projectID).flatMap { tab in
                 PaletteInput.renameTab(tab.id, in: projectID, appState: ctx.appState)
             }
         case .renameProject:
@@ -110,7 +110,7 @@ extension AppCommand {
             // the busy confirmation and routes a pinned tab to the unload path
             // (sessions end, the record stays), so one command serves both.
             guard let projectID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab
+                  let tab = ctx.appState.model.activeTab(of: projectID)
             else { return nil }
             return { ctx.appState.requestCloseTab(tab.id, projectID: projectID) }
         case .nextTab:
@@ -143,16 +143,16 @@ extension AppCommand {
             guard let scope = inputScope(in: ctx) else { return nil }
             return { ctx.appState.openCommandPalette(scope: scope) }
         case .pinTab:
-            // Pin the active tab. Only from a real project — the
-            // pinned workspace's own tabs are already pinned.
-            guard let projectID, projectID != PinnedTabs.workspaceID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab
+            // Pin the active tab. Not from the pinned project — its own tabs
+            // are already pinned.
+            guard let projectID, !ctx.appState.showsPinnedRecords(projectID),
+                  let tab = ctx.appState.model.activeTab(of: projectID)
             else { return nil }
             return { ctx.appState.pinTab(tab.id, fromProject: projectID) }
         case .unpinTab:
             // Unpin the active pinned tab — back to its origin project.
-            guard projectID == PinnedTabs.workspaceID,
-                  let tab = ctx.appState.workspaces[PinnedTabs.workspaceID]?.activeTab
+            guard let projectID, let tab = ctx.appState.model.activeTab(of: projectID),
+                  ctx.appState.pinnedRecord(tab.id) != nil
             else { return nil }
             return { ctx.appState.unpinTab(tab.id, projects: ctx.projectStore.projects) }
         case .separateAllPanes:
@@ -161,7 +161,7 @@ extension AppCommand {
             // its own tab, shells intact. nil (hidden/fall-through) on a
             // single-pane tab — there is nothing to separate.
             guard let projectID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab,
+                  let tab = ctx.appState.model.activeTab(of: projectID),
                   tab.splitRoot.allPanes().count > 1
             else { return nil }
             return { ctx.appState.separateTabPanes(tab.id, projectID: projectID) }
@@ -172,14 +172,12 @@ extension AppCommand {
             // in the pinned workspace too (the separated tab is pinned from
             // birth); its destPath is only a fallback — the pane keeps its cwd.
             guard let projectID,
-                  let ws = ctx.appState.workspaces[projectID],
-                  let tab = ws.activeTab,
+                  let tab = ctx.appState.model.activeTab(of: projectID),
                   tab.splitRoot.allPanes().count > 1,
                   let paneID = tab.focusedPaneID
             else { return nil }
-            guard let destPath = Project.synthetic(for: projectID)?.path ?? current?.path else { return nil }
-            let index = ws.tabs.firstIndex(where: { $0.id == tab.id }).map { $0 + 1 }
-            return { ctx.appState.separatePane(paneID, toProject: projectID, destPath: destPath, at: index) }
+            let index = ctx.appState.model.tabs(of: projectID).firstIndex(where: { $0.id == tab.id }).map { $0 + 1 }
+            return { ctx.appState.separatePane(paneID, toProject: projectID, at: index) }
         case .splitRight:
             guard let projectID else { return nil }
             return {
@@ -285,7 +283,7 @@ extension AppCommand {
         case .restartSession:
             // The active tab, when one of its sessions runs an older build
             // than the app. Without one there is nothing to restart.
-            guard let projectID, let tab = ctx.appState.workspaces[projectID]?.activeTab,
+            guard let projectID, let tab = ctx.appState.model.activeTab(of: projectID),
                   ctx.appState.tabRunsOlderSession(tab)
             else { return nil }
             return { ctx.appState.requestRestartSessions(tabID: tab.id, projectID: projectID) }
@@ -314,7 +312,7 @@ extension AppCommand {
         case .newRemoteProject:
             return { ctx.appState.openCommandPalette(scope: .remoteHosts) }
         case .removeProject:
-            guard let projectID, !Project.isSynthetic(projectID) else { return nil }
+            guard let projectID, ctx.appState.model.project(projectID).map({ $0.removable && $0.isTreeProject }) == true else { return nil }
             return {
                 ctx.appState.requestRemoveProject(projectID, store: ctx.projectStore)
             }

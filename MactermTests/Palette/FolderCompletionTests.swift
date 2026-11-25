@@ -161,13 +161,10 @@ struct FolderCompletionTests {
             hostFolders: lister
         ) { _, _ in .nothing })
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("macterm-hf-\(UUID().uuidString)")
-        let context = PaletteContext(
-            appState: AppState(
-                workspaceStore: WorkspaceStore(fileURL: base.appendingPathComponent("w.json")),
-                projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("p", isDirectory: true))
-            ),
-            projectStore: ProjectStore(fileURL: base.appendingPathComponent("s.json"))
+        let state = TestModel.appState(
+            projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("p", isDirectory: true))
         )
+        let context = PaletteContext(appState: state, projectStore: TestModel.projectStore(state))
         var redraws = 0
         scope.activate(context: context) { redraws += 1 }
         _ = lister.listing("/srv/")

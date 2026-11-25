@@ -307,24 +307,24 @@ struct SidebarContent: View {
             // slot after the last top-level project (`OutlineGapDropGuard`
             // gives a project drag no other scratch slot). A project dropped
             // there goes to the end of the top level.
-            if showsScratchRows, presentation.hasProjectDropSlots {
-                scratchRows
+            if let bottom = bottomProject, showsBottomRows, presentation.hasProjectDropSlots {
+                bottomRows(bottom)
                     .dropDestination(for: ProjectSlotDropItem.self) { items, offset in
                         for item in items {
                             switch item {
                             case let .project(dragged):
                                 receiveProjectSlotDrop([dragged], into: nil, at: projectStore.children(of: nil).count)
                             case let .tab(tab):
-                                receiveSlotDrop([.tab(tab)], into: ScratchTabs.project, at: offset)
+                                receiveSlotDrop([.tab(tab)], into: bottom, at: offset)
                             case let .pane(pane):
-                                receiveSlotDrop([.pane(pane)], into: ScratchTabs.project, at: offset)
+                                receiveSlotDrop([.pane(pane)], into: bottom, at: offset)
                             }
                         }
                     }
-            } else if showsScratchRows {
-                scratchRows
+            } else if let bottom = bottomProject, showsBottomRows {
+                bottomRows(bottom)
                     .dropDestination(for: TabSlotDropItem.self) { items, offset in
-                        receiveSlotDrop(items, into: ScratchTabs.project, at: offset)
+                        receiveSlotDrop(items, into: bottom, at: offset)
                     }
             }
             // A project drag lands in one of two places: on a header, inside
@@ -434,14 +434,11 @@ struct SidebarContent: View {
             case let .project(projectID):
                 guard let project = projectStore.projects.first(where: { $0.id == projectID }) else { return }
                 appState.showProjectScreen(project, in: windowState)
-            case let .tab(PinnedTabs.workspaceID, tabID):
+            case let .tab(_, tabID) where appState.pinnedRecord(tabID) != nil:
                 // Loaded → select; unloaded → restore from declaration.
                 appState.selectPinnedTab(tabID)
-            case let .tab(ScratchTabs.workspaceID, tabID):
-                appState.selectScratchTabs(in: windowState)
-                appState.selectTab(tabID, projectID: ScratchTabs.workspaceID, in: windowState)
             case let .tab(projectID, tabID):
-                if let project = projectStore.projects.first(where: { $0.id == projectID }) {
+                if let project = appState.model.project(projectID), project.isSelectable {
                     appState.selectProject(project, in: windowState)
                     appState.selectTab(tabID, projectID: projectID, in: windowState)
                 }
@@ -475,7 +472,7 @@ struct SidebarContent: View {
                 branches: OutlineGapDropGuard.Branches(
                     types: [NSPasteboard.PasteboardType(UTType.mactermProject.identifier)],
                     topLevelCount: projectStore.children(of: nil).count,
-                    trailingCount: showsScratchRows ? scratchTabs.count : 0
+                    trailingCount: showsBottomRows ? bottomProject.map { appState.model.tabs(of: $0.id).count } ?? 0 : 0
                 ),
                 isGuarded: $presentation.hasProjectDropSlots
             )
@@ -500,7 +497,7 @@ struct SidebarContent: View {
     /// kill it, same as `tabRow` documents.
     private func pinnedRow(record: PinnedTabRecord, index: Int) -> some View {
         Group {
-            if let tab = appState.pinnedWorkspace?.tabs.first(where: { $0.id == record.id }) {
+            if let tab = appState.pinnedTabs.first(where: { $0.id == record.id }) {
                 // The shared row with the pin as its fixed icon — pinned rows
                 // have no project section around them, so the pin is what
                 // says which rows these are.
@@ -508,7 +505,7 @@ struct SidebarContent: View {
                     tab: tab,
                     index: index + 1,
                     iconSymbolOverride: "pin",
-                    selectionItem: .tab(projectID: PinnedTabs.workspaceID, tabID: record.id),
+                    selectionItem: .tab(projectID: pinnedID, tabID: record.id),
                     presentation: presentation,
                     isInteractive: isInteractive,
                     onRename: { newName in
@@ -535,21 +532,21 @@ struct SidebarContent: View {
         .padding(.trailing, rowTrailingInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .tag(SidebarItem.tab(projectID: PinnedTabs.workspaceID, tabID: record.id))
-        .id(SidebarItem.tab(projectID: PinnedTabs.workspaceID, tabID: record.id))
+        .tag(SidebarItem.tab(projectID: pinnedID, tabID: record.id))
+        .id(SidebarItem.tab(projectID: pinnedID, tabID: record.id))
         // Dragging a pinned row into a project unpins it (AppState.moveTab
         // routes the record bookkeeping). Deliberately NO drop destination on
         // the row — same rule as `tabRow`: any row-level target claims the
         // drag before the ForEach's insertion mechanism sees it and kills the
         // native drop slot.
-        .draggable(MovableTab(tabID: record.id, sourceProjectID: PinnedTabs.workspaceID))
+        .draggable(MovableTab(tabID: record.id, sourceProjectID: pinnedID))
     }
 
     /// A tab dropped at a pinned insertion offset (the ForEach's native
     /// drop slot): from a project → pin there; from within the pinned
     /// rows → reorder (`reorderPinnedTab` speaks the same pre-removal offset).
     private func receivePinnedTabDrop(_ item: MovableTab, at offset: Int) {
-        if item.sourceProjectID == PinnedTabs.workspaceID {
+        if appState.pinnedRecord(item.tabID) != nil {
             appState.reorderPinnedTab(item.tabID, toIndex: offset)
         } else {
             appState.pinTab(item.tabID, fromProject: item.sourceProjectID, toRecordIndex: offset)
@@ -576,7 +573,7 @@ struct SidebarContent: View {
     /// false when a project above this one is closed.
     private func projectSection(_ node: SidebarNode, parentsOpen: Bool = true) -> AnyView {
         let project = node.project
-        let tabs = appState.workspaces[project.id]?.tabs ?? []
+        let tabs = appState.model.tabs(of: project.id)
         // Only visible rows take drops. The outline can give the line below
         // a closed project to a destination inside it, and that accept
         // crashes SwiftUI's outline list. An empty `ForEach` takes no drops
@@ -650,14 +647,15 @@ struct SidebarContent: View {
         }
     }
 
-    private var scratchRows: some DynamicViewContent {
-        ForEach(Array(scratchTabs.enumerated()), id: \.element.id) { tabIndex, tab in
-            tabRow(tab: tab, index: tabIndex, project: ScratchTabs.project)
+    /// The tab rows of the project of the bottom section (Scratch Tabs).
+    private func bottomRows(_ bottom: Project) -> some DynamicViewContent {
+        ForEach(Array(appState.model.tabs(of: bottom.id).enumerated()), id: \.element.id) { tabIndex, tab in
+            tabRow(tab: tab, index: tabIndex, project: bottom)
         }
     }
 
     private func tabCount(of project: Project) -> Int {
-        appState.workspaces[project.id]?.tabs.count ?? 0
+        appState.model.tabs(of: project.id).count
     }
 
     /// A project dropped in a drop slot among the projects of `parent` (nil:
@@ -685,7 +683,7 @@ struct SidebarContent: View {
             index: tabIndex + 1,
             // A scratch row has no project section around it, so its icon
             // says which rows these are, as the pin does for pinned rows.
-            iconSymbolOverride: project.id == ScratchTabs.workspaceID ? ScratchTabs.iconSymbol : nil,
+            iconSymbolOverride: project.sidebar == .bottom ? ScratchTabs.iconSymbol : nil,
             selectionItem: .tab(projectID: project.id, tabID: tab.id),
             presentation: presentation,
             isInteractive: isInteractive,
@@ -767,24 +765,42 @@ struct SidebarContent: View {
     /// between two rows — the List keeps its own copy of this order for the
     /// clicks it still handles itself.
     private var orderedItems: [SidebarItem] {
+        let pinned = pinnedID
         var items: [SidebarItem] = appState.pinnedRecords.map {
-            .tab(projectID: PinnedTabs.workspaceID, tabID: $0.id)
+            .tab(projectID: pinned, tabID: $0.id)
         }
         items += SidebarTree.selectableItems(
             SidebarTree.nodes(in: projectStore),
             expanded: windowState.expandedRows,
-            tabs: { appState.workspaces[$0]?.tabs.map(\.id) ?? [] }
+            tabs: { appState.model.tabs(of: $0).map(\.id) }
         )
-        items.append(contentsOf: scratchTabs.map { .tab(projectID: ScratchTabs.workspaceID, tabID: $0.id) })
+        if let bottom = bottomProject, showsBottomRows {
+            items.append(contentsOf: appState.model.tabs(of: bottom.id).map { .tab(projectID: bottom.id, tabID: $0.id) })
+        }
         return items
     }
 
-    /// The scratch rows, in order (#665).
-    private var scratchTabs: [TerminalTab] { appState.scratchWorkspace?.tabs ?? [] }
+    /// The project of the top section (`sidebar: top`, Pinned), whose rows
+    /// are the pinned records. The app makes it with the first record
+    /// (`ensurePinnedProject`); before that, no row names it.
+    private var pinnedID: UUID {
+        appState.model.projects.first { $0.sidebar == .top }?.id ?? Self.noPinnedProject
+    }
 
-    /// Whether the scratch rows are drawn: see `body`.
-    private var showsScratchRows: Bool {
-        !scratchTabs.isEmpty || windowState.activeProjectID == ScratchTabs.workspaceID
+    /// The id of the rows of pinned records while the model has no pinned
+    /// project: one fixed value, so the rows keep their identity.
+    private static let noPinnedProject = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+    /// The project of the bottom section (`sidebar: bottom`, Scratch Tabs,
+    /// #665): its tabs are flat rows below the tree.
+    private var bottomProject: Project? {
+        appState.model.projects.first { $0.sidebar == .bottom }
+    }
+
+    /// Whether the bottom rows are drawn: see `body`.
+    private var showsBottomRows: Bool {
+        guard let bottom = bottomProject else { return false }
+        return !appState.model.tabs(of: bottom.id).isEmpty || windowState.activeProjectID == bottom.id
     }
 
     private var activeTabID: UUID? {
@@ -872,16 +888,16 @@ struct SidebarContent: View {
                 if let project = projectStore.projects.first(where: { $0.id == id }) {
                     projectMenu(project)
                 }
-            case let .tab(PinnedTabs.workspaceID, tabID):
+            case let .tab(_, tabID) where appState.pinnedRecord(tabID) != nil:
                 if let record = appState.pinnedRecord(tabID) {
                     pinnedTabMenu(record: record)
                 }
             case let .tab(projectID, tabID):
-                // A scratch row gets the project tab's menu through the
-                // synthetic project: its Move to Project lists every project,
-                // and Pin Tab works as it does from a project.
-                if let project = Project.synthetic(for: projectID) ?? projectStore.projects.first(where: { $0.id == projectID }),
-                   let tab = appState.workspaces[projectID]?.tabs.first(where: { $0.id == tabID })
+                // A scratch row gets the project tab's menu: its Move to
+                // Project lists every project, and Pin Tab works as it does
+                // from a project.
+                if let project = appState.model.project(projectID),
+                   let tab = appState.model.tabs(of: projectID).first(where: { $0.id == tabID })
                 {
                     tabMenu(project: project, tab: tab)
                 }
@@ -1010,11 +1026,11 @@ struct SidebarContent: View {
         let isLoaded = appState.isPinnedTabLoaded(record.id)
         if isLoaded {
             Button("Rename Tab") { requestTabRename(record.id) }
-            if let tab = appState.pinnedWorkspace?.tabs.first(where: { $0.id == record.id }),
+            if let tab = appState.pinnedTabs.first(where: { $0.id == record.id }),
                tab.splitRoot.allPanes().count > 1
             {
                 Button("Separate Panes") {
-                    appState.separateTabPanes(record.id, projectID: PinnedTabs.workspaceID)
+                    appState.separateTabPanes(record.id, projectID: pinnedID)
                 }
             }
             Divider()
@@ -1033,12 +1049,7 @@ struct SidebarContent: View {
             Menu("Unpin to Project") {
                 ForEach(unpinTargets) { destination in
                     Button(destination.name) {
-                        appState.moveTab(
-                            record.id,
-                            from: PinnedTabs.workspaceID,
-                            to: destination.id,
-                            destPath: destination.path
-                        )
+                        appState.moveTab(record.id, from: pinnedID, to: destination.id)
                         windowState.expandedRows.insert(destination.id)
                     }
                 }
@@ -1057,7 +1068,7 @@ struct SidebarContent: View {
             // point as the normal tab menu's Close Tab and the closeTab
             // command — `requestCloseTab` routes pinned tabs to the unload.
             Button("Close Tab", role: .destructive) {
-                appState.requestCloseTab(record.id, projectID: PinnedTabs.workspaceID)
+                appState.requestCloseTab(record.id, projectID: pinnedID)
             }
         }
     }
@@ -1073,7 +1084,7 @@ struct SidebarContent: View {
         Divider()
         // `reorderTab` takes `move(fromOffsets:toOffset:)`-convention offsets
         // (it's the drag-and-drop path's entry point), hence `+ 2` for down.
-        let tabs = appState.workspaces[project.id]?.tabs ?? []
+        let tabs = appState.model.tabs(of: project.id)
         let tabIndex = tabs.firstIndex(where: { $0.id == tab.id }) ?? 0
         Button("Move Up") {
             appState.reorderTab(tab.id, inProject: project.id, toIndex: tabIndex - 1)
@@ -1084,7 +1095,7 @@ struct SidebarContent: View {
         }
         .disabled(tabIndex >= tabs.count - 1)
         moveToProjectMenu(.tab(projectID: project.id, tabID: tab.id))
-        if project.id != ScratchTabs.workspaceID {
+        if project.sidebar != .bottom {
             // Out of the project, shells intact (#665). The tab keeps its own
             // working directory; only its row moves below the projects.
             Button("Move to Scratch Tabs") {
@@ -1122,11 +1133,9 @@ struct SidebarContent: View {
         var tabRefs: [(tabID: UUID, projectID: UUID)] = []
         for item in items {
             switch item {
-            case .project(PinnedTabs.workspaceID),
-                 .project(ScratchTabs.workspaceID):
-                // The pinned and the scratch sections can't be removed.
-                break
             case let .project(id):
+                // A project that is not removable (Pinned, Scratch Tabs) has
+                // no row of the tree, so it is never in a selection.
                 projectIDs.append(id)
             case let .tab(projectID, tabID):
                 // Pinned tabs are included: `closeTabs` routes them to the
@@ -1359,7 +1368,7 @@ private struct SidebarProjectRow: View {
     }
 
     /// `network`, or `network.slash` while the host cannot be reached: a
-    /// pane of the project lost its connection (`Workspace.hasLostRemoteLink`),
+    /// pane of the project lost its connection (`Pane.isDisconnected`),
     /// or the host's roaming link hears nothing (`RemoteHosts.quietDestinations`).
     /// The slashed symbol has the failure color. On a selected row of a
     /// focused list the selection has the accent color, and red is hard to
@@ -1369,7 +1378,7 @@ private struct SidebarProjectRow: View {
     /// with the same weight and only one is visible. So the mark after it
     /// does not move.
     private func remoteMark(host: String, destination: String) -> some View {
-        let lost = appState.workspaces[project.id]?.hasLostRemoteLink == true
+        let lost = appState.model.tabs(of: project.id).contains { $0.splitRoot.allPanes().contains(where: \.isDisconnected) }
             || RemoteHosts.shared.quietDestinations.contains(destination)
         let help = lost
             ? String(

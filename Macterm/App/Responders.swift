@@ -128,7 +128,7 @@ final class QuickTerminalResponder: KeyResponder {
         // KeybindPassthrough). Returning `.passThrough` is only half the job —
         // `isAppShortcut` would otherwise swallow the chord once the event
         // reaches the surface's `keyDown`, so it consults the same policy.
-        if KeybindPassthrough.yields(event: event, pane: state.tab.focusedPane) {
+        if KeybindPassthrough.yields(event: event, pane: state.tab?.focusedPane) {
             return .passThrough
         }
 
@@ -163,7 +163,7 @@ final class QuickTerminalResponder: KeyResponder {
         }
         if HotkeyRegistry.matches(event, action: .zoomPane) {
             guard let paneID = state.focusedPaneID else { return .passThrough }
-            ModelWriter.paneZoom(state.tab, toggling: paneID)
+            state.toggleZoom(paneID)
             return .handled
         }
         // The pane modes act on the panel's focused pane, as in
@@ -171,22 +171,22 @@ final class QuickTerminalResponder: KeyResponder {
         // main-app responder, which toggles the mode of the main window's
         // pane, so these swallow it also when the panel's pane has no view.
         if HotkeyRegistry.matches(event, action: .copyMode) {
-            state.tab.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.copyMode.toggle()
+            state.tab?.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.copyMode.toggle()
             return .handled
         }
         if HotkeyRegistry.matches(event, action: .readOnlyMode) {
-            if let view = state.tab.focusedPane.flatMap({ SurfaceRegistry.shared.view(of: $0) }), view.surface != nil {
+            if let view = state.tab?.focusedPane.flatMap({ SurfaceRegistry.shared.view(of: $0) }), view.surface != nil {
                 view.sendBindingAction("toggle_readonly")
             }
             return .handled
         }
         if HotkeyRegistry.matches(event, action: .resetZoom) {
-            state.tab.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.pictureZoom.reset()
+            state.tab?.focusedPane.flatMap { SurfaceRegistry.shared.view(of: $0) }?.pictureZoom.reset()
             return .handled
         }
         if let (_, dir) = Self.focusActions.first(where: { HotkeyRegistry.matches(event, action: $0.0) }) {
             guard let focusedID = state.focusedPaneID else { return .passThrough }
-            if let bestID = state.splitRoot.nearestPane(from: focusedID, direction: dir) {
+            if let bestID = state.splitRoot?.nearestPane(from: focusedID, direction: dir) {
                 state.focusPane(bestID)
             }
             return .handled

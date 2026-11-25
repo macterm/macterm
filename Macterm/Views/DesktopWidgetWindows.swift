@@ -193,8 +193,8 @@ final class DesktopWidgetPanel: NSPanel {
             // edit state instead.
             hasShadow = false
             makeKeyAndOrderFront(nil)
-            if let paneID = widget.pane?.id {
-                FocusRestoration.restoreFocus(to: paneID, in: widget.tab.splitRoot, window: self)
+            if let paneID = widget.pane?.id, let root = widget.tab?.splitRoot {
+                FocusRestoration.restoreFocus(to: paneID, in: root, window: self)
             }
         } else {
             hasShadow = true
@@ -681,7 +681,12 @@ private struct DesktopWidgetTerminalView: View {
     let onShellExit: () -> Void
 
     var body: some View {
-        let tab = widget.tab
+        if let tab = widget.tab {
+            terminal(tab)
+        }
+    }
+
+    private func terminal(_ tab: TerminalTab) -> some View {
         SplitRootView(
             tabID: tab.id,
             root: tab.splitRoot,
@@ -692,8 +697,9 @@ private struct DesktopWidgetTerminalView: View {
             focusedPaneID: state.isEditing ? tab.focusedPaneID : nil,
             zoomedPaneID: nil,
             isActiveProject: true,
-            projectID: DesktopWidget.projectID,
-            onFocusPane: { ModelWriter.paneFocus(tab, paneID: $0) },
+            projectID: widget.id,
+            // One pane: it is always the focused pane of its tab.
+            onFocusPane: { _ in },
             onSplit: { _, _, _ in },
             onClosePane: { _ in onShellExit() },
             onAdaptiveBackgroundChange: { paneID, color in

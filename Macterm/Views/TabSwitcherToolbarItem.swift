@@ -6,7 +6,7 @@ import SwiftUI
 /// that same index (multi-digit numbers accumulate while Cmd is held).
 ///
 /// The window centers the active tab when at least two tabs sit on either
-/// side; otherwise it clamps to the start or end of the workspace. The
+/// side; otherwise it clamps to the start or end of the project's tabs. The
 /// control itself never scrolls — switching tabs simply replaces the
 /// visible segments. With ≤ 5 tabs, every tab is shown.
 ///
@@ -34,12 +34,13 @@ struct TabSwitcherToolbarItem: View {
     var body: some View {
         if visibility != .hidden,
            availableWidth >= Self.minimumDetailWidth,
-           let workspace = activeWorkspace,
-           !workspace.tabs.isEmpty,
-           visibility == .always || workspace.tabs.count > 1
+           let projectID = appState.activeProjectID,
+           case let tabs = appState.model.tabs(of: projectID),
+           !tabs.isEmpty,
+           visibility == .always || tabs.count > 1
         {
-            let tabs = workspace.tabs
-            let activeIndex = tabs.firstIndex(where: { $0.id == workspace.activeTabID }) ?? 0
+            let activeTabID = appState.model.activeTabID(of: projectID)
+            let activeIndex = tabs.firstIndex(where: { $0.id == activeTabID }) ?? 0
             let window = slidingWindow(activeIndex: activeIndex, tabCount: tabs.count)
             let windowTabs = Array(tabs[window])
             let labels = windowTabs.indices.map {
@@ -47,7 +48,7 @@ struct TabSwitcherToolbarItem: View {
             }
 
             Picker("Tab", selection: Binding(
-                get: { workspace.activeTabID },
+                get: { activeTabID },
                 set: { newValue in
                     guard let id = newValue, let projectID = appState.activeProjectID else { return }
                     appState.selectTab(id, projectID: projectID)
@@ -103,10 +104,5 @@ struct TabSwitcherToolbarItem: View {
         var start = activeIndex - half
         start = max(0, min(start, tabCount - size))
         return start ..< (start + size)
-    }
-
-    private var activeWorkspace: Workspace? {
-        guard let pid = appState.activeProjectID else { return nil }
-        return appState.workspaces[pid]
     }
 }

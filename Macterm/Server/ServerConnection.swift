@@ -31,6 +31,11 @@ final class ServerConnection: @unchecked Sendable {
     private var fdIsOpen = true
     private var nextID: UInt64 = 1
     private var pending: [UInt64: CheckedContinuation<MactermProtocol.Response, Error>] = [:]
+    /// The requests of `callBlocking` that wait for a response.
+    private var blockingPending: [UInt64: BlockingReply] = [:]
+    /// Takes each event batch on the reader thread, in place of `events`
+    /// (`setBatchHandler`).
+    private var batchHandler: (@Sendable (ServerEventBatch?) -> Void)?
     private var isClosed = false
     /// The open pane channels, by number (`openChannel`).
     private var channelSinks: [UInt32: PaneChannel.Sink] = [:]
@@ -143,6 +148,40 @@ final class ServerConnection: @unchecked Sendable {
             guard let result = try await group.next() else { throw CancellationError() }
             return result
         }
+    }
+
+    /// Sends one request and blocks the calling thread until its response
+    /// comes, or until `timeout` (`ServerClientError.noAnswer`). The reader
+    /// thread hands each event batch that comes before the response to the
+    /// batch handler first, so a caller that drains its handler's batches
+    /// after this returns has the change of its request (design/010 §4: the
+    /// server sends a request's batch before its reply).
+    func callBlocking<M: ProtocolMethod>(_ method: M.Type, _ args: M.Args, timeout: DispatchTimeInterval) throws -> M.Result {
+        let waiter = BlockingReply()
+        let id: UInt64 = try lock.withLock {
+            guard !isClosed else { throw ServerClientError.disconnected }
+            defer { nextID += 1 }
+            blockingPending[nextID] = waiter
+            return nextID
+        }
+        do {
+            try send(.request(MactermProtocol.Request(id: id, method: method, args: args)))
+        } catch {
+            _ = lock.withLock { blockingPending.removeValue(forKey: id) }
+            throw error
+        }
+        guard waiter.semaphore.wait(timeout: .now() + timeout) == .success else {
+            _ = lock.withLock { blockingPending.removeValue(forKey: id) }
+            throw ServerClientError.noAnswer
+        }
+        return try waiter.result.get().result(of: method)
+    }
+
+    /// Gives each event batch to `handler` on the reader thread, in order,
+    /// from now on, and nil when the connection ends. `events` then gets
+    /// no batch.
+    func setBatchHandler(_ handler: @escaping @Sendable (ServerEventBatch?) -> Void) {
+        lock.withLock { batchHandler = handler }
     }
 
     /// The requests that wait for a response. Tests read it.
@@ -297,10 +336,20 @@ final class ServerConnection: @unchecked Sendable {
     private func handle(_ message: ProtocolControl) throws {
         switch message {
         case let .response(response):
-            forget(response.re)?.resume(returning: response)
+            if let continuation = forget(response.re) {
+                continuation.resume(returning: response)
+            } else if let waiter = lock.withLock({ blockingPending.removeValue(forKey: response.re) }) {
+                waiter.finish(.success(response))
+            }
         case let .events(batch):
             let events = batch.ev.compactMap(ServerEvent.init)
-            if !events.isEmpty { eventSink.yield(ServerEventBatch(seq: batch.seq, events: events)) }
+            guard !events.isEmpty else { break }
+            let value = ServerEventBatch(seq: batch.seq, events: events, cause: batch.cause)
+            if let handler = lock.withLock({ batchHandler }) {
+                handler(value)
+            } else {
+                eventSink.yield(value)
+            }
         case .hello,
              .request,
              .refuse:
@@ -334,9 +383,12 @@ final class ServerConnection: @unchecked Sendable {
 
     private func finish() {
         lock.lock()
+        let handler = isClosed ? nil : batchHandler
         isClosed = true
         let waiting = pending
         pending = [:]
+        let blocked = blockingPending
+        blockingPending = [:]
         let sinks = channelSinks
         channelSinks = [:]
         earlyFrames = [:]
@@ -348,7 +400,11 @@ final class ServerConnection: @unchecked Sendable {
         for continuation in waiting.values {
             continuation.resume(throwing: ServerClientError.disconnected)
         }
+        for waiter in blocked.values {
+            waiter.finish(.failure(ServerClientError.disconnected))
+        }
         eventSink.finish()
+        handler?(nil)
     }
 }
 
@@ -358,6 +414,25 @@ struct ServerEventBatch: Equatable {
     /// The batch's number in the server's `epoch` (`StateSubscribe.Result.seq`).
     var seq: UInt64
     var events: [ServerEvent]
+    /// The id of the request that caused the batch, only on the connection
+    /// that sent it.
+    var cause: UInt64?
+}
+
+/// The response that a `callBlocking` waits for.
+private final class BlockingReply: @unchecked Sendable {
+    let semaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var value: Result<MactermProtocol.Response, Error>?
+
+    var result: Result<MactermProtocol.Response, Error> {
+        lock.withLock { value ?? .failure(ServerClientError.disconnected) }
+    }
+
+    func finish(_ result: Result<MactermProtocol.Response, Error>) {
+        lock.withLock { value = result }
+        semaphore.signal()
+    }
 }
 
 /// An event of the server that this build reads. Events that a later build

@@ -97,18 +97,10 @@ struct PreferencesTests {
         let prior = Preferences.shared.activeProjectID
         defer { Preferences.shared.activeProjectID = prior }
 
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-prefs-tests-\(UUID().uuidString).json")
-        let filesDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-prefs-tests-projects-\(UUID().uuidString)", isDirectory: true)
-        // Inject a tempdir ProjectFileStore too, so this never reads/writes the
-        // developer's real ~/.config/macterm/projects/ (tempdir-injection rule).
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp),
-            projectFiles: ProjectFileStore(directoryURL: filesDir)
-        )
-        let project = Project(name: "throwaway", path: "/tmp", sortOrder: 0)
-        state.selectProject(project)
+        // Every file of the test model is in a temp folder, so this never
+        // reads or writes the developer's real files (tempdir-injection rule).
+        let state = TestModel.appState()
+        let project = TestModel.project(state, name: "throwaway")
 
         #expect(Preferences.shared.activeProjectID == project.id)
         let standardValue = UserDefaults.standard.string(forKey: Preferences.Keys.activeProjectID.name)

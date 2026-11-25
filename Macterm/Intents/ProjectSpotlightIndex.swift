@@ -9,11 +9,11 @@ private let logger = Logger(subsystem: appBundleID, category: "ProjectSpotlightI
 /// Spotlight and Siri find a project by its name or its folder. A click on a
 /// result runs `OpenMactermProjectIntent`.
 ///
-/// The index is the whole project list, written again after each save of
-/// `projects.json` (`ProjectStore.onSave`). Projects are few, so a full
-/// rewrite is cheap, and it removes the items of deleted projects with no
-/// bookkeeping. The pinned and scratch workspaces are not projects in the
-/// store, so they are not indexed.
+/// The index is the list of the projects of the tree, written again after
+/// each change of the model's projects, by any client (`ProjectStore.onSave`).
+/// Projects are few, so a full rewrite is cheap, and it removes the items of
+/// deleted projects with no bookkeeping. The hidden projects (Pinned,
+/// Scratch Tabs, the quick terminal, the widgets) are not indexed.
 @MainActor
 final class ProjectSpotlightIndex {
     static let shared = ProjectSpotlightIndex()
@@ -35,11 +35,12 @@ final class ProjectSpotlightIndex {
             || ProcessInfo.processInfo.environment["MACTERM_BENCHMARK_DATA_DIR"] != nil
     }
 
-    /// Index the store's projects now, and again after each save.
+    /// Index the store's projects after each change. A store with no model
+    /// yet indexes nothing: an empty list would delete the user's items.
     func attach(projectStore: ProjectStore) {
         guard !Self.isHermetic else { return }
         projectStore.onSave = { [weak self] projects in self?.update(projects) }
-        update(projectStore.projects)
+        if !projectStore.loadFailed { update(projectStore.projects) }
     }
 
     private func update(_ projects: [Project]) {

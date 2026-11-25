@@ -162,10 +162,7 @@ struct DirectorySource: PaletteSource {
             category: Self.category,
             score: score
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            let project = projectStore.findOrCreate(
-                name: name,
-                path: fullPath
-            )
+            guard let project = projectStore.findOrCreate(name: name, path: fullPath) else { return }
             appState.selectProject(project)
         }
     }
@@ -189,7 +186,7 @@ struct DirectorySource: PaletteSource {
             score: score,
             opensScope: Self.remoteFolderScope(fullPath, context: context)
         ) { [appState = context.appState, projectStore = context.projectStore] in
-            appState.selectProject(projectStore.create(name: name, path: fullPath))
+            if let project = projectStore.create(name: name, path: fullPath) { appState.selectProject(project) }
         }
     }
 }

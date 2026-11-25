@@ -4,10 +4,9 @@ import Testing
 
 @MainActor
 struct LayoutReconcilerTests {
-    /// Build a single-tab workspace from a split tree.
-    private func workspace(projectID: UUID, root: SplitNode, title: String? = nil) -> Workspace {
-        let tab = TerminalTab(id: UUID(), splitRoot: root, focusedPaneID: root.allPanes().first?.id, customTitle: title)
-        return Workspace(id: projectID, tabs: [tab], activeTabID: tab.id)
+    /// The tabs of a project with one tab of a split tree.
+    private func workspace(projectID _: UUID, root: SplitNode, title: String? = nil) -> [TerminalTab] {
+        [TerminalTab(id: UUID(), splitRoot: root, focusedPaneID: root.allPanes().first?.id, customTitle: title)]
     }
 
     /// Parse a layout from a `tabs:` fixture. Throws (rather than `try!`) so a
@@ -26,7 +25,7 @@ struct LayoutReconcilerTests {
     /// declared `shell`, else nil); tests swapping shells inject their own.
     private func plan(
         _ file: LayoutFile,
-        workspace: Workspace?,
+        workspace: [TerminalTab]?,
         projectRoot: String,
         projectID: UUID,
         liveCommand: @escaping (Pane) -> String? = { $0.start?.text },
@@ -34,7 +33,7 @@ struct LayoutReconcilerTests {
     ) -> LayoutReconciler.Plan {
         LayoutReconciler.plan(
             layout: file,
-            workspace: workspace,
+            tabs: workspace ?? [],
             projectRoot: projectRoot,
             projectID: projectID,
             liveCommand: liveCommand,
@@ -60,7 +59,7 @@ struct LayoutReconcilerTests {
           - { run: "btop" }
         """)
 
-        let plan = LayoutReconciler.plan(layout: file, workspace: ws, projectRoot: root, projectID: pid)
+        let plan = LayoutReconciler.plan(layout: file, tabs: ws, projectRoot: root, projectID: pid)
         #expect(!plan.isDestructive)
         #expect(plan.tabs[0].root.allPanes().map(\.id) == [btop.id])
     }
@@ -293,7 +292,7 @@ struct LayoutReconcilerTests {
         let goneShell = Pane(projectPath: "/proj", projectID: pid)
         let tabA = TerminalTab(id: UUID(), splitRoot: .pane(keep), focusedPaneID: keep.id, customTitle: "Dev")
         let tabB = TerminalTab(id: UUID(), splitRoot: .pane(goneShell), focusedPaneID: goneShell.id, customTitle: "Scratch")
-        let ws = Workspace(id: pid, tabs: [tabA, tabB], activeTabID: tabA.id)
+        let ws = [tabA, tabB]
 
         // Only the "Dev" tab is declared.
         let file = try layout("""

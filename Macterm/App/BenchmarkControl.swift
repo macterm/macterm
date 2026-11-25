@@ -132,7 +132,7 @@ enum BenchmarkControl {
             return
         }
         let path = ProcessInfo.processInfo.environment["MACTERM_BENCHMARK_DIR"] ?? NSHomeDirectory()
-        let project = projectStore.findOrCreate(name: "Benchmark", path: path)
+        guard let project = projectStore.findOrCreate(name: "Benchmark", path: path) else { return }
         appState.selectProject(project)
     }
 

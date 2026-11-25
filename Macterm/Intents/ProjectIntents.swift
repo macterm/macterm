@@ -52,10 +52,11 @@ struct NewMactermProjectIntent: AppIntent {
             throw MactermIntentError.badInput(message)
         }
         logger.info("intent: new project at \(path, privacy: .public)")
-        let project = ctx.projectStore.create(
+        guard let project = ctx.projectStore.create(
             name: (trimmed?.isEmpty == false ? trimmed : nil) ?? (path as NSString).lastPathComponent,
             path: path
         )
+        else { throw MactermIntentError.badInput(String(localized: "Macterm could not add the project.")) }
         ctx.appState.selectProject(project)
         // The shortcut ran from outside the app, so nothing has fronted a
         // window — and this one's whole point is to show the user their new
@@ -164,7 +165,7 @@ struct GetMactermProjectMemoryIntent: AppIntent {
             throw MactermIntentError.unavailable(String(localized: "Project Insights is off. Turn it on in Settings → Intelligence."))
         }
         let target = try IntentTargets.project(project.id, in: ctx)
-        guard ProjectMemory.covers(target.id) else {
+        guard ProjectMemory.covers(target) else {
             throw MactermIntentError.unavailable(String(localized: "\(target.name) is not a project, so it has no insights."))
         }
         let memory = MactermIntentHost.shared.projectMemory()

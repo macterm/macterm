@@ -5,27 +5,28 @@ private let logger = Logger(subsystem: appBundleID, category: "ProjectStore")
 
 @MainActor @Observable
 final class ProjectStore {
-    /// Every project in tree order: depth first, a parent before its
-    /// children, and the children of each parent in `sortOrder` (design
-    /// 013). A project can have no folder (`Project.hasFolder`).
-    /// `normalize` derives it from `rows` after each change. It is stored
-    /// because many view bodies read it.
-    private(set) var projects: [Project] = []
-    /// Every row of projects.json, in the order of the file.
-    private var rows: [Project] = []
-    private let fileURL: URL
-    /// Set when `load()` found a present-but-undecodable projects.json. While
-    /// set, `save()` refuses to overwrite — a transient read/decode failure
-    /// must never let the next mutation wipe the user's entire project list.
-    @ObservationIgnored
-    private(set) var loadFailed = false
+    /// The projects of the sidebar tree (`Project.isTreeProject`), in tree
+    /// order: depth first, a parent before its children, and the children
+    /// of each parent in `sortOrder` (design 013). A project can have no
+    /// folder (`Project.hasFolder`). The server holds them (design/010 §11):
+    /// this is the mirror's list, and each change is a request.
+    var projects: [Project] { treeOrder(under: nil) }
+
+    private let writer: ModelWriter
+    private var mirror: ModelMirror { writer.mirror }
+    /// The tree projects, as the mirror has them.
+    private var rows: [Project] { mirror.treeProjects }
+
+    /// Whether the model could not be read. Nothing is ended or removed on
+    /// a list that is not the user's.
+    var loadFailed: Bool { mirror.data == nil || mirror.readonly }
     /// Whether `create` tags a new project. Injectable so tests don't mutate
     /// the shared preference — swift-testing runs suites in parallel.
     @ObservationIgnored
     var autoAssignsColors: () -> Bool = { Preferences.shared.autoAssignProjectColors }
-    /// Called with the list after each save that wrote it (the Spotlight
-    /// index, `ProjectSpotlightIndex`). Not called while `loadFailed` refuses
-    /// to save, because that list is not the user's.
+    /// Called with the list after each change of it, by any client, and when
+    /// the model is installed with another list (the Spotlight index,
+    /// `ProjectSpotlightIndex`).
     @ObservationIgnored
     var onSave: (([Project]) -> Void)?
     /// Called with each project that `add` stored. `AppState.projectAdded`
@@ -34,9 +35,22 @@ final class ProjectStore {
     @ObservationIgnored
     var onAdd: ((Project) -> Void)?
 
-    init(fileURL: URL = FileStorage.fileURL(filename: "projects.json")) {
-        self.fileURL = fileURL
-        load()
+    /// The list that `onSave` got last. A change of a hidden project (a
+    /// pinned tab, a widget) changes the model's projects but not this
+    /// list, and `onSave` does not get it again.
+    @ObservationIgnored
+    private var lastSaved: [Project]?
+
+    init(writer: ModelWriter) {
+        self.writer = writer
+        if !loadFailed { lastSaved = projects }
+        writer.mirror.onProjectsChanged = { [weak self] in
+            guard let self else { return }
+            let list = projects
+            guard list != lastSaved else { return }
+            lastSaved = list
+            onSave?(list)
+        }
     }
 
     func project(matchingPath path: String) -> Project? {
@@ -49,7 +63,7 @@ final class ProjectStore {
     /// re-running to be a no-op. Interactive project creation goes through
     /// `create` instead, so the same directory can back several projects.
     @discardableResult
-    func findOrCreate(name: String, path: String) -> Project {
+    func findOrCreate(name: String, path: String) -> Project? {
         if let existing = project(matchingPath: path) {
             return existing
         }
@@ -58,8 +72,8 @@ final class ProjectStore {
 
     /// Always add a new project, even when one already backs this directory.
     /// A directory is not an identity: two projects may share a `path` and
-    /// keep wholly independent workspaces (keyed on `Project.id`) and zmx
-    /// sessions (named with per-pane entropy). This is the entry point for
+    /// keep wholly independent tabs (keyed on `Project.id`) and sessions
+    /// (named with per-pane entropy). This is the entry point for
     /// user-initiated creation (folder picker, New Remote Project, `project create`).
     ///
     /// A name that `Project.nameRefusal` refuses is stored changed (see
@@ -68,9 +82,9 @@ final class ProjectStore {
     /// nobody chose, so refusing it would make a folder called Pinned
     /// impossible to add. The `name:` of a layout file is changed the same
     /// way. A caller holding a name someone typed refuses it before calling
-    /// this, where it can say why.
+    /// this, where it can say why. nil when the server refused it.
     @discardableResult
-    func create(name: String, path: String, parent: UUID? = nil) -> Project {
+    func create(name: String, path: String, parent: UUID? = nil) -> Project? {
         var project = Project(name: Self.allowedName(name), path: path, parent: parent)
         if autoAssignsColors() {
             project.colorName = ProjectColor.leastUsed(among: projects.map(\.color)).rawValue
@@ -78,18 +92,16 @@ final class ProjectStore {
         return add(project)
     }
 
-    /// Append a project at the end of its parent, and return it as stored.
-    /// A parent that is not a project of this store becomes nil (top level).
+    /// Add a project at the end of its parent, and return it as stored. A
+    /// parent that is not a project of the tree becomes nil (top level).
     @discardableResult
-    func add(_ project: Project) -> Project {
+    func add(_ project: Project) -> Project? {
         var project = project
         project.path = ProjectPath.normalizedForStorage(project.path)
         if !isPlace(project.parent) { project.parent = nil }
-        project.sortOrder = children(of: project.parent).count
-        rows.append(project)
-        changed()
-        onAdd?(project)
-        return project
+        guard writer.projectCreate(project), let stored = mirror.project(project.id) else { return nil }
+        onAdd?(stored)
+        return stored
     }
 
     // MARK: - Tree
@@ -102,22 +114,20 @@ final class ProjectStore {
 
     /// Move a project into the project `parent` (nil: the top level), at its
     /// end. A project that is already in `parent` does not move. Returns
-    /// false when `parent` is not a project of this store, or is the project
+    /// false when `parent` is not a project of the tree, or is the project
     /// itself or a project inside it.
     @discardableResult
     func move(_ id: UUID, into parent: UUID?) -> Bool {
-        move(id, into: parent, saving: true)
-    }
-
-    /// `move(_:into:)`. With `saving` false, the caller saves after its own
-    /// next change.
-    private func move(_ id: UUID, into parent: UUID?, saving: Bool) -> Bool {
-        guard let index = rows.firstIndex(where: { $0.id == id }), isPlace(parent) else { return false }
+        guard let project = row(id), isPlace(parent) else { return false }
         if let parent, parent == id || ancestors(of: parent).contains(id) { return false }
-        guard rows[index].parent != parent else { return true }
-        rows[index].sortOrder = children(of: parent).count
-        rows[index].parent = parent
-        if saving { changed() }
+        guard project.parent != parent else { return true }
+        let oldParent = project.parent
+        guard writer.projectSet(id, parent: .some(parent)) else { return false }
+        // The server keeps the order number: put the project at the end, and
+        // number the rows that it left from 0 again.
+        writer.projectReorder(parent: parent, ids: children(of: parent).map(\.id).filter { $0 != id } + [id])
+        let left = children(of: oldParent).map(\.id)
+        if !left.isEmpty { writer.projectReorder(parent: oldParent, ids: left) }
         return true
     }
 
@@ -133,7 +143,7 @@ final class ProjectStore {
             siblings.remove(at: current)
             if current < slot { slot -= 1 }
         }
-        guard move(id, into: parent, saving: false) else { return false }
+        guard move(id, into: parent) else { return false }
         siblings.insert(id, at: slot)
         reorder(parent: parent, ids: siblings)
         return true
@@ -143,18 +153,12 @@ final class ProjectStore {
     /// row of `parent` is ignored. A row of `parent` that `ids` does not
     /// name keeps its order after the named ones.
     func reorder(parent: UUID?, ids: [UUID]) {
-        setOrder(parent: parent, ids: ids)
-        changed()
-    }
-
-    private func setOrder(parent: UUID?, ids: [UUID]) {
         let siblings = children(of: parent).map(\.id)
         var order = ids.filter(siblings.contains)
         order = order.enumerated().filter { order.firstIndex(of: $0.element) == $0.offset }.map(\.element)
         order += siblings.filter { !order.contains($0) }
-        for (position, id) in order.enumerated() {
-            if let index = rows.firstIndex(where: { $0.id == id }) { rows[index].sortOrder = position }
-        }
+        guard order != siblings else { return }
+        writer.projectReorder(parent: parent, ids: order)
     }
 
     /// The project `id`.
@@ -172,7 +176,7 @@ final class ProjectStore {
     func moveOut(_ id: UUID) {
         guard let parent = row(id)?.parent else { return }
         let grandparent = row(parent)?.parent
-        _ = move(id, into: grandparent, saving: false)
+        guard move(id, into: grandparent) else { return }
         var siblings = children(of: grandparent).map(\.id).filter { $0 != id }
         let index = siblings.firstIndex(of: parent).map { $0 + 1 } ?? siblings.endIndex
         siblings.insert(id, at: index)
@@ -196,17 +200,8 @@ final class ProjectStore {
         return siblings.firstIndex { $0.id == id }.map { ($0, siblings.count) }
     }
 
-    /// Remove the project `id` and every project inside it, at any depth.
-    /// The caller ends the sessions of all of them first.
-    func removeWithDescendants(_ id: UUID) {
-        guard row(id) != nil else { return }
-        let removed = Set(rows.map(\.id).filter { $0 == id || ancestors(of: $0).contains(id) })
-        rows.removeAll { removed.contains($0.id) }
-        changed()
-    }
-
-    /// Whether `id` is nil (the top level) or a project of this store: the
-    /// two places a project can be.
+    /// Whether `id` is nil (the top level) or a project of the tree: the two
+    /// places a project can be.
     private func isPlace(_ id: UUID?) -> Bool {
         guard let id else { return true }
         return rows.contains { $0.id == id }
@@ -232,9 +227,8 @@ final class ProjectStore {
             logger.error("Refusing to rename project \(id, privacy: .public) to refused name \(newName, privacy: .public)")
             return
         }
-        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
-        rows[index].name = newName
-        changed()
+        guard row(id) != nil else { return }
+        writer.projectSet(id, name: newName)
     }
 
     /// `name` changed so that `Project.nameRefusal` allows it. Each slash
@@ -260,109 +254,54 @@ final class ProjectStore {
 
     /// Set (or clear, with nil) the project's color tag.
     func setColor(id: UUID, to color: ProjectColor?) {
-        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
-        guard rows[index].colorName != color?.rawValue else { return }
-        rows[index].colorName = color?.rawValue
-        changed()
+        guard let project = row(id), project.colorName != color?.rawValue else { return }
+        writer.projectSet(id, color: color?.rawValue ?? "")
     }
 
-    /// Set a project's path. A project with no folder gets one this way.
+    /// Point the project at another folder.
     func setPath(id: UUID, to newPath: String) {
-        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         let normalized = ProjectPath.normalizedForStorage(newPath)
-        guard rows[index].path != normalized else { return }
-        rows[index].path = normalized
-        changed()
-    }
-
-    /// After each change: normalize the rows, derive `projects`, save.
-    private func changed() {
-        normalize()
-        save()
-    }
-
-    /// Repair the rows, then derive `projects`. Load calls it too. It writes
-    /// nothing to disk; the next save writes the repaired rows.
-    /// - A parent that is not a project of this list (a removed project, a
-    ///   hand edit) becomes nil, and the project goes to the end of the top
-    ///   level. A parent link in a loop becomes nil too.
-    /// - The children of each parent get `sortOrder` 0, 1, 2 in their order.
-    private func normalize() {
-        let ids = Set(rows.map(\.id))
-        for index in rows.indices {
-            if let parent = rows[index].parent, !ids.contains(parent) {
-                moveToEndOfTopLevel(index)
-            }
-        }
-        for index in rows.indices {
-            if let parent = rows[index].parent, ancestors(of: parent).contains(rows[index].id) || parent == rows[index].id {
-                moveToEndOfTopLevel(index)
-            }
-        }
-        // Stable: rows with equal `sortOrder` keep their order.
-        rows = rows.enumerated()
-            .sorted { ($0.element.sortOrder, $0.offset) < ($1.element.sortOrder, $1.offset) }
-            .map(\.element)
-        var next: [UUID?: Int] = [:]
-        for index in rows.indices {
-            rows[index].sortOrder = next[rows[index].parent, default: 0]
-            next[rows[index].parent, default: 0] += 1
-        }
-        projects = treeOrder(under: nil)
-    }
-
-    private func moveToEndOfTopLevel(_ index: Int) {
-        rows[index].parent = nil
-        rows[index].sortOrder = rows.count + index
+        guard let project = row(id), project.path != normalized else { return }
+        writer.projectSet(id, path: normalized)
     }
 
     private func treeOrder(under parent: UUID?) -> [Project] {
         children(of: parent).flatMap { [$0] + treeOrder(under: $0.id) }
     }
 
-    private func save() {
-        guard !loadFailed else {
-            logger.error("Refusing to save projects: prior load failed, file preserved")
-            return
-        }
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(rows)
-            try data.write(to: fileURL, options: .atomic)
-            onSave?(projects)
-        } catch {
-            logger.error("Failed to save projects: \(error, privacy: .public)")
-        }
-    }
+    // MARK: - v1's projects.json
 
-    private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        let data: Data
+    /// The rows of v1's `projects.json`, for the import (design/010 §8):
+    /// each path normalized, each parent that is not a row (or that makes a
+    /// loop) read as the top level. `failed` when a file is there and does
+    /// not read: then nothing is imported. The import never writes the file.
+    static func readV1(fileURL: URL = FileStorage.fileURL(filename: "projects.json")) -> (rows: [Project], failed: Bool) {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return ([], false) }
         do {
-            data = try Data(contentsOf: fileURL)
-        } catch {
-            logger.error("Failed to read projects file: \(error, privacy: .public)")
-            loadFailed = true
-            return
-        }
-        // An empty file is a genuine empty state, not corruption.
-        guard !data.isEmpty else { return }
-        do {
-            rows = try JSONDecoder().decode([Project].self, from: data)
-            // Migrate paths stored before normalization existed (e.g. with the
-            // trailing slash `URL.path(percentEncoded:)` keeps on directories).
-            // In-memory only; the cleaned form persists on the next mutation.
+            let data = try Data(contentsOf: fileURL)
+            guard !data.isEmpty else { return ([], false) }
+            var rows = try JSONDecoder().decode([Project].self, from: data)
+            let ids = Set(rows.map(\.id))
             for i in rows.indices {
                 rows[i].path = ProjectPath.normalizedForStorage(rows[i].path)
+                if let parent = rows[i].parent, !ids.contains(parent) || parent == rows[i].id { rows[i].parent = nil }
             }
-            normalize()
+            // A loop of parents reads as the top level.
+            for i in rows.indices {
+                var seen: Set<UUID> = [rows[i].id]
+                var next = rows[i].parent
+                while let current = next {
+                    if !seen.insert(current).inserted {
+                        rows[i].parent = nil
+                        break
+                    }
+                    next = rows.first { $0.id == current }?.parent
+                }
+            }
+            return (rows, false)
         } catch {
-            // Present but undecodable — a corrupt entry or a future format.
-            // Preserve the file: refuse to overwrite it until this session
-            // restarts and reads it cleanly (or the user fixes it).
-            logger.error("Failed to decode projects file: \(error, privacy: .public)")
-            loadFailed = true
+            logger.error("Failed to read projects.json: \(String(describing: error), privacy: .public)")
+            return ([], true)
         }
     }
 }

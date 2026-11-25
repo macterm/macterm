@@ -66,7 +66,7 @@ struct NotificationHandlerTests {
     @Test
     func user_info_carries_the_keys_did_receive_reads_back() {
         let pane = Pane(projectPath: "/tmp", projectID: UUID())
-        let userInfo = NotificationHandler.userInfo(for: pane)
+        let userInfo = NotificationHandler.userInfo(for: pane, in: nil)
 
         #expect(userInfo["paneID"] as? String == pane.id.uuidString)
         #expect(userInfo["projectID"] as? String == pane.projectID.uuidString)
@@ -74,10 +74,12 @@ struct NotificationHandlerTests {
     }
 
     @Test
-    func a_quick_terminal_pane_is_flagged_so_taps_route_to_the_panel() {
-        let pane = Pane(projectPath: "/tmp", projectID: QuickTerminalService.projectID)
-
-        #expect(NotificationHandler.userInfo(for: pane)["isQuickTerminal"] as? Bool == true)
+    func a_quick_terminal_pane_is_flagged_so_taps_route_to_the_panel() throws {
+        // A pane of the project with the alias `quick` routes to the panel.
+        let state = TestModel.appState()
+        let tab = try #require(state.quickTerminal.ensureTab())
+        let pane = try #require(tab.splitRoot.allPanes().first)
+        #expect(NotificationHandler.userInfo(for: pane, in: state.model)["isQuickTerminal"] as? Bool == true)
     }
 
     // MARK: - Identifiers
