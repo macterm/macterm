@@ -15,6 +15,16 @@ struct Project: Identifiable, Codable, Hashable {
     /// projects.json. `ProjectStore` reads a parent that is not one of its
     /// projects as nil.
     var parent: UUID?
+    /// The capability fields of design/010 §11, §2. The app sets them when
+    /// it makes the project, and they never change. A project of the
+    /// sidebar tree has the defaults. The hidden projects (Pinned, Scratch
+    /// Tabs, the quick terminal, a widget) have others.
+    var sidebar: MactermProtocol.ProjectSidebar = .tree
+    var singleTab = false
+    var removable = true
+    /// The one short word that finds a singleton: `pinned`, `scratch` or
+    /// `quick`. A lookup, never a behavior.
+    var alias: String?
 
     init(
         name: String,
@@ -32,18 +42,31 @@ struct Project: Identifiable, Codable, Hashable {
         createdAt = Date()
     }
 
-    /// Explicit-id variant for SYNTHETIC projects only (`PinnedTabs.project`,
-    /// `ScratchTabs.project`).
-    /// Real projects always mint a fresh id above — a directory is not an
-    /// identity, and two projects may share a path.
-    init(id: UUID, name: String, path: String) {
+    /// A project with a known id: a row of a v1 file, or a test.
+    init(id: UUID, name: String, path: String, sortOrder: Int = 0, colorName: String? = nil, parent: UUID? = nil) {
         self.id = id
         self.name = name
         self.path = path
-        sortOrder = 0
-        colorName = nil
-        parent = nil
+        self.sortOrder = sortOrder
+        self.colorName = colorName
+        self.parent = parent
         createdAt = Date()
+    }
+
+    /// The project of the model. `id` and `parent` are the mirror's UUIDs
+    /// of the wire ids.
+    init(model p: MactermProtocol.Project, id: UUID, parent: UUID?) {
+        self.id = id
+        name = p.name
+        path = p.path
+        sortOrder = Int(p.sortOrder)
+        createdAt = Date(timeIntervalSince1970: TimeInterval(p.createdAt) / 1000)
+        colorName = p.color
+        self.parent = parent
+        sidebar = p.sidebar
+        singleTab = p.singleTab
+        removable = p.removable
+        alias = p.alias
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -109,26 +132,16 @@ extension Project {
     var isRemote: Bool { ProjectPath.isRemote(path) }
 }
 
-/// The two workspaces that are not `ProjectStore` rows: the pinned tabs and
-/// the scratch tabs. Each has a synthetic `Project` for the call sites that
-/// render or route by a `Project`.
 extension Project {
-    /// The synthetic project behind a sentinel workspace id; nil for a real
-    /// project's id.
-    static func synthetic(for id: UUID) -> Project? {
-        switch id {
-        case PinnedTabs.workspaceID: PinnedTabs.project
-        case ScratchTabs.workspaceID: ScratchTabs.project
-        default: nil
-        }
-    }
+    /// A row of the sidebar tree: the projects that `project list`, the
+    /// palette, Spotlight and Settings → Projects show (design/010 §11, §2).
+    /// Only a tree project can hold child projects or be dragged as a
+    /// project.
+    var isTreeProject: Bool { sidebar == .tree }
 
-    /// Whether `id` is a sentinel workspace: it has no directory, no layout
-    /// file and no row in Settings → Projects, and it can be neither renamed
-    /// nor removed.
-    static func isSynthetic(_ id: UUID) -> Bool {
-        synthetic(for: id) != nil
-    }
+    /// A window can select it (`select.set`): not the quick terminal's and
+    /// not a widget's.
+    var isSelectable: Bool { sidebar != .none }
 
     /// Why a typed project name is refused, or nil when it is allowed. The
     /// one test every naming path applies. A name cannot contain a slash
