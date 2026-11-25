@@ -395,6 +395,79 @@ struct SidebarDragFeedbackTests {
         #expect(await drop(row: 7, fraction: 0.5) == ["top 2"])
     }
 
+    /// The sidebar opens its pin band while a tab drag is on the rows
+    /// (`PinTabDropZone`). The probe reports the drag of each open gap, and
+    /// nil at the exit and at the drop. A row update during the drag closes
+    /// and opens the gap again (`OutlineGapDropGuard`), and the probe reports
+    /// no close there.
+    @Test
+    func the_probe_reports_an_open_drag_until_it_exits_or_drops() async throws {
+        let drops = DropLog()
+        let expansion = ProbeExpansion(open: ["A"])
+        let tree = [
+            ProbeNode(name: "A", tabs: ["A0", "A1"], children: []),
+            ProbeNode(name: "B", tabs: ["B0"], children: []),
+        ]
+        let reports = DragReports()
+        let content = List {
+            ForEach(tree) { ProbeProjectRow(node: $0, drops: drops, expansion: expansion) }
+        }
+        .listStyle(.sidebar)
+        .background {
+            SidebarDragFeedback(isGuarded: .constant(false)) { reports.values.append($0 != nil) }
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 320),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: content)
+        window.layoutIfNeeded()
+
+        // Rows: 0 A, 1 A0, 2 A1, 3 B (closed).
+        let outline = try #require(await poll {
+            window.contentView.flatMap { Self.outlines(in: $0).first }.flatMap {
+                $0.draggingDestinationFeedbackStyle == .gap && $0.numberOfRows == 4 ? $0 : nil
+            }
+        })
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("macterm-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        try pasteboard.setData(
+            JSONEncoder().encode(MovableTab(tabID: UUID(), sourceProjectID: UUID())),
+            forType: NSPasteboard.PasteboardType(UTType.mactermTab.identifier)
+        )
+        func point(row: Int, fraction: CGFloat) -> NSPoint {
+            let rect = outline.rect(ofRow: row)
+            return outline.convert(NSPoint(x: rect.midX, y: rect.minY + rect.height * fraction), to: nil)
+        }
+
+        let drag = FakeDrag(location: point(row: 1, fraction: 0.8), pasteboard: pasteboard, window: window)
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        #expect(reports.values.last == true)
+        // B opens under the held drag. The guard closes the gap for the row
+        // update and opens it again: no close is reported.
+        let beforeUpdate = reports.values.count
+        expansion.open.insert("B")
+        #expect(await poll { outline.numberOfRows == 5 ? true : nil } == true)
+        #expect(await poll { reports.values.count > beforeUpdate ? true : nil } == true)
+        #expect(!reports.values[beforeUpdate...].contains(false))
+        // The exit reports the close.
+        outline.draggingExited(drag)
+        #expect(reports.values.last == false)
+        // Back in and a drop: the drop reports the close.
+        #expect(!outline.draggingEntered(drag).isEmpty)
+        #expect(reports.values.last == true)
+        #expect(outline.prepareForDragOperation(drag))
+        #expect(reports.values.last == false)
+        #expect(outline.performDragOperation(drag))
+        outline.concludeDragOperation(drag)
+        #expect(await poll { drops.entries.isEmpty ? nil : drops.entries } == ["tab A 1"])
+    }
+
     private func sidebarList() -> some View {
         List {
             Section {
@@ -481,6 +554,11 @@ private final class ProbeExpansion {
 @MainActor
 private final class GuardFlag {
     var value = false
+}
+
+@MainActor
+private final class DragReports {
+    var values: [Bool] = []
 }
 
 @MainActor

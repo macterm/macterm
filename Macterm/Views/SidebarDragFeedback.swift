@@ -30,6 +30,9 @@ struct SidebarDragFeedback: NSViewRepresentable {
     /// are at the top level.
     var branches = OutlineGapDropGuard.Branches()
     @Binding var isGuarded: Bool
+    /// Gets the drag whose gap is open on the rows, and nil when the gap
+    /// closes (`OutlineGapDropGuard.observeOpenDrag`).
+    var onOpenDrag: (NSDraggingInfo?) -> Void = { _ in }
 
     func makeNSView(context _: Context) -> ProbeView {
         ProbeView()
@@ -37,6 +40,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
 
     func updateNSView(_ view: ProbeView, context _: Context) {
         view.branches = branches
+        view.onOpenDrag = onOpenDrag
         let report: (Bool) -> Void = { guarded in
             if isGuarded != guarded { isGuarded = guarded }
         }
@@ -63,6 +67,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
         private static let maxTries = 20
         var branches = OutlineGapDropGuard.Branches()
         var onGuardChange: (Bool) -> Void = { _ in }
+        var onOpenDrag: (NSDraggingInfo?) -> Void = { _ in }
         /// True while the guard is on the outline view of this probe.
         var isGuarded: Bool {
             gapIsAllowed && outline?.window != nil
@@ -112,6 +117,7 @@ struct SidebarDragFeedback: NSViewRepresentable {
                 switch OutlineGapDropGuard.install(on: found, branches: branches) {
                 case .installed:
                     outline = found
+                    OutlineGapDropGuard.observeOpenDrag(on: found) { [weak self] info in self?.onOpenDrag(info) }
                     gapIsAllowed = true
                     if found.draggingDestinationFeedbackStyle != .gap {
                         found.draggingDestinationFeedbackStyle = .gap
@@ -277,6 +283,34 @@ enum OutlineGapDropGuard {
 
     private static func setOpenDrag(_ info: NSDraggingInfo?, on outline: NSOutlineView) {
         objc_setAssociatedObject(outline, &dragKey, info.map(DragReference.init), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        if !isClosingForUpdate { observer(of: outline)?(info) }
+    }
+
+    /// True while the guard closes a gap before a row update (point 3). The
+    /// gap opens again after the update, so the observer sees no close.
+    private static var isClosingForUpdate = false
+
+    /// The key of the observer of one outline view.
+    private static var observerKey: UInt8 = 0
+
+    /// An observer as an object, because an associated object must be one.
+    private final class ObserverBox {
+        let body: (NSDraggingInfo?) -> Void
+        init(_ body: @escaping (NSDraggingInfo?) -> Void) {
+            self.body = body
+        }
+    }
+
+    private static func observer(of outline: NSOutlineView) -> ((NSDraggingInfo?) -> Void)? {
+        (objc_getAssociatedObject(outline, &observerKey) as? ObserverBox)?.body
+    }
+
+    /// Tells `body` the drag of each validation that opens the gap on
+    /// `outline`, and nil when the gap closes: at an exit, at a refused
+    /// proposal and at the drop. It is called at each drag update. The
+    /// sidebar opens its pin band with it while a tab drag is on the rows.
+    static func observeOpenDrag(on outline: NSOutlineView, _ body: @escaping (NSDraggingInfo?) -> Void) {
+        objc_setAssociatedObject(outline, &observerKey, ObserverBox(body), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
     /// The branches of `outline`. Each outline view has its own: the guard
@@ -376,7 +410,9 @@ enum OutlineGapDropGuard {
         let beginReplacement: @convention(block) (NSOutlineView) -> Void = { view in
             MainActor.assumeIsolated {
                 guard view.draggingDestinationFeedbackStyle == .gap, let info = openDrag(on: view) else { return }
+                isClosingForUpdate = true
                 view.draggingExited(info)
+                isClosingForUpdate = false
                 reenter(DragReference(info), on: view)
             }
             beginOriginal(view, begin)
@@ -405,10 +441,15 @@ enum OutlineGapDropGuard {
     private static func reenter(_ drag: DragReference, on outline: NSOutlineView) {
         DispatchQueue.main.async { [weak outline] in
             MainActor.assumeIsolated {
-                guard let outline, let info = drag.info, openDrag(on: outline) == nil,
+                guard let outline, openDrag(on: outline) == nil else { return }
+                guard let info = drag.info,
                       outline.window === info.draggingDestinationWindow,
                       dropView(at: info.draggingLocation, in: outline) === outline
-                else { return }
+                else {
+                    // The gap stays closed: now the observer sees the close.
+                    observer(of: outline)?(nil)
+                    return
+                }
                 _ = outline.draggingEntered(info)
             }
         }
