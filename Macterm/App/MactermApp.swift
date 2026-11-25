@@ -229,6 +229,25 @@ struct MactermApp: App {
                     titleOverride: "Set Project Path to Current Directory"
                 )
                 Divider()
+                AppCommandMenuItem(
+                    command: .newProjectInside,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "New Project Inside…"
+                )
+                AppCommandMenuItem(
+                    command: .moveToProject,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "Move to Project…"
+                )
+                AppCommandMenuItem(
+                    command: .moveOutOfProject,
+                    appState: appState,
+                    projectStore: projectStore,
+                    titleOverride: "Move Out of Project"
+                )
+                Divider()
                 AppCommandMenuItem(command: .nextProject, appState: appState, projectStore: projectStore, titleOverride: "Next Project")
                 AppCommandMenuItem(
                     command: .previousProject,

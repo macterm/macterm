@@ -5,7 +5,7 @@ import AppKit
 /// projects a small score boost over commands; empty state shows up to 5
 /// recently-visited projects (falling back to the store if recency is empty).
 /// The subtitle of a project in another project is the path of those names
-/// ("Work / api"). The subtitle of a project at the top level is its folder
+/// ("Work/api"). The subtitle of a project at the top level is its folder
 /// (design 013).
 @MainActor
 struct ProjectSource: PaletteSource {
@@ -66,7 +66,7 @@ struct ProjectSource: PaletteSource {
         PaletteItem(
             id: "project:\(project.id.uuidString)",
             title: project.name,
-            subtitle: parents.isEmpty ? project.path : parents.joined(separator: " / "),
+            subtitle: parents.isEmpty ? project.path : parents.joined(separator: "/"),
             category: category,
             score: score
         ) { [appState = context.appState] in

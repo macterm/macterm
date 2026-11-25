@@ -5478,22 +5478,6 @@
         }
       }
     },
-    "Move Into Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프로젝트 안으로 이동"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移入项目"
-          }
-        }
-      }
-    },
     "Move Out of Project" : {
       "localizations" : {
         "ko" : {
@@ -5638,6 +5622,22 @@
         }
       }
     },
+    "Move to Project…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트로 이동…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移到项目…"
+          }
+        }
+      }
+    },
     "Move to Scratch Tabs" : {
       "localizations" : {
         "ko" : {
@@ -5730,6 +5730,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在其中新建项目"
+          }
+        }
+      }
+    },
+    "New Project Inside…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내부에 새로운 프로젝트…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在其中新建项目…"
           }
         }
       }
@@ -9204,6 +9220,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按名称或路径搜索文件..."
+          }
+        }
+      }
+    },
+    "Search projects by name or path..." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름 또는 경로로 프로젝트 검색..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按名称或路径搜索项目..."
           }
         }
       }
