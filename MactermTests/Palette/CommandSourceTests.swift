@@ -36,18 +36,6 @@ struct CommandSourceTests {
         CommandSource().items(query: query, context: ctx).first { $0.title == title }
     }
 
-    /// The rename actions defer setting `renaming…ID` to the next main-queue
-    /// tick (so the sidebar row's TextField exists before it takes first
-    /// responder — see `AppCommand.action(in:)`). Spin the run loop so that
-    /// deferred work lands before asserting.
-    private func flushMainQueue() async {
-        // Enqueue behind any pending DispatchQueue.main.async work; main-queue
-        // FIFO ordering guarantees the deferred set has run once this resumes.
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
-    }
-
     // MARK: - renameTab command availability
 
     @Test
@@ -62,54 +50,26 @@ struct CommandSourceTests {
         #expect(findItem(title: AppCommand.renameTab.title, in: ctx) == nil)
     }
 
-    // MARK: - renameTab action
+    // MARK: - renameTab row
 
+    /// The row opens the input screen of the tab that was active when the
+    /// row was built, in place: the palette stays up.
     @Test
-    func renameTab_action_registers_postPaletteAction() throws {
-        let (ctx, state) = makeContext()
-        let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
-        item.action()
-        #expect(state.postPaletteAction != nil)
-    }
-
-    @Test
-    func renameTab_postPaletteAction_sets_sidebarVisible_and_renamingTabID() async throws {
-        let (ctx, state) = makeContext()
-        let activeTabID = try #require(
-            state.activeProjectID.flatMap { state.workspaces[$0]?.activeTabID }
-        )
-        let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
-        item.action()
-        state.postPaletteAction?()
-        await flushMainQueue()
-        #expect(state.sidebarVisible)
-        #expect(state.renamingTabID == activeTabID)
-    }
-
-    @Test
-    func renameTab_postPaletteAction_targets_active_tab_at_time_of_action() async throws {
+    func renameTab_row_opens_the_input_screen_of_the_active_tab() throws {
         let (ctx, state) = makeContext()
         let projectID = try #require(state.activeProjectID)
         let ws = try #require(state.workspaces[projectID])
-        let firstTabID = try #require(ws.activeTabID)
-
-        // Create a second tab and make it active.
         let secondTab = ModelWriter.tabCreate(in: ws, projectPath: "/tmp")
         ModelWriter.tabSelect(secondTab.id, in: ws)
-        #expect(ws.activeTabID == secondTab.id)
 
-        // Build the palette item — it captures the active tab at item-build time.
         let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
-
-        // Switch back to the first tab before executing.
-        ModelWriter.tabSelect(firstTabID, in: ws)
-        item.action()
-        state.postPaletteAction?()
-        await flushMainQueue()
-
-        // renamingTabID should be the tab that was active when the item was built.
-        #expect(state.renamingTabID == secondTab.id)
-        _ = firstTabID
+        guard case let .input(input) = item.opensScope else {
+            Issue.record("Rename Current Tab opens no input screen")
+            return
+        }
+        #expect(input.id == "rename-tab:\(secondTab.id.uuidString)")
+        #expect(item.icon == nil, "an input screen's pill has no glyph, so its row has none")
+        #expect(state.postPaletteAction == nil)
     }
 
     // MARK: - renameProject command availability
@@ -126,46 +86,19 @@ struct CommandSourceTests {
         #expect(findItem(title: AppCommand.renameProject.title, in: ctx) == nil)
     }
 
-    // MARK: - renameProject action
+    // MARK: - renameProject row
 
     @Test
-    func renameProject_action_registers_postPaletteAction() throws {
-        let (ctx, state) = makeContext()
-        let item = try #require(findItem(title: AppCommand.renameProject.title, in: ctx))
-        item.action()
-        #expect(state.postPaletteAction != nil)
-    }
-
-    @Test
-    func renameProject_postPaletteAction_sets_sidebarVisible_and_renamingProjectID() async throws {
+    func renameProject_row_opens_the_input_screen_of_the_current_project() throws {
         let (ctx, state) = makeContext()
         let projectID = try #require(state.activeProjectID)
         let item = try #require(findItem(title: AppCommand.renameProject.title, in: ctx))
-        item.action()
-        state.postPaletteAction?()
-        await flushMainQueue()
-        #expect(state.sidebarVisible)
-        #expect(state.renamingProjectID == projectID)
-    }
-
-    @Test
-    func renameProject_does_not_set_renamingTabID() async throws {
-        let (ctx, state) = makeContext()
-        let item = try #require(findItem(title: AppCommand.renameProject.title, in: ctx))
-        item.action()
-        state.postPaletteAction?()
-        await flushMainQueue()
-        #expect(state.renamingTabID == nil)
-    }
-
-    @Test
-    func renameTab_does_not_set_renamingProjectID() async throws {
-        let (ctx, state) = makeContext()
-        let item = try #require(findItem(title: AppCommand.renameTab.title, in: ctx))
-        item.action()
-        state.postPaletteAction?()
-        await flushMainQueue()
-        #expect(state.renamingProjectID == nil)
+        guard case let .input(input) = item.opensScope else {
+            Issue.record("Rename Current Project opens no input screen")
+            return
+        }
+        #expect(input.id == "rename-project:\(projectID.uuidString)")
+        #expect(input.initialValue == "proj")
     }
 
     // MARK: - applyLayout muted state
