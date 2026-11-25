@@ -41,12 +41,13 @@ enum ForegroundPolicy {
     /// That reading is busy when the cursor is not at the prompt that OSC
     /// 133 marks. Never silently kill an unknown foreground.
     ///
-    /// `surfaceBusy` is the surface's reading, nil for a pane with no
-    /// surface, which runs nothing. `confirmClose` is the user's
-    /// `confirm-close-surface`. libghostty
-    /// applies it to the surface's reading. Only `true` lets a remote pane's
-    /// own signals decide: for `false` and `always` the surface's reading
-    /// is the verdict for every pane (`ConfirmCloseSurface`).
+    /// `confirmClose` is the user's `confirm-close-surface`. libghostty
+    /// applies it to the surface's reading. The remote signals above apply
+    /// only for `true`. For `false` and `always`, the surface's reading is
+    /// the verdict for every pane (`ConfirmCloseSurface`).
+    ///
+    /// `surfaceBusy` is nil for a pane that no window drew. Such a pane
+    /// warns only for `always`.
     static func needsConfirmClose(
         sample: ForegroundSample?,
         executionState: TerminalExecutionState,
@@ -54,7 +55,7 @@ enum ForegroundPolicy {
         confirmClose: ConfirmCloseSurface,
         surfaceBusy: (() -> Bool)?
     ) -> Bool {
-        guard let surfaceBusy else { return false }
+        guard let surfaceBusy else { return confirmClose == .always }
         guard isRemote, confirmClose.judgesPaneState else { return surfaceBusy() }
         return remoteNeedsConfirmClose(sample: sample, executionState: executionState) ?? surfaceBusy()
     }

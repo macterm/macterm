@@ -2126,7 +2126,7 @@ final class AppState {
     /// same verdict as `judgeClose`, without the retention of pinned tabs:
     /// the rows of the quit dialog.
     func panesThatNeedConfirmClose(_ panes: [Pane]) async -> [Pane] {
-        let plain = confirmCloseSurface().judgesPaneState ? panes.filter(paneRunsPlainShell) : []
+        let plain = plainShellsToJudge(panes)
         var answers: [UUID: Bool] = [:]
         if !plain.isEmpty {
             answers = await withCheckedContinuation { continuation in
@@ -2138,13 +2138,18 @@ final class AppState {
 
     /// The plain shells of `closing` whose verdict counts. A pane whose
     /// session the close keeps (`pendingPinnedSessionNames`) is not asked,
-    /// so its busy answer cannot stop the wait for the others. Only
+    /// so its busy answer cannot stop the wait for the others.
+    private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
+        let retained = pendingPinnedSessionNames()
+        return plainShellsToJudge(closing).filter { !retained.contains($0.sessionName) }
+    }
+
+    /// The plain shells of `panes` whose host must answer. Only
     /// `confirm-close-surface = true` asks a host: for `false` and `always`
     /// the surface's reading is the verdict (`ConfirmCloseSurface`).
-    private func plainShellsToAsk(_ closing: [Pane]) -> [Pane] {
+    private func plainShellsToJudge(_ panes: [Pane]) -> [Pane] {
         guard confirmCloseSurface().judgesPaneState else { return [] }
-        let retained = pendingPinnedSessionNames()
-        return closing.filter { paneRunsPlainShell($0) && !retained.contains($0.sessionName) }
+        return panes.filter(paneRunsPlainShell)
     }
 
     /// Asks the host of each plain shell in `plain` whether the shell is

@@ -1,25 +1,14 @@
-import Foundation
-
-/// The user's ghostty `confirm-close-surface`: when a close or a quit asks
-/// first. Ghostty uses the one key for a pane close and for the quit prompt,
-/// and so does Macterm: every close guard reads it through
+/// The user's ghostty `confirm-close-surface`: `true` (the default) asks
+/// before a close or a quit ends a running program, `false` never asks,
+/// `always` asks at every close. Every close guard reads it through
 /// `ForegroundPolicy.needsConfirmClose` and `AppState.judgeClose`.
 ///
-/// - `true` (ghostty's default): ask when a program runs.
-/// - `false`: never ask.
-/// - `always`: ask at every close, also at an idle prompt.
+/// libghostty applies the key in `ghostty_surface_needs_confirm_quit`, and a
+/// read-only surface always asks there. Macterm judges a pane itself only
+/// for `true`, because the surface cannot see a remote program.
 ///
-/// libghostty applies the key itself in `ghostty_surface_needs_confirm_quit`
-/// (the surface's reading), with one more rule: a read-only surface always
-/// asks. Macterm judges the state of a pane itself only for `true`, where
-/// the surface cannot see a remote program. For `false` and `always` the
-/// surface's reading is the verdict, so the read-only rule of ghostty
-/// stays.
-///
-/// The raw values are ghostty's own enum tag names
-/// (`src/config/Config.zig`'s `ConfirmCloseSurface`), a wire contract with
-/// libghostty.
-enum ConfirmCloseSurface: String, CaseIterable {
+/// The raw values are ghostty's enum tag names.
+enum ConfirmCloseSurface: String {
     case `false`
     case `true`
     case always
@@ -27,11 +16,10 @@ enum ConfirmCloseSurface: String, CaseIterable {
     /// An enum key, so it arrives as a bare tag pointer (`.tag`).
     static let key = GhosttyConfigKey.tag("confirm-close-surface")
 
-    /// An unset, unreadable or unknown value means `true`, ghostty's
-    /// default, so an unknown value never turns the warning off.
+    /// An unset or unknown value means `true`, ghostty's default, so an
+    /// unknown value never turns the warning off.
     static func resolve(configValue: String?) -> ConfirmCloseSurface {
-        guard let raw = configValue?.trimmingCharacters(in: .whitespaces) else { return .true }
-        return ConfirmCloseSurface(rawValue: raw.lowercased()) ?? .true
+        configValue.flatMap(ConfirmCloseSurface.init(rawValue:)) ?? .true
     }
 
     /// Whether the verdict depends on what runs in the pane, so that Macterm

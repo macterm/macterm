@@ -149,6 +149,21 @@ struct ForegroundSampleTests {
     }
 
     @Test
+    func a_pane_that_no_window_drew_warns_only_for_always() {
+        for isRemote in [false, true] {
+            #expect(ForegroundPolicy.needsConfirmClose(
+                sample: nil, executionState: .idle, isRemote: isRemote, confirmClose: .always, surfaceBusy: nil
+            ))
+            #expect(!ForegroundPolicy.needsConfirmClose(
+                sample: nil, executionState: .running, isRemote: isRemote, confirmClose: .true, surfaceBusy: nil
+            ))
+            #expect(!ForegroundPolicy.needsConfirmClose(
+                sample: nil, executionState: .running, isRemote: isRemote, confirmClose: .false, surfaceBusy: nil
+            ))
+        }
+    }
+
+    @Test
     func true_warns_only_for_a_busy_pane() {
         #expect(verdict(.true, sample: sample(name: "btop"), isRemote: false, surfaceBusy: true))
         #expect(!verdict(.true, sample: sample(name: "zsh", isIdleShell: true), isRemote: false, surfaceBusy: false))
