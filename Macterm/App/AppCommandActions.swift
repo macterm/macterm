@@ -54,6 +54,31 @@ extension AppCommand {
         }
     }
 
+    /// The input screen this command asks its value on (`PaletteInput`), or
+    /// nil when it asks none or has no target. Unlike `paletteScope`, the
+    /// screen is about one thing (the active tab, the current project), so
+    /// it depends on the context. Its palette row enters it in place; a
+    /// keybind or the menu opens the palette on it.
+    @MainActor
+    func inputScope(in ctx: AppCommandContext) -> PaletteScopeID? {
+        guard let projectID = ctx.appState.activeProjectID else { return nil }
+        let input: PaletteInput? = switch self {
+        case .renameTab:
+            ctx.appState.workspaces[projectID]?.activeTab.flatMap { tab in
+                PaletteInput.renameTab(tab.id, in: projectID, appState: ctx.appState)
+            }
+        case .renameProject:
+            PaletteInput.renameProject(projectID, appState: ctx.appState, store: ctx.projectStore)
+        case .changeProjectDirectory:
+            ctx.projectStore.projects.first { $0.id == projectID }.map { project in
+                ctx.appState.changeProjectDirectoryInput(for: project, projectStore: ctx.projectStore)
+            }
+        default:
+            nil
+        }
+        return input.map { .input($0) }
+    }
+
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
     /// project is active).
@@ -113,19 +138,10 @@ extension AppCommand {
         case .moveTabDown:
             guard let projectID, ctx.appState.activeTabMoveOffset(step: 1, projectID: projectID) != nil else { return nil }
             return { ctx.appState.moveActiveTab(step: 1, projectID: projectID) }
-        case .renameTab:
-            guard let projectID,
-                  let tab = ctx.appState.workspaces[projectID]?.activeTab
-            else { return nil }
-            let tabID = tab.id
-            return {
-                ctx.appState.sidebarVisible = true
-                // Defer a tick so the sidebar (and its row's TextField) is in
-                // the hierarchy before we ask it to begin editing — otherwise,
-                // when the sidebar was collapsed, the field can't take first
-                // responder. Applies to every caller (palette, menu, hotkey).
-                DispatchQueue.main.async { ctx.appState.renamingTabID = tabID }
-            }
+        case .renameTab,
+             .renameProject:
+            guard let scope = inputScope(in: ctx) else { return nil }
+            return { ctx.appState.openCommandPalette(scope: scope) }
         case .pinTab:
             // Pin the active tab. Only from a real project — the
             // pinned workspace's own tabs are already pinned.
@@ -285,14 +301,6 @@ extension AppCommand {
             return { ctx.appState.toggleCommandPalette(scope: .input(.newProject)) }
         case .newRemoteProject:
             return { ctx.appState.isNewRemoteProjectSheetPresented = true }
-        case .renameProject:
-            guard let current else { return nil }
-            let projectID = current.id
-            return {
-                ctx.appState.sidebarVisible = true
-                // See .renameTab: defer so the sidebar row exists first.
-                DispatchQueue.main.async { ctx.appState.renamingProjectID = projectID }
-            }
         case .removeProject:
             guard let projectID, !Project.isSynthetic(projectID) else { return nil }
             return {
@@ -469,16 +477,11 @@ extension AppCommand {
     }
 
     /// The palette screen that this command opens now: a built-in screen
-    /// (`paletteScope`), or the input screen of Change Project Directory
-    /// for the active project. Nil when the command opens no screen.
+    /// (`paletteScope`), or the input screen that it asks its value on
+    /// (`inputScope(in:)`). Nil when the command opens no screen.
     @MainActor
     func paletteScreen(in ctx: AppCommandContext) -> PaletteScopeID? {
-        if let paletteScope { return paletteScope }
-        guard self == .changeProjectDirectory,
-              let projectID = ctx.appState.activeProjectID,
-              let current = ctx.projectStore.projects.first(where: { $0.id == projectID })
-        else { return nil }
-        return .input(ctx.appState.changeProjectDirectoryInput(for: current, projectStore: ctx.projectStore))
+        paletteScope ?? inputScope(in: ctx)
     }
 
     /// Why `project` has no Files screen, or nil when it has one: the index

@@ -507,8 +507,8 @@ extension Pane {
     /// Whether closing this pane must be confirmed first because a foreground
     /// program is running. Every busy-close guard reads it, through
     /// `AppState.judgeClose` for a pane in a workspace. For a plain shell (a
-    /// host with no server), `judgeClose` asks the host first, and the host's
-    /// answer replaces it.
+    /// host with no server) under `confirm-close-surface = true`,
+    /// `judgeClose` asks the host first, and the host's answer replaces it.
     ///
     /// The verdict itself is `ForegroundPolicy.needsConfirmClose` — a pure
     /// function over the pane's sample, so the local/remote asymmetry lives
@@ -520,8 +520,8 @@ extension Pane {
             sample: foregroundSample,
             executionState: executionState,
             isRemote: isRemote,
-            hasSurface: view != nil,
-            surfaceBusy: view?.needsConfirmQuit() == true
+            confirmClose: GhosttyApp.shared.confirmCloseSurface,
+            surfaceBusy: view.map { view in { view.needsConfirmQuit() } }
         )
     }
 

@@ -387,6 +387,38 @@ struct AppStateTests {
     }
 
     @Test
+    func apply_project_rename_writes_nothing_for_an_unchanged_or_refused_name() throws {
+        let state = makeAppState()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-tests-rename-\(UUID().uuidString).json")
+        let store = ProjectStore(fileURL: url)
+        let project = store.create(name: "alpha", path: "/tmp")
+        try FileManager.default.removeItem(at: url)
+
+        #expect(state.applyProjectRename(project.id, to: "alpha", store: store) == nil)
+        #expect(state.applyProjectRename(project.id, to: "Pinned", store: store) == PinnedTabs.reservedNameMessage)
+        #expect(!FileManager.default.fileExists(atPath: url.path), "no write")
+        #expect(store.projects.first?.name == "alpha")
+        #expect(state.pendingDialog == nil, "the caller says why, not this function")
+
+        #expect(state.applyProjectRename(project.id, to: "beta", store: store) == nil)
+        #expect(store.projects.first?.name == "beta")
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test
+    func set_tab_title_sets_and_clears_the_custom_title() throws {
+        let state = makeAppState()
+        let project = seedProject(state, path: "/project")
+        let tab = try #require(state.workspaces[project.id]?.activeTab)
+        state.setTabTitle(tab, title: "build")
+        #expect(tab.customTitle == "build")
+        state.setTabTitle(tab, title: nil)
+        #expect(tab.customTitle == nil)
+        #expect(tab.sidebarTitle == tab.autoTitle)
+    }
+
+    @Test
     func splitPane_uses_selected_directory() throws {
         let state = makeAppState()
         state.newSplitInheritsWorkingDirectory = { true }
@@ -1434,6 +1466,7 @@ struct AppStateTests {
         state.paneNeedsConfirmClose = { _ in true }
         state.paneRunsPlainShell = { $0.id == target }
         state.askPlainShellNeedsConfirmClose = { pane, _ in pane.id == target ? answer : nil }
+        state.confirmCloseSurface = { .true }
         return (state, p, tab, target)
     }
 
@@ -1554,6 +1587,55 @@ struct AppStateTests {
         let rows = await fx.state.panesThatNeedConfirmClose(panes)
         #expect(rows.map(\.id) == [fx.target])
         #expect(!rows.contains { $0.id == slow.id })
+    }
+
+    // MARK: - confirm-close-surface decides every close guard (0609)
+
+    /// The plain-shell tab under `confirmClose`. Every pane's surface
+    /// reading is libghostty's for the key (busy for `always`, idle for
+    /// `false`). The host would answer the opposite, and it must not be
+    /// asked.
+    private func plainShellTab(confirmClose: ConfirmCloseSurface) throws
+        -> (state: AppState, project: Project, tab: TerminalTab, target: UUID, asked: () -> Bool)
+    {
+        let surfaceBusy = confirmClose == .always
+        let fx = try plainShellTab(answer: !surfaceBusy)
+        var asked = false
+        fx.state.confirmCloseSurface = { confirmClose }
+        fx.state.paneNeedsConfirmClose = { _ in surfaceBusy }
+        fx.state.askPlainShellNeedsConfirmClose = { _, _ in
+            asked = true
+            return !surfaceBusy
+        }
+        return (fx.state, fx.project, fx.tab, fx.target, { asked })
+    }
+
+    @Test
+    func confirm_close_false_closes_a_plain_shell_with_no_warning_and_no_host_question() throws {
+        let fx = try plainShellTab(confirmClose: .false)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        #expect(fx.tab.splitRoot.allPanes().count == 1)
+        #expect(fx.state.pendingDialog == nil)
+        #expect(!fx.asked())
+    }
+
+    @Test
+    func confirm_close_false_leaves_the_quit_rows_empty() async throws {
+        let fx = try plainShellTab(confirmClose: .false)
+        let rows = await fx.state.panesThatNeedConfirmClose(fx.tab.splitRoot.allPanes())
+        #expect(rows.isEmpty)
+        #expect(!fx.asked())
+    }
+
+    @Test
+    func confirm_close_always_warns_for_a_plain_shell_that_its_host_would_call_idle() async throws {
+        let fx = try plainShellTab(confirmClose: .always)
+        fx.state.requestClosePane(fx.target, projectID: fx.project.id)
+        #expect(fx.state.pendingDialog?.kind == .closePane(paneID: fx.target, projectID: fx.project.id))
+        #expect(await fx.state.judgeClose(fx.tab.splitRoot.allPanes()))
+        let rows = await fx.state.panesThatNeedConfirmClose(fx.tab.splitRoot.allPanes())
+        #expect(rows.count == 2)
+        #expect(!fx.asked())
     }
 
     // MARK: - applyLayout

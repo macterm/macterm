@@ -59,6 +59,13 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The pill of an input screen is its `title`, with no icon (`PaletteInput.pill`, Ethan, 0561).
       - The New Project screen (`PaletteInput.newProject`, `NewProjectInput`) is the screen of `AppCommand.newProject`. Its action row is Select in Finder while the field is empty, and only then (Ethan, 0586). For a typed path, its rows are the folder rows of the root palette's path mode (`DirectorySource`), as `PaletteInput.choices`. Each row is the action (Ethan, 0594): Return or a click adds the folder, switches to the project that has it, or adds another project there. There is no `New Project "<path>"` row. A path with no row gets the `PathProblem` notice.
       - Escape, or Backspace at an empty field, pops it like any screen.
+      - Its pill has no glyph (`PaletteInput.pill`, from `PaletteInput.title`). A `PaletteInput` cannot name one. Its palette row therefore has no glyph either.
+      - An `AppCommand` that asks its value on an input screen returns it from `AppCommand.inputScope`. Its palette row enters it in place, and its keybind and menu item open the palette on it.
+      - Rename Current Tab and Rename Current Project ask the name here (`PaletteInput.renameTab`, `PaletteInput.renameProject`).
+        - A new name has the action row `Rename to "<name>"`. The current name has no row, so a tab with an automatic name stays automatic.
+        - An empty field on a renamed tab has the row `Use the automatic name "<name>"`.
+        - A project name that `Project.nameRefusal` refuses shows the reason and no row.
+        - The inline rename of a sidebar row (a double-click, the context menu) and ghostty's `prompt_surface_title` still edit the row.
     - `PasswordPaletteScope`.
     - `FilesPaletteScope`: the files and directories of the active local project.
       - `FileIndex.scan` walks a level at a time, so that the cap of 20k cuts the deepest level, never the top. It skips hidden directories and the directories for dependencies and builds. It lists a linked directory, and it never enters it.
