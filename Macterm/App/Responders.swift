@@ -5,7 +5,8 @@ import AppKit
 // ordered by the KeyRouter so disposition is explicit instead of implicit.
 
 /// Toggles the unified command palette on its chord (`toggleCommandPalette`,
-/// ⌘P by default). When the palette is visible, passes other keys through to
+/// ⌘P by default). When the palette is visible, a chord whose command opens
+/// a palette screen switches to that screen; other keys pass through to
 /// SwiftUI's own key handlers (arrow navigation, escape, etc.).
 @MainActor
 final class PaletteResponder: KeyResponder {
@@ -25,32 +26,41 @@ final class PaletteResponder: KeyResponder {
             appState.isCommandPaletteVisible.toggle()
             return .handled
         }
-        // A palette screen's chord with the palette already up: the app-level
-        // responder that runs bindings stands aside while the palette is
-        // visible, so switch to the screen (or close it) here.
-        if appState.isCommandPaletteVisible,
-           let action = HotkeyAction.allCases.first(where: {
-               $0.appCommand.paletteScope != nil && HotkeyRegistry.matches(event, action: $0)
-           })
-        {
-            let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
-            if let run = action.appCommand.action(in: ctx) {
-                run()
-            } else if let notice = action.appCommand.unavailableNotice(in: ctx) {
-                appState.presentToast(notice)
-            } else {
-                return .passThrough
-            }
-            return .handled
-        }
         // Capture Palette acts on the palette as it stands, so its
         // chord is answered here, with the palette up, too.
         if appState.isCommandPaletteVisible, HotkeyRegistry.matches(event, action: .capturePaletteScreenshot) {
             PaletteScreenshot.capture(appState: appState)
             return .handled
         }
+        // While the palette is up, `MainAppResponder` stands aside, so typed
+        // text never runs a binding. One kind of binding still acts: a chord
+        // whose command opens a palette screen (Files, Rename Current Tab,
+        // Move to Project, …) switches the palette to that screen, or closes
+        // it as its toggle does. Every other binding passes through to the
+        // palette's own keys. The chord resolves to its command as in
+        // `MainAppResponder`, so two bindings on one chord give one answer
+        // in both places.
+        if appState.isCommandPaletteVisible,
+           let action = HotkeyAction.allCases.first(where: { HotkeyRegistry.matches(event, action: $0) })
+        {
+            // A screen whose listing failed shows Retry, and ⌘R is its key
+            // (`CommandPalette`): the chord the user reads on the screen wins
+            // over Rename Current Tab's default binding.
+            if appState.paletteShowsRetry, Self.isRetryChord(event) { return .passThrough }
+            let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
+            let command = action.appCommand
+            guard (command.paletteScope(in: ctx) ?? command.inputScope(in: ctx)) != nil else { return .passThrough }
+            if let run = command.action(in: ctx) {
+                run()
+            } else if let notice = command.unavailableNotice(in: ctx) {
+                appState.presentToast(notice)
+            } else {
+                return .passThrough
+            }
+            return .handled
+        }
         // A custom palette's chord: the same two outcomes as a built-in
-        // screen's, with `PaletteHotkeys` as the table — after the screens'
+        // screen's, with `PaletteHotkeys` as the table — after the actions'
         // chords, so a chord bound to both resolves as `MainAppResponder`
         // resolves it when the palette is down.
         if appState.isCommandPaletteVisible,
@@ -61,6 +71,13 @@ final class PaletteResponder: KeyResponder {
         }
         // While the palette is visible, SwiftUI owns arrow / escape / etc.
         return .passThrough
+    }
+
+    /// The palette's own Retry key, ⌘R (`CommandPalette`), fixed and not a
+    /// binding.
+    static func isRetryChord(_ event: NSEvent) -> Bool {
+        event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "r"
     }
 }
 

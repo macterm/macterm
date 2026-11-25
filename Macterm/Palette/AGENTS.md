@@ -42,7 +42,9 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The breadcrumb and each pill come and go through `PaletteMotion`. This is `blurReplace` of SwiftUI on an ease-out of 120 ms. Reduce Motion lands them in one frame.
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
       - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill (none for an input screen) and a chevron.
-      - Each such command can have a keybind and toggles its screen. `PaletteResponder` answers those chords while the palette is up, when the app responder stands aside.
+      - Each such command can have a keybind and toggles its screen.
+      - **App hotkeys while the palette is up** (0615). `MainAppResponder` stands aside, so typed text never runs a binding. `PaletteResponder` answers one kind of binding: a chord whose command opens a palette screen (`AppCommand.paletteScope(in:)` or `AppCommand.inputScope`: Files, Passwords, New Project, Rename Current Tab, Rename Current Project, Move to Project) switches the palette to that screen, on the root and on every screen. Every other binding (⌘T, ⌘W, a split) does nothing while the palette is up. The chord resolves to its command as in `MainAppResponder`. An extension's chord opens its palette, as when the palette is down.
+      - **⌘R is Retry while a screen shows a failed listing** (`AppState.paletteShowsRetry`, `PaletteResponder.isRetryChord`), also when Rename Current Tab has ⌘R. At all other times Rename Current Tab's chord opens its screen.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.
