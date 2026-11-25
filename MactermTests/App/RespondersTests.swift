@@ -129,8 +129,8 @@ struct MainAppResponderTests {
 }
 
 /// While the palette is up, a chord whose command opens a palette screen
-/// switches the palette to it; every other binding is the palette's own
-/// key, so typed text never runs a binding.
+/// switches the palette to it; every other binding does nothing, and the
+/// palette's own keys stay the palette's.
 @MainActor
 struct PaletteResponderTests {
     private struct Fixture {
@@ -200,17 +200,39 @@ struct PaletteResponderTests {
         #expect(fx.state.isCommandPaletteVisible)
     }
 
-    @Test
-    func a_chord_that_opens_no_screen_is_left_to_the_palette() throws {
+    /// ⌘T, ⌘W and a split do nothing while the palette is up. The chord is
+    /// consumed: passed through, it would reach the menu item with the same
+    /// key equivalent and change the tabs behind the palette.
+    @Test(arguments: [
+        (HotkeyAction.newTab, "cmd+t"),
+        (HotkeyAction.closePane, "cmd+w"),
+        (HotkeyAction.splitRight, "cmd+d"),
+    ])
+    func a_binding_that_opens_no_screen_does_nothing(action: HotkeyAction, chord: String) throws {
         let fx = makeFixture()
-        let restore = bind(.newTab, to: "cmd+t")
+        let restore = bind(action, to: chord)
+        defer { restore() }
+        let workspace = try #require(fx.state.workspaces[fx.project.id])
+        let tabs = workspace.tabs.map(\.id)
+        let panes = workspace.activeTab?.splitRoot.allPanes().map(\.id)
+
+        #expect(try fx.responder.handle(keyDown(chord)) == .handled)
+        #expect(workspace.tabs.map(\.id) == tabs)
+        #expect(workspace.activeTab?.splitRoot.allPanes().map(\.id) == panes)
+        #expect(fx.window.paletteScope == nil)
+        #expect(fx.state.isCommandPaletteVisible)
+    }
+
+    /// ⌃N moves the palette's selection, also when a binding uses ⌃N.
+    @Test
+    func the_palettes_own_keys_win_over_a_binding() throws {
+        let fx = makeFixture()
+        let restore = bind(.newTab, to: "ctrl+n")
         defer { restore() }
         let tabs = fx.state.workspaces[fx.project.id]?.tabs.count
 
-        #expect(try fx.responder.handle(keyDown("cmd+t")) == .passThrough)
+        #expect(try fx.responder.handle(keyDown("ctrl+n")) == .passThrough)
         #expect(fx.state.workspaces[fx.project.id]?.tabs.count == tabs)
-        #expect(fx.window.paletteScope == nil)
-        #expect(fx.state.isCommandPaletteVisible)
     }
 
     @Test

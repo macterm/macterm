@@ -458,8 +458,9 @@ struct CommandPalettePanel: View {
         }
         // ⌘R runs a screen's listing again. It is also Rename Current Tab's
         // default chord: `PaletteResponder` lets it through to here only
-        // while the screen shows Retry, or when no binding opens a screen
-        // on it. On the root it stays ignored.
+        // while the screen shows Retry, or when no binding uses ⌘R. On the
+        // root it stays ignored. ⌃P, ⌃N and ⌥↩ above are also in
+        // `PaletteResponder.isPaletteKey`: keep the two lists the same.
         .onKeyPress(characters: .init(charactersIn: "r")) { press in
             guard press.chordModifiers == .command, let scope else { return .ignored }
             scope.retry()

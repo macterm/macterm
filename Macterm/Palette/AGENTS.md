@@ -43,14 +43,15 @@ This file loads when you work in `Macterm/Palette/`. The root `AGENTS.md` has th
       - The pill of a frame is `PaletteScopeID.pill`, unless the row that opened it names a pill.
       - An `AppCommand` opens a screen through `paletteScope`. This makes its palette row enter the screen in place, with the glyph of the pill (none for an input screen) and a chevron.
       - Each such command can have a keybind and toggles its screen.
-      - **App hotkeys while the palette is up** (0615). `MainAppResponder` does not act, so typed text never runs a binding. `PaletteResponder` answers these chords:
+      - **App hotkeys while the palette is up** (0615, Ethan, ui-review 0616). The palette keeps the keyboard: `MainAppResponder` does not act, and no binding reaches the menu bar. `PaletteResponder` answers these chords while the window of the palette is key:
         - The chord of a command that opens a palette screen (`AppCommand.paletteScope(in:)` or `AppCommand.inputScope`) runs the command, on the root and on every screen. These are Files, Passwords, New Project, Rename Current Tab, Rename Current Project and Move to Project.
         - The palette then shows that screen in place of the stack, and text typed on the old screen is lost. Files, Passwords, New Project and Move to Project toggle: their chord on their own screen closes the palette. Rename Current Tab and Rename Current Project do not toggle: their chord on their own screen does nothing.
         - Capture Palette captures the palette as it stands.
         - An extension's chord opens its palette, as when the palette is down.
-        - Every other binding (⌘T, ⌘W, a split) does nothing while the palette is up.
+        - Every other binding (⌘T, ⌘W, a split, Settings) does nothing. `PaletteResponder` consumes it: a pass-through would reach the menu item with the same key equivalent, which would change the tabs behind the palette.
+        - The palette's own keys win over a binding on the same chord (`PaletteResponder.isPaletteKey`): ⌃P, ⌃N, ⌥↩, and ⌘R while Retry shows.
         - The chord resolves to its command as in `MainAppResponder`.
-      - **⌘R is Retry while a screen shows a failed listing** (`AppState.paletteShowsRetry`, `PaletteResponder.isRetryChord`), also when Rename Current Tab has ⌘R. At all other times, Rename Current Tab's chord opens its screen.
+      - **⌘R is Retry while a screen shows a failed listing** (`AppState.paletteShowsRetry`), also when Rename Current Tab has ⌘R. At all other times, Rename Current Tab's chord opens its screen.
     - `InputPaletteScope`: a screen that asks for one value (`PaletteInput`, the one `.input` case of `PaletteScopeID`). Use it for an action that needs text from the user.
       - The field holds the value, not a search. It starts on `initialValue`, selected (`PaletteScope.initialQuery`). The scope keeps the text when a screen above it pops.
       - The identity of a screen is `PaletteInput.id`. An input about one thing (a tab, a pane) puts the id of that thing in its own.

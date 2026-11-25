@@ -32,31 +32,30 @@ final class PaletteResponder: KeyResponder {
             PaletteScreenshot.capture(appState: appState)
             return .handled
         }
-        // While the palette is up, `MainAppResponder` does not act, so typed
-        // text never runs a binding. One kind of binding still acts: a chord
-        // whose command opens a palette screen (Files, Rename Current Tab,
-        // Move to Project, …) runs that command. The palette then shows that
-        // screen in place of the stack, or closes when the command toggles
-        // and its screen is already up. Every other binding passes through
-        // to the palette's own keys. The chord resolves to its command as in
+        // While the palette is up, `MainAppResponder` does not act, and no
+        // binding reaches the menu bar: the palette keeps the keyboard. One
+        // kind of binding acts: a chord whose command opens a palette screen
+        // (Files, Rename Current Tab, Move to Project, …) runs that command.
+        // The palette then shows that screen in place of the stack, or
+        // closes when the command toggles and its screen is already up.
+        // Every other binding (⌘T, ⌘W, a split) does nothing. It is consumed
+        // here, because a pass-through would reach the menu item with the
+        // same key equivalent, and that item would open or close a tab
+        // behind the palette. The chord resolves to its command as in
         // `MainAppResponder`, so two bindings on one chord give one answer
         // in both places.
-        if appState.isCommandPaletteVisible,
+        if appState.isCommandPaletteVisible, paletteWindowIsKey,
            let action = HotkeyAction.allCases.first(where: { HotkeyRegistry.matches(event, action: $0) })
         {
-            // A screen whose listing failed shows Retry, and ⌘R is its key
-            // (`CommandPalette`): the chord the user reads on the screen wins
-            // over Rename Current Tab's default binding.
-            if appState.paletteShowsRetry, Self.isRetryChord(event) { return .passThrough }
+            // The palette's own keys win over a binding on the same chord.
+            if Self.isPaletteKey(event, showsRetry: appState.paletteShowsRetry) { return .passThrough }
             let ctx = AppCommandContext(appState: appState, projectStore: projectStore)
             let command = action.appCommand
-            guard (command.paletteScope(in: ctx) ?? command.inputScope(in: ctx)) != nil else { return .passThrough }
+            guard (command.paletteScope(in: ctx) ?? command.inputScope(in: ctx)) != nil else { return .handled }
             if let run = command.action(in: ctx) {
                 run()
             } else if let notice = command.unavailableNotice(in: ctx) {
                 appState.presentToast(notice)
-            } else {
-                return .passThrough
             }
             return .handled
         }
@@ -74,13 +73,33 @@ final class PaletteResponder: KeyResponder {
         return .passThrough
     }
 
-    /// The palette's own Retry key, ⌘R (`CommandPalette`), fixed and not a
-    /// binding. It matches as a binding matches (`HotkeyShortcut.matches`),
-    /// so a keyboard layout or Caps Lock gives the same answer for both.
+    /// Whether the key window is the window that shows the palette. Another
+    /// window (Settings, the quick terminal's panel) keeps its keys while a
+    /// palette is up behind it. With no key window (tests, launch), the
+    /// palette's window is the one that takes keys.
+    private var paletteWindowIsKey: Bool {
+        guard let keyWindow = NSApp.keyWindow else { return true }
+        return appState.appDelegate?.isTerminalWindow(keyWindow) ?? true
+    }
+
+    /// The chords that `CommandPalette` answers itself and that a binding
+    /// can also use (a binding always has a modifier): ⌃P and ⌃N move the
+    /// selection, and ⌥↩ runs the alt action of a row. Keep this list the
+    /// same as the palette's `onKeyPress` handlers.
+    private static let paletteKeys = ["ctrl+p", "ctrl+n", "opt+return"].compactMap(HotkeyRegistry.parseShortcut)
+
+    /// The palette's own Retry key, ⌘R, fixed and not a binding. It is the
+    /// palette's key only while a screen shows a failed listing: at all
+    /// other times it is Rename Current Tab's default chord.
     private static let retryShortcut = HotkeyRegistry.parseShortcut("cmd+r")
 
-    static func isRetryChord(_ event: NSEvent) -> Bool {
-        retryShortcut?.matches(event) ?? false
+    /// Whether `event` is a key of the palette itself, which a binding on
+    /// the same chord must not take. Each matches as a binding matches
+    /// (`HotkeyShortcut.matches`), so a keyboard layout or Caps Lock gives
+    /// the same answer for both.
+    static func isPaletteKey(_ event: NSEvent, showsRetry: Bool) -> Bool {
+        if showsRetry, retryShortcut?.matches(event) == true { return true }
+        return paletteKeys.contains { $0.matches(event) }
     }
 }
 
