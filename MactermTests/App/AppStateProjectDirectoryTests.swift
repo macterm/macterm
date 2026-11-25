@@ -227,7 +227,7 @@ struct AppStateProjectDirectoryTests {
     }
 
     @Test
-    func a_remote_project_changes_its_folder_after_the_host_checks_it() async throws {
+    func a_remote_project_with_no_folder_list_changes_its_folder_after_the_host_checks_it() async throws {
         let fixture = makeFixture(path: "me@devbox:~/proj")
         let ctx = fixture.ctx
         #expect(AppCommand.changeProjectDirectory.action(in: ctx) != nil, "a remote project has the command too")
@@ -240,6 +240,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { "~/other/" },
+            listFolders: { _, _ in nil },
             folderCheck: { folder, destination in
                 asked.append((folder, destination))
                 return answer
@@ -249,35 +250,34 @@ struct AppStateProjectDirectoryTests {
         #expect(empty.title == "Current Pane's Directory")
         #expect(empty.subtitle == "~/other", "the remote pane's folder")
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
-        #expect(input.choices("~/", context).isEmpty, "nothing lists a folder on the host")
-
         let scope = InputPaletteScope(input: input)
-        var changes = 0
-        scope.activate(context: context) { changes += 1 }
-        let items = scope.sections(for: PaletteQuery(raw: "~/api"), context: context).flatMap(\.items)
-        #expect(items.map(\.title) == ["Change to \"~/api\""])
+        scope.activate(context: context) {}
+        let items = try await settledItems(scope, "~/api", context)
+        #expect(items.map(\.title) == ["Change to \"~/api\""], "no list from the host: the typed folder is the action")
         #expect(scope.press(items[0]) == .checking)
         #expect(scope.loading?.message == "Checking the folder on me@devbox")
         #expect(scope.press(items[0]) == .nothing, "a second Return waits for the check")
-        try await waitUntil { changes == 1 }
+        try await waitUntil { scope.loading == nil }
         #expect(asked.count == 1)
         #expect(asked.first?.0 == "~/api")
         #expect(asked.first?.1 == "me@devbox")
         #expect(scope.failure?.title == "Path ~/api doesn't exist", "the host's answer is the local notice")
-        #expect(scope.loading == nil)
+        let again = scope.sections(for: PaletteQuery(raw: "~/api"), context: context).flatMap(\.items)
+        #expect(again.map(\.title) == ["Change to \"~/api\""], "the row stays under the reason, for every path")
         #expect(!scope.takeCloseRequest())
         #expect(path(of: fixture) == "me@devbox:~/proj")
 
         answer = .exists
         #expect(scope.press(items[0]) == .checking)
         #expect(scope.failure == nil, "a new check hides the old reason")
-        try await waitUntil { changes == 2 }
+        try await waitUntil { scope.loading == nil }
         #expect(scope.takeCloseRequest(), "a yes runs the action and closes the palette")
         #expect(path(of: fixture) == "me@devbox:~/api")
 
-        let slashed = scope.sections(for: PaletteQuery(raw: "/srv/web/"), context: context).flatMap(\.items)
+        let slashed = try await settledItems(scope, "/srv/web/", context)
+        #expect(slashed.map(\.title) == ["Change to \"/srv/web\""], "a path with a slash gets the same row")
         #expect(scope.press(slashed[0]) == .checking)
-        try await waitUntil { changes == 3 }
+        try await waitUntil { scope.loading == nil }
         #expect(path(of: fixture) == "me@devbox:/srv/web", "a slash at the end goes")
         #expect(notice(input, "api", fixture) == "Path api doesn't exist", "a session starts only in a folder from / or ~")
 
@@ -292,6 +292,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
+            listFolders: { _, _ in nil },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -300,7 +301,7 @@ struct AppStateProjectDirectoryTests {
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        let items = scope.sections(for: PaletteQuery(raw: "/srv"), context: context).flatMap(\.items)
+        let items = try await settledItems(scope, "/srv", context)
         #expect(scope.press(items[0]) == .checking)
         scope.deactivate()
         try await Task.sleep(for: .milliseconds(400))
@@ -315,6 +316,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
+            listFolders: { _, _ in nil },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -323,13 +325,68 @@ struct AppStateProjectDirectoryTests {
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let scope = InputPaletteScope(input: input)
         scope.activate(context: context) {}
-        let old = scope.sections(for: PaletteQuery(raw: "~/apj"), context: context).flatMap(\.items)
+        let old = try await settledItems(scope, "~/apj", context)
         #expect(scope.press(old[0]) == .checking)
         _ = scope.sections(for: PaletteQuery(raw: "~/api"), context: context)
         #expect(scope.loading == nil, "new text stops the check")
         try await Task.sleep(for: .milliseconds(400))
         #expect(path(of: fixture) == "devbox:~/proj", "the old text's answer runs nothing")
         #expect(!scope.takeCloseRequest())
+    }
+
+    @Test
+    func a_remote_project_lists_the_hosts_folders_as_a_local_project_does() async throws {
+        let fixture = makeFixture(path: "me@devbox:~/proj")
+        var asked: [(String, String)] = []
+        var checked = 0
+        let listings = [
+            "~/": FolderListing(path: "/home/me", names: ["proj", "projects", ".config"]),
+            "~/proj/": FolderListing(path: "/home/me/proj", names: ["api"]),
+        ]
+        let input = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { nil },
+            listFolders: { folder, destination in
+                asked.append((folder, destination))
+                return listings[folder]
+            },
+            folderCheck: { _, _ in
+                checked += 1
+                return .exists
+            }
+        )
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+
+        let rows = try await settledItems(scope, "~/pro", context)
+        #expect(rows.map(\.title) == ["proj", "projects"], "the rows of a local path: folder names")
+        #expect(rows.first?.subtitle == "Change to: /home/me/proj", "the full path on the host")
+        #expect(rows.first?.subtitleIsPath == true)
+        #expect(scope.failure == nil)
+        #expect(asked.first?.1 == "me@devbox")
+        #expect(scope.restingItemID == rows.first?.id, "the selection rests on the first folder row")
+        #expect(scope.tabText(selected: rows.first, rows: rows) == "~/proj/", "Tab keeps the ~ that the user typed")
+
+        let inside = try await settledItems(scope, "~/proj", context)
+        #expect(inside.map(\.title) == ["proj", "api"], "a typed folder, then the folders in it")
+
+        let none = try await settledItems(scope, "~/zzz", context)
+        #expect(none.isEmpty, "no Change to row: nothing matches")
+        #expect(scope.failure?.title == "Path ~/zzz doesn't exist", "the notice only when nothing matches")
+
+        let picked = try await settledItems(scope, "~/pro", context)
+        #expect(scope.press(picked[0]) == .closed, "a folder row is the action")
+        #expect(path(of: fixture) == "me@devbox:~/proj", "the folder as the user typed it")
+        #expect(checked == 0, "the host listed the folder, so it needs no check")
+    }
+
+    /// The rows of `text` once the host's listing in flight has ended.
+    private func settledItems(_ scope: InputPaletteScope, _ text: String, _ context: PaletteContext) async throws -> [PaletteItem] {
+        _ = scope.sections(for: PaletteQuery(raw: text), context: context)
+        try await waitUntil { scope.loading == nil }
+        return scope.sections(for: PaletteQuery(raw: text), context: context).flatMap(\.items)
     }
 
     /// Poll until `condition` holds, with a sleep, or fail after 2 s.

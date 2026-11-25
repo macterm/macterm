@@ -1,8 +1,9 @@
 import Foundation
 
 /// Change Project Directory: the one way to give a project another
-/// folder, on this Mac or on the project's host. Open panes and their sessions stay where they are; a new tab
-/// that starts in the project's folder starts in the new one.
+/// folder, on this Mac or on the project's host. Open panes and their
+/// sessions stay where they are; a new tab that starts in the project's
+/// folder starts in the new one.
 extension AppState {
     /// The palette screen of Change Project Directory for `project`. A
     /// typed path lists folder rows, as the root palette does
@@ -16,14 +17,19 @@ extension AppState {
     /// (`currentPaneDirectory` by default) when it shows, not when the
     /// palette builds its row.
     ///
-    /// A remote project has no folder rows: nothing lists a folder on the
-    /// host. A typed folder gives one action row, `Change to "<folder>"`,
-    /// and the host checks the folder when the row runs, as New Remote
-    /// Project does (`folderCheck`, `RemoteHosts.checkFolder` by default).
+    /// A remote project gets the same folder rows from the host's folder
+    /// list (Ethan, 0610; `HostFolderLister`, `listFolders`,
+    /// `RemoteHosts.listFolders` by default), and the same notice when no
+    /// row matches. When the host gives no list (no connection up, no
+    /// answer in time), a typed folder gives one action row,
+    /// `Change to "<folder>"`, and the host checks the folder when the row
+    /// runs, as New Remote Project does (`folderCheck`,
+    /// `RemoteHosts.checkFolder` by default).
     func changeProjectDirectoryInput(
         for project: Project,
         projectStore: ProjectStore,
         paneDirectory: (@MainActor () -> String?)? = nil,
+        listFolders: (@MainActor (String, String) async -> FolderListing?)? = nil,
         folderCheck: (@MainActor (String, String) async -> RemoteHosts.FolderCheck)? = nil
     ) -> PaletteInput {
         let projectID = project.id
@@ -31,10 +37,16 @@ extension AppState {
         if case let .remote(user, host, _) = ProjectPath.parse(project.path) {
             let destination = HostCommands.destination(user: user, host: host)
             let checkFolder = folderCheck ?? { await RemoteHosts.shared.checkFolder($0, destination: $1) }
+            let list = listFolders ?? { await RemoteHosts.shared.listFolders($0, destination: $1) }
+            let lister = HostFolderLister { folder in await list(folder, destination) }
             return PaletteInput(
                 id: "changeProjectDirectory:\(projectID.uuidString)",
                 title: AppCommand.changeProjectDirectory.title,
                 prompt: String(localized: "Type a folder path on \(destination)"),
+                choices: { [self] text, _ in
+                    hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) ?? []
+                },
+                hostFolders: lister,
                 check: { [self] text, _ in
                     let folder = Self.hostFolder(text)
                     if folder.isEmpty {
@@ -44,6 +56,20 @@ extension AppState {
                     guard HostCommands.isSafeHostFolder(folder) else {
                         return .notice(PathProblem.missing.notice(for: folder))
                     }
+                    switch hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) {
+                    case let rows? where rows.isEmpty:
+                        // The host listed the folders and none matches.
+                        return .notice(PathProblem.missing.notice(for: folder))
+                    case .some:
+                        // The folder rows are the action.
+                        return .nothing
+                    case nil where lister.isListing:
+                        return .nothing
+                    case nil:
+                        break
+                    }
+                    // No list from the host: the typed folder is the action,
+                    // and the host checks it when it runs.
                     return .action(PaletteInputAction(
                         title: String(localized: "Change to \"\(folder)\""),
                         check: (
@@ -77,6 +103,36 @@ extension AppState {
                 return problem.map { .notice($0.notice(for: path)) } ?? .nothing
             }
         )
+    }
+
+    /// The folder rows of a path typed on a remote project: the rows of a
+    /// local path (`FolderCompletion`), from the host's folder list. Each
+    /// row sets the folder as the user typed it, with no slash at the end
+    /// (`hostFolder`). The host listed it, so it needs no check. nil while
+    /// the host lists, or when it gave no list.
+    func hostFolderChoices(
+        for text: String,
+        lister: HostFolderLister,
+        projectID: UUID,
+        projectStore: ProjectStore
+    ) -> [PaletteInputChoice]? {
+        let typed = text.trimmingCharacters(in: .whitespaces)
+        guard HostCommands.isSafeHostFolder(Self.hostFolder(typed)),
+              let rows = FolderCompletion.rows(for: typed, listing: lister.listing)
+        else { return nil }
+        return rows.map { row in
+            let folder = Self.hostFolder(row.fieldText)
+            return PaletteInputChoice(
+                item: PaletteItem(
+                    id: "changeTo:\(row.path)",
+                    title: PathRow.title(for: row.path),
+                    subtitle: PathRow.Action.changeTo.subtitle(for: row.path),
+                    subtitleIsPath: true,
+                    action: { [self] in _ = setProjectDirectory(projectID, to: folder, projectStore: projectStore) }
+                ),
+                value: row.fieldText
+            )
+        }
     }
 
     /// The folder rows of a typed path (`PathCompleter`): the folder that
