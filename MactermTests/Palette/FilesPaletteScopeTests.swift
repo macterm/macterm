@@ -113,6 +113,72 @@ struct FilesPaletteScopeTests {
         #expect(byPath["src/palette/engine.swift"] != nil, "the walk went on past the unreadable directory")
     }
 
+    /// A fake home folder under `Users/me`: the folders macOS guards, a
+    /// folder it does not guard, and a project.
+    private func makeHome() throws -> (users: URL, home: URL) {
+        let users = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macterm-files-home-\(UUID().uuidString)/Users", isDirectory: true)
+        let home = users.appendingPathComponent("me", isDirectory: true)
+        let files = [
+            "Desktop/note.txt", "Documents/report.txt", "Downloads/setup.dmg", "Music/song.mp3",
+            "Pictures/photo.jpg", "dev/proj/main.swift",
+        ]
+        for file in files {
+            let url = home.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "x".write(to: url, atomically: true, encoding: .utf8)
+        }
+        return (users, home)
+    }
+
+    /// An index of the home folder lists the folders macOS guards and does
+    /// not enter them: entering one makes macOS ask for access.
+    @Test
+    func the_index_lists_the_guarded_home_folders_and_does_not_enter_them() throws {
+        let (users, home) = try makeHome()
+        defer { try? FileManager.default.removeItem(at: users.deletingLastPathComponent()) }
+        let skipping = FileIndex.protectedDirectories(home: home, fullDiskAccess: false)
+        let paths = Set(FileIndex.scan(root: home, skipping: skipping).map(\.relativePath))
+        for folder in FileIndex.ProtectedFolder.allCases.map(\.rawValue) {
+            #expect(paths.contains(folder), "\(folder) is listed, so its row opens a shell in it")
+            #expect(!paths.contains { $0.hasPrefix("\(folder)/") }, "\(folder) is not entered")
+        }
+        #expect(paths.contains("Pictures/photo.jpg") && paths.contains("dev/proj/main.swift"), "other folders are entered")
+
+        let fromAbove = Set(FileIndex.scan(root: users, skipping: skipping).map(\.relativePath))
+        #expect(fromAbove.contains("me/Documents") && !fromAbove.contains("me/Documents/report.txt"), "skipped from above home too")
+
+        // Another path to the same folders, as the firmlink
+        // `/System/Volumes/Data/Users/me` is to `/Users/me`.
+        let alias = users.deletingLastPathComponent().appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: users)
+        let viaAlias = Set(FileIndex.scan(root: alias.appendingPathComponent("me"), skipping: skipping).map(\.relativePath))
+        #expect(viaAlias.contains("Documents") && !viaAlias.contains("Documents/report.txt"), "skipped by identity, not by path")
+
+        let unsure = FileIndex.protectedDirectories(home: home, fullDiskAccess: nil)
+        #expect(!FileIndex.scan(root: home, skipping: unsure).contains { $0.relativePath == "Documents/report.txt" }, "no evidence skips")
+    }
+
+    /// With Full Disk Access the index enters the folders it includes, not
+    /// Music. A project inside a guarded folder is the folder the user asked
+    /// for, so its index enters it. A project that touches none of them is
+    /// unchanged.
+    @Test
+    func the_guarded_folders_are_entered_with_full_disk_access_or_as_the_project_root() throws {
+        let (users, home) = try makeHome()
+        defer { try? FileManager.default.removeItem(at: users.deletingLastPathComponent()) }
+        let granted = Set(FileIndex.scan(root: home, skipping: FileIndex.protectedDirectories(home: home, fullDiskAccess: true))
+            .map(\.relativePath))
+        #expect(granted.contains("Documents/report.txt") && granted.contains("Desktop/note.txt"))
+        #expect(granted.contains("Music") && !granted.contains("Music/song.mp3"), "Full Disk Access does not prove Music")
+
+        let skipping = FileIndex.protectedDirectories(home: home, fullDiskAccess: false)
+        let documents = home.appendingPathComponent("Documents", isDirectory: true)
+        #expect(FileIndex.scan(root: documents, skipping: skipping).map(\.relativePath) == ["report.txt"])
+        let project = home.appendingPathComponent("dev/proj", isDirectory: true)
+        #expect(FileIndex.scan(root: project, skipping: skipping).map(\.relativePath) == ["main.swift"])
+    }
+
     @Test
     func a_partial_path_finds_a_file_and_a_name_prefix_ranks_first() throws {
         let entries = try FileIndex.scan(root: makeTree())

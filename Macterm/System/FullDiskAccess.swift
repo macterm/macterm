@@ -57,7 +57,9 @@ enum FullDiskAccess {
         return nil
     }
 
-    /// Probe the real system. `nil` means no evidence — treat as granted.
+    /// Probe the real system. `nil` means no evidence. A caller that warns
+    /// treats it as granted; `FileIndex.protectedDirectories`, which must
+    /// not make a prompt, treats it as not granted.
     static func isGranted() -> Bool? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return verdict(probePaths.map { probe(home.appendingPathComponent($0).path) })

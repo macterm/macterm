@@ -27,6 +27,56 @@ enum FileIndex {
     /// something a palette can show anyway, and the scan has to end.
     static let limit = 20000
 
+    /// The folders of the home folder that macOS guards with a prompt.
+    /// When a walk enters one, macOS asks for access to a folder that the
+    /// user did not ask for. `~/Library` and `/Volumes` are hidden, so the
+    /// walk does not enter them.
+    enum ProtectedFolder: String, CaseIterable {
+        /// Files and Folders. Full Disk Access includes these.
+        case desktop = "Desktop"
+        case documents = "Documents"
+        case downloads = "Downloads"
+        /// Media and Apple Music. Macterm cannot prove that Full Disk Access
+        /// includes it, so the walk never enters it.
+        case music = "Music"
+
+        var fullDiskAccessIncludes: Bool { self != .music }
+    }
+
+    /// A directory by its device and inode, so that a firmlink
+    /// (`/System/Volumes/Data/Users/…`), a link or a different case of the
+    /// same path is the same directory.
+    struct DirectoryID: Hashable {
+        let device: dev_t
+        let inode: ino_t
+
+        /// `nil` when `path` is not there. A stat reads only the parent
+        /// folder, so it never makes a prompt.
+        init?(path: String) {
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            device = info.st_dev
+            inode = info.st_ino
+        }
+    }
+
+    /// The directories that `scan` lists and does not enter: each
+    /// `ProtectedFolder` of `home`, except those that Full Disk Access
+    /// includes when Macterm has it. `FullDiskAccess` probes it with no
+    /// prompt. `nil` (no evidence) counts as no access. macOS has no probe
+    /// for a grant to one folder that does not prompt.
+    static func protectedDirectories(home: URL, fullDiskAccess: Bool?) -> Set<DirectoryID> {
+        Set(ProtectedFolder.allCases.compactMap { folder in
+            if fullDiskAccess == true, folder.fullDiskAccessIncludes { return nil }
+            return DirectoryID(path: home.appendingPathComponent(folder.rawValue).path(percentEncoded: false))
+        })
+    }
+
+    /// `protectedDirectories` for this Mac and its Full Disk Access now.
+    static func protectedDirectories() -> Set<DirectoryID> {
+        protectedDirectories(home: FileManager.default.homeDirectoryForCurrentUser, fullDiskAccess: FullDiskAccess.isGranted())
+    }
+
     /// Every entry under `root`, shallow first and alphabetical within a
     /// depth, so the top of the list is the project's own top level.
     ///
@@ -36,8 +86,14 @@ enum FileIndex {
     /// to a directory is listed as a directory and never entered (a link back
     /// up the tree would loop); a package (`.app`) is listed as one entry. An
     /// unreadable directory is skipped, and a cancelled task stops the walk.
-    static func scan(root: URL, limit: Int = limit) -> [FileIndexEntry] {
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
+    ///
+    /// These directories are listed and not entered: a directory in
+    /// `skipping` (`protectedDirectories`), and the root of a different
+    /// volume (a network or removable disk can need access, and the index
+    /// stays on the volume of the project). The root itself is always
+    /// entered, because the user asked for it.
+    static func scan(root: URL, limit: Int = limit, skipping: Set<DirectoryID> = []) -> [FileIndexEntry] {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey, .isVolumeKey]
         var entries: [FileIndexEntry] = []
         var level: [(url: URL, relative: String)] = [(root, "")]
         walk: while !level.isEmpty {
@@ -64,7 +120,11 @@ enum FileIndex {
                     let relative = prefix.isEmpty ? name : "\(prefix)/\(name)"
                     entries.append(FileIndexEntry(relativePath: relative, isDirectory: isDirectory))
                     if entries.count >= limit { break walk }
-                    if isDirectory, !isLink, values?.isPackage != true { next.append((child, relative)) }
+                    if isDirectory, !isLink, values?.isPackage != true, values?.isVolume != true,
+                       DirectoryID(path: child.path(percentEncoded: false)).map({ !skipping.contains($0) }) ?? true
+                    {
+                        next.append((child, relative))
+                    }
                 }
             }
             level = next
@@ -126,7 +186,9 @@ final class FilesPaletteScope: PaletteScope {
     private var context: PaletteContext?
     private let scan: @Sendable (URL) -> [FileIndexEntry]
 
-    init(scan: @escaping @Sendable (URL) -> [FileIndexEntry] = { FileIndex.scan(root: $0) }) {
+    init(scan: @escaping @Sendable (URL) -> [FileIndexEntry] = {
+        FileIndex.scan(root: $0, skipping: FileIndex.protectedDirectories())
+    }) {
         self.scan = scan
     }
 
