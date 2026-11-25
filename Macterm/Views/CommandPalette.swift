@@ -568,7 +568,9 @@ struct CommandPalettePanel: View {
         // (`InputPaletteScope.tabText`).
         if let inputScope {
             let selected = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
-            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .ignored }
+            // With no new value, Tab still stays in the field: it has
+            // nowhere to go, and the focus must not leave the field.
+            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .handled }
             query = completion
             return .handled
         }

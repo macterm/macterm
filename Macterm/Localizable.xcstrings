@@ -2295,6 +2295,22 @@
         }
       }
     },
+    "Checking the folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 폴더를 확인하는 중"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 %@ 上的文件夹"
+          }
+        }
+      }
+    },
     "Choose Files…" : {
       "localizations" : {
         "ko" : {
@@ -2726,22 +2742,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在连接到 %@"
-          }
-        }
-      }
-    },
-    "Connecting to %@…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@에 연결하는 중…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在连接到 %@…"
           }
         }
       }

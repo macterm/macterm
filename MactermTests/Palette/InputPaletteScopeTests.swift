@@ -200,7 +200,7 @@ struct InputPaletteScopeTests {
         let action = try #require(rows(scope, "taken").first)
         #expect(scope.press(action) == .refused)
         #expect(scope.failure?.title == "The name is taken.")
-        #expect(rows(scope, "taken").isEmpty, "a refused text has no action row: the notice is alone")
+        #expect(rows(scope, "taken").map(\.title) == ["Make \"taken\""], "the row stays under the reason, so Return can try again")
         #expect(scope.failure?.title == "The name is taken.", "a redraw of the same text keeps the reason")
 
         let other = try #require(rows(scope, "free").first)
@@ -278,7 +278,7 @@ struct InputPaletteScopeTests {
         try await waitUntil { scope.loading == nil }
         #expect(!scope.takeCloseRequest())
         #expect(scope.failure == PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
-        #expect(rows(scope, "~/none").isEmpty, "the refusal is alone and centered")
+        #expect(rows(scope, "~/none").map(\.title) == ["Add \"~/none\""], "the row stays under the reason")
         #expect(scope.failure != nil, "a redraw of the same text keeps the reason")
     }
 

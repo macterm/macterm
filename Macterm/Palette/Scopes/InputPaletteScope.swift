@@ -271,10 +271,9 @@ final class InputPaletteScope: PaletteScope {
     }
 
     /// An action's check in flight, or a host listing in flight. The panel
-    /// reads it after `sections`, which is where a listing starts, and
-    /// `onChange` redraws when either ends. A check shows as the notice,
-    /// because its screen then has no action row; a listing shows as the
-    /// field's spinner over the rows that it has.
+    /// reads it after `sections`, which is where a listing starts.
+    /// `onChange` redraws when either ends. A check has no action row, so
+    /// it shows as the notice. A listing shows as the spinner of the field.
     var loading: PaletteLoading? {
         if let checkLoading { return checkLoading }
         return input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders…")) : nil
@@ -296,10 +295,10 @@ final class InputPaletteScope: PaletteScope {
         case let .notice(text): notice = text
         case .nothing: break
         }
-        // While a check runs, and while a refusal stands for this text, the
-        // action row is not offered: the notice is then alone and fills the
-        // results, as for a value that the check refused at once.
-        if checkLoading != nil || refusal != nil { action = nil }
+        // While a check runs, the action row is not offered: the check's
+        // message is then alone and fills the results. After a refusal the
+        // row comes back under the reason, so that Return can try again.
+        if checkLoading != nil { action = nil }
         if checkLoading != nil {
             failure = nil
         } else if let reason = refusal?.reason ?? notice {

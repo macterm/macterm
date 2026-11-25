@@ -111,16 +111,16 @@ final class RemoteHostsPaletteScope: PaletteScope {
     /// A typed path lists the host's folders as the rows of a local path
     /// (`FolderCompletion`, `HostFolderLister`): the typed folder, then the
     /// folders in it or the folders that complete it. Each row is the
-    /// action: Return or a click adds the folder as a project, with no
-    /// check, because the host listed it. Tab goes into it. A path with no
-    /// row is the one notice of a path (`PathProblem`), as on a local
-    /// screen.
+    /// action. Return or a click adds the folder as a project, with no
+    /// check, because the host listed it. Tab goes into it.
     ///
-    /// Only when the host gives no list (no connection up, no answer in
-    /// time) does a typed folder give the action row
-    /// `New Project "devbox:~/api"`. It checks the folder on the host
-    /// (`RemoteHosts.refusal`) while the palette shows that it connects,
-    /// and a missing folder or a file is the notice of `PathProblem`.
+    /// A path with no folder row gets the action row
+    /// `New Project "devbox:~/api"`. This occurs when the host gives no
+    /// list (no connection up, no answer in time), or when no listed
+    /// folder matches. The row checks the path on the host
+    /// (`RemoteHosts.refusal`). A missing folder or a file then shows the
+    /// notice of `PathProblem`, as on a local screen. The list has only
+    /// folders, so only the host can tell a file from a missing path.
     ///
     /// A new project is named by its folder
     /// (`ProjectPath.remoteDisplayName`) and is always new: a folder can
@@ -157,19 +157,16 @@ final class RemoteHostsPaletteScope: PaletteScope {
                     return .notice(PathProblem.missing.notice(for: folder))
                 }
                 switch folderChoices(for: text, destination: destination, lister: lister, appState: appState, projectStore: projectStore) {
-                case let rows? where rows.isEmpty:
-                    // The host listed the folders and none matches.
-                    return .notice(PathProblem.missing.notice(for: folder))
-                case .some:
+                case let rows? where !rows.isEmpty:
                     // The folder rows are the action.
                     return .nothing
                 case nil where lister.isListing:
                     return .nothing
-                case nil:
+                default:
                     break
                 }
-                // No list from the host: the typed folder is the action, and
-                // the host checks it when it runs.
+                // No folder row: the typed path is the action, and the host
+                // checks it when it runs.
                 let title = String(
                     localized: "palette.remoteFolder.action",
                     defaultValue: "New Project \"\(path)\"",
@@ -178,7 +175,7 @@ final class RemoteHostsPaletteScope: PaletteScope {
                 return .action(PaletteInputAction(
                     title: title,
                     check: (
-                        message: String(localized: "Connecting to \(destination)…"),
+                        message: String(localized: "Checking the folder on \(destination)"),
                         answer: {
                             let answer = await refusal(path)
                             if answer != nil { logger.info("new remote project \(path, privacy: .public): not added") }
