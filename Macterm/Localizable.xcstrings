@@ -2135,22 +2135,6 @@
         }
       }
     },
-    "Change Project Directory is not available for remote projects" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "원격 프로젝트에서는 프로젝트 디렉토리 변경을 사용할 수 없음"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "远程项目不可使用“更改项目目录”"
-          }
-        }
-      }
-    },
     "Change Project Directory…" : {
       "localizations" : {
         "ko" : {
@@ -2179,6 +2163,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在行的菜单中更改顺序。"
+          }
+        }
+      }
+    },
+    "Change to \"%@\"" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\"(으)로 변경"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改为“%@”"
           }
         }
       }
@@ -2291,6 +2291,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在检查 %@…"
+          }
+        }
+      }
+    },
+    "Checking the folder on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 폴더를 확인하는 중"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 %@ 上的文件夹"
           }
         }
       }
@@ -11900,6 +11916,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "输入文件夹路径"
+          }
+        }
+      }
+    },
+    "Type a folder path on %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 폴더 경로 입력"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入 %@ 上的文件夹路径"
           }
         }
       }

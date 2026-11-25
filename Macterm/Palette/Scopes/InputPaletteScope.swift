@@ -96,6 +96,10 @@ enum PaletteInputPress: Equatable {
     case refused
     /// The Cancel row: the screen goes, as with Escape.
     case cancelled
+    /// The action waits for its check (`PaletteInputAction.check`): the
+    /// screen shows `loading`, and closes or shows the reason when the
+    /// answer comes.
+    case checking
 }
 
 /// The one action row of an input screen: its title names the action and
@@ -106,10 +110,27 @@ struct PaletteInputAction {
     /// name the value (`Current Pane's Directory`). The row cuts it in the
     /// middle, so that both ends stay.
     var subtitle: String?
+    /// A check that takes time (a host checks a remote folder), with the
+    /// line that the screen shows while it runs. Its answer is nil when the
+    /// action can run, else the reason, which shows as a refusal. Nil for
+    /// an action with no such check.
+    var check: (message: String, answer: @MainActor () async -> String?)?
     /// Do the action, or refuse it. On `.done` the palette closes. An
     /// action that must run after the palette has closed and focus is back
     /// in the pane sets `AppState.postPaletteAction`.
     let run: @MainActor () -> PaletteCommit
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        check: (message: String, answer: @MainActor () async -> String?)? = nil,
+        run: @escaping @MainActor () -> PaletteCommit
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.check = check
+        self.run = run
+    }
 }
 
 /// A row of an input screen that is an action itself
@@ -155,6 +176,13 @@ final class InputPaletteScope: PaletteScope {
     /// True until the screen has shown once: only then does the panel
     /// select the field's text, the initial value.
     var isFirstShow = true
+    /// The check of an action in flight (`PaletteInputAction.check`).
+    private var checkTask: Task<Void, Never>?
+    private(set) var loading: PaletteLoading?
+    /// An action ran after its check: the panel closes the palette at its
+    /// next redraw (`takeCloseRequest`).
+    private var closeRequested = false
+    private var onChange: (@MainActor () -> Void)?
 
     /// The id of the action row.
     static let actionItemID = "input-action"
@@ -168,6 +196,23 @@ final class InputPaletteScope: PaletteScope {
 
     var placeholder: String { input.prompt }
     var initialQuery: String { text }
+
+    func activate(context _: PaletteContext, onChange: @escaping @MainActor () -> Void) {
+        self.onChange = onChange
+    }
+
+    func deactivate() {
+        checkTask?.cancel()
+        checkTask = nil
+        loading = nil
+    }
+
+    /// True once, after an action ran when its check said yes: the palette
+    /// closes.
+    func takeCloseRequest() -> Bool {
+        defer { closeRequested = false }
+        return closeRequested
+    }
 
     func sections(for query: PaletteQuery, context: PaletteContext) -> [PaletteSection] {
         text = query.raw
@@ -258,6 +303,37 @@ final class InputPaletteScope: PaletteScope {
             guard let completion = completion(for: item), completion != text else { return .nothing }
             return .fill(completion)
         }
+        if let check = action.check {
+            guard checkTask == nil else { return .nothing }
+            startCheck(check, of: action)
+            return .checking
+        }
+        return run(action)
+    }
+
+    /// Run `check`, then `action` when it says yes, else show its reason.
+    /// The text that the check is for keeps the reason: the line goes
+    /// when the text changes.
+    private func startCheck(_ check: (message: String, answer: @MainActor () async -> String?), of action: PaletteInputAction) {
+        let checkedText = text
+        loading = PaletteLoading(message: check.message)
+        failure = nil
+        checkTask = Task { [weak self] in
+            let reason = await check.answer()
+            guard let self, !Task.isCancelled else { return }
+            checkTask = nil
+            loading = nil
+            if let reason {
+                refusal = (checkedText, reason)
+                failure = PaletteFailure(title: reason, retryable: false)
+            } else if run(action) == .closed {
+                closeRequested = true
+            }
+            onChange?()
+        }
+    }
+
+    private func run(_ action: PaletteInputAction) -> PaletteInputPress {
         switch action.run() {
         case .done:
             refusal = nil

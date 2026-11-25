@@ -490,6 +490,12 @@ struct CommandPalettePanel: View {
     }
 
     private func refresh() {
+        // An input action ran after its check (a host said yes): close.
+        if inputScope?.takeCloseRequest() == true {
+            query = ""
+            windowState.isCommandPaletteVisible = false
+            return
+        }
         let selectedID = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex].id : nil
         if let scope {
             let context = PaletteContext(appState: appState, projectStore: projectStore)
@@ -559,7 +565,9 @@ struct CommandPalettePanel: View {
         // (`InputPaletteScope.tabText`).
         if let inputScope {
             let selected = flatItems.indices.contains(selectedIndex) ? flatItems[selectedIndex] : nil
-            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .ignored }
+            // With no new value, Tab still stays in the field: it has
+            // nowhere to go, and the focus must not leave the field.
+            guard let completion = inputScope.tabText(selected: selected, rows: flatItems) else { return .handled }
             query = completion
             return .handled
         }
@@ -656,7 +664,8 @@ struct CommandPalettePanel: View {
             break
         case let .fill(text):
             query = text
-        case .refused:
+        case .refused,
+             .checking:
             refresh()
         case .cancelled:
             leaveScope()

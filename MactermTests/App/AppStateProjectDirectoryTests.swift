@@ -60,7 +60,7 @@ struct AppStateProjectDirectoryTests {
             projectStore: fixture.store,
             paneDirectory: { paneDirectory }
         )
-        let input = try #require(made)
+        let input = made
         #expect(action(input, "") == nil, "the pane is in the project folder")
         paneDirectory = sub + "/"
         let row = try #require(action(input, ""))
@@ -85,7 +85,7 @@ struct AppStateProjectDirectoryTests {
             projectStore: fixture.store,
             paneDirectory: { nil }
         )
-        let input = try #require(made)
+        let input = made
         #expect(input.initialValue.isEmpty)
         #expect(action(input, "") == nil, "no pane folder: only the typed field")
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
@@ -117,7 +117,7 @@ struct AppStateProjectDirectoryTests {
             projectStore: fixture.store,
             paneDirectory: { nil }
         )
-        let input = try #require(made)
+        let input = made
         #expect(notice(input, root + "/missing") == "Path \(root)/missing doesn't exist")
         #expect(action(input, root + "/missing") == nil, "no action row for a bad path")
         #expect(notice(input, root + "/su") == nil, "no notice while a folder row matches the typed text")
@@ -149,7 +149,7 @@ struct AppStateProjectDirectoryTests {
             projectStore: fixture.store,
             paneDirectory: { nil }
         )
-        let scope = try InputPaletteScope(input: #require(made))
+        let scope = InputPaletteScope(input: made)
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let typed = root + "/s"
         let items = scope.sections(for: PaletteQuery(raw: typed), context: context).flatMap(\.items)
@@ -172,6 +172,9 @@ struct AppStateProjectDirectoryTests {
         #expect(AppState.paneDirectoryOffer(root + "/sub", for: project) == root + "/sub")
         let noFolder = Project(name: "bare", path: "", sortOrder: 0)
         #expect(AppState.paneDirectoryOffer(root, for: noFolder) == nil, "a project with no folder has only the typed field")
+        let remote = Project(name: "remote", path: "devbox:~/proj", sortOrder: 0)
+        #expect(AppState.paneDirectoryOffer("~/proj/", for: remote) == nil, "a remote pane in the project's folder")
+        #expect(AppState.paneDirectoryOffer("/srv/app", for: remote) == "/srv/app")
     }
 
     @Test
@@ -186,7 +189,7 @@ struct AppStateProjectDirectoryTests {
     func a_project_with_no_folder_gets_its_first_folder() throws {
         let root = try makeFolder()
         let fixture = makeFixture(path: "")
-        let input = try #require(fixture.state.changeProjectDirectoryInput(for: fixture.project, projectStore: fixture.store))
+        let input = fixture.state.changeProjectDirectoryInput(for: fixture.project, projectStore: fixture.store)
         #expect(action(input, "") == nil)
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let first = try #require(input.choices(root, context).first, "the typed folder is the first folder row")
@@ -221,20 +224,90 @@ struct AppStateProjectDirectoryTests {
     }
 
     @Test
-    func a_remote_project_has_no_change_project_directory() {
-        let fixture = makeFixture(path: "devbox:~/proj")
+    func a_remote_project_changes_its_folder_after_the_host_checks_it() async throws {
+        let fixture = makeFixture(path: "me@devbox:~/proj")
         let ctx = fixture.ctx
-        let reason = "Change Project Directory is not available for remote projects"
-        #expect(AppCommand.changeProjectDirectory.action(in: ctx) == nil)
-        #expect(AppCommand.changeProjectDirectory.paletteScreen(in: ctx) == nil)
-        #expect(AppCommand.changeProjectDirectory.unavailableNotice(in: ctx) == reason)
-        #expect(AppCommand.changeProjectDirectory.paletteDisabledHint(in: ctx) == reason)
-        let muted = CommandSource().emptyItems(context: PaletteContext(appState: fixture.state, projectStore: fixture.store))?
-            .first { $0.title == AppCommand.changeProjectDirectory.title }
-        #expect(muted?.isEnabled == false)
-        #expect(muted?.icon == nil, "an input screen has no glyph")
-        #expect(fixture.state.setProjectDirectory(fixture.project.id, to: "/tmp", projectStore: fixture.store) == .refused(reason))
-        #expect(path(of: fixture) == "devbox:~/proj")
+        #expect(AppCommand.changeProjectDirectory.action(in: ctx) != nil, "a remote project has the command too")
+        #expect(AppCommand.changeProjectDirectory.unavailableNotice(in: ctx) == nil)
+        #expect(AppCommand.changeProjectDirectory.paletteDisabledHint(in: ctx) == nil)
+
+        var asked: [(String, String)] = []
+        var answer = RemoteHosts.FolderCheck.missing
+        let input = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { "~/other/" },
+            folderCheck: { folder, destination in
+                asked.append((folder, destination))
+                return answer
+            }
+        )
+        let empty = try #require(action(input, ""))
+        #expect(empty.title == "Current Pane's Directory")
+        #expect(empty.subtitle == "~/other", "the remote pane's folder")
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        #expect(input.choices("~/", context).isEmpty, "nothing lists a folder on the host")
+
+        let scope = InputPaletteScope(input: input)
+        var changes = 0
+        scope.activate(context: context) { changes += 1 }
+        let items = scope.sections(for: PaletteQuery(raw: "~/api"), context: context).flatMap(\.items)
+        #expect(items.map(\.title) == ["Change to \"~/api\""])
+        #expect(scope.press(items[0]) == .checking)
+        #expect(scope.loading?.message == "Checking the folder on me@devbox")
+        #expect(scope.press(items[0]) == .nothing, "a second Return waits for the check")
+        try await waitUntil { changes == 1 }
+        #expect(asked.count == 1)
+        #expect(asked.first?.0 == "~/api")
+        #expect(asked.first?.1 == "me@devbox")
+        #expect(scope.failure?.title == "Path ~/api doesn't exist", "the host's answer is the local notice")
+        #expect(scope.loading == nil)
+        #expect(!scope.takeCloseRequest())
+        #expect(path(of: fixture) == "me@devbox:~/proj")
+
+        answer = .exists
+        #expect(scope.press(items[0]) == .checking)
+        try await waitUntil { changes == 2 }
+        #expect(scope.takeCloseRequest(), "a yes runs the action and closes the palette")
+        #expect(path(of: fixture) == "me@devbox:~/api")
+
+        #expect(empty.run() == .done, "the pane row needs no check")
+        #expect(path(of: fixture) == "me@devbox:~/other")
+    }
+
+    @Test
+    func leaving_the_screen_cancels_the_host_check() async throws {
+        let fixture = makeFixture(path: "devbox:~/proj")
+        let input = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { nil },
+            folderCheck: { _, _ in
+                try? await Task.sleep(for: .milliseconds(200))
+                return .exists
+            }
+        )
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        let items = scope.sections(for: PaletteQuery(raw: "/srv"), context: context).flatMap(\.items)
+        #expect(scope.press(items[0]) == .checking)
+        scope.deactivate()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(path(of: fixture) == "devbox:~/proj", "a cancelled check changes nothing")
+        #expect(!scope.takeCloseRequest())
+    }
+
+    /// Poll until `condition` holds, with a sleep, or fail after 2 s.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("timed out")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     @Test
