@@ -106,7 +106,7 @@ struct CommandSource: PaletteSource {
         }
 
         return PaletteItem(
-            title: command.title,
+            title: command.title(in: commandCtx),
             // A palette screen says what it lists, as a custom palette's
             // `description:` does.
             subtitle: command.paletteSubtitle(in: commandCtx) ?? command.paletteScope?.summary,

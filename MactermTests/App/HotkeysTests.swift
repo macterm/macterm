@@ -4,6 +4,24 @@ import Testing
 
 @MainActor
 struct HotkeysTests {
+    // MARK: - Remove keeps the id of Close Tab
+
+    /// Close Tab and Remove Current Project are one command, Remove (design
+    /// 013 §2.7). A binding, a flag and a Shortcuts action saved under the
+    /// id of Close Tab read to it, and it keeps no default chord (⌘W is
+    /// Close Pane).
+    @Test
+    func the_id_of_close_tab_reads_to_remove() {
+        #expect(HotkeyAction(rawValue: "close_tab") == .remove)
+        #expect(HotkeyAction.remove.defaultsKey == "macterm.hotkey.close_tab")
+        #expect(HotkeyAction.remove.appCommand == .remove)
+        #expect(AppCommand.remove.hotkeyAction == .remove)
+        #expect(MactermKeybind(rawValue: "close_tab")?.hotkeyAction == .remove)
+        #expect(HotkeyAction.remove.defaultShortcut == "none")
+        #expect(HotkeyAction.closePane.defaultShortcut == "cmd+w")
+        #expect(AppCommand.remove.searchAliases.contains("Remove Current Project"))
+    }
+
     // MARK: - parseShortcut
 
     @Test

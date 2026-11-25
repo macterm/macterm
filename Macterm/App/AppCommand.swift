@@ -17,7 +17,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case newTab
     case newScratchTab
     case closePane
-    case closeTab
+    case remove
     case renameTab
     case nextTab
     case previousTab
@@ -61,7 +61,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case newProject
     case newRemoteProject
     case renameProject
-    case removeProject
     case replaceProjectPathWithCurrentDir
     case applyLayout
     case saveLayout
@@ -107,6 +106,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     private var formerTitles: [String] {
         switch self {
         case .newProject: ["Open Project", "Add Project"]
+        case .remove: ["Close Tab", "Remove Project", "Remove Current Project"]
         default: []
         }
     }
@@ -122,7 +122,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newTab: "New Tab"
         case .newScratchTab: "New Scratch Tab"
         case .closePane: "Close Pane"
-        case .closeTab: "Close Tab"
+        case .remove: "Close Tab or Remove Project"
         case .renameTab: "Rename Current Tab"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
@@ -165,7 +165,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newProject: "New Project"
         case .newRemoteProject: "New Remote Project"
         case .renameProject: "Rename Current Project"
-        case .removeProject: "Remove Current Project"
         case .replaceProjectPathWithCurrentDir: "Replace Project Path with Current Directory"
         case .files: "Files"
         case .applyLayout: "Apply Layout"
@@ -199,7 +198,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newTab,
              .newScratchTab,
              .closePane,
-             .closeTab,
+             .remove,
              .renameTab,
              .nextTab,
              .previousTab,
@@ -241,7 +240,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newProject,
              .newRemoteProject,
              .renameProject,
-             .removeProject,
              .replaceProjectPathWithCurrentDir,
              .applyLayout,
              .saveLayout,
@@ -272,7 +270,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .newTab: .newTab
         case .newScratchTab: .newScratchTab
         case .closePane: .closePane
-        case .closeTab: .closeTab
+        case .remove: .remove
         case .nextTab: .nextGlobalTab
         case .previousTab: .previousGlobalTab
         case .nextTabInProject: .nextTabInProject
@@ -335,7 +333,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .moveOutOfProject: .moveOutOfProject
         case .newRemoteProject,
              .newDesktopWidget,
-             .removeProject,
              .replaceProjectPathWithCurrentDir,
              .checkForUpdate: nil
         }

@@ -2441,6 +2441,22 @@
         }
       }
     },
+    "Close Tab or Remove Project" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 닫기 또는 프로젝트 제거"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭标签页或移除项目"
+          }
+        }
+      }
+    },
     "Close Window" : {
       "localizations" : {
         "ko" : {
@@ -8207,22 +8223,6 @@
         }
       }
     },
-    "Remove Current Project" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "현재 프로젝트 제거"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除当前项目"
-          }
-        }
-      }
-    },
     "Remove Project" : {
       "localizations" : {
         "ko" : {
@@ -11060,12 +11060,12 @@
         }
       }
     },
-    "The selected projects contain %lld tabs and %lld nested projects." : {
+    "The selected items contain %lld tabs and %lld nested projects." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The selected projects contain %#@tabs@ and %#@projects@."
+            "value" : "The selected items contain %#@tabs@ and %#@projects@."
           },
           "substitutions" : {
             "projects" : {
@@ -11113,23 +11113,23 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "선택한 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다."
+            "value" : "선택한 항목에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。"
+            "value" : "所选项包含 %1$lld 个标签页和 %2$lld 个嵌套项目。"
           }
         }
       }
     },
-    "The selected projects contain %lld tabs and %lld nested projects. A process is still running." : {
+    "The selected items contain %lld tabs and %lld nested projects. A process is still running." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The selected projects contain %#@tabs@ and %#@projects@. A process is still running."
+            "value" : "The selected items contain %#@tabs@ and %#@projects@. A process is still running."
           },
           "substitutions" : {
             "projects" : {
@@ -11177,13 +11177,13 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "선택한 프로젝트에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다. 프로세스가 아직 실행 중입니다."
+            "value" : "선택한 항목에는 탭 %1$lld개와 중첩 프로젝트 %2$lld개가 있습니다. 프로세스가 아직 실행 중입니다."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所选项目包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
+            "value" : "所选项包含 %1$lld 个标签页和 %2$lld 个嵌套项目。仍有进程正在运行。"
           }
         }
       }

@@ -1113,38 +1113,14 @@ struct SidebarContent: View {
         }
     }
 
-    /// Delete every item in a multi-selection, confirming once if any affected
-    /// pane is busy. Tabs whose project is also being removed are skipped —
-    /// `removeProject` already tears their surfaces down. A selected project
-    /// goes with every project inside it, as a single Remove does.
+    /// Remove every node of a multi-selection: the one engine of Remove
+    /// (`AppState.requestRemove`). It asks one question when a selected
+    /// project holds tabs or projects, or when a process runs, and clears
+    /// the removed rows from the selection.
     private func removeSelection(_ items: Set<SidebarItem>) {
-        var projectIDs: [UUID] = []
-        var tabRefs: [(tabID: UUID, projectID: UUID)] = []
-        for item in items {
-            switch item {
-            case .project(PinnedTabs.workspaceID),
-                 .project(ScratchTabs.workspaceID):
-                // The pinned and the scratch sections can't be removed.
-                break
-            case let .project(id):
-                projectIDs.append(id)
-            case let .tab(projectID, tabID):
-                // Pinned tabs are included: `closeTabs` routes them to the
-                // unload path (record kept), matching a single-row close.
-                tabRefs.append((tabID: tabID, projectID: projectID))
-            }
-        }
-
-        let removedProjects = Set(appState.projectsRemoved(with: projectIDs, store: projectStore))
-        let tabsToClose = tabRefs.filter { !removedProjects.contains($0.projectID) }
-
-        appState.requestRemoveSelection(projectIDs: projectIDs, tabs: tabsToClose, store: projectStore) {
-            appState.closeTabs(tabsToClose)
-            for id in projectIDs {
-                appState.removeProject(id, store: projectStore)
-            }
-            presentation.selection = []
-        }
+        let order = presentation.orderedItems
+        let nodes = items.sorted { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+        appState.requestRemove(nodes, store: projectStore)
     }
 
     /// The New Project screen in this window's palette.

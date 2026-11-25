@@ -57,6 +57,41 @@ final class WindowState: Identifiable {
     /// A saved set that closed the active project therefore stays closed.
     var expandedRows: Set<UUID> = []
 
+    /// The sidebar's selection, rename draft and row order. On the window,
+    /// not on a view, because commands read the selection as their target
+    /// (`AppState.commandTarget(store:)`, design 013 §2.1). Both copies of
+    /// the sidebar (native and overlay) share it.
+    @ObservationIgnored
+    let sidebar = SidebarPresentationState()
+
+    /// Whether the focus of this window is in its sidebar: the first
+    /// responder is the outline view of the sidebar's `List`. Observed, so
+    /// that a menu item whose title follows the command target updates when
+    /// the focus moves (`AppState.commandTarget(store:)`). `watchFocus(of:)`
+    /// keeps it current.
+    var sidebarHasFocus = false
+
+    @ObservationIgnored
+    private var focusObservation: NSKeyValueObservation?
+
+    /// Follow the first responder of `nsWindow` into `sidebarHasFocus`.
+    /// Nothing else in a main window is an outline view.
+    func watchFocus(of nsWindow: NSWindow) {
+        sidebarHasFocus = nsWindow.firstResponder is NSOutlineView
+        focusObservation = nsWindow.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
+            MainActor.assumeIsolated {
+                let focused = window.firstResponder is NSOutlineView
+                if self?.sidebarHasFocus != focused { self?.sidebarHasFocus = focused }
+            }
+        }
+    }
+
+    /// The nodes that a command from the palette acts on, recorded when the
+    /// palette opens, before it takes the focus from the sidebar
+    /// (`AppState.commandTarget(store:)`). nil while the palette is closed.
+    @ObservationIgnored
+    var paletteTarget: [SidebarItem]?
+
     /// The tab this window shows for each project it has visited, keyed by
     /// project id.
     ///
@@ -104,7 +139,10 @@ final class WindowState: Identifiable {
     @ObservationIgnored
     var frame: String?
 
-    var isCommandPaletteVisible = false
+    var isCommandPaletteVisible = false {
+        didSet { if !isCommandPaletteVisible { paletteTarget = nil } }
+    }
+
     /// The view the palette and its breadcrumb row are drawn over while the
     /// palette is up — what Capture Palette frames
     /// (`PaletteScreenshot`). Unobserved; the palette sets it as it mounts.

@@ -1078,7 +1078,7 @@ struct AppStateTests {
         state.requestRemoveSelection(projectIDs: [a.id, b.id], tabs: [], store: store) { ran = true }
         #expect(!ran)
         #expect(state.pendingDialog?.kind == .removeSelection)
-        #expect(state.pendingDialog?.message == "The selected projects contain 1 tab and 2 nested projects.")
+        #expect(state.pendingDialog?.message == "The selected items contain 1 tab and 2 nested projects.")
         state.confirmPendingDialog()
         #expect(ran)
     }

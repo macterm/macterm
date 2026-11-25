@@ -21,7 +21,7 @@ enum MactermKeybind: String, AppEnum {
 
     case newTab = "new_tab"
     case closePane = "close_pane"
-    case closeTab = "close_tab"
+    case remove = "close_tab"
     case splitRight = "split_right"
     case splitDown = "split_down"
     case splitAuto = "split_auto"
@@ -94,7 +94,7 @@ enum MactermKeybind: String, AppEnum {
     static let caseDisplayRepresentations: [MactermKeybind: DisplayRepresentation] = [
         .newTab: "New Tab",
         .closePane: "Close Pane",
-        .closeTab: "Close Tab",
+        .remove: "Close Tab or Remove Project",
         .splitRight: "Split Right",
         .splitDown: "Split Down",
         .splitAuto: "Split Automatically",
