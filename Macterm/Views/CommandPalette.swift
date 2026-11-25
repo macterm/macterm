@@ -290,7 +290,13 @@ struct CommandPalettePanel: View {
                                 ForEach(section.items) { item in
                                     let idx = indexByID[item.id] ?? 0
                                     Button {
-                                        selectedIndex = idx
+                                        // The index of the row now, not at the
+                                        // build of the row: SwiftUI can keep the
+                                        // action of a row whose item did not
+                                        // change while the list around it did,
+                                        // and a kept index named another row.
+                                        guard let index = flatItems.firstIndex(where: { $0.id == item.id }) else { return }
+                                        selectedIndex = index
                                         if let inputScope {
                                             runInputRow(inputScope)
                                         } else {
@@ -537,25 +543,24 @@ struct CommandPalettePanel: View {
         }
     }
 
-    /// Select `text` in the palette field when the field shows it, so that
-    /// a keystroke replaces it. The palette opened with a kept query, and a
-    /// screen that starts on its value, use it.
+    /// Select `text` in the palette field, so that a keystroke replaces it:
+    /// the kept query of a palette that opens, and the value of an input
+    /// screen that opens.
     ///
-    /// A screen entered from a palette row showed its value with the cursor
-    /// at the end: the field did not yet hold the new text when the select
-    /// ran one main-queue turn later (the UI review of PR 957). The exact
-    /// cause is not measured. The select therefore does not depend on when
-    /// the write comes. It waits, one main-queue turn at a time, until the
-    /// field has focus and its field editor holds `text`. It stops when the
-    /// user changed the query, or after `attempts` turns.
+    /// The editor is the first responder of the palette's window. SwiftUI's
+    /// `TextField` edits with a field editor of its own, so the window's
+    /// shared field editor (`fieldEditor(_:for:)`) is not it, and a select
+    /// there does nothing (measured in `CommandPaletteSelectionTests`). A
+    /// field that takes focus selects its text by itself, but a screen
+    /// entered from a palette row changes the text of a field that already
+    /// has focus. The select waits until the field holds `text`, 50 ms at
+    /// most, and does nothing when the user changed the
+    /// query in the meantime.
     private func selectFieldText(once text: String, attempts: Int = 5) {
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
             guard !text.isEmpty, query == text else { return }
-            if let window = NSApp.keyWindow,
-               let editor = window.fieldEditor(false, for: nil),
-               window.firstResponder === editor,
-               editor.string == text
-            {
+            let editor = appState.nsWindow(for: windowState)?.firstResponder as? NSTextView
+            if let editor, editor.isFieldEditor, editor.string == text {
                 editor.selectAll(nil)
             } else if attempts > 1 {
                 selectFieldText(once: text, attempts: attempts - 1)
