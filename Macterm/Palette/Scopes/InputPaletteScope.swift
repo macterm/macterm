@@ -75,17 +75,17 @@ struct PaletteInput: Hashable {
     }
 
     /// Completions for a field that holds a local directory
-    /// (`PathCompleter`): the directories under the typed path, each by
-    /// its name, with its full path under it, as path mode of the root
-    /// shows them. A remote spec gets none.
+    /// (`PathCompleter`): the directories under the typed path, as the rows
+    /// of `PathRow`, with `action` as the words before the path. A remote
+    /// spec gets none.
     @MainActor
-    static func pathCompletions(_ text: String) -> [PaletteCompletion] {
+    static func pathCompletions(_ text: String, action: PathRow.Action) -> [PaletteCompletion] {
         guard let completion = PathCompleter.complete(text) else { return [] }
         return completion.children.map { child in
             PaletteCompletion(
-                title: (child as NSString).lastPathComponent,
+                title: PathRow.title(for: child),
                 value: PathCompleter.fieldText(for: child, typed: text),
-                subtitle: text.hasPrefix("~") ? (child as NSString).abbreviatingWithTildeInPath : child
+                subtitle: action.subtitle(for: child)
             )
         }
     }
@@ -145,14 +145,8 @@ struct PaletteInputAction {
 struct PaletteCompletion: Equatable {
     let title: String
     let value: String
-    /// A line under the title, such as the full path of a folder.
-    let subtitle: String?
-
-    init(title: String, value: String, subtitle: String? = nil) {
-        self.title = title
-        self.value = value
-        self.subtitle = subtitle
-    }
+    /// A path row's subtitle (`PathRow`), cut in the middle when long.
+    var subtitle: String?
 }
 
 /// What the run of an input screen's action did.
@@ -210,7 +204,9 @@ final class InputPaletteScope: PaletteScope {
             failure = nil
         }
         completions = input.completions(text)
-        var items = completions.map { PaletteItem(id: Self.itemID($0), title: $0.title, subtitle: $0.subtitle, action: {}) }
+        var items = completions.map {
+            PaletteItem(id: Self.itemID($0), title: $0.title, subtitle: $0.subtitle, subtitleIsPath: $0.subtitle != nil, action: {})
+        }
         if let action {
             items.insert(PaletteItem(id: Self.actionItemID, title: action.title, action: {}), at: 0)
         }

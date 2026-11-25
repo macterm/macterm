@@ -14,9 +14,8 @@ import Foundation
 /// - A path that is not a folder gets the notice of `PathProblem`, and no
 ///   action row.
 ///
-/// The completions are the folders under the typed path, each with its
-/// full path, as path mode of the root shows them
-/// (`PaletteInput.pathCompletions`).
+/// The completions are the folders under the typed path, as path rows
+/// (`PaletteInput.pathCompletions`, `PathRow.Action.openAsNewProject`).
 extension PaletteInput {
     static var newProject: PaletteInput {
         PaletteInput(
@@ -24,7 +23,7 @@ extension PaletteInput {
             title: AppCommand.newProject.title,
             prompt: String(localized: "Type a folder path, or select one in Finder"),
             summary: String(localized: "Add a project from a folder"),
-            completions: { PaletteInput.pathCompletions($0.trimmingCharacters(in: .whitespaces)) },
+            completions: { PaletteInput.pathCompletions($0.trimmingCharacters(in: .whitespaces), action: .openAsNewProject) },
             check: NewProjectInput.check
         )
     }

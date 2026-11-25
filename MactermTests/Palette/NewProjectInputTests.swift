@@ -117,7 +117,7 @@ struct NewProjectInputTests {
         let listed = rows(scope, parent + "/", context)
         #expect(listed.map(\.title) == ["New Project \"\(parent)/\"", "api"])
         let child = listed[1]
-        #expect(child.subtitle == folder.path)
+        #expect(child.subtitle == "Open as new project: \(folder.path)")
         #expect(scope.press(child) == .fill(folder.path + "/"), "a completion fills the field and runs nothing")
         #expect(context.projectStore.projects.isEmpty)
     }
