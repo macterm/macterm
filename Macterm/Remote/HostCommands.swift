@@ -213,10 +213,11 @@ enum HostCommands {
     /// Directory row of a remote pane (`RemoteHosts.processFolder`). The
     /// pid is `$1`, so no shell parses it. Linux reads `/proc/<pid>/cwd`,
     /// macOS asks `lsof`, which is in `/usr/sbin` there, so the script adds
-    /// it to `PATH`. One line with the folder from `/`, else exit 1.
-    static let processFolderScript = #"PATH=$PATH:/usr/sbin:/sbin; d=$(readlink "/proc/$1/cwd" 2>/dev/null) || "#
+    /// it to `PATH`. One line with the folder from `/`, else exit 1. A
+    /// folder that Linux marks ` (deleted)` is no folder.
+    static let processFolderScript = #"PATH=${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin; d=$(readlink "/proc/$1/cwd" 2>/dev/null) || "#
         + #"d=$(lsof -a -d cwd -Fn -p "$1" 2>/dev/null | sed -n "s/^n//p"); "#
-        + #"case $d in /*) printf "%s\n" "$d" ;; *) exit 1 ;; esac"#
+        + #"case $d in *" (deleted)") exit 1 ;; /*) printf "%s\n" "$d" ;; *) exit 1 ;; esac"#
 
     /// The `command.run` argv of `processFolderScript` for `pid`.
     static func processFolderArgv(pid: Int32) -> [String] {
@@ -224,10 +225,12 @@ enum HostCommands {
     }
 
     /// The folder in the output of `processFolderScript`, nil for any
-    /// other end.
+    /// other end. More than one line is a folder with a newline in its name:
+    /// one line of it would name another folder.
     static func processFolder(code: UInt8?, output: String) -> String? {
-        guard code == 0, let line = output.split(separator: "\n").first, line.hasPrefix("/") else { return nil }
-        return String(line)
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        guard code == 0, lines.count == 2, lines[1].isEmpty, lines[0].hasPrefix("/") else { return nil }
+        return String(lines[0])
     }
 
     /// The most folder names that one listing gives (`folderListScript`).

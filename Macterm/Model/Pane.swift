@@ -544,6 +544,7 @@ final class Pane: Identifiable {
         foregroundReportIsShell = false
         lastAppliedForeground = nil
         sessionShell = nil
+        hostShellPID = nil
         isSessionRunning = false
         isShellAtPrompt = false
         // A notification whose pane no longer exists routes nowhere on tap, so

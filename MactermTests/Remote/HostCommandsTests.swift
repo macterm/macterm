@@ -377,6 +377,8 @@ struct HostCommandsTests {
         #expect(HostCommands.processFolder(code: 0, output: "lsof: no such\n") == nil)
         #expect(HostCommands.processFolder(code: 1, output: "/srv\n") == nil)
         #expect(HostCommands.processFolder(code: nil, output: "/srv\n") == nil)
+        #expect(HostCommands.processFolder(code: 0, output: "/srv/a\nb\n") == nil, "a folder with a newline in its name")
+        #expect(HostCommands.processFolder(code: 0, output: "/srv/a\n") == "/srv/a")
     }
 
     @Test

@@ -184,24 +184,28 @@ final class HostFolderLister {
         failed[folder] != nil
     }
 
-    /// The folder of the pane's process on the host (`paneFolder`): not
-    /// asked yet, asked, or the answer.
-    private var paneFolderAnswer: String??
+    /// The folder of the pane's process on the host (`paneFolder`), and
+    /// when an ask gave none, so that it is asked again after `retryAfter`.
+    private var paneFolderAnswer: String?
+    private var paneFolderFailed: ContinuousClock.Instant?
     private var paneFolderRequest: Task<Void, Never>?
 
     /// The folder of the focused pane's process on the host, for the
     /// Current Pane's Directory row (UI review 0617). The first call asks
     /// with `read`, and `onChange` draws the screen again when the answer
-    /// comes. The screen asks once. nil while it asks, and when the host
-    /// gave no folder.
+    /// comes. A folder is asked once. No folder (no pid yet, no connection,
+    /// no answer in time) is asked again after `retryAfter`. nil while it
+    /// asks, and while there is no folder.
     func paneFolder(read: @escaping @MainActor () async -> String?) -> String? {
         if let paneFolderAnswer { return paneFolderAnswer }
+        if let paneFolderFailed, ContinuousClock.now - paneFolderFailed < Self.retryAfter { return nil }
         if paneFolderRequest == nil {
             paneFolderRequest = Task { [weak self] in
                 let answer = await read()
                 guard let self, !Task.isCancelled else { return }
                 paneFolderRequest = nil
-                paneFolderAnswer = .some(answer)
+                paneFolderAnswer = answer
+                paneFolderFailed = answer == nil ? .now : nil
                 onChange?()
             }
         }
