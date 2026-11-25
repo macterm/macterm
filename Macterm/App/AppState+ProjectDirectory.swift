@@ -10,7 +10,7 @@ extension AppState {
     /// (`changeProjectDirectoryChoices`): the typed folder, then the folders
     /// whose names start with the text. Return on a row sets the project's
     /// folder, and Tab goes into it. The notice of `PathProblem` shows when
-    /// no row is there, and always for a file. At an empty
+    /// no row is there, and always for a local file. At an empty
     /// field the action row is "Current Pane's Directory", with the
     /// pane's folder as its subtitle (`paneDirectoryOffer`). The screen
     /// reads the pane's folder through `paneDirectory`
@@ -29,7 +29,7 @@ extension AppState {
         for project: Project,
         projectStore: ProjectStore,
         paneDirectory: (@MainActor () -> String?)? = nil,
-        listFolders: (@MainActor (String, String) async -> FolderListing?)? = nil,
+        listFolders: (@MainActor (String, String) async -> HostFolderAnswer)? = nil,
         folderCheck: (@MainActor (String, String) async -> RemoteHosts.FolderCheck)? = nil
     ) -> PaletteInput {
         let projectID = project.id
@@ -56,6 +56,8 @@ extension AppState {
                     guard HostCommands.isSafeHostFolder(folder) else {
                         return .notice(PathProblem.missing.notice(for: folder))
                     }
+                    let typed = text.trimmingCharacters(in: .whitespaces)
+                    let listed = FolderCompletion.listedFolder(for: typed)
                     switch hostFolderChoices(for: text, lister: lister, projectID: projectID, projectStore: projectStore) {
                     case let rows? where rows.isEmpty:
                         // The host listed the folders and none matches.
@@ -63,7 +65,11 @@ extension AppState {
                     case .some:
                         // The folder rows are the action.
                         return .nothing
-                    case nil where lister.isListing:
+                    case nil where listed.map(lister.isMissing) == true:
+                        // The host says that the folder is not there.
+                        return .notice(PathProblem.missing.notice(for: folder))
+                    case nil where listed.map(lister.hasFailed) != true && listed != nil:
+                        // The first answer is not there yet.
                         return .nothing
                     case nil:
                         break

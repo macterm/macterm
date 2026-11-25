@@ -8,6 +8,17 @@ struct FolderListing: Equatable {
     let names: [String]
 }
 
+/// What a host says about a folder that the field lists
+/// (`RemoteHosts.listFolders`).
+enum HostFolderAnswer: Equatable {
+    /// The folders in it.
+    case listed(FolderListing)
+    /// A shell cannot `cd` to it: it is not there, or it is a file.
+    case missing
+    /// No connection up, or no clear answer in time.
+    case unavailable
+}
+
 /// The folder rows of a typed path, from any listing of folders: the rule
 /// of `PathCompleter`, for a source that is not the file system of this Mac
 /// (a host, 0614). The rows of a local path and a remote path therefore
@@ -34,19 +45,9 @@ enum FolderCompletion {
         limit: Int = 10,
         listing: (String) -> FolderListing?
     ) -> [Row]? {
-        guard typed.hasPrefix("/") || typed.hasPrefix("~") else { return nil }
-        let text = typed == "~" ? "~/" : typed
-        let parentText: String
-        let name: String
-        if text.hasSuffix("/") {
-            parentText = text
-            name = ""
-        } else {
-            let cut = text.index(after: text.lastIndex(of: "/") ?? text.startIndex)
-            parentText = String(text[..<cut])
-            name = String(text[cut...])
-        }
-        guard let parent = listing(parentText) else { return nil }
+        guard let parts = split(typed), let parent = listing(parts.parent) else { return nil }
+        let text = parts.text
+        let name = parts.name
         if name.isEmpty {
             return [Row(path: parent.path, fieldText: text)] + children(of: parent, typedFolder: text, name: "", limit: limit)
         }
@@ -57,7 +58,34 @@ enum FolderCompletion {
             guard let folder = listing(folderText) else { return [exact] }
             return [exact] + children(of: folder, typedFolder: folderText, name: "", limit: limit)
         }
-        return children(of: parent, typedFolder: parentText, name: name, limit: limit)
+        return children(of: parent, typedFolder: parts.parent, name: name, limit: limit)
+    }
+
+    /// The folder that `typed` lists (as typed, with a slash at the end):
+    /// the typed folder for a text that ends with a slash, else its parent.
+    /// nil for a text that is not a path from `/` or `~`, and for `~name`
+    /// with no slash, which names another user's home, not a folder in
+    /// this one.
+    static func listedFolder(for typed: String) -> String? {
+        split(typed)?.parent
+    }
+
+    /// A typed path cut at its last slash.
+    private struct Parts {
+        /// The path, with `~` as `~/`.
+        let text: String
+        /// The folder to list, with a slash at the end.
+        let parent: String
+        /// The part after the last slash.
+        let name: String
+    }
+
+    private static func split(_ typed: String) -> Parts? {
+        if typed == "~" { return Parts(text: "~/", parent: "~/", name: "") }
+        guard typed.hasPrefix("/") || (typed.hasPrefix("~") && typed.contains("/")) else { return nil }
+        if typed.hasSuffix("/") { return Parts(text: typed, parent: typed, name: "") }
+        let cut = typed.index(after: typed.lastIndex(of: "/") ?? typed.startIndex)
+        return Parts(text: typed, parent: String(typed[..<cut]), name: String(typed[cut...]))
     }
 
     /// The folders of `listing` whose names start with `name`, sorted, at
@@ -85,27 +113,30 @@ enum FolderCompletion {
 /// when it comes. A request with no answer gives no rows.
 @MainActor
 final class HostFolderLister {
-    private let list: @MainActor (String) async -> FolderListing?
-    /// The listings that came, the newest last.
+    private let list: @MainActor (String) async -> HostFolderAnswer
+    /// The listings that came, the newest last. A read moves one to the end.
     private var listings: [(folder: String, listing: FolderListing)] = []
-    /// When a request for a folder gave no answer: the lister asks again
-    /// only after `retryAfter`, so that a host that is down is not asked
-    /// at each redraw.
+    /// The folders that the host says a shell cannot enter.
+    private var missing: Set<String> = []
+    /// When a request for a folder gave no clear answer: the lister asks
+    /// again only after `retryAfter`, so that a host that is down is not
+    /// asked at each redraw. The record stays while it asks again, so the
+    /// screen keeps what it shows meanwhile.
     private var failed: [String: ContinuousClock.Instant] = [:]
     private var requests: [String: Task<Void, Never>] = [:]
     /// Called when a request ends, so that the screen draws its rows.
     var onChange: (@MainActor () -> Void)?
 
     /// The most folders whose listings stay. A screen types down one path,
-    /// so it needs few. The oldest goes first.
+    /// so it needs few. The one read last goes last.
     static let kept = 8
-    /// How long a folder with no answer waits before the lister asks again
-    /// (no connection yet, a slow host, a folder that is made later).
+    /// How long a folder with no clear answer waits before the lister asks
+    /// again (no connection yet, a slow host).
     static let retryAfter: Duration = .seconds(5)
 
-    /// `list` asks the host for the listing of a folder as typed
+    /// `list` asks the host about a folder as typed
     /// (`RemoteHosts.listFolders`).
-    init(list: @escaping @MainActor (String) async -> FolderListing?) {
+    init(list: @escaping @MainActor (String) async -> HostFolderAnswer) {
         self.list = list
     }
 
@@ -113,8 +144,11 @@ final class HostFolderLister {
     /// while it is asked or when the host gave none.
     func listing(_ folder: String) -> FolderListing? {
         if let index = listings.firstIndex(where: { $0.folder == folder }) {
-            return listings[index].listing
+            let kept = listings.remove(at: index)
+            listings.append(kept)
+            return kept.listing
         }
+        if missing.contains(folder) { return nil }
         if let when = failed[folder], ContinuousClock.now - when < Self.retryAfter { return nil }
         if requests[folder] == nil {
             requests[folder] = Task { [weak self] in
@@ -122,17 +156,32 @@ final class HostFolderLister {
                 let answer = await list(folder)
                 guard !Task.isCancelled else { return }
                 requests[folder] = nil
-                if let answer {
+                switch answer {
+                case let .listed(listing):
                     failed[folder] = nil
-                    listings.append((folder, answer))
+                    listings.append((folder, listing))
                     if listings.count > Self.kept { listings.removeFirst() }
-                } else {
+                case .missing:
+                    failed[folder] = nil
+                    missing.insert(folder)
+                case .unavailable:
                     failed[folder] = .now
                 }
                 onChange?()
             }
         }
         return nil
+    }
+
+    /// The host says that a shell cannot enter `folder`.
+    func isMissing(_ folder: String) -> Bool {
+        missing.contains(folder)
+    }
+
+    /// The host gave no clear answer for `folder`, also while the lister
+    /// asks again.
+    func hasFailed(_ folder: String) -> Bool {
+        failed[folder] != nil
     }
 
     /// Whether a request is in flight.

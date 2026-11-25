@@ -240,7 +240,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { "~/other/" },
-            listFolders: { _, _ in nil },
+            listFolders: { _, _ in .unavailable },
             folderCheck: { folder, destination in
                 asked.append((folder, destination))
                 return answer
@@ -251,9 +251,12 @@ struct AppStateProjectDirectoryTests {
         #expect(empty.subtitle == "~/other", "the remote pane's folder")
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let scope = InputPaletteScope(input: input)
-        scope.activate(context: context) {}
+        var redraws = 0
+        scope.activate(context: context) { redraws += 1 }
         let items = try await settledItems(scope, "~/api", context)
         #expect(items.map(\.title) == ["Change to \"~/api\""], "no list from the host: the typed folder is the action")
+        #expect(input.choices("~/", context).isEmpty, "no list, no folder rows")
+        let before = redraws
         #expect(scope.press(items[0]) == .checking)
         #expect(scope.loading?.message == "Checking the folder on me@devbox")
         #expect(scope.press(items[0]) == .nothing, "a second Return waits for the check")
@@ -261,6 +264,7 @@ struct AppStateProjectDirectoryTests {
         #expect(asked.count == 1)
         #expect(asked.first?.0 == "~/api")
         #expect(asked.first?.1 == "me@devbox")
+        #expect(redraws > before, "the end of a check draws the screen again")
         #expect(scope.failure?.title == "Path ~/api doesn't exist", "the host's answer is the local notice")
         let again = scope.sections(for: PaletteQuery(raw: "~/api"), context: context).flatMap(\.items)
         #expect(again.map(\.title) == ["Change to \"~/api\""], "the row stays under the reason, for every path")
@@ -292,7 +296,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
-            listFolders: { _, _ in nil },
+            listFolders: { _, _ in .unavailable },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -316,7 +320,7 @@ struct AppStateProjectDirectoryTests {
             for: fixture.project,
             projectStore: fixture.store,
             paneDirectory: { nil },
-            listFolders: { _, _ in nil },
+            listFolders: { _, _ in .unavailable },
             folderCheck: { _, _ in
                 try? await Task.sleep(for: .milliseconds(200))
                 return .exists
@@ -349,7 +353,7 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { nil },
             listFolders: { folder, destination in
                 asked.append((folder, destination))
-                return listings[folder]
+                return listings[folder].map { .listed($0) } ?? .missing
             },
             folderCheck: { _, _ in
                 checked += 1
@@ -375,6 +379,13 @@ struct AppStateProjectDirectoryTests {
         let none = try await settledItems(scope, "~/zzz", context)
         #expect(none.isEmpty, "no Change to row: nothing matches")
         #expect(scope.failure?.title == "Path ~/zzz doesn't exist", "the notice only when nothing matches")
+
+        let typo = try await settledItems(scope, "~/typo/sub", context)
+        #expect(typo.isEmpty, "no Change to row for a folder that the host says is not there")
+        #expect(scope.failure?.title == "Path ~/typo/sub doesn't exist")
+
+        let tilde = try await settledItems(scope, "~p", context)
+        #expect(tilde.map(\.title) == ["Change to \"~p\""], "~p is not a folder in the home folder: the host checks it")
 
         let picked = try await settledItems(scope, "~/pro", context)
         #expect(scope.press(picked[0]) == .closed, "a folder row is the action")
