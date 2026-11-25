@@ -776,6 +776,55 @@ pub const Model = struct {
         if (!tree.swap(&tab.root, x, y)) return error.BadRequest;
     }
 
+    /// Puts `new_pane` in the place of pane `pane_id`. The focus, the zoom
+    /// and the focus history move to the new pane. Returns the old pane: it
+    /// left the model.
+    pub fn replacePane(m: *Model, pane_id: PaneId, new_pane: Pane) Error!Pane {
+        const a = m.alloc();
+        const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
+        if (new_pane.id.isEmpty() or new_pane.session.len == 0) return error.BadRequest;
+        if (m.nodeIdInUse(new_pane.id.text)) return error.DuplicateId;
+        const fresh = try tree.clonePane(a, new_pane);
+        const slot = tree.findPaneMut(&tab.root, pane_id).?;
+        const old = slot.*;
+        slot.* = fresh;
+        if (tab.focused != null and tab.focused.?.eql(old.id)) tab.focused = fresh.id;
+        if (m.zoomed.getPtr(tab.id)) |z| {
+            if (z.eql(old.id)) z.* = fresh.id;
+        }
+        if (m.pane_history.getPtr(tab.id)) |h| h.remove(old.id);
+        return old;
+    }
+
+    /// Sets the folders of a pane that are not null.
+    pub fn setPaneFolders(m: *Model, pane_id: PaneId, cwd: ?[]const u8, host_session_dir: ?[]const u8) Error!void {
+        const a = m.alloc();
+        const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
+        const pane = tree.findPaneMut(&tab.root, pane_id).?;
+        if (cwd) |c| pane.cwd = try a.dupe(u8, c);
+        if (host_session_dir) |d| pane.host_session_dir = try a.dupe(u8, d);
+    }
+
+    /// Puts `root` in place of the tree of a tab. A pane or a split of the
+    /// old tree can keep its id in the new one. The focus is `focused` when
+    /// the new tree has it, else the first pane. Any zoom ends. Returns the
+    /// panes of the old tree that are not in the new one.
+    pub fn setTabRoot(m: *Model, tab_id: TabId, root: SplitNode, focused: ?PaneId) Error![]const Pane {
+        const a = m.alloc();
+        const tab = m.findTab(tab_id) orelse return error.NotFound;
+        try m.checkFreshIds(&root, &tab.root);
+        const copy = try tree.clone(a, root);
+        var old: std.ArrayList(Pane) = .empty;
+        try appendPanes(a, &tab.root, &old);
+        var gone: std.ArrayList(Pane) = .empty;
+        for (old.items) |p| if (!tree.contains(&copy, p.id)) try gone.append(a, p);
+        tab.root = copy;
+        tab.focused = if (focused) |f| (if (tree.findPane(&copy, f)) |p| p.id else tree.firstPane(&copy).id) else tree.firstPane(&copy).id;
+        _ = m.zoomed.remove(tab.id);
+        _ = m.pane_history.remove(tab.id);
+        return gone.items;
+    }
+
     pub fn setAttention(m: *Model, pane_id: PaneId, attention: tree.ModelAttention) Error!void {
         const tab = m.findPaneTab(pane_id) orelse return error.NotFound;
         tree.findPaneMut(&tab.root, pane_id).?.attention = attention;

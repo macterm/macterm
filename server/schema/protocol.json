@@ -509,6 +509,61 @@
       "args": "SessionWait.Args",
       "result": "SessionWait.Result",
       "doc": "Waits until a line of the terminal of a session starts with a marker, or until no command runs in it."
+    },
+    {
+      "name": "pane.swap",
+      "type": "PaneSwap",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneSwap.Args",
+      "result": "PaneSwap.Result",
+      "doc": "Swaps the places of two panes of one tab."
+    },
+    {
+      "name": "pane.replace",
+      "type": "PaneReplace",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneReplace.Args",
+      "result": "PaneReplace.Result",
+      "doc": "Puts a new pane in the place of a pane."
+    },
+    {
+      "name": "pane.set",
+      "type": "PaneSet",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "PaneSet.Args",
+      "result": "PaneSet.Result",
+      "doc": "Sets the working directory of a pane."
+    },
+    {
+      "name": "tab.layout",
+      "type": "TabLayout",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabLayout.Args",
+      "result": "TabLayout.Result",
+      "doc": "Puts a new tree of panes in a tab."
+    },
+    {
+      "name": "tab.rebalance",
+      "type": "TabRebalance",
+      "since": 3,
+      "senders": [
+        "local"
+      ],
+      "args": "TabRebalance.Args",
+      "result": "TabRebalance.Result",
+      "doc": "Makes every ratio of the splits of a tab even."
     }
   ],
   "events": [
@@ -3451,6 +3506,176 @@
         "timeout",
         "unknown"
       ],
+      "variants": []
+    },
+    {
+      "name": "PaneSwap.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "One pane."
+        },
+        {
+          "name": "other",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The other pane. It must be in the same tab."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSwap.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneReplace.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The pane to replace."
+        },
+        {
+          "name": "new",
+          "type": "Pane",
+          "optional": false,
+          "since": 3,
+          "doc": "The new pane, with the id that the client made."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneReplace.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
+          "since": 3,
+          "doc": "The panes that left the model."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSet.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The pane."
+        },
+        {
+          "name": "cwd",
+          "type": "str",
+          "optional": true,
+          "since": 3,
+          "doc": "The working directory of the shell of the pane."
+        },
+        {
+          "name": "host_session_dir",
+          "type": "str",
+          "optional": true,
+          "since": 3,
+          "doc": "For a remote pane, the folder of its shell on the host."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "PaneSet.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabLayout.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The tab."
+        },
+        {
+          "name": "root",
+          "type": "SplitNode",
+          "optional": false,
+          "since": 3,
+          "doc": "The new tree. New panes and splits have ids that the client made."
+        },
+        {
+          "name": "focused",
+          "type": "str",
+          "optional": true,
+          "since": 3,
+          "doc": "The pane that gets the focus. Null is the first pane."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabLayout.Result",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "panes",
+          "type": "[RemovedPane]",
+          "optional": false,
+          "default": "[]",
+          "since": 3,
+          "doc": "The panes that left the model."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabRebalance.Args",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "optional": false,
+          "since": 3,
+          "doc": "The tab."
+        }
+      ],
+      "cases": [],
+      "variants": []
+    },
+    {
+      "name": "TabRebalance.Result",
+      "kind": "struct",
+      "fields": [],
+      "cases": [],
       "variants": []
     },
     {

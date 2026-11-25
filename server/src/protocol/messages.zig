@@ -1343,6 +1343,114 @@ pub const SplitRatio = struct {
     pub const Result = struct {};
 };
 
+/// Swaps the places of two panes of one tab (Move Pane). The shape and the
+/// ratios of the tree stay. The focus stays on its pane.
+pub const PaneSwap = struct {
+    pub const name = "pane.swap";
+    pub const doc = "Swaps the places of two panes of one tab.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .id = "One pane.",
+            .other = "The other pane. It must be in the same tab.",
+        };
+
+        id: PaneId,
+        other: PaneId,
+    };
+    pub const Result = struct {};
+};
+
+/// Puts a new pane in the place of a pane (Restart Session). The focus and
+/// the zoom go to the new pane. The old pane leaves the model.
+pub const PaneReplace = struct {
+    pub const name = "pane.replace";
+    pub const doc = "Puts a new pane in the place of a pane.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .id = "The pane to replace.",
+            .new = "The new pane, with the id that the client made.",
+        };
+
+        id: PaneId,
+        new: model.Pane,
+    };
+    pub const Result = struct {
+        pub const field_doc = .{ .panes = "The panes that left the model." };
+
+        panes: []const RemovedPane = &.{},
+    };
+};
+
+/// Changes the fields of a pane that are not null: the folders that a new
+/// session of the pane starts in.
+pub const PaneSet = struct {
+    pub const name = "pane.set";
+    pub const doc = "Sets the working directory of a pane.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .id = "The pane.",
+            .cwd = "The working directory of the shell of the pane.",
+            .host_session_dir = "For a remote pane, the folder of its shell on the host.",
+        };
+
+        id: PaneId,
+        cwd: ?[]const u8 = null,
+        host_session_dir: ?[]const u8 = null,
+    };
+    pub const Result = struct {};
+};
+
+/// Puts a new tree of panes in a tab (Apply Layout). A pane of the old tree
+/// can stay in the new one with its id. A pane that is not in the new tree
+/// leaves the model. The focus is `focused`, else the first pane.
+pub const TabLayout = struct {
+    pub const name = "tab.layout";
+    pub const doc = "Puts a new tree of panes in a tab.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{
+            .id = "The tab.",
+            .root = "The new tree. New panes and splits have ids that the client made.",
+            .focused = "The pane that gets the focus. Null is the first pane.",
+        };
+
+        id: TabId,
+        root: model.SplitNode,
+        focused: ?PaneId = null,
+    };
+    pub const Result = struct {
+        pub const field_doc = .{ .panes = "The panes that left the model." };
+
+        panes: []const RemovedPane = &.{},
+    };
+};
+
+/// Makes every ratio of a tab even.
+pub const TabRebalance = struct {
+    pub const name = "tab.rebalance";
+    pub const doc = "Makes every ratio of the splits of a tab even.";
+    pub const since = 3;
+    pub const senders: []const Trust = &.{.local};
+
+    pub const Args = struct {
+        pub const field_doc = .{ .id = "The tab." };
+
+        id: TabId,
+    };
+    pub const Result = struct {};
+};
+
 /// The key window's selection. `tab` becomes the active tab of the
 /// project. A project with `sidebar: none` fails with `refused`.
 pub const SelectSet = struct {
@@ -1431,7 +1539,7 @@ pub const methods = .{
     ProjectSet,     ProjectReorder, ProjectRemove, TabCreate,    TabClose,      TabSet,         TabSelect,
     TabReorder,     TabMove,        TabMerge,      PaneSplit,    PaneClose,     PaneMove,       PaneSeparate,
     PaneFocus,      PaneZoom,       SplitRatio,    SelectSet,    ModelImport,   ModelReplace,   ModelOptions,
-    SessionWait,
+    SessionWait,    PaneSwap,       PaneReplace,   PaneSet,      TabLayout,     TabRebalance,
 };
 
 /// The methods that change the model. The server answers one of them sent
@@ -1440,7 +1548,7 @@ pub const model_writes = .{
     ProjectCreate, ProjectSet, ProjectReorder, ProjectRemove, TabCreate, TabClose,    TabSet,
     TabSelect,     TabReorder, TabMove,        TabMerge,      PaneSplit, PaneClose,   PaneMove,
     PaneSeparate,  PaneFocus,  PaneZoom,       SplitRatio,    SelectSet, ModelImport, ModelReplace,
-    ModelOptions,
+    ModelOptions,  PaneSwap,   PaneReplace,    PaneSet,       TabLayout, TabRebalance,
 };
 
 // ── Events ──────────────────────────────────────────────────────────────────

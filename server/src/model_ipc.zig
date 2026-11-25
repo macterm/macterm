@@ -328,6 +328,11 @@ fn apply(s: *Server, comptime M: type, mo: *Model, a: std.mem.Allocator, args: M
             }
             if (holder) |h| mo.selectTab(h.id, args.tab.?) catch |err| return modelError(err);
         },
+        m.PaneSwap => mo.swapPanes(args.id, args.other) catch |err| return modelError(err),
+        m.PaneReplace => _ = mo.replacePane(args.id, args.new) catch |err| return modelError(err),
+        m.PaneSet => mo.setPaneFolders(args.id, args.cwd, args.host_session_dir) catch |err| return modelError(err),
+        m.TabLayout => _ = mo.setTabRoot(args.id, args.root, args.focused) catch |err| return modelError(err),
+        m.TabRebalance => mo.rebalanceTab(args.id) catch |err| return modelError(err),
         m.ModelImport => return putModel(s, a, args.model, .{ .import = args.source }),
         m.ModelReplace => return putModel(s, a, args.model, .replace),
         else => @compileError("not a model request: " ++ M.name),
