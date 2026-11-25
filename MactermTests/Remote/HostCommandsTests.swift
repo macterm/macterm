@@ -331,6 +331,45 @@ struct HostCommandsTests {
         #expect(home.nothingRan)
     }
 
+    // MARK: - The folder list of a remote folder field (0614)
+
+    @Test(arguments: ["/bin/sh", "/bin/csh"])
+    func the_folder_list_names_the_folders_under_a_login_shell(_ loginShell: String) throws {
+        let home = try Home()
+        try home.makeFile("notes.txt")
+        try FileManager.default.createDirectory(at: home.url.appendingPathComponent(".hidden"), withIntermediateDirectories: true)
+        let command = try #require(HostCommands.folderListCommand(directory: "~/"))
+        let result = try Self.run([loginShell, "-c", command], environment: home.environment, in: home.url)
+        let list = try #require(HostCommands.folderList(status: result.status, output: result.output))
+        #expect(list.path == home.url.path, "the first line is the folder from /, with ~ resolved")
+        let expected = HostCommandsTests.folders.compactMap(\.made) + [".hidden"]
+        #expect(Set(list.names) == Set(expected), "folders only, hidden ones too: \(result.output)")
+        // A folder with an odd name is listed from inside it too.
+        for (sent, made) in Self.folders where made != nil {
+            let inner = try #require(HostCommands.folderListCommand(directory: sent))
+            let answer = try Self.run([loginShell, "-c", inner], environment: home.environment, in: home.url)
+            #expect(HostCommands.folderList(status: answer.status, output: answer.output)?.path == home.expected(made), "\(sent)")
+        }
+        for sent in ["~/none", "/nonexistent;touch pwned", "~$(touch pwned)/x", "-n", "~/notes.txt"] {
+            let missing = try #require(HostCommands.folderListCommand(directory: sent))
+            #expect(try Self.run([loginShell, "-c", missing], environment: home.environment, in: home.url).status == 3, "\(sent)")
+        }
+        #expect(home.nothingRan)
+    }
+
+    @Test
+    func the_folder_list_keeps_only_names_under_the_cap() {
+        let names = (0 ..< HostCommands.folderListCap + 5).map { "f\($0)" }
+        let output = "/srv\n" + names.joined(separator: "\n") + "\n"
+        let list = HostCommands.folderList(status: 0, output: output)
+        #expect(list?.path == "/srv")
+        #expect(list?.names.count == HostCommands.folderListCap)
+        #expect(HostCommands.folderList(status: 0, output: "/srv\n\na\n.\n..\nb/c\n")?.names == ["a"])
+        #expect(HostCommands.folderList(status: 3, output: "/srv\na\n") == nil, "a folder that is not there")
+        #expect(HostCommands.folderList(status: nil, output: "/srv\na\n") == nil, "no answer in time")
+        #expect(HostCommands.folderList(status: 0, output: "motd text\n") == nil, "the first line must be a path")
+    }
+
     @Test
     func only_the_scripts_own_answers_count() {
         #expect(RemoteHosts.folderCheck(status: 0) == .exists)

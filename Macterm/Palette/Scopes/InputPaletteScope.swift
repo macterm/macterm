@@ -54,6 +54,11 @@ struct PaletteInput: Hashable {
     /// gets the palette's context, so that an action can reach the app and
     /// the projects.
     let check: @MainActor (String, PaletteContext) -> PaletteInputCheck
+    /// The host's folder listings of a remote folder field (0614). Its
+    /// listings come after a keystroke, so the screen draws again when one
+    /// comes, and stops the requests when it leaves. nil for any other
+    /// field.
+    let hostFolders: HostFolderLister?
 
     init(
         id: String,
@@ -63,6 +68,7 @@ struct PaletteInput: Hashable {
         summary: String = "",
         completions: @escaping @MainActor (String) -> [PaletteCompletion] = { _ in [] },
         choices: @escaping @MainActor (String, PaletteContext) -> [PaletteInputChoice] = { _, _ in [] },
+        hostFolders: HostFolderLister? = nil,
         check: @escaping @MainActor (String, PaletteContext) -> PaletteInputCheck
     ) {
         self.id = id
@@ -72,6 +78,7 @@ struct PaletteInput: Hashable {
         self.summary = summary
         self.completions = completions
         self.choices = choices
+        self.hostFolders = hostFolders
         self.check = check
     }
 
@@ -203,6 +210,20 @@ final class InputPaletteScope: PaletteScope {
     init(input: PaletteInput) {
         self.input = input
         text = input.initialValue
+    }
+
+    func activate(context _: PaletteContext, onChange: @escaping @MainActor () -> Void) {
+        input.hostFolders?.onChange = onChange
+    }
+
+    func deactivate() {
+        input.hostFolders?.cancel()
+        input.hostFolders?.onChange = nil
+    }
+
+    /// A host listing in flight shows the spinner in the field.
+    var loading: PaletteLoading? {
+        input.hostFolders?.isListing == true ? PaletteLoading(message: String(localized: "Listing folders")) : nil
     }
 
     var placeholder: String { input.prompt }
