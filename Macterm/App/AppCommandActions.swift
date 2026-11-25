@@ -299,6 +299,18 @@ extension AppCommand {
             return { view.explainOutput() }
         case .newProject:
             return { ctx.appState.toggleCommandPalette(scope: .input(.newProject)) }
+        // The tree of projects and tabs (design 013). Move to Project acts
+        // on the node that the key window shows; the others act on the
+        // active project, as the items of its sidebar menu do.
+        case .newProjectInside:
+            guard let current else { return nil }
+            return { ctx.appState.newProject(inside: current, store: ctx.projectStore, in: ctx.appState.keyWindow) }
+        case .moveToProject:
+            guard let scope = paletteScope(in: ctx) else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: scope) }
+        case .moveOutOfProject:
+            guard let current, current.parent != nil else { return nil }
+            return { ctx.projectStore.moveOut(current.id) }
         case .newRemoteProject:
             return { ctx.appState.isNewRemoteProjectSheetPresented = true }
         case .removeProject:
@@ -477,11 +489,11 @@ extension AppCommand {
     }
 
     /// The palette screen that this command opens now: a built-in screen
-    /// (`paletteScope`), or the input screen that it asks its value on
-    /// (`inputScope(in:)`). Nil when the command opens no screen.
+    /// (`paletteScope(in:)`), or the input screen that it asks its value
+    /// on (`inputScope(in:)`). Nil when the command opens no screen.
     @MainActor
     func paletteScreen(in ctx: AppCommandContext) -> PaletteScopeID? {
-        paletteScope ?? inputScope(in: ctx)
+        paletteScope(in: ctx) ?? inputScope(in: ctx)
     }
 
     /// Why `project` has no Files screen, or nil when it has one: the index

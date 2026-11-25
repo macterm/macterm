@@ -122,7 +122,7 @@ struct SidebarTreeTests {
     @Test
     func path_name_joins_the_projects_above() {
         let f = makeFixture()
-        #expect(SidebarTree.pathName(of: f.c, in: f.store) == "g / inner / c")
+        #expect(SidebarTree.pathName(of: f.c, in: f.store) == "g/inner/c")
         #expect(SidebarTree.pathName(of: f.g, in: f.store) == "g")
     }
 }
