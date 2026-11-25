@@ -133,18 +133,11 @@ struct PaletteResponderTests {
     }
 
     private func makeFixture() -> Fixture {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-palette-responder-tests-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: tmp.appendingPathComponent("workspaces.json")),
-            projectFiles: ProjectFileStore(directoryURL: tmp.appendingPathComponent("projects", isDirectory: true))
-        )
+        let state = TestModel.appState()
         let window = WindowState()
         state.registerWindow(window)
-        let projects = ProjectStore(fileURL: tmp.appendingPathComponent("projects.json"))
-        let project = Project(name: "proj", path: "/tmp", sortOrder: 0)
-        projects.add(project)
-        state.selectProject(project)
+        let projects = TestModel.projectStore(state)
+        let project = TestModel.project(state)
         state.isCommandPaletteVisible = true
         return Fixture(
             state: state,
@@ -183,7 +176,7 @@ struct PaletteResponderTests {
         let fx = makeFixture()
         let restore = bind(.renameTab, to: "cmd+r")
         defer { restore() }
-        let tab = try #require(fx.state.workspaces[fx.project.id]?.activeTab)
+        let tab = try #require(fx.state.liveTabs[fx.project.id]?.activeTab)
         let rename = try #require(PaletteInput.renameTab(tab.id, in: fx.project.id, appState: fx.state))
         #expect(fx.window.paletteScope == nil)
 
@@ -204,7 +197,7 @@ struct PaletteResponderTests {
         let fx = makeFixture()
         let restore = bind(action, to: chord)
         defer { restore() }
-        let workspace = try #require(fx.state.workspaces[fx.project.id])
+        let workspace = try #require(fx.state.liveTabs[fx.project.id])
         let tabs = workspace.tabs.map(\.id)
         let panes = workspace.activeTab?.splitRoot.allPanes().map(\.id)
 
