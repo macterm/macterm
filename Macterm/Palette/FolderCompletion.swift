@@ -86,8 +86,13 @@ enum FolderCompletion {
 @MainActor
 final class HostFolderLister {
     private let list: @MainActor (String) async -> FolderListing?
+    private let probe: (@MainActor (String) async -> RemoteHosts.FolderCheck?)?
     /// The listings that came, the newest last.
     private var listings: [(folder: String, listing: FolderListing)] = []
+    /// The answers of `check(_:)` that came, the newest last.
+    private var checks: [(path: String, answer: RemoteHosts.FolderCheck)] = []
+    /// Whether the host answered a request once: its connection is up.
+    private(set) var hasAnswered = false
     /// When a request for a folder gave no answer: the lister asks again
     /// only after `retryAfter`, so that a host that is down is not asked
     /// at each redraw.
@@ -104,9 +109,14 @@ final class HostFolderLister {
     static let retryAfter: Duration = .seconds(5)
 
     /// `list` asks the host for the listing of a folder as typed
-    /// (`RemoteHosts.listFolders`).
-    init(list: @escaping @MainActor (String) async -> FolderListing?) {
+    /// (`RemoteHosts.listFolders`). `probe` asks what a path is
+    /// (`RemoteHosts.probeFolder`), for `check(_:)`.
+    init(
+        list: @escaping @MainActor (String) async -> FolderListing?,
+        probe: (@MainActor (String) async -> RemoteHosts.FolderCheck?)? = nil
+    ) {
         self.list = list
+        self.probe = probe
     }
 
     /// The listing of `folder` (as typed, with a slash at the end), or nil
@@ -124,10 +134,42 @@ final class HostFolderLister {
                 requests[folder] = nil
                 if let answer {
                     failed[folder] = nil
+                    hasAnswered = true
                     listings.append((folder, answer))
                     if listings.count > Self.kept { listings.removeFirst() }
                 } else {
                     failed[folder] = .now
+                }
+                onChange?()
+            }
+        }
+        return nil
+    }
+
+    /// What the path `path` is on the host, or nil while it is asked, when
+    /// the host gave no answer, or with no `probe`. A screen asks it for a
+    /// path that its listing does not show, so that it can tell a file from
+    /// a missing path as the user types. The rules of `listing(_:)` apply.
+    func check(_ path: String) -> RemoteHosts.FolderCheck? {
+        guard let probe else { return nil }
+        if let index = checks.firstIndex(where: { $0.path == path }) {
+            return checks[index].answer
+        }
+        let key = "check:" + path
+        if let when = failed[key], ContinuousClock.now - when < Self.retryAfter { return nil }
+        if requests[key] == nil {
+            requests[key] = Task { [weak self] in
+                guard let self else { return }
+                let answer = await probe(path)
+                guard !Task.isCancelled else { return }
+                requests[key] = nil
+                if let answer {
+                    failed[key] = nil
+                    hasAnswered = true
+                    checks.append((path, answer))
+                    if checks.count > Self.kept { checks.removeFirst() }
+                } else {
+                    failed[key] = .now
                 }
                 onChange?()
             }

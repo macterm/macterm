@@ -162,9 +162,10 @@ struct PaletteInputAction {
     let title: String
     /// A check that takes time (a host checks a remote folder), with the
     /// line that the screen shows while it runs. Its answer is nil when the
-    /// action can run, else the reason, which shows as a refusal. Nil for
-    /// an action with no such check.
-    var check: (message: String, answer: @MainActor () async -> String?)?
+    /// action can run, else the refusal. A `retryable` refusal (no
+    /// connection) has Retry, which runs the check again. Nil for an action
+    /// with no such check.
+    var check: PaletteInputCheckStep?
     /// Do the action, or refuse it. On `.done` the palette closes. An
     /// action that must run after the palette has closed and focus is back
     /// in the pane sets `AppState.postPaletteAction`.
@@ -172,13 +173,21 @@ struct PaletteInputAction {
 
     init(
         title: String,
-        check: (message: String, answer: @MainActor () async -> String?)? = nil,
+        check: PaletteInputCheckStep? = nil,
         run: @escaping @MainActor () -> PaletteCommit
     ) {
         self.title = title
         self.check = check
         self.run = run
     }
+}
+
+/// The check of an action that takes time (`PaletteInputAction.check`).
+struct PaletteInputCheckStep {
+    /// What the screen shows while the check runs.
+    let message: String
+    /// Nil when the action can run, else the refusal.
+    let answer: @MainActor () async -> PaletteFailure?
 }
 
 /// A row of an input screen that is an action itself
@@ -218,7 +227,16 @@ final class InputPaletteScope: PaletteScope {
     private(set) var action: PaletteInputAction?
     /// The reason of an action that refused, and the text it was for: the
     /// line goes when the text changes.
-    private var refusal: (text: String, reason: String)?
+    private var refusal: Refusal?
+
+    /// An action that refused, for the text it refused: the action is kept
+    /// when a retry can run its check again.
+    private struct Refusal {
+        let text: String
+        let failure: PaletteFailure
+        let action: PaletteInputAction?
+    }
+
     private var completions: [PaletteCompletion] = []
     private var choices: [PaletteInputChoice] = []
     /// True until the screen has shown once: only then does the panel
@@ -295,13 +313,16 @@ final class InputPaletteScope: PaletteScope {
         case let .notice(text): notice = text
         case .nothing: break
         }
-        // While a check runs, the action row is not offered: the check's
-        // message is then alone and fills the results. After a refusal the
-        // row comes back under the reason, so that Return can try again.
-        if checkLoading != nil { action = nil }
+        // While a check runs, and while a refusal stands for this text, the
+        // action row is not offered: the message is then alone and fills
+        // the results, as the notice of a value that is not valid does. A
+        // refusal that can change (no connection) has Retry instead.
+        if checkLoading != nil || refusal != nil { action = nil }
         if checkLoading != nil {
             failure = nil
-        } else if let reason = refusal?.reason ?? notice {
+        } else if let refusal {
+            failure = refusal.failure
+        } else if let reason = notice {
             failure = PaletteFailure(title: reason, retryable: false)
         } else {
             failure = nil
@@ -383,7 +404,17 @@ final class InputPaletteScope: PaletteScope {
     /// Run `check`, then `action` when it says yes, else show its reason.
     /// The text that the check is for keeps the reason: the line goes
     /// when the text changes.
-    private func startCheck(_ check: (message: String, answer: @MainActor () async -> String?), of action: PaletteInputAction) {
+    /// Retry and ⌘R on a refusal that can change: run the check of its
+    /// action again.
+    func retry() {
+        guard checkTask == nil, let refusal, refusal.failure.retryable,
+              let action = refusal.action, let check = action.check
+        else { return }
+        startCheck(check, of: action)
+        onChange?()
+    }
+
+    private func startCheck(_ check: PaletteInputCheckStep, of action: PaletteInputAction) {
         let checkedText = text
         self.checkedText = checkedText
         checkLoading = PaletteLoading(message: check.message)
@@ -391,14 +422,14 @@ final class InputPaletteScope: PaletteScope {
         failure = nil
         self.action = nil
         checkTask = Task { [weak self] in
-            let reason = await check.answer()
+            let refused = await check.answer()
             guard let self, !Task.isCancelled, self.checkedText == checkedText else { return }
             checkTask = nil
             self.checkedText = nil
             checkLoading = nil
-            if let reason {
-                refusal = (checkedText, reason)
-                failure = PaletteFailure(title: reason, retryable: false)
+            if let refused {
+                refusal = Refusal(text: checkedText, failure: refused, action: action)
+                failure = refused
             } else if run(action) == .closed {
                 closeRequested = true
             }
@@ -413,8 +444,9 @@ final class InputPaletteScope: PaletteScope {
             failure = nil
             return .closed
         case let .refused(reason):
-            refusal = (text, reason)
-            failure = PaletteFailure(title: reason, retryable: false)
+            let refused = PaletteFailure(title: reason, retryable: false)
+            refusal = Refusal(text: text, failure: refused, action: nil)
+            failure = refused
             return .refused
         }
     }

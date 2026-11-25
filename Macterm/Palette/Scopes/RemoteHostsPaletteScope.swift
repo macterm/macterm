@@ -114,13 +114,17 @@ final class RemoteHostsPaletteScope: PaletteScope {
     /// action. Return or a click adds the folder as a project, with no
     /// check, because the host listed it. Tab goes into it.
     ///
-    /// A path with no folder row gets the action row
-    /// `New Project "devbox:~/api"`. This occurs when the host gives no
-    /// list (no connection up, no answer in time), or when no listed
-    /// folder matches. The row checks the path on the host
-    /// (`RemoteHosts.refusal`). A missing folder or a file then shows the
-    /// notice of `PathProblem`, as on a local screen. The list has only
-    /// folders, so only the host can tell a file from a missing path.
+    /// A path that no listed folder matches is asked about as the user
+    /// types (`HostFolderLister.check`), because the list has folders only.
+    /// A missing path or a file then shows the notice of `PathProblem`,
+    /// alone and centered, as on a local screen (Ethan, 0579, 0593).
+    ///
+    /// The action row `New Project "devbox:~/api"` is for a path that the
+    /// host did not answer about as the user typed (no connection up, no
+    /// answer in time). Return on it checks the path on the host
+    /// (`RemoteHosts.checkFolder`), which can log in. A missing path or a
+    /// file then shows the same notice. No connection shows its reason
+    /// with Retry.
     ///
     /// A new project is named by its folder
     /// (`ProjectPath.remoteDisplayName`) and is always new: a folder can
@@ -132,9 +136,17 @@ final class RemoteHostsPaletteScope: PaletteScope {
         listFolders: @escaping @MainActor (String, String) async -> FolderListing? = {
             await RemoteHosts.shared.listFolders($0, destination: $1)
         },
-        refusal: @escaping @MainActor (String) async -> String? = { await RemoteHosts.shared.refusal(forNewProjectPath: $0) }
+        probeFolder: @escaping @MainActor (String, String) async -> RemoteHosts.FolderCheck? = {
+            await RemoteHosts.shared.probeFolder($0, destination: $1)
+        },
+        folderCheck: @escaping @MainActor (String, String) async -> RemoteHosts.FolderCheck = {
+            await RemoteHosts.shared.checkFolder($0, destination: $1)
+        }
     ) -> PaletteInput {
-        let lister = HostFolderLister { folder in await listFolders(folder, destination) }
+        let lister = HostFolderLister(
+            list: { folder in await listFolders(folder, destination) },
+            probe: { path in await probeFolder(path, destination) }
+        )
         let appState = context.appState
         let projectStore = context.projectStore
         return PaletteInput(
@@ -160,31 +172,62 @@ final class RemoteHostsPaletteScope: PaletteScope {
                 case let rows? where !rows.isEmpty:
                     // The folder rows are the action.
                     return .nothing
+                case .some:
+                    // The host listed the folders and none matches: ask what
+                    // the path is.
+                    switch lister.check(folder) {
+                    case .missing: return .notice(PathProblem.missing.notice(for: folder))
+                    case .notDirectory: return .notice(PathProblem.notDirectory.notice(for: folder))
+                    case nil where lister.isListing: return .nothing
+                    default: break
+                    }
                 case nil where lister.isListing:
                     return .nothing
-                default:
+                case nil:
                     break
                 }
-                // No folder row: the typed path is the action, and the host
-                // checks it when it runs.
-                let title = String(
-                    localized: "palette.remoteFolder.action",
-                    defaultValue: "New Project \"\(path)\"",
-                    comment: "Command palette, New Remote Project: the action row that adds the typed folder of the host"
-                )
-                return .action(PaletteInputAction(
-                    title: title,
-                    check: (
-                        message: String(localized: "Checking the folder on \(destination)"),
-                        answer: {
-                            let answer = await refusal(path)
-                            if answer != nil { logger.info("new remote project \(path, privacy: .public): not added") }
-                            return answer
-                        }
-                    ),
-                    run: { addProject(path, appState: appState, projectStore: projectStore) }
-                ))
+                return .action(checkedAction(
+                    path: path,
+                    destination: destination,
+                    connected: lister.hasAnswered,
+                    folderCheck: folderCheck
+                ) { addProject(path, appState: appState, projectStore: projectStore) })
             }
+        )
+    }
+
+    /// The action row `New Project "devbox:~/api"`: it checks the folder on
+    /// the host, then adds the project. Its message is `Connecting to …`
+    /// until the host has answered once, and then `Checking the folder on
+    /// …`.
+    private static func checkedAction(
+        path: String,
+        destination: String,
+        connected: Bool,
+        folderCheck: @escaping @MainActor (String, String) async -> RemoteHosts.FolderCheck,
+        add: @escaping @MainActor () -> PaletteCommit
+    ) -> PaletteInputAction {
+        // The folder as the parser reads it from `path`.
+        var folder = path
+        if case let .remote(_, _, directory) = ProjectPath.parse(path) { folder = directory }
+        let title = String(
+            localized: "palette.remoteFolder.action",
+            defaultValue: "New Project \"\(path)\"",
+            comment: "Command palette, New Remote Project: the action row that adds the typed folder of the host"
+        )
+        let message = connected
+            ? String(localized: "Checking the folder on \(destination)")
+            : String(localized: "Connecting to \(destination)…")
+        return PaletteInputAction(
+            title: title,
+            check: PaletteInputCheckStep(message: message) {
+                let answer = await folderCheck(folder, destination)
+                guard let reason = RemoteHosts.refusal(answer, directory: folder, destination: destination) else { return nil }
+                logger.info("new remote project \(path, privacy: .public): not added")
+                // Only no connection can change on a retry.
+                return PaletteFailure(title: reason, retryable: answer == .unreachable)
+            },
+            run: add
         )
     }
 

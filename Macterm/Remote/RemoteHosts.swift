@@ -321,6 +321,20 @@ final class RemoteHosts {
         return FolderListing(path: list.path, names: list.names)
     }
 
+    /// What `directory` is on the host, for a remote folder field as the
+    /// user types (`HostFolderLister.check`). Over the host's ssh
+    /// connection, only one that is up, as `listFolders`: a keystroke never
+    /// asks for a login and never connects. nil when no connection is up or
+    /// no answer came in `timeout`.
+    func probeFolder(_ directory: String, destination: String, timeout: Duration = .seconds(2)) async -> FolderCheck? {
+        guard SSHConnections.isValidDestination(destination),
+              let command = HostCommands.folderCheckCommand(directory: directory),
+              let outcome = try? await connections.run(destination, command, login: false, timeout: timeout)
+        else { return nil }
+        let answer = Self.folderCheck(status: outcome.status)
+        return answer == .unreachable ? nil : answer
+    }
+
     /// `checkFolder` for the scp-style path of a new remote project in the
     /// GUI (New Remote Project in the palette, Create Project of a layout file in
     /// Settings): nil when the folder is there, else the

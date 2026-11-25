@@ -200,7 +200,7 @@ struct InputPaletteScopeTests {
         let action = try #require(rows(scope, "taken").first)
         #expect(scope.press(action) == .refused)
         #expect(scope.failure?.title == "The name is taken.")
-        #expect(rows(scope, "taken").map(\.title) == ["Make \"taken\""], "the row stays under the reason, so Return can try again")
+        #expect(rows(scope, "taken").isEmpty, "a refused text has no action row: the notice is alone")
         #expect(scope.failure?.title == "The name is taken.", "a redraw of the same text keeps the reason")
 
         let other = try #require(rows(scope, "free").first)
@@ -218,14 +218,14 @@ struct InputPaletteScopeTests {
 
     /// A check whose answer the test gives: nil to run, else the reason.
     final class Gate {
-        var continuation: CheckedContinuation<String?, Never>?
+        var continuation: CheckedContinuation<PaletteFailure?, Never>?
     }
 
     private func checkingInput(gate: Gate, log: Log) -> PaletteInput {
         PaletteInput(id: "test.check", title: "Check", prompt: "Folder") { text, _ in
             .action(PaletteInputAction(
                 title: "Add \"\(text)\"",
-                check: (message: "Checking \(text)…", answer: { await withCheckedContinuation { gate.continuation = $0 } }),
+                check: PaletteInputCheckStep(message: "Checking \(text)…") { await withCheckedContinuation { gate.continuation = $0 } },
                 run: {
                     log.committed.append(text)
                     return .done
@@ -274,11 +274,13 @@ struct InputPaletteScopeTests {
 
         #expect(pressAction(scope, "~/none") == .checking)
         try await waitUntil { gate.continuation != nil }
-        gate.continuation?.resume(returning: "Path ~/none doesn't exist")
+        gate.continuation?.resume(returning: PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
         try await waitUntil { scope.loading == nil }
         #expect(!scope.takeCloseRequest())
         #expect(scope.failure == PaletteFailure(title: "Path ~/none doesn't exist", retryable: false))
-        #expect(rows(scope, "~/none").map(\.title) == ["Add \"~/none\""], "the row stays under the reason")
+        #expect(rows(scope, "~/none").isEmpty, "the refusal is alone and centered")
+        scope.retry()
+        #expect(scope.loading == nil, "a refusal that cannot change has no Retry")
         #expect(scope.failure != nil, "a redraw of the same text keeps the reason")
     }
 
