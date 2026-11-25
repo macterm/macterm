@@ -138,7 +138,7 @@ struct InputPaletteScopeTests {
         var ran: [String] = []
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.choices",
-            pill: PalettePill(title: "Pick", icon: "folder"),
+            title: "Pick",
             prompt: "Pick",
             choices: { text, _ in
                 (text == "*" ? ["alpha", "beta"] : []).map { name in
@@ -164,7 +164,7 @@ struct InputPaletteScopeTests {
     func tab_skips_a_value_that_the_field_has_and_an_action_row_rests_before_a_choice() {
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.tab",
-            pill: PalettePill(title: "Pick", icon: "folder"),
+            title: "Pick",
             prompt: "Pick",
             choices: { _, _ in
                 ["a/", "a/b/"].map { PaletteInputChoice(item: PaletteItem(id: "pick:\($0)", title: $0) {}, value: $0) }
@@ -280,7 +280,7 @@ struct InputPaletteScopeTests {
         // The screen draws them as path rows: the subtitle is cut in the middle.
         let scope = InputPaletteScope(input: PaletteInput(
             id: "test.path",
-            pill: PalettePill(title: "Folder", icon: "folder"),
+            title: "Folder",
             prompt: "Folder",
             completions: { PaletteInput.pathCompletions($0, action: .changeTo) },
             check: { _ in .nothing }
