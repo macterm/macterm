@@ -15,6 +15,10 @@ struct PaletteItem: Identifiable {
     let id: String
     let title: String
     let subtitle: String?
+    /// The subtitle ends in a path (`PathRow`): a long one is cut in the
+    /// middle, so the end of the path stays. Other subtitles are cut at the
+    /// end.
+    let subtitleIsPath: Bool
     let category: String?
     let keybind: String?
     /// The keybind split into individual glyphs (e.g. `["⇧", "⌘", "A"]`) so the
@@ -54,6 +58,7 @@ struct PaletteItem: Identifiable {
         id: String? = nil,
         title: String,
         subtitle: String? = nil,
+        subtitleIsPath: Bool = false,
         category: String? = nil,
         keybind: String? = nil,
         keybindSymbols: [String]? = nil,
@@ -70,6 +75,7 @@ struct PaletteItem: Identifiable {
         self.id = id ?? "\(category ?? "")/\(title)"
         self.title = title
         self.subtitle = subtitle
+        self.subtitleIsPath = subtitleIsPath
         self.category = category
         self.keybind = keybind
         self.keybindSymbols = keybindSymbols
@@ -93,6 +99,7 @@ struct PaletteItem: Identifiable {
             id: id,
             title: title,
             subtitle: subtitle,
+            subtitleIsPath: subtitleIsPath,
             category: category,
             keybind: keybind,
             keybindSymbols: keybindSymbols,
