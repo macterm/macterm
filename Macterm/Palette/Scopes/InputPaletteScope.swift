@@ -195,6 +195,8 @@ final class InputPaletteScope: PaletteScope {
     /// An action ran after its check: the panel closes the palette at its
     /// next redraw (`takeCloseRequest`).
     private var closeRequested = false
+    /// The text that the check in flight is for.
+    private var checkedText: String?
     private var onChange: (@MainActor () -> Void)?
 
     /// The id of the action row.
@@ -215,8 +217,13 @@ final class InputPaletteScope: PaletteScope {
     }
 
     func deactivate() {
+        cancelCheck()
+    }
+
+    private func cancelCheck() {
         checkTask?.cancel()
         checkTask = nil
+        checkedText = nil
         loading = nil
     }
 
@@ -229,6 +236,9 @@ final class InputPaletteScope: PaletteScope {
 
     func sections(for query: PaletteQuery, context: PaletteContext) -> [PaletteSection] {
         text = query.raw
+        // A check is for the text it started on: new text stops it, so
+        // that its answer never runs the action of the old text.
+        if checkTask != nil, checkedText != text { cancelCheck() }
         if let refusal, refusal.text != text { self.refusal = nil }
         action = nil
         var notice: String?
@@ -329,12 +339,15 @@ final class InputPaletteScope: PaletteScope {
     /// when the text changes.
     private func startCheck(_ check: (message: String, answer: @MainActor () async -> String?), of action: PaletteInputAction) {
         let checkedText = text
+        self.checkedText = checkedText
         loading = PaletteLoading(message: check.message)
+        refusal = nil
         failure = nil
         checkTask = Task { [weak self] in
             let reason = await check.answer()
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, self.checkedText == checkedText else { return }
             checkTask = nil
+            self.checkedText = nil
             loading = nil
             if let reason {
                 refusal = (checkedText, reason)

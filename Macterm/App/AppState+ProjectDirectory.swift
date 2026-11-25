@@ -1,7 +1,7 @@
 import Foundation
 
-/// Change Project Directory: the one way to give a project another folder,
-/// on this Mac or on the project's host. Open panes and their sessions stay where they are; a new tab
+/// Change Project Directory: the one way to give a project another
+/// folder, on this Mac or on the project's host. Open panes and their sessions stay where they are; a new tab
 /// that starts in the project's folder starts in the new one.
 extension AppState {
     /// The palette screen of Change Project Directory for `project`. A
@@ -36,9 +36,13 @@ extension AppState {
                 title: AppCommand.changeProjectDirectory.title,
                 prompt: String(localized: "Type a folder path on \(destination)"),
                 check: { [self] text, _ in
-                    let folder = text.trimmingCharacters(in: .whitespaces)
+                    let folder = Self.hostFolder(text)
                     if folder.isEmpty {
                         return paneDirectoryAction(readPaneDirectory(), for: project, projectStore: projectStore)
+                    }
+                    // A session starts only in a folder from `/` or `~`.
+                    guard HostCommands.isSafeHostFolder(folder) else {
+                        return .notice(PathProblem.missing.notice(for: folder))
                     }
                     return .action(PaletteInputAction(
                         title: String(localized: "Change to \"\(folder)\""),
@@ -129,11 +133,25 @@ extension AppState {
     static func paneDirectoryOffer(_ directory: String?, for project: Project) -> String? {
         guard project.hasFolder, let directory, !directory.isEmpty else { return nil }
         if case let .remote(_, _, projectDirectory) = ProjectPath.parse(project.path) {
-            let trimmed = { (path: String) in path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path }
-            return trimmed(directory) == trimmed(projectDirectory) ? nil : trimmed(directory)
+            // The shell reports a path on the host. Anything else (a URL, a
+            // relative path) is not a folder that a session can start in.
+            let folder = hostFolder(directory)
+            guard HostCommands.isSafeHostFolder(folder) else { return nil }
+            return folder == hostFolder(projectDirectory) ? nil : folder
         }
         let normalized = ProjectPath.normalizedForStorage(directory)
         return normalized == ProjectPath.normalizedForStorage(project.path) ? nil : normalized
+    }
+
+    /// A folder on a host as Macterm stores it: no space at the ends, and
+    /// no slash at the end (except `/`), so that `~/api/` and `~/api` are
+    /// one folder.
+    static func hostFolder(_ text: String) -> String {
+        var folder = text.trimmingCharacters(in: .whitespaces)
+        while folder.count > 1, folder.hasSuffix("/") {
+            folder.removeLast()
+        }
+        return folder
     }
 
     /// Set the folder of a project to `path`. A local project: `~` expands,
@@ -151,7 +169,10 @@ extension AppState {
         }
         if case let .remote(user, host, _) = ProjectPath.parse(project.path) {
             let destination = HostCommands.destination(user: user, host: host)
-            guard let remotePath = ProjectPath.composeRemote(host: destination, directory: trimmed) else {
+            let folder = Self.hostFolder(trimmed)
+            guard HostCommands.isSafeHostFolder(folder),
+                  let remotePath = ProjectPath.composeRemote(host: destination, directory: folder)
+            else {
                 return .refused(PathProblem.missing.notice(for: trimmed))
             }
             projectStore.setPath(id: projectID, to: remotePath)

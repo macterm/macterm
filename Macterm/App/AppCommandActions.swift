@@ -56,7 +56,7 @@ extension AppCommand {
 
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
-    /// project is active, Change Project Directory for a remote project).
+    /// project is active).
     /// Single source of truth for execution — used by both the command
     /// palette and the menu bar so the two stay in sync.
     @MainActor

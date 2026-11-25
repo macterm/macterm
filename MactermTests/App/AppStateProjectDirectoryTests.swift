@@ -176,6 +176,8 @@ struct AppStateProjectDirectoryTests {
         let remote = Project(name: "remote", path: "devbox:~/proj", sortOrder: 0)
         #expect(AppState.paneDirectoryOffer("~/proj/", for: remote) == nil, "a remote pane in the project's folder")
         #expect(AppState.paneDirectoryOffer("/srv/app", for: remote) == "/srv/app")
+        #expect(AppState.paneDirectoryOffer("/home/me/proj/", for: remote) == "/home/me/proj", "an absolute path from the host's shell")
+        #expect(AppState.paneDirectoryOffer("file://devbox/srv", for: remote) == nil, "a URL is not a folder on the host")
     }
 
     @Test
@@ -268,9 +270,16 @@ struct AppStateProjectDirectoryTests {
 
         answer = .exists
         #expect(scope.press(items[0]) == .checking)
+        #expect(scope.failure == nil, "a new check hides the old reason")
         try await waitUntil { changes == 2 }
         #expect(scope.takeCloseRequest(), "a yes runs the action and closes the palette")
         #expect(path(of: fixture) == "me@devbox:~/api")
+
+        let slashed = scope.sections(for: PaletteQuery(raw: "/srv/web/"), context: context).flatMap(\.items)
+        #expect(scope.press(slashed[0]) == .checking)
+        try await waitUntil { changes == 3 }
+        #expect(path(of: fixture) == "me@devbox:/srv/web", "a slash at the end goes")
+        #expect(notice(input, "api", fixture) == "Path api doesn't exist", "a session starts only in a folder from / or ~")
 
         #expect(empty.run() == .done, "the pane row needs no check")
         #expect(path(of: fixture) == "me@devbox:~/other")
@@ -296,6 +305,30 @@ struct AppStateProjectDirectoryTests {
         scope.deactivate()
         try await Task.sleep(for: .milliseconds(400))
         #expect(path(of: fixture) == "devbox:~/proj", "a cancelled check changes nothing")
+        #expect(!scope.takeCloseRequest())
+    }
+
+    @Test
+    func new_text_stops_the_host_check_of_the_old_text() async throws {
+        let fixture = makeFixture(path: "devbox:~/proj")
+        let input = fixture.state.changeProjectDirectoryInput(
+            for: fixture.project,
+            projectStore: fixture.store,
+            paneDirectory: { nil },
+            folderCheck: { _, _ in
+                try? await Task.sleep(for: .milliseconds(200))
+                return .exists
+            }
+        )
+        let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
+        let scope = InputPaletteScope(input: input)
+        scope.activate(context: context) {}
+        let old = scope.sections(for: PaletteQuery(raw: "~/apj"), context: context).flatMap(\.items)
+        #expect(scope.press(old[0]) == .checking)
+        _ = scope.sections(for: PaletteQuery(raw: "~/api"), context: context)
+        #expect(scope.loading == nil, "new text stops the check")
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(path(of: fixture) == "devbox:~/proj", "the old text's answer runs nothing")
         #expect(!scope.takeCloseRequest())
     }
 
