@@ -133,7 +133,7 @@ final class ProjectStore {
             siblings.remove(at: current)
             if current < slot { slot -= 1 }
         }
-        guard move(id, into: parent, saving: false) else { return false }
+        guard move(id, into: parent) else { return false }
         siblings.insert(id, at: slot)
         reorder(parent: parent, ids: siblings)
         return true
