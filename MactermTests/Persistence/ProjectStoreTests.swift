@@ -51,13 +51,13 @@ struct ProjectStoreTests {
 
     /// The offset counts the rows before the move, as a drop slot does.
     @Test
-    func move_at_an_offset_puts_the_project_at_that_slot() {
+    func move_at_an_offset_puts_the_project_at_that_slot() throws {
         let store = makeStore()
-        let a = store.create(name: "a", path: "/tmp/a")
-        let b = store.create(name: "b", path: "/tmp/b")
-        let c = store.create(name: "c", path: "/tmp/c")
-        let parent = store.create(name: "parent", path: "/tmp/parent")
-        let inner = store.create(name: "inner", path: "/tmp/inner", parent: parent.id)
+        let a = try #require(store.create(name: "a", path: "/tmp/a"))
+        let b = try #require(store.create(name: "b", path: "/tmp/b"))
+        let c = try #require(store.create(name: "c", path: "/tmp/c"))
+        let parent = try #require(store.create(name: "parent", path: "/tmp/parent"))
+        let inner = try #require(store.create(name: "inner", path: "/tmp/inner", parent: parent.id))
 
         // Down among its own rows: the slot before c.
         #expect(store.move(a.id, into: nil, at: 2))
