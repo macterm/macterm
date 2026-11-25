@@ -21,16 +21,9 @@ struct AppStateProjectDirectoryTests {
     }
 
     private func makeFixture(path: String) -> Fixture {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("macterm-dir-ctx-\(UUID().uuidString)", isDirectory: true)
-        let state = AppState(
-            workspaceStore: WorkspaceStore(fileURL: base.appendingPathComponent("w.json")),
-            projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("projects", isDirectory: true))
-        )
-        let store = ProjectStore(fileURL: base.appendingPathComponent("p.json"))
-        let project = Project(name: "proj", path: path, sortOrder: 0)
-        store.add(project)
-        state.selectProject(project)
+        let state = TestModel.appState()
+        let store = TestModel.projectStore(state)
+        let project = TestModel.project(state, path: path)
         return Fixture(state: state, store: store, project: project)
     }
 

@@ -160,10 +160,7 @@ struct FolderCompletionTests {
             prompt: "Folder",
             hostFolders: lister
         ) { _, _ in .nothing })
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("macterm-hf-\(UUID().uuidString)")
-        let state = TestModel.appState(
-            projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("p", isDirectory: true))
-        )
+        let state = TestModel.appState()
         let context = PaletteContext(appState: state, projectStore: TestModel.projectStore(state))
         var redraws = 0
         scope.activate(context: context) { redraws += 1 }
