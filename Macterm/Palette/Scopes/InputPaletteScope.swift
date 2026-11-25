@@ -43,7 +43,7 @@ struct PaletteInput: Hashable {
     let summary: String
     /// The completions of the text in the field, best first.
     let completions: @MainActor (String) -> [PaletteCompletion]
-    /// The rows that are themselves actions, best first: Return or a click
+    /// The rows that are actions themselves, best first: Return or a click
     /// on one runs it, and Tab puts its `value` in the field. A folder
     /// screen gives the folder rows here, so that a folder row is the
     /// action (Ethan, 0594).
