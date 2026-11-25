@@ -321,6 +321,17 @@ final class RemoteHosts {
         return FolderListing(path: list.path, names: list.names)
     }
 
+    /// The folder of the process `pid` on the host (a session's shell), from
+    /// the host's server (`HostCommands.processFolderScript`, `run`). It
+    /// uses only a connection that is up, as every background read. nil
+    /// when no server is up, or no clear answer came in `timeout`.
+    func processFolder(pid: Int32, destination: String, timeout: Duration = .seconds(2)) async -> String? {
+        guard let result = await run(HostCommands.processFolderArgv(pid: pid), destination: destination, timeout: timeout) else {
+            return nil
+        }
+        return HostCommands.processFolder(code: result.code, output: String(decoding: result.output.bytes, as: UTF8.self))
+    }
+
     /// What `directory` is on the host, for a remote folder field as the
     /// user types (`HostFolderLister.check`). Over the host's ssh
     /// connection, only one that is up, as `listFolders`: a keystroke never

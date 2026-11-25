@@ -99,7 +99,7 @@ struct CommandSource: PaletteSource {
                 category: command.category.title,
                 score: 0,
                 isEnabled: false,
-                icon: command.paletteScope?.pill.icon,
+                icon: command.paletteIcon,
                 searchAliases: command.searchAliases,
                 action: {}
             )
@@ -116,7 +116,7 @@ struct CommandSource: PaletteSource {
             score: 0,
             // A command that is a palette screen, or asks its value on one,
             // opens it in place rather than closing the palette to reopen it.
-            opensScope: command.paletteScope(in: commandCtx) ?? command.inputScope(in: commandCtx),
+            opensScope: command.paletteScreen(in: commandCtx),
             searchAliases: command.searchAliases,
             action: rawAction
         )

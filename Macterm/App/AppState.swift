@@ -2252,27 +2252,6 @@ final class AppState {
         return nil
     }
 
-    /// Update the active project's path to wherever the focused pane currently
-    /// sits (via OSC 7 — `SurfaceRegistry.shared.view(of: pane).currentPwd`). Useful when a project
-    /// started in one directory but the user has settled into a subdirectory
-    /// and wants new tabs / persisted state to start there.
-    ///
-    /// No-op when there's no active project or no resolvable pwd. We don't
-    /// touch open panes or workspaces. They keep their current cwd. Future tabs
-    /// use the new directory when "New tab directory" is set to Project.
-    func replaceProjectPathWithCurrentDir(projectStore: ProjectStore) {
-        guard let projectID = activeProjectID,
-              let project = projectStore.projects.first(where: { $0.id == projectID }),
-              // Remote projects (#104): the reported pwd is a REMOTE
-              // directory — adopting it would corrupt the project's identity.
-              !project.isRemote,
-              let pane = focusedPane(for: projectID),
-              let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd,
-              !pwd.isEmpty
-        else { return }
-        projectStore.setPath(id: projectID, to: pwd)
-    }
-
     /// Point every window showing `projectID` at nothing.
     ///
     /// Removal ends the project's shells. A window left showing it would

@@ -106,9 +106,34 @@ struct FolderCompletionTests {
             try await waitUntil { changes == index + 1 }
         }
         #expect(lister.listing("f\(HostFolderLister.kept)/") != nil, "the newest stays")
-        #expect(lister.listing("f1/") != nil, "only the oldest goes")
+        #expect(lister.listing("f1/") != nil, "only the oldest goes, and a read keeps a listing")
         #expect(lister.listing("f0/") == nil, "the oldest went, and is asked again")
         #expect(lister.isListing)
+    }
+
+    @Test
+    func a_name_after_a_tilde_with_no_slash_gives_no_rows() {
+        let listing = { (_: String) in FolderListing(path: "/home/me", names: ["docs"]) }
+        #expect(FolderCompletion.rows(for: "~d", listing: listing) == nil, "~d names a home of another user, as locally")
+        #expect(FolderCompletion.rows(for: "~bob/d", listing: listing)?.map(\.fieldText) == ["~bob/docs/"])
+        #expect(PathCompleter.complete("~d") == nil)
+    }
+
+    @Test
+    func the_pane_folder_is_asked_once() async throws {
+        let lister = HostFolderLister { _ in nil }
+        var asked = 0
+        var changes = 0
+        lister.onChange = { changes += 1 }
+        #expect(lister.paneFolder {
+            asked += 1
+            return "/srv/app"
+        } == nil, "asked, not there yet")
+        #expect(lister.isListing, "the field shows the spinner meanwhile")
+        try await waitUntil { changes == 1 }
+        #expect(lister.paneFolder { nil } == "/srv/app", "the answer stays")
+        #expect(asked == 1)
+        #expect(!lister.isListing)
     }
 
     @Test
@@ -135,10 +160,7 @@ struct FolderCompletionTests {
             prompt: "Folder",
             hostFolders: lister
         ) { _, _ in .nothing })
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("macterm-hf-\(UUID().uuidString)")
-        let state = TestModel.appState(
-            projectFiles: ProjectFileStore(directoryURL: base.appendingPathComponent("p", isDirectory: true))
-        )
+        let state = TestModel.appState()
         let context = PaletteContext(appState: state, projectStore: TestModel.projectStore(state))
         var redraws = 0
         scope.activate(context: context) { redraws += 1 }

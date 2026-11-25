@@ -284,10 +284,21 @@ final class Pane: Identifiable {
         return owner != surfaceID
     }
 
+    /// The pid of a remote session's shell on its host, from the channel's
+    /// `state` message: the host's server reads that process's folder for
+    /// Change Project Directory (`RemoteHosts.processFolder`). nil for a
+    /// local pane, which keeps `sessionShell`, and for a plain ssh shell.
+    @ObservationIgnored
+    private(set) var hostShellPID: Int32?
+
     /// The channel's `state` message. A remote session's pid is on the
-    /// host, so it is not kept.
+    /// host: it is kept apart (`hostShellPID`), never as a local process.
     func receiveSessionState(_ state: MactermProtocol.State) {
-        guard !isRemote, state.shellPid > 0, state.shellPid <= Int64(Int32.max) else { return }
+        guard state.shellPid > 0, state.shellPid <= Int64(Int32.max) else { return }
+        if isRemote {
+            hostShellPID = Int32(state.shellPid)
+            return
+        }
         let tty = String(decoding: state.pty.bytes, as: UTF8.self)
         sessionShell = SessionShell(pid: pid_t(state.shellPid), ttyPath: tty.isEmpty ? nil : tty)
     }
@@ -533,6 +544,7 @@ final class Pane: Identifiable {
         foregroundReportIsShell = false
         lastAppliedForeground = nil
         sessionShell = nil
+        hostShellPID = nil
         isSessionRunning = false
         isShellAtPrompt = false
         // A notification whose pane no longer exists routes nowhere on tap, so

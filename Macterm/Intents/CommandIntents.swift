@@ -62,6 +62,7 @@ enum MactermKeybind: String, AppEnum {
     case toggleQuickTerminal = "toggle_quick_terminal"
     case renameTab = "rename_tab"
     case renameProject = "rename_project"
+    case changeProjectDirectory = "change_project_directory"
     case copySessionID = "copy_session_id"
     case capturePane = "capture_pane"
     case copyMode = "copy_mode"
@@ -135,6 +136,7 @@ enum MactermKeybind: String, AppEnum {
         .toggleQuickTerminal: "Toggle Quick Terminal",
         .renameTab: "Rename Current Tab",
         .renameProject: "Rename Current Project",
+        .changeProjectDirectory: "Change Project Directory",
         .copySessionID: "Copy Session ID",
         .capturePane: "Capture Pane",
         .copyMode: "Copy Mode",

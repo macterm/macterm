@@ -47,8 +47,7 @@ extension AppCommand {
              .resetZoom,
              .restartSession,
              .explainOutput,
-             .autofillPassword,
-             .replaceProjectPathWithCurrentDir:
+             .autofillPassword:
             true
         default:
             false
@@ -70,6 +69,10 @@ extension AppCommand {
             }
         case .renameProject:
             PaletteInput.renameProject(projectID, appState: ctx.appState, store: ctx.projectStore)
+        case .changeProjectDirectory:
+            ctx.projectStore.projects.first { $0.id == projectID }.map { project in
+                ctx.appState.changeProjectDirectoryInput(for: project, projectStore: ctx.projectStore)
+            }
         default:
             nil
         }
@@ -78,9 +81,9 @@ extension AppCommand {
 
     /// Returns the closure that performs this command, or nil if the command
     /// doesn't apply in the current context (e.g. tab/pane commands when no
-    /// project is active, "Replace path" when the pane's pwd matches the
-    /// project's). Single source of truth for execution — used by both the
-    /// command palette and the menu bar so the two stay in sync.
+    /// project is active).
+    /// Single source of truth for execution — used by both the command
+    /// palette and the menu bar so the two stay in sync.
     @MainActor
     func action(in ctx: AppCommandContext) -> (@MainActor () -> Void)? {
         if actsOnShownTab, ctx.appState.keyWindowShowsProjectScreen { return nil }
@@ -313,16 +316,12 @@ extension AppCommand {
             return {
                 ctx.appState.requestRemoveProject(projectID, store: ctx.projectStore)
             }
-        case .replaceProjectPathWithCurrentDir:
-            // Remote projects (#104): OSC 7 reports a directory on the REMOTE
-            // host — writing it into `Project.path` would corrupt the
-            // project's identity into a local-looking path.
-            guard let current, !current.isRemote,
-                  let pane = ctx.appState.focusedPane(for: current.id),
-                  let pwd = SurfaceRegistry.shared.view(of: pane)?.currentPwd, !pwd.isEmpty,
-                  current.path != pwd
-            else { return nil }
-            return { ctx.appState.replaceProjectPathWithCurrentDir(projectStore: ctx.projectStore) }
+        case .changeProjectDirectory:
+            // Always there for a project, local or remote, also when the pane
+            // is in the project's folder: only the screen's pane row hides
+            // then.
+            guard let scope = paletteScreen(in: ctx) else { return nil }
+            return { ctx.appState.toggleCommandPalette(scope: scope) }
         case .applyLayout:
             // Requires an applicable central file. `.invalid` stays enabled on
             // purpose: invoking it surfaces the parse-error dialog instead of
@@ -465,11 +464,28 @@ extension AppCommand {
                 ? String(localized: "Turn on Apple Intelligence in System Settings to explain output")
                 : nil
         }
-        guard self == .files,
-              let projectID = ctx.appState.activeProjectID,
+        guard let projectID = ctx.appState.activeProjectID,
               let current = ctx.projectStore.projects.first(where: { $0.id == projectID })
         else { return nil }
-        return Self.filesUnavailableReason(for: current)
+        switch self {
+        case .files: return Self.filesUnavailableReason(for: current)
+        default: return nil
+        }
+    }
+
+    /// The glyph of the command's palette row, also when the row is muted:
+    /// the pill glyph of the built-in screen that it opens. An input screen
+    /// has none.
+    var paletteIcon: PaletteIcon? {
+        paletteScope?.pill.icon
+    }
+
+    /// The palette screen that this command opens now: a built-in screen
+    /// (`paletteScope(in:)`), or the input screen that it asks its value
+    /// on (`inputScope(in:)`). Nil when the command opens no screen.
+    @MainActor
+    func paletteScreen(in ctx: AppCommandContext) -> PaletteScopeID? {
+        paletteScope(in: ctx) ?? inputScope(in: ctx)
     }
 
     /// Why `project` has no Files screen, or nil when it has one: the index
