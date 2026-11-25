@@ -107,9 +107,13 @@ final class ProjectStore {
         guard let project = row(id), isPlace(parent) else { return false }
         if let parent, parent == id || ancestors(of: parent).contains(id) { return false }
         guard project.parent != parent else { return true }
+        let oldParent = project.parent
         guard writer.projectSet(id, parent: .some(parent)) else { return false }
-        // The server keeps the order number: put the project at the end.
+        // The server keeps the order number: put the project at the end, and
+        // number the rows that it left from 0 again.
         writer.projectReorder(parent: parent, ids: children(of: parent).map(\.id).filter { $0 != id } + [id])
+        let left = children(of: oldParent).map(\.id)
+        if !left.isEmpty { writer.projectReorder(parent: oldParent, ids: left) }
         changed()
         return true
     }

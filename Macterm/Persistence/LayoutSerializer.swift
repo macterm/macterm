@@ -1,8 +1,7 @@
 import Foundation
 
 /// Serializes the live tabs of a project back into a declarative `LayoutFile` — the
-/// `save` direction, inverse of `LayoutBuilder`. Mirrors
-/// `WorkspaceSerializer.snapshotNode`: walks the live split tree and emits
+/// `save` direction, inverse of `LayoutBuilder`. Walks the live split tree and emits
 /// `LayoutNode`s, recording each pane's cwd (project-relative) and declared
 /// `run` command.
 @MainActor
@@ -35,7 +34,7 @@ enum LayoutSerializer {
     }
 
     /// Capture one live tab as a pinned declaration (`PinnedTabRecord`'s
-    /// respawn recipe). Same walk and seams as `layout(for:)`, with one
+    /// respawn recipe). Same walk and seams as `layout(tabs:projectName:projectRoot:)`, with one
     /// structural difference: pinned tabs have NO project root, so every
     /// leaf's `cwd` is self-contained (`CwdStyle.selfContained`).
     /// `LayoutBuilder.resolveCwd` round-trips all three forms against the
@@ -73,8 +72,8 @@ enum LayoutSerializer {
     ) -> LayoutNode {
         switch node {
         case let .pane(p):
-            // Prefer the shell's live cwd over the pane's original path, same as
-            // WorkspaceSerializer.snapshotNode, so a saved layout reflects where
+            // Prefer the shell's live cwd over the pane's original path, so a
+            // saved layout reflects where
             // the user actually navigated. Remote panes (#104) record their
             // scp-style `projectPath` verbatim — their `currentPwd` is a
             // remote-filesystem path with no host prefix, and live-cwd capture

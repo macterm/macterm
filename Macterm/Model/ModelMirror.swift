@@ -335,6 +335,12 @@ final class ModelMirror {
         }
     }
 
+    /// The server took `model.import`: no batch carries the flag, so the
+    /// mirror sets it.
+    func noteImported() {
+        data?.importedV1 = true
+    }
+
     // MARK: Registered panes
 
     /// Takes a pane that the app made for a request it sends now. The

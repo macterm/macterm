@@ -264,14 +264,9 @@ struct PinnedTabSnapshot: Codable {
 /// it was.
 final class WorkspaceStore {
     private let fileURL: URL
-    /// Set when `load()` found a present-but-undecodable file. While set,
-    /// `save()` refuses to overwrite — a single corrupt field (or a snapshot
-    /// written by a newer build) must never let the next autosave clobber the
-    /// user's persisted tabs/sessions with empty state.
-    /// Exposed read-only (#281): the orphan reapers infer "unclaimed" from the
-    /// set of restored session names, so a failed load would present an empty
-    /// claim set and mark every live session an orphan. Both reapers skip
-    /// entirely while this is set — same fail-closed stance as `save`.
+    /// Set when `load()` found a present-but-undecodable file, or a file of
+    /// a newer build. The import then imports nothing (design/010 §8): a
+    /// model made from a file that did not read would be empty.
     private(set) var loadFailed = false
 
     init(fileURL: URL = FileStorage.fileURL(filename: "workspaces_v3.json")) {

@@ -1039,6 +1039,9 @@ final class AppState {
     /// The v1 snapshot, `workspaces_v3.json`: read once by the import
     /// (design/010 §8), never written.
     let workspaceStore: WorkspaceStore
+    /// v1's `projects.json`: read once by the import, never written.
+    @ObservationIgnored
+    let v1ProjectsURL: URL
     /// `gui-state.json`: what only a window needs (design/010 §2).
     @ObservationIgnored
     let guiStateStore: GUIStateStore
@@ -1281,6 +1284,7 @@ final class AppState {
         modelConnection: ModelConnection,
         workspaceStore: WorkspaceStore = WorkspaceStore(),
         guiStateStore: GUIStateStore = GUIStateStore(),
+        v1ProjectsURL: URL = FileStorage.fileURL(filename: "projects.json"),
         projectFiles: ProjectFileStore = ProjectFileStore(),
         paletteHotkeys: PaletteHotkeys = .shared,
         quickTerminal: QuickTerminalSplitState? = nil,
@@ -1290,6 +1294,7 @@ final class AppState {
         writer = ModelWriter(connection: modelConnection)
         self.workspaceStore = workspaceStore
         self.guiStateStore = guiStateStore
+        self.v1ProjectsURL = v1ProjectsURL
         self.legacyPanelVisible = legacyPanelVisible
         layoutFiles = LayoutFileService(projectFiles: projectFiles)
         pinnedLayoutStore = PinnedLayoutStore(directoryURL: projectFiles.configDirectoryURL)

@@ -10,7 +10,7 @@ private let logger = Logger(subsystem: appBundleID, category: "Import")
 /// they were at the cut-over. Migration code: 0228 removes it.
 extension AppState {
     func importV1Files() {
-        let (rows, projectsFailed) = ProjectStore.readV1()
+        let (rows, projectsFailed) = ProjectStore.readV1(fileURL: v1ProjectsURL)
         let loaded = workspaceStore.load()
         guard !projectsFailed, !workspaceStore.loadFailed else {
             // Nothing is written over a file that did not read. The flag
@@ -72,6 +72,7 @@ extension AppState {
             ? "workspaces_v3.json"
             : "none"
         if writer.modelImport(data, source: source) {
+            model.noteImported()
             logger.info("import: \(data.projects.count, privacy: .public) projects from \(source, privacy: .public)")
         }
     }
