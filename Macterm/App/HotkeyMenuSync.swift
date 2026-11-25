@@ -26,8 +26,8 @@ private let logger = Logger(subsystem: appBundleID, category: "HotkeyMenuSync")
 enum HotkeyMenuSync {
     /// Rendered menu title → the action supplying its shortcut. Populated by
     /// `AppCommandMenuItem` as SwiftUI builds the menu. Titles are unique per
-    /// item; two menu entries for the same command (e.g. "Open Project…" and
-    /// "New Project…") register separately and both get synced.
+    /// item; two menu entries for the same command (e.g. "New Project…" in the
+    /// File menu and in the Project menu) register separately and both get synced.
     private static var actionsByTitle: [String: HotkeyAction] = [:]
 
     static func register(title: String, action: HotkeyAction) {

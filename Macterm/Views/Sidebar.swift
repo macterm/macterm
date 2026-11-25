@@ -343,17 +343,15 @@ struct SidebarContent: View {
             paintsFallbackBackground: paintsFallbackFooterBackground
         ) {
             HStack(spacing: 0) {
-                Menu {
-                    Button("Local Folder…") { openProject() }
-                    Button("Remote Machine…") {
-                        windowState.isNewRemoteProjectSheetPresented = true
-                    }
+                // The New Project screen of the palette: a typed path, a
+                // remote spec, or Select in Finder.
+                Button {
+                    openNewProjectScreen()
                 } label: {
                     Label("New Project", systemImage: "plus")
                         .font(.body)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .buttonStyle(.borderless)
                 .fixedSize()
                 Spacer()
             }
@@ -791,7 +789,7 @@ struct SidebarContent: View {
         } else {
             // Right-click on empty space.
             Menu("New Project") {
-                Button("Local Folder…") { openProject() }
+                Button("Local Folder…") { openNewProjectScreen() }
                 Button("Remote Machine…") { windowState.isNewRemoteProjectSheetPresented = true }
             }
             Button("New Scratch Tab") { appState.createScratchTab() }
@@ -829,7 +827,7 @@ struct SidebarContent: View {
     /// project), and Move Up and Down among the projects of its parent.
     @ViewBuilder
     private func treeMoveItems(_ project: Project) -> some View {
-        Button("New Project Inside") { openProject(inside: project) }
+        Button("New Project Inside") { newProject(inside: project) }
         let targets = SidebarTree.moveTargets(for: project.id, in: projectStore)
         if targets.isEmpty {
             // A disabled item, not a disabled `Menu`: see `worktreesMenu`.
@@ -1056,12 +1054,17 @@ struct SidebarContent: View {
         }
     }
 
-    /// Open Folder. With `parent` (New Project Inside), the new project is
-    /// a child of `parent`, which opens so that the new row shows.
-    private func openProject(inside parent: Project? = nil) {
-        if let project = appState.openProject(store: projectStore, inside: parent) {
+    /// The New Project screen in this window's palette.
+    private func openNewProjectScreen() {
+        appState.openCommandPalette(scope: .input(.newProject))
+    }
+
+    /// New Project Inside: the folder panel, and the new project is a child
+    /// of `parent`, which opens so that the new row shows.
+    private func newProject(inside parent: Project) {
+        if let project = appState.newProjectFromFolderPanel(store: projectStore, inside: parent) {
             windowState.expandedRows.insert(project.id)
-            if let parent { windowState.expandedRows.insert(parent.id) }
+            windowState.expandedRows.insert(parent.id)
         }
     }
 

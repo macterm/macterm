@@ -99,7 +99,7 @@ struct FocusMactermProjectIntent: AppIntent {
 /// `project` would empty it in every shortcut that uses it. Hidden from the
 /// Shortcuts gallery, which already offers Focus Project.
 struct OpenMactermProjectIntent: OpenIntent {
-    static let title: LocalizedStringResource = "Open Project"
+    static let title: LocalizedStringResource = "Show Project"
     static let description = IntentDescription("Show a project and bring its window forward.")
     static let isDiscoverable = false
 

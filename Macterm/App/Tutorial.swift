@@ -64,7 +64,7 @@ enum Tutorial {
             (.newTab, "new tab"),
             (.splitRight, "split right"),
             (.toggleCommandPalette, "command palette"),
-            (.openProject, "open a folder"),
+            (.openProject, "new project"),
             (.splitDown, "split down"),
             (.toggleSidebar, "toggle sidebar"),
             (.renameTab, "rename tab"),

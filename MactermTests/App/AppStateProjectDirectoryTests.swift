@@ -10,6 +10,7 @@ struct AppStateProjectDirectoryTests {
         let store: ProjectStore
         let project: Project
         var ctx: AppCommandContext { AppCommandContext(appState: state, projectStore: store) }
+        var palette: PaletteContext { PaletteContext(appState: state, projectStore: store) }
     }
 
     private func makeFolder() throws -> String {
@@ -38,14 +39,14 @@ struct AppStateProjectDirectoryTests {
     }
 
     /// The action row that `text` gives, nil for a notice or nothing.
-    private func action(_ input: PaletteInput, _ text: String) -> PaletteInputAction? {
-        if case let .action(row) = input.check(text) { return row }
+    private func action(_ input: PaletteInput, _ text: String, _ fixture: Fixture) -> PaletteInputAction? {
+        if case let .action(row) = input.check(text, fixture.palette) { return row }
         return nil
     }
 
     /// The notice that `text` gives, nil for an action row or nothing.
-    private func notice(_ input: PaletteInput, _ text: String) -> String? {
-        if case let .notice(line) = input.check(text) { return line }
+    private func notice(_ input: PaletteInput, _ text: String, _ fixture: Fixture) -> String? {
+        if case let .notice(line) = input.check(text, fixture.palette) { return line }
         return nil
     }
 
@@ -61,9 +62,9 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { paneDirectory }
         )
         let input = made
-        #expect(action(input, "") == nil, "the pane is in the project folder")
+        #expect(action(input, "", fixture) == nil, "the pane is in the project folder")
         paneDirectory = sub + "/"
-        let row = try #require(action(input, ""))
+        let row = try #require(action(input, "", fixture))
         #expect(row.title == "Current Pane's Directory")
         #expect(row.subtitle == sub)
         let scope = InputPaletteScope(input: input)
@@ -87,7 +88,7 @@ struct AppStateProjectDirectoryTests {
         )
         let input = made
         #expect(input.initialValue.isEmpty)
-        #expect(action(input, "") == nil, "no pane folder: only the typed field")
+        #expect(action(input, "", fixture) == nil, "no pane folder: only the typed field")
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let rows = input.choices(root + "/", context)
         let rootName = (root as NSString).lastPathComponent
@@ -95,8 +96,8 @@ struct AppStateProjectDirectoryTests {
         #expect(rows[1].item.subtitle?.hasPrefix("Change to: ") == true, "a folder row says what it does")
         #expect(rows[1].item.subtitleIsPath)
         #expect(rows[1].value == root + "/sub/", "Tab goes into the folder")
-        #expect(action(input, root + "/") == nil, "no Change to row: a folder row is the action")
-        #expect(notice(input, root + "/") == nil)
+        #expect(action(input, root + "/", fixture) == nil, "no Change to row: a folder row is the action")
+        #expect(notice(input, root + "/", fixture) == nil)
         rows[1].item.action()
         #expect(path(of: fixture) == root + "/sub")
 
@@ -118,21 +119,21 @@ struct AppStateProjectDirectoryTests {
             paneDirectory: { nil }
         )
         let input = made
-        #expect(notice(input, root + "/missing") == "Path \(root)/missing doesn't exist")
-        #expect(action(input, root + "/missing") == nil, "no action row for a bad path")
-        #expect(notice(input, root + "/su") == nil, "no notice while a folder row matches the typed text")
-        #expect(notice(input, "relative/path") == "Path relative/path doesn't exist")
+        #expect(notice(input, root + "/missing", fixture) == "Path \(root)/missing doesn't exist")
+        #expect(action(input, root + "/missing", fixture) == nil, "no action row for a bad path")
+        #expect(notice(input, root + "/su", fixture) == nil, "no notice while a folder row matches the typed text")
+        #expect(notice(input, "relative/path", fixture) == "Path relative/path doesn't exist")
         let missingUnderHome = "~/macterm-no-such-folder-\(UUID().uuidString)"
-        #expect(notice(input, missingUnderHome) == "Path \(missingUnderHome) doesn't exist", "the notice keeps ~")
-        #expect(notice(input, "  ") == nil)
-        #expect(action(input, "  ") == nil)
+        #expect(notice(input, missingUnderHome, fixture) == "Path \(missingUnderHome) doesn't exist", "the notice keeps ~")
+        #expect(notice(input, "  ", fixture) == nil)
+        #expect(action(input, "  ", fixture) == nil)
         let file = root + "/file.txt"
         try "x".write(toFile: file, atomically: true, encoding: .utf8)
-        #expect(notice(input, file) == "\(file) is not a directory", "a file has its own notice")
+        #expect(notice(input, file, fixture) == "\(file) is not a directory", "a file has its own notice")
         try FileManager.default.createDirectory(atPath: root + "/file.txt-old", withIntermediateDirectories: true)
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         #expect(input.choices(file, context).map(\.item.title) == ["file.txt-old"])
-        #expect(notice(input, file) == "\(file) is not a directory", "a file keeps its notice beside the folder rows")
+        #expect(notice(input, file, fixture) == "\(file) is not a directory", "a file keeps its notice beside the folder rows")
         let store = fixture.store
         #expect(fixture.state
             .setProjectDirectory(fixture.project.id, to: file, projectStore: store) == .refused("\(file) is not a directory"))
@@ -190,7 +191,7 @@ struct AppStateProjectDirectoryTests {
         let root = try makeFolder()
         let fixture = makeFixture(path: "")
         let input = fixture.state.changeProjectDirectoryInput(for: fixture.project, projectStore: fixture.store)
-        #expect(action(input, "") == nil)
+        #expect(action(input, "", fixture) == nil)
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)
         let first = try #require(input.choices(root, context).first, "the typed folder is the first folder row")
         #expect(first.item.title == (root as NSString).lastPathComponent)
@@ -242,7 +243,7 @@ struct AppStateProjectDirectoryTests {
                 return answer
             }
         )
-        let empty = try #require(action(input, ""))
+        let empty = try #require(action(input, "", fixture))
         #expect(empty.title == "Current Pane's Directory")
         #expect(empty.subtitle == "~/other", "the remote pane's folder")
         let context = PaletteContext(appState: fixture.state, projectStore: fixture.store)

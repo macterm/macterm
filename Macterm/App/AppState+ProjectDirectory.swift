@@ -4,12 +4,6 @@ import Foundation
 /// on this Mac or on the project's host. Open panes and their sessions stay where they are; a new tab
 /// that starts in the project's folder starts in the new one.
 extension AppState {
-    /// The pill of the screen. An input screen's pill has no glyph, so its
-    /// palette row has none either.
-    static var changeProjectDirectoryPill: PalettePill {
-        PalettePill(title: AppCommand.changeProjectDirectory.title)
-    }
-
     /// The palette screen of Change Project Directory for `project`. A
     /// typed path lists folder rows, as the root palette does
     /// (`changeProjectDirectoryChoices`): the typed folder, then the folders
@@ -39,9 +33,9 @@ extension AppState {
             let checkFolder = folderCheck ?? { await RemoteHosts.shared.checkFolder($0, destination: $1) }
             return PaletteInput(
                 id: "changeProjectDirectory:\(projectID.uuidString)",
-                pill: Self.changeProjectDirectoryPill,
+                title: AppCommand.changeProjectDirectory.title,
                 prompt: String(localized: "Type a folder path on \(destination)"),
-                check: { [self] text in
+                check: { [self] text, _ in
                     let folder = text.trimmingCharacters(in: .whitespaces)
                     if folder.isEmpty {
                         return paneDirectoryAction(readPaneDirectory(), for: project, projectStore: projectStore)
@@ -61,12 +55,12 @@ extension AppState {
         }
         return PaletteInput(
             id: "changeProjectDirectory:\(projectID.uuidString)",
-            pill: Self.changeProjectDirectoryPill,
+            title: AppCommand.changeProjectDirectory.title,
             prompt: String(localized: "Type a folder path"),
             choices: { [self] text, _ in
                 changeProjectDirectoryChoices(for: text, projectID: projectID, projectStore: projectStore)
             },
-            check: { [self] text in
+            check: { [self] text, _ in
                 if text.trimmingCharacters(in: .whitespaces).isEmpty {
                     return paneDirectoryAction(readPaneDirectory(), for: project, projectStore: projectStore)
                 }
