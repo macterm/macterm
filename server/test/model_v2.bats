@@ -108,6 +108,12 @@ assert c.call("project.remove", id="p2").get("panes", []) == []
 assert c.request("tab.create", project="p1", id="t2", root=pane("a"))["err"]["code"] == "duplicate_id"
 assert c.request("pane.focus", id="nope")["err"]["code"] == "not_found"
 assert c.request("project.reorder", ids=["p1", "p1"])["err"]["code"] == "invalid_args"
+# A slash in the name of a tree project: refused, with nothing changed.
+res = c.request("project.create", id="p3", name="a/b", path="/tmp/three")
+assert res["err"] == {"code": "invalid_args", "message": "A project name cannot contain a slash."}, res
+res = c.request("project.set", id="p1", name="a/b", path="/tmp/moved")
+assert res["err"]["code"] == "invalid_args", res
+assert [p for p in c.call("state.subscribe")["model"]["projects"] if p["id"] == "p1"][0]["path"] == "/tmp/one"
 assert c.request("pane.split", tab="t1", target="b", new={"id": "d", "session": "x"}, split_id="s3", dir="sideways")["err"]["code"] == "invalid_args"
 # A refused request sends no batch.
 before = len([v for v in c.control() if isinstance(v, dict) and "seq" in v])

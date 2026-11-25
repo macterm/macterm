@@ -22,6 +22,7 @@ This file loads when you work in `server/`. The root `AGENTS.md` has the build, 
 - **A pane that leaves the model ends its local session**, unless another pane of the model names the session. `pane.removed` and the reply name every pane that left. `model.import` ends no session.
 - **`model.replace` is the shadow stage** (design/010 §9, step 3). The app sends its own model after each save, any number of times. It ends no session and leaves `imported_v1` false. Once the model has `imported_v1`, the server refuses it (`refused`). Step 7 removes it.
 - **The ring of request ids** keeps 256 answers by client key, request id and a hash of the arguments. `state.subscribe` gives the key as `client`; `control.resume` takes it. `split.ratio` and failures for lack of memory are not kept.
+- **The name of a `tree` project has no slash** (`Model.nameAllowed`). `project.create` and `project.set` refuse it with `invalid_args`. `validate` does not apply the rule, so a `model.json`, `model.import` or `model.replace` with a name from before the rule still reads.
 - **The model and each batch must fit in one frame** (`server.frame_max`, 1 MiB).
 - **The schema reads the model through `src/wire.zig`**, because a file can be in one module only.
 

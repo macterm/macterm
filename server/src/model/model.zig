@@ -189,6 +189,8 @@ pub const Error = error{
     /// in a `single_tab` project, the removal of a project that is not
     /// `removable`, the selection of a project that no window draws.
     Refused,
+    /// The name of a `tree` project contains a slash (`nameAllowed`).
+    SlashInName,
 };
 
 /// The most recent ids first, with no duplicates.
@@ -385,10 +387,11 @@ pub const Model = struct {
     /// Adds a project with no tabs (`p.tabs` and `p.active_tab` are not
     /// read). Its capability fields must keep the rules of `validate`: a
     /// unique `alias`, and a parent only for a `tree` project, in a `tree`
-    /// project.
+    /// project. The name of a `tree` project has no slash (`nameAllowed`).
     pub fn addProject(m: *Model, p: Project) Error!void {
         const a = m.alloc();
         if (p.id.isEmpty()) return error.BadRequest;
+        if (!nameAllowed(p.sidebar, p.name)) return error.SlashInName;
         if (m.findProject(p.id) != null) return error.DuplicateId;
         if (p.alias) |x| {
             if (x.len == 0) return error.BadRequest;
@@ -414,6 +417,25 @@ pub const Model = struct {
             .alias = try dupeText(a, p.alias),
         };
         m.data.projects = try appendOne(Project, a, m.data.projects, copy);
+    }
+
+    /// Gives the project `id` the name `name`. The name of a `tree` project
+    /// has no slash (`nameAllowed`).
+    pub fn renameProject(m: *Model, id: ProjectId, name: []const u8) Error!void {
+        const p = m.findProject(id) orelse return error.NotFound;
+        if (!nameAllowed(p.sidebar, name)) return error.SlashInName;
+        p.name = try m.alloc().dupe(u8, name);
+    }
+
+    /// Whether a project of `sidebar` can have the name `name`. A nested
+    /// project is named by the path of names from the top level
+    /// (`Work/api`), so a slash in the name of a `tree` project makes that
+    /// path ambiguous. A hidden project is not on such a path: a widget
+    /// keeps the name that `widgets.yaml` gives it. `validate` does not
+    /// apply this rule, so that a model with a name from before the rule
+    /// still reads.
+    pub fn nameAllowed(sidebar: ProjectSidebar, name: []const u8) bool {
+        return sidebar != .tree or std.mem.indexOfScalar(u8, name, '/') == null;
     }
 
     /// The project that holds `p`, or null for the top level. An unknown
