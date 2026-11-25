@@ -54,7 +54,7 @@ final class TerminalTab: Identifiable {
     fileprivate(set) var zoomedPaneID: UUID?
 
     /// Bumped by every ratio change that should ANIMATE: the keyboard resize
-    /// (`ModelWriter.splitResize`, sent with `animated`). The batch of that
+    /// (`AppState.splitResize`, sent with `animated`). The batch of that
     /// request carries its `cause`, and the mirror bumps this in the same
     /// change (design/010 §4). `SplitLayout.animationKey` folds it in, so the
     /// frames that follow animate like a split. A divider drag and the

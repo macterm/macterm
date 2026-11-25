@@ -49,6 +49,43 @@ struct ProjectStoreTests {
         #expect(store.create(name: "lost", path: "/tmp/lost", parent: UUID())?.parent == nil, "an unknown parent is the top level")
     }
 
+    /// The offset counts the rows before the move, as a drop slot does.
+    @Test
+    func move_at_an_offset_puts_the_project_at_that_slot() {
+        let store = makeStore()
+        let a = store.create(name: "a", path: "/tmp/a")
+        let b = store.create(name: "b", path: "/tmp/b")
+        let c = store.create(name: "c", path: "/tmp/c")
+        let parent = store.create(name: "parent", path: "/tmp/parent")
+        let inner = store.create(name: "inner", path: "/tmp/inner", parent: parent.id)
+
+        // Down among its own rows: the slot before c.
+        #expect(store.move(a.id, into: nil, at: 2))
+        #expect(store.children(of: nil).map(\.id) == [b.id, a.id, c.id, parent.id])
+        // Up: the first slot.
+        #expect(store.move(c.id, into: nil, at: 0))
+        #expect(store.children(of: nil).map(\.id) == [c.id, b.id, a.id, parent.id])
+        // Into another project, before its first row.
+        #expect(store.move(b.id, into: parent.id, at: 0))
+        #expect(store.children(of: parent.id).map(\.id) == [b.id, inner.id])
+        #expect(store.children(of: nil).map(\.id) == [c.id, a.id, parent.id])
+        // An offset past the end is the end.
+        #expect(store.move(a.id, into: parent.id, at: 99))
+        #expect(store.children(of: parent.id).map(\.id) == [b.id, inner.id, a.id])
+        // Its own slot, or the slot after it: no change.
+        #expect(store.move(b.id, into: parent.id, at: 0))
+        #expect(store.move(b.id, into: parent.id, at: 1))
+        #expect(store.children(of: parent.id).map(\.id) == [b.id, inner.id, a.id])
+        // A negative offset is the first slot.
+        #expect(store.move(a.id, into: parent.id, at: -3))
+        #expect(store.children(of: parent.id).map(\.id) == [a.id, b.id, inner.id])
+        // Never into itself or a project inside it, and no change of order.
+        let topLevel = store.children(of: nil).map(\.id)
+        #expect(!store.move(parent.id, into: inner.id, at: 0))
+        #expect(store.row(parent.id)?.parent == nil)
+        #expect(store.children(of: nil).map(\.id) == topLevel)
+    }
+
     @Test
     func create_tags_a_new_project_only_when_auto_assign_is_on() throws {
         let store = makeStore()
